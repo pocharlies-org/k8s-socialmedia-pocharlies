@@ -8,7 +8,7 @@
 #   tilt args -- --prod  → prod mode (reference only, no builds)
 
 # ── Config ───────────────────────────────────────────────────────────────────
-REGISTRY = "ghcr.io/pocharlies"
+REGISTRY = "harbor.lan.e-dani.com/homelab"
 NAMESPACE = "whatsapp-mcp"
 
 config.define_bool("prod")
@@ -21,7 +21,7 @@ k8s_yaml("k8s/manifest.yaml")
 # ── Helper: build a Node.js monorepo service ─────────────────────────────────
 def node_service(name, image_suffix, dockerfile, watch_dirs, port=None):
     """Build a Node.js service from the pnpm monorepo root context."""
-    img = REGISTRY + "/socialmedia-" + image_suffix
+    img = REGISTRY + "/whatsappmcp-" + image_suffix
 
     if not is_prod:
         docker_build(
@@ -100,7 +100,7 @@ node_service(
 )
 
 # ── Telegram Sync (Python) ───────────────────────────────────────────────────
-TSYNC_IMG = REGISTRY + "/socialmedia-telegram-sync"
+TSYNC_IMG = REGISTRY + "/whatsappmcp-telegram-sync"
 if not is_prod:
     docker_build(
         TSYNC_IMG,
