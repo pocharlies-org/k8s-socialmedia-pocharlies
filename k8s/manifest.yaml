@@ -259,7 +259,7 @@ spec:
             requests: { cpu: 50m, memory: 128Mi }
             limits:   { memory: 512Mi }
           readinessProbe:
-            httpGet: { path: /health, port: 3001 }
+            httpGet: { path: /status, port: 3001 }
             initialDelaySeconds: 15
 ---
 apiVersion: v1
