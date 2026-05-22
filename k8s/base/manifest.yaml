@@ -466,59 +466,6 @@ spec:
   tls:
     store: { name: default, namespace: traefik-edge }
 ---
-# Auto-reply worker
-# Auto-reply rules config — rules array populated by admin when needed
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: auto-reply-config
-  namespace: whatsapp-mcp
-data:
-  config.json: '{"rules":[]}'
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: auto-reply-worker
-  namespace: whatsapp-mcp
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: auto-reply-worker } }
-  template:
-    metadata: { labels: { app: auto-reply-worker } }
-    spec:
-      enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
-      containers:
-        - name: auto-reply-worker
-          image: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker:v1.3.13@sha256:f166c39a02f086b7ea510120d485fb929f54b24c1cd691078e30e36f73406e85
-          ports: [{ name: http, containerPort: 3090 }]
-          env:
-            - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
-            - { name: LITELLM_URL, value: "http://litellm.litellm.svc.cluster.local:4000" }
-            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-            - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001/api/v1/messages/send" }
-            - { name: CONNECTOR_SECRET, value: "$(CONNECTOR_SHARED_SECRET)" }
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
-          volumeMounts:
-            - name: config
-              mountPath: /worker/config.json
-              subPath: config.json
-          resources:
-            requests: { cpu: 50m, memory: 128Mi }
-            limits:   { memory: 512Mi }
-      volumes:
-        - name: config
-          configMap:
-            name: auto-reply-config
----
-apiVersion: v1
-kind: Service
-metadata: { name: auto-reply-worker, namespace: whatsapp-mcp }
-spec:
-  selector: { app: auto-reply-worker }
-  ports: [{ name: http, port: 3090, targetPort: 3090 }]
----
 # Telegram-sync (message sync worker)
 apiVersion: apps/v1
 kind: Deployment

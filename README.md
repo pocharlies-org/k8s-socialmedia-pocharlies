@@ -15,7 +15,6 @@ Repo: `git@github.com:pocharlies/whatsappmcp.git` (the directory is `mcp-socialm
 | `whatsapp-cloud-connector` (Cloud API) | 3004 | Deferred — pending dedicated phone |
 | `mcp-server` | 3000 | Internal MCP server (HTTP) |
 | `mcp-sse` | 3010 | Public MCP over SSE for Claude / clients |
-| `auto-reply-worker` | 3090 | Rule-based auto-replies across platforms |
 
 Tool inventory (49 tools across the 3 platforms): see [MCP.md](./MCP.md).
 
@@ -29,8 +28,6 @@ mcp-socialmedia/
 │   ├── telegram/            # gramjs connector — send + realtime (3002)
 │   ├── telegram-sync/       # telethon ingestion to Postgres (3080)
 │   └── instagram/           # Graph API connector (3003)
-├── workers/
-│   └── auto-reply-worker/   # NATS-driven rule-based replies (3090)
 ├── mcp-server/              # MCP server + SSE entrypoint (3000 / 3010)
 ├── shared/                  # Shared TS utilities
 ├── config/                  # nats / redis / minio configs

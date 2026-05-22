@@ -22,7 +22,6 @@ The setup is a **single-host docker-compose** stack on x86 at `192.168.50.142`. 
 │  Server / workers:                                         │
 │    mcp-server               :3000  (internal HTTP)        │
 │    mcp-sse                  :3010  (public SSE for Claude)│
-│    auto-reply-worker        :3090                          │
 │                                                            │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -56,8 +55,6 @@ echo -n "telegram-sync 3080:   "; curl -s http://localhost:3080/health
 echo -n "instagram 3003:       "; curl -s http://localhost:3003/health
 echo -n "whatsapp-cloud 3004:  "; curl -s http://localhost:3004/status   # connected:false expected (deferred)
 echo -n "mcp-sse 3010:         "; curl -s http://localhost:3010/health
-echo -n "auto-reply 3090:      "; curl -s http://localhost:3090/health
-
 # Container state
 docker ps --filter "name=whatsappmcp" --format 'table {{.Names}}\t{{.Status}}'
 docker ps --filter "name=telegram-sync" --format 'table {{.Names}}\t{{.Status}}'
@@ -73,9 +70,7 @@ docker logs -f whatsappmcp-instagram-connector-1
 docker logs -f telegram-sync
 docker logs -f whatsappmcp-mcp-server-1
 docker logs -f whatsappmcp-mcp-sse-1
-docker logs -f whatsappmcp-auto-reply-worker-1
 
-# All at once (Ctrl+C to stop)
 docker compose logs -f --tail=50
 ```
 

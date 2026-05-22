@@ -307,31 +307,6 @@ importers:
         specifier: ^5.3.2
         version: 5.9.3
 
-  workers/auto-reply-worker:
-    dependencies:
-      express:
-        specifier: ^4.21.0
-        version: 4.22.1
-      nats:
-        specifier: ^2.28.2
-        version: 2.29.3
-      pg:
-        specifier: ^8.13.3
-        version: 8.20.0
-    devDependencies:
-      '@types/express':
-        specifier: ^4.17.21
-        version: 4.17.25
-      '@types/node':
-        specifier: ^22.13.4
-        version: 22.19.17
-      '@types/pg':
-        specifier: ^8.11.11
-        version: 8.20.0
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-
 packages:
 
   /@adiwajshing/keyed-db@0.2.4:
@@ -1846,12 +1821,6 @@ packages:
     resolution: {integrity: sha512-orrrD74MBUyK8jOAD/r0+lfa1I2MO6I+vAkmAWzMYbCcgrN4lCrmK52gRFQq/JRxfYPfonkr4b0jcY7Olqdqbw==}
     dependencies:
       undici-types: 6.21.0
-
-  /@types/node@22.19.17:
-    resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
-    dependencies:
-      undici-types: 6.21.0
-    dev: true
 
   /@types/pg@8.20.0:
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}

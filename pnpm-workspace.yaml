@@ -5,4 +5,3 @@ packages:
   - 'connectors/whatsapp-cloud'
   - 'mcp-server'
   - 'shared'
-  - 'workers/auto-reply-worker'

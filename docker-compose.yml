@@ -265,33 +265,6 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  auto-reply-worker:
-    build:
-      context: ./workers/auto-reply-worker
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: postgresql://whatsappmcp:${POSTGRES_PASSWORD:-whatsappmcp_dev}@postgres:5432/whatsappmcp?sslmode=disable
-      NATS_URL: tls://nats:4222
-      NATS_CA_CERT: /certs/ca.crt
-      CONNECTOR_URL: http://whatsapp-connector:3001/api/v1/messages/send
-      CONNECTOR_SECRET: ${CONNECTOR_SHARED_SECRET:-dev-secret-change-in-production}
-      LLM_URL: https://dgx.e-dani.com/v1/chat/completions
-      LLM_API_KEY: ${LLM_API_KEY}
-      LLM_MODEL: ${LLM_MODEL:-local}
-      LLM_OMNI_MODEL: ${LLM_OMNI_MODEL:-omni}
-      LLM_OMNI_MAX_TOKENS: ${LLM_OMNI_MAX_TOKENS:-500}
-      CONFIG_PATH: /worker/config.json
-      NODE_EXTRA_CA_CERTS: /certs/ca.crt
-      REPLY_DELAY_MS: 2500
-    volumes:
-      - ./workers/auto-reply-worker/config.json:/worker/config.json:ro
-      - ./certs/ca.crt:/certs/ca.crt:ro
-    depends_on:
-      nats:
-        condition: service_healthy
-      whatsapp-connector:
-        condition: service_started
-    restart: unless-stopped
 
 
   instagram-connector:

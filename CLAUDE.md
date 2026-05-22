@@ -15,7 +15,6 @@ Servidor MCP multi-plataforma (WhatsApp + Telegram + Instagram) que expone tools
 
 Tras el refactor del 2026-05-07 (commit `6791fae`), todo bajo carpetas dedicadas:
 - `connectors/{whatsapp-web,whatsapp-cloud,telegram,telegram-sync,instagram}/`
-- `workers/auto-reply-worker/`
 - `mcp-server/`, `shared/`
 
 ## Conectores (estado 2026-05-08)
@@ -29,7 +28,6 @@ Tras el refactor del 2026-05-07 (commit `6791fae`), todo bajo carpetas dedicadas
 | WhatsApp Cloud API | 3004 | ⛔ diferido | container up, `connected:false` (ver abajo) |
 | MCP server (interno) | 3000 | ✅ healthy | |
 | MCP SSE (público) | 3010 | ✅ healthy | Bearer token en `docker-compose.yml` L205 |
-| Auto-reply worker | 3090 | ✅ 1 regla | |
 
 ## WhatsApp Cloud API — DIFERIDO
 

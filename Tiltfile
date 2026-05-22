@@ -83,12 +83,6 @@ node_service(
     port="3003:3003",
 )
 
-node_service(
-    name="auto-reply-worker",
-    image_suffix="auto-reply-worker",
-    dockerfile="workers/auto-reply-worker/Dockerfile",
-    watch_dirs=["workers/auto-reply-worker"],
-)
 
 # ── MCP Server ────────────────────────────────────────────────────────────────
 node_service(
@@ -129,4 +123,3 @@ k8s_resource("telegram-connector",       labels=["connectors"])
 k8s_resource("telegram-sync",            labels=["connectors"])
 k8s_resource("instagram-connector",      labels=["connectors"])
 k8s_resource("mcp-server",               labels=["app"])
-k8s_resource("auto-reply-worker",        labels=["workers"])
