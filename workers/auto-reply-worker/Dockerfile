@@ -3,11 +3,11 @@ FROM node:20-bookworm AS builder
 
 WORKDIR /build-worker
 
-COPY package.json ./
+COPY workers/auto-reply-worker/package.json ./
 RUN npm install
 
-COPY tsconfig.json ./
-COPY index.ts ./
+COPY workers/auto-reply-worker/tsconfig.json ./
+COPY workers/auto-reply-worker/index.ts ./
 RUN npx tsc --skipLibCheck
 
 # ─── Runtime image ────────────────────────────────────────────────────────────
