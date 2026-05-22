@@ -347,6 +347,60 @@ spec:
   selector: { app: mcp-server }
   ports: [{ name: http, port: 3000, targetPort: 3000 }]
 ---
+# MCP SSE bridge for existing clients using x86:3010/sse
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-sse
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: mcp-sse } }
+  template:
+    metadata: { labels: { app: mcp-sse } }
+    spec:
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/hostname: ubuntu
+        kubernetes.io/arch: amd64
+      containers:
+        - name: mcp-sse
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          command: ["sh", "-c", "cd mcp-server && npx tsx src/mcp/sse-server.ts"]
+          ports:
+            - { name: sse, containerPort: 3010, hostPort: 3010 }
+          env:
+            - { name: MCP_SSE_PORT, value: "3010" }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
+            - { name: TELEGRAM_CONNECTOR_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
+            - { name: INSTAGRAM_CONNECTOR_URL, value: "http://instagram-connector.whatsapp-mcp.svc.cluster.local:3003" }
+            - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+            - { name: LLM_CHAT_MODEL, value: "tooling" }
+            - name: MCP_SSE_AUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-sse-secrets, key: MCP_SSE_AUTH_TOKEN } }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 3010 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3010 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mcp-sse, namespace: whatsapp-mcp }
+spec:
+  selector: { app: mcp-sse }
+  ports: [{ name: sse, port: 3010, targetPort: 3010 }]
+---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
