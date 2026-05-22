@@ -207,6 +207,7 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: ENABLE_SENDING, value: "true" }
+            - { name: SESSION_PATH, value: "/app/persistent-session" }
             - { name: WA_QR_PUBLIC_URL, value: "https://whatsapp.e-dani.com/qr/page" }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
@@ -224,6 +225,14 @@ spec:
             httpGet: { path: /api/v1/health, port: 3001 }
             initialDelaySeconds: 15
             timeoutSeconds: 3
+          volumeMounts:
+            - name: whatsapp-session-data
+              mountPath: /app/persistent-session
+      volumes:
+        - name: whatsapp-session-data
+          hostPath:
+            path: /home/dibanez/mcp-socialmedia/connectors/whatsapp-web/session-data
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
