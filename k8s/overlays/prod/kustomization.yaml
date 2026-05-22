@@ -18,6 +18,7 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: latest
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: latest
+    newTag: v1.3.5
+    digest: sha256:3616271386edb15c3914058c91a3ae4164bc48c1f1b54488cd791b7064f1a600
   - name: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker
     newTag: latest

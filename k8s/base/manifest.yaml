@@ -361,6 +361,7 @@ spec:
       containers:
         - name: mcp-server
           image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          command: ["sh", "-c", "cd mcp-server && pnpm start"]
           ports: [{ name: http, containerPort: 3000 }]
           env:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
@@ -372,6 +373,14 @@ spec:
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits:   { memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
 ---
 apiVersion: v1
 kind: Service
@@ -400,7 +409,7 @@ spec:
       containers:
         - name: mcp-sse
           image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
-          command: ["sh", "-c", "cd mcp-server && npx tsx src/mcp/sse-server.ts"]
+          command: ["sh", "-c", "cd mcp-server && pnpm start:sse"]
           ports:
             - { name: sse, containerPort: 3010, hostPort: 3010 }
           env:
