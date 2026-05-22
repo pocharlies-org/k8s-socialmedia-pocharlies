@@ -68,7 +68,7 @@ spec:
     spec:
       containers:
         - name: auto-reply-worker
-          image: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker:latest
+          image: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker:v1.3.13@sha256:f166c39a02f086b7ea510120d485fb929f54b24c1cd691078e30e36f73406e85
 ---
 apiVersion: apps/v1
 kind: Deployment

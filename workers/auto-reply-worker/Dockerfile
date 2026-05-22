@@ -1,23 +1,22 @@
-# Standalone builder — no dependency on local sibling images for CI compatibility
-FROM node:20-bookworm AS builder
+FROM node:20-bookworm-slim AS builder
 
-WORKDIR /build-worker
+WORKDIR /worker
 
 COPY workers/auto-reply-worker/package.json ./
 RUN npm install
 
 COPY workers/auto-reply-worker/tsconfig.json ./
 COPY workers/auto-reply-worker/index.ts ./
-RUN npx tsc --skipLibCheck
+RUN npm run build
+RUN npm prune --omit=dev
 
-# ─── Runtime image ────────────────────────────────────────────────────────────
 FROM node:20-bookworm-slim
 
 WORKDIR /worker
 
-COPY --from=builder /build-worker/dist ./dist
-COPY --from=builder /build-worker/node_modules ./node_modules
-COPY --from=builder /build-worker/package.json ./
+COPY --from=builder /worker/dist ./dist
+COPY --from=builder /worker/node_modules ./node_modules
+COPY --from=builder /worker/package.json ./
 
 ENV NODE_ENV=production
 ENV CONFIG_PATH=/worker/config.json

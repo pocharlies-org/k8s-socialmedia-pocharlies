@@ -25,4 +25,5 @@ images:
     newTag: v1.3.12
     digest: sha256:2a1b075bc3088644e558661780bde209c43953ca6c7ccd562cad947459d84103
   - name: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker
-    newTag: latest
+    newTag: v1.3.13
+    digest: sha256:f166c39a02f086b7ea510120d485fb929f54b24c1cd691078e30e36f73406e85
