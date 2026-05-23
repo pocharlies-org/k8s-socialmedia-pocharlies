@@ -50,7 +50,7 @@ import {
   getHistorySyncStatus,
   HistorySyncState,
 } from './db-writer';
-import { uploadMedia, ensureMediaBucket } from './media-storage';
+import { uploadMedia, ensureMediaBucket, fetchMedia } from './media-storage';
 
 export interface WhatsAppMessage {
   waMessageId: string;
@@ -1511,19 +1511,32 @@ export class BaileysClient extends EventEmitter {
     chatId: string,
     messageId: string
   ): Promise<{ data: string; mimetype: string; filename: string } | null> {
-    if (!this.sock) throw new Error('Client not initialized');
-    const cached = this.keyCache.get(messageId);
-    if (!cached) {
-      this.logger.warn(`downloadMedia: message ${messageId} not in key cache; cannot fetch live`);
+    // Incoming media is persisted to MinIO on receipt; map the wa_message_id to
+    // its stored object (attachments.file_url) and stream it back as base64.
+    try {
+      const pool = getPool();
+      const r = await pool.query(
+        `SELECT a.file_url, a.mime_type, a.file_name
+           FROM attachments a JOIN messages m ON m.id = a.message_id
+          WHERE m.wa_message_id = $1
+          ORDER BY a.id DESC LIMIT 1`,
+        [messageId]
+      );
+      const row = r.rows[0];
+      if (!row?.file_url) {
+        this.logger.warn(`downloadMedia: no stored attachment for ${messageId}`);
+        return null;
+      }
+      const buf = await fetchMedia(row.file_url as string);
+      return {
+        data: buf.toString('base64'),
+        mimetype: (row.mime_type as string) || 'application/octet-stream',
+        filename: (row.file_name as string) || 'media',
+      };
+    } catch (e: any) {
+      this.logger.error(`downloadMedia failed for ${messageId}: ${e?.message || e}`);
       return null;
     }
-    // Baileys can't fetch a media we don't have; we'd need the full WAMessage.
-    // We don't keep it. For attachments persisted to MinIO use the /media-blob/
-    // endpoint instead.
-    this.logger.warn(
-      'downloadMedia: live re-download not implemented; use MinIO storage_key from attachments table'
-    );
-    return null;
   }
 
   async backfillRecentMedia(

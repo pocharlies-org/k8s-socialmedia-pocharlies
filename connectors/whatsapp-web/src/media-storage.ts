@@ -84,3 +84,11 @@ export async function uploadMedia(
   await client.putObject(BUCKET, storageKey, data, data.length, meta);
   return { storageKey, fileSize: data.length };
 }
+
+/** Fetch a stored object from MinIO by its storage key, as a Buffer. */
+export async function fetchMedia(storageKey: string): Promise<Buffer> {
+  const stream = await client.getObject(BUCKET, storageKey);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks);
+}
