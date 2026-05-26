@@ -198,14 +198,14 @@ async def run(client: TelegramClient, pool: asyncpg.Pool):
             from sync import avatar_sync
             avatars_done = 0
             for dialog in dialogs:
-                # Always-on avatar sync — only downloads when avatar_url IS NULL
-                # so existing rows are not re-fetched. Doesn't block the message
-                # import even if it fails (try/except inside avatar_sync).
+                # Always-on: persists real unread badge + archived flag every
+                # cycle, and downloads avatar when avatar_url IS NULL. Never
+                # blocks the message import (errors swallowed inside avatar_sync).
                 try:
-                    if await avatar_sync.ensure_conversation_avatar(client, pool, dialog.entity):
+                    if await avatar_sync.sync_dialog_state(client, pool, dialog):
                         avatars_done += 1
                 except Exception as e:
-                    logger.warning(f"avatar sync failed for {dialog.name}: {e}")
+                    logger.warning(f"dialog state sync failed for {dialog.name}: {e}")
 
                 try:
                     await import_chat(client, pool, dialog, my_id)

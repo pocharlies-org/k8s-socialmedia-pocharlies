@@ -15,29 +15,9 @@ from typing import Optional
 import asyncpg
 from telethon import TelegramClient
 
-from sync import media_storage
+from sync import media_storage, db
 
 logger = logging.getLogger(__name__)
-
-
-def _conv_id_for_dialog(entity) -> Optional[str]:
-    """Map a Telethon dialog.entity to the conversation id used in the
-    whatsappmcp.conversations table. Convention used elsewhere in the codebase:
-    `tg_<chat_id>` (with the negative sign preserved for groups/channels)."""
-    eid = getattr(entity, "id", None)
-    if eid is None:
-        return None
-    # Telethon User has positive id; groups/channels are negative as Bot API style.
-    # The connector publishes negative IDs for groups already.
-    # Channels: id is positive but conventionally we use `-100<id>`.
-    cls = type(entity).__name__
-    if cls == "User":
-        return f"tg_{eid}"
-    if cls in ("Chat",):
-        return f"tg_-{eid}"
-    if cls in ("Channel", "ChannelForbidden"):
-        return f"tg_-100{eid}"
-    return f"tg_{eid}"
 
 
 async def _download_entity_photo(client: TelegramClient, entity) -> Optional[bytes]:
@@ -63,15 +43,21 @@ async def ensure_conversation_avatar(
     pool: asyncpg.Pool,
     entity,
     *,
+    conv_id: Optional[str] = None,
     force: bool = False,
 ) -> bool:
     """Download conversation/group avatar if we don't have one yet.
 
+    conv_id should be the canonical id (db.account_key(f"tg_{dialog.id}")). If
+    omitted it's derived from entity.id (only correct for users / simple chats).
+
     Returns True if a new avatar was persisted, False otherwise (skipped or
     no photo available)."""
-    conv_id = _conv_id_for_dialog(entity)
-    if not conv_id:
-        return False
+    if conv_id is None:
+        eid = getattr(entity, "id", None)
+        if eid is None:
+            return False
+        conv_id = db.account_key(f"tg_{eid}")
 
     if not force:
         row = await pool.fetchrow(
@@ -106,7 +92,7 @@ async def ensure_participant_avatar(
     uid = getattr(user_entity, "id", None)
     if uid is None:
         return False
-    pid = f"tg_{uid}"
+    pid = db.account_key(f"tg_{uid}")
 
     if not force:
         row = await pool.fetchrow(
@@ -142,23 +128,33 @@ async def ensure_participant_avatar(
     return True
 
 
-async def ensure_dialog_avatars(
+async def sync_dialog_state(
     client: TelegramClient,
     pool: asyncpg.Pool,
     dialog,
     *,
     force: bool = False,
-) -> tuple[bool, int]:
-    """Convenience helper invoked from history.py's get_dialogs() loop.
+) -> bool:
+    """Invoked from history.py's get_dialogs() loop, once per dialog.
 
-    Downloads:
-      1) the dialog's own avatar (chat group photo OR 1:1 user photo)
-      2) for groups, optionally each known participant's avatar
-         (skipped here — expensive; backfill script handles bulk)
+    Persists the dialog's REAL unread badge + archived flag, and downloads its
+    avatar if missing. Uses the canonical conv id db.account_key(f"tg_{dialog.id}").
 
-    Returns (conv_downloaded, participants_downloaded).
+    Returns True if a new avatar was downloaded this call.
     """
-    conv_done = await ensure_conversation_avatar(
-        client, pool, dialog.entity, force=force,
+    conv_id = db.account_key(f"tg_{dialog.id}")
+
+    # Real unread + archived straight from Telethon's Dialog object.
+    try:
+        await db.update_conversation_state(
+            pool, conv_id,
+            getattr(dialog, "unread_count", 0) or 0,
+            getattr(dialog, "unread_mentions_count", 0) or 0,
+            bool(getattr(dialog, "archived", False)),
+        )
+    except Exception as e:
+        logger.warning(f"conversation state update failed for {conv_id}: {e}")
+
+    return await ensure_conversation_avatar(
+        client, pool, dialog.entity, conv_id=conv_id, force=force,
     )
-    return conv_done, 0

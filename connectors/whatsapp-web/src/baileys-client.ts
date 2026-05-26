@@ -53,6 +53,7 @@ import {
   getParticipantAvatar,
   setConversationAvatar,
   setParticipantAvatar,
+  setConversationState,
 } from './db-writer';
 import { uploadMedia, ensureMediaBucket, fetchMedia, uploadAvatar } from './media-storage';
 
@@ -515,6 +516,8 @@ export class BaileysClient extends EventEmitter {
           unreadCount: c.unreadCount || 0,
           timestamp: Number(c.conversationTimestamp || 0),
         });
+        // Persist real unread + archived from the history snapshot.
+        void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
       }
       if (!this.historySyncOnLogin && Date.now() > this.historyBackfillRequestedUntil) return;
       this.logger.info(
@@ -572,6 +575,10 @@ export class BaileysClient extends EventEmitter {
             metadata: { name: prev.name },
           });
         }
+        // chats.update may carry only a delta — persist whichever fields are present.
+        const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount || 0;
+        const arch = typeof (u as any).archived === 'boolean' ? (u as any).archived : undefined;
+        void setConversationState(norm, uc, arch).catch(() => {});
       }
     });
 
@@ -587,6 +594,8 @@ export class BaileysClient extends EventEmitter {
           unreadCount: c.unreadCount || 0,
           timestamp: Number(c.conversationTimestamp || 0),
         });
+        // Persist real unread badge + archived flag (fire-and-forget).
+        void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
       }
     });
 

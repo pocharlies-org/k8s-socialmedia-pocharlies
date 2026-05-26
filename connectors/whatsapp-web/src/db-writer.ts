@@ -163,6 +163,30 @@ export async function getConversationAvatar(id: string): Promise<string | null> 
   return r.rows[0]?.avatar_url || null;
 }
 
+/**
+ * Persist the real unread badge + archived flag for a conversation.
+ * No-op if the row doesn't exist yet (next message creates it). `archived`
+ * is optional — pass undefined to leave the stored value untouched.
+ */
+export async function setConversationState(
+  id: string,
+  unreadCount: number,
+  archived?: boolean
+): Promise<void> {
+  const pool = getPool();
+  if (archived === undefined) {
+    await pool.query(
+      `UPDATE conversations SET unread_count = $2, updated_at = now() WHERE id = $1`,
+      [id, Math.max(0, unreadCount | 0)]
+    );
+  } else {
+    await pool.query(
+      `UPDATE conversations SET unread_count = $2, archived = $3, updated_at = now() WHERE id = $1`,
+      [id, Math.max(0, unreadCount | 0), archived]
+    );
+  }
+}
+
 export async function getParticipantAvatar(id: string): Promise<string | null> {
   const pool = getPool();
   const r = await pool.query(`SELECT profile_pic_url FROM participants WHERE id = $1`, [id]);

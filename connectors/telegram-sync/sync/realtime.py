@@ -61,7 +61,10 @@ def register(client: TelegramClient, pool: asyncpg.Pool, my_id: int):
             # Lazy avatar pulls — only fire if we don't yet have an avatar for
             # the chat OR the sender. Cheap when already populated (a single
             # SELECT). All errors are swallowed inside avatar_sync.
-            asyncio.create_task(avatar_sync.ensure_conversation_avatar(client, pool, chat))
+            conv_id = db.account_key(f"tg_{chat_id}")
+            asyncio.create_task(
+                avatar_sync.ensure_conversation_avatar(client, pool, chat, conv_id=conv_id)
+            )
             try:
                 sender = await event.get_sender()
                 if sender is not None:
