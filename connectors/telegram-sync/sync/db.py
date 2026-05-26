@@ -288,3 +288,17 @@ async def mark_chat_completed(pool: asyncpg.Pool, chat_id: int):
             "UPDATE telegram_sync_state SET completed = TRUE, updated_at = NOW() "
             "WHERE chat_id = $1", chat_id
         )
+
+
+async def update_conversation_state(
+    pool: asyncpg.Pool, conv_id: str,
+    unread_count: int, unread_mentions: int, archived: bool,
+):
+    """Persist the real unread badge + archived flag from a Telethon dialog.
+    No-op if the conversation row doesn't exist yet (next message creates it)."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE conversations SET unread_count = $2, unread_mentions = $3, "
+            "archived = $4, updated_at = NOW() WHERE id = $1",
+            conv_id, int(unread_count or 0), int(unread_mentions or 0), bool(archived),
+        )
