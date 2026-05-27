@@ -321,6 +321,45 @@ spec:
   selector: { app: whatsapp-connector-professional }
   ports: [{ name: http, port: 3001, targetPort: 3001 }]
 ---
+# Brain ingestion: push WhatsApp/Telegram messages into SkirmBrain RAG, one
+# instance per account (personal -> personal, professional -> skirmshop).
+# Runs the mcp-server image (has pg + tsx + the messages schema). Idempotent:
+# brain dedups by source_id; keyset cursor in `brain_ingest_cursor`.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: brain-ingest
+  namespace: whatsapp-mcp
+spec:
+  schedule: "*/5 * * * *"
+  timeZone: Europe/Madrid
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+          containers:
+            - name: brain-ingest
+              image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+              command: ["sh", "-c", "cd mcp-server && tsx src/jobs/brain-ingest.ts"]
+              env:
+                - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+                - { name: BRAIN_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
+                # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (Vault) via envFrom.
+              envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits:   { memory: 512Mi }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
