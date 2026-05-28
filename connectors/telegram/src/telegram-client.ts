@@ -106,9 +106,7 @@ export class TelegramClientWrapper extends EventEmitter {
     const me = await this.client.getMe();
     this.selfId = me.id.toString();
     this.connected = true;
-    this.logger.info(
-      `Connected to Telegram as ${me.username || me.firstName} (id=${this.selfId})`,
-    );
+    this.logger.info(`Connected to Telegram as ${me.username || me.firstName} (id=${this.selfId})`);
     this.emit('connected');
 
     // Register the message event handler — fires for incoming + outgoing
@@ -221,12 +219,34 @@ export class TelegramClientWrapper extends EventEmitter {
   /**
    * Send a text message. For forum supergroups, pass topicId to thread into that topic.
    */
-  async sendMessage(chatId: string, text: string, topicId?: number): Promise<void> {
+  async sendMessage(
+    chatId: string,
+    text: string,
+    topicId?: number,
+    replyTo?: number
+  ): Promise<string | null> {
     if (!this.connected) throw new Error('Not connected to Telegram');
     try {
-      // mtcute: replyTo accepts the topic root message id (= topic id) for forums.
-      await this.client.sendText(toMtcutePeer(chatId), text, topicId ? { replyTo: topicId } : undefined);
-      this.logger.info(`Message sent to ${chatId}${topicId ? ` (topic ${topicId})` : ''}`);
+      // mtcute: replyTo is the id of the message we quote. For forum topics
+      // the topic root id IS a reply-to too (replyTo = topicId). When both
+      // are present we prefer replyTo (explicit quote) and pass topicId via
+      // topMsgId so the message still lands in the right forum thread.
+      const opts: any = {};
+      if (replyTo) {
+        opts.replyTo = replyTo;
+        if (topicId) opts.topMsgId = topicId;
+      } else if (topicId) {
+        opts.replyTo = topicId;
+      }
+      const sent = await this.client.sendText(
+        toMtcutePeer(chatId),
+        text,
+        Object.keys(opts).length ? opts : undefined
+      );
+      this.logger.info(
+        `Message sent to ${chatId}${topicId ? ` (topic ${topicId})` : ''}${replyTo ? ` (reply to ${replyTo})` : ''}`
+      );
+      return sent && (sent as any).id ? String((sent as any).id) : null;
     } catch (e) {
       this.logger.error(`Failed to send message: ${e}`);
       throw e;
@@ -245,7 +265,12 @@ export class TelegramClientWrapper extends EventEmitter {
     }>
   > {
     if (!this.connected) throw new Error('Not connected to Telegram');
-    const result: Array<{ id: string; name: string; type: TelegramMessage['chatType']; unreadCount: number }> = [];
+    const result: Array<{
+      id: string;
+      name: string;
+      type: TelegramMessage['chatType'];
+      unreadCount: number;
+    }> = [];
     for await (const dialog of this.client.iterDialogs({})) {
       const peer = dialog.peer;
       result.push({
@@ -264,7 +289,7 @@ export class TelegramClientWrapper extends EventEmitter {
   async getMessages(
     chatId: string,
     limit: number = 100,
-    offsetId?: number,
+    offsetId?: number
   ): Promise<TelegramMessage[]> {
     if (!this.connected) throw new Error('Not connected to Telegram');
     const params: { limit: number; offset?: { id: number; date: number } } = { limit };
@@ -349,7 +374,7 @@ export class TelegramClientWrapper extends EventEmitter {
   async getParticipants(chatId: string, limit: number = 100): Promise<any[]> {
     if (!this.connected) throw new Error('Not connected');
     const members = await this.client.getChatMembers(toMtcutePeer(chatId), { limit });
-    return members.map((m) => {
+    return members.map(m => {
       const u = m.user;
       return {
         id: u.id.toString(),
@@ -387,7 +412,7 @@ export class TelegramClientWrapper extends EventEmitter {
     if (!this.connected) throw new Error('Not connected');
     if (!chatId) {
       const result = await this.client.searchGlobal({ query, limit });
-      return result.map((m) => ({
+      return result.map(m => ({
         id: m.id.toString(),
         chatId: m.chat.id.toString(),
         text: m.text || '',
@@ -395,7 +420,7 @@ export class TelegramClientWrapper extends EventEmitter {
       }));
     }
     const result = await this.client.searchMessages({ chatId: toMtcutePeer(chatId), query, limit });
-    return result.map((m) => ({
+    return result.map(m => ({
       id: m.id.toString(),
       chatId,
       text: m.text || '',
@@ -472,7 +497,7 @@ export class TelegramClientWrapper extends EventEmitter {
   async sendFile(
     chatId: string,
     filePath: string,
-    options?: { caption?: string; voiceNote?: boolean; videoNote?: boolean },
+    options?: { caption?: string; voiceNote?: boolean; videoNote?: boolean }
   ): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
     // Fetch remote http(s) URLs connector-side and upload the bytes. Passing a URL
@@ -491,12 +516,15 @@ export class TelegramClientWrapper extends EventEmitter {
         ...(options.caption ? { caption: options.caption } : {}),
       });
     } else if (options?.videoNote) {
-      media = InputMedia.video(
-        source,
-        { isRound: true, ...(options.caption ? { caption: options.caption } : {}) },
-      );
+      media = InputMedia.video(source, {
+        isRound: true,
+        ...(options.caption ? { caption: options.caption } : {}),
+      });
     } else {
-      media = InputMedia.document(source, options?.caption ? { caption: options.caption } : undefined);
+      media = InputMedia.document(
+        source,
+        options?.caption ? { caption: options.caption } : undefined
+      );
     }
     await this.client.sendMedia(toMtcutePeer(chatId), media);
   }

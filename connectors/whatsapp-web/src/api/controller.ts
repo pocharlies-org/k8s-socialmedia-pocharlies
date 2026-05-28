@@ -76,8 +76,13 @@ export function createRouter(
   router.post('/messages/send', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
       try {
-        const body = req.body as { sendToken?: string; conversationId?: string; content?: string };
-        const { sendToken, conversationId, content } = body;
+        const body = req.body as {
+          sendToken?: string;
+          conversationId?: string;
+          content?: string;
+          replyToMessageId?: string;
+        };
+        const { sendToken, conversationId, content, replyToMessageId } = body;
 
         if (!sendToken || !conversationId || !content) {
           console.warn(
@@ -126,7 +131,7 @@ export function createRouter(
           return;
         }
 
-        const messageId = await client.sendMessage(conversationId, content);
+        const messageId = await client.sendMessage(conversationId, content, { replyToMessageId });
         console.info(
           `WhatsApp send ok conversationId=${conversationId} messageId=${messageId || ''}`
         );
