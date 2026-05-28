@@ -121,6 +121,33 @@ export class TelegramClientWrapper extends EventEmitter {
     });
     this.logger.info('NewMessage event handler registered (incoming + outgoing)');
 
+    // Inbound reactions snapshot — when someone reacts (or un-reacts) to a
+    // message, Telegram dispatches an edit_message event whose `reactions`
+    // field now contains the updated counts. We forward this snapshot to the
+    // dashboard so the chat UI updates in realtime.
+    this.client.onUpdate.add(async (upd: any) => {
+      if (upd?.name !== 'edit_message') return;
+      const msg: any = upd.data;
+      if (!msg || !msg.reactions) return;
+      try {
+        const chatId = `tg_${msg.chat?.id}`;
+        const waMessageId = `tg_${msg.chat?.id}_${msg.id}`;
+        const snapshot: Record<string, { count: number; mine: boolean }> = {};
+        for (const rc of msg.reactions.reactions as any[]) {
+          const emoji = typeof rc.emoji === 'string' ? rc.emoji : String(rc.emoji);
+          snapshot[emoji] = { count: rc.count, mine: rc.order != null };
+        }
+        await dashboardNotify('/_connector/reaction-snapshot', {
+          conversation_id: chatId,
+          wa_message_id: waMessageId,
+          snapshot,
+        });
+      } catch (e) {
+        this.logger.warn(`reaction snapshot forward failed: ${(e as Error).message}`);
+      }
+    });
+    this.logger.info('Update (edit_message → reactions snapshot) handler registered');
+
     // Typing indicator — forward to the dashboard so the chat header shows
     // "<user> is typing…". mtcute fires UserTypingUpdate every ~5s while the
     // user keeps typing; the dashboard treats each notify as a TTL refresh.
