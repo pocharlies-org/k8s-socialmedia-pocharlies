@@ -1028,7 +1028,36 @@ export class BaileysClient extends EventEmitter {
   // Public surface used by the HTTP controller
   // ---------------------------------------------------------------------------
 
-  async sendMessage(chatId: string, content: string): Promise<string | undefined> {
+  /**
+   * Build a baileys-compatible "quoted" message from a wa_message_id we've
+   * seen before (cached at ingest time). Returns undefined if we don't have
+   * the original — baileys will still send, just without the quote bubble.
+   */
+  private async buildQuotedFromId(
+    replyToMessageId: string | undefined,
+    chatJid: string
+  ): Promise<proto.IWebMessageInfo | undefined> {
+    if (!replyToMessageId) return undefined;
+    const cachedKey = this.keyCache.get(replyToMessageId);
+    const messageProto =
+      this.retryMessageCache.get<proto.IMessage>(replyToMessageId) ||
+      (cachedKey
+        ? this.retryMessageCache.get<proto.IMessage>(
+            this.retryMessageCacheKey(cachedKey.chatJid, replyToMessageId)
+          )
+        : undefined);
+    if (!cachedKey || !messageProto) return undefined;
+    return {
+      key: { ...cachedKey.key, id: replyToMessageId, remoteJid: chatJid },
+      message: messageProto,
+    } as proto.IWebMessageInfo;
+  }
+
+  async sendMessage(
+    chatId: string,
+    content: string,
+    options?: { replyToMessageId?: string }
+  ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     if (!this.isConnected())
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
@@ -1057,13 +1086,12 @@ export class BaileysClient extends EventEmitter {
     this.logger.info(
       `Sending WhatsApp message rawJid=${raw} normalizedJid=${normalized} type=${isGroup ? 'group' : 'direct'}${groupRepair?.groupSubject ? ` groupSubject="${groupRepair.groupSubject}" participants=${groupRepair.participantCount}` : ''}`
     );
+    const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
     try {
-      const sent = await this.sendTextWithTimeout(
-        raw,
-        content,
-        timeoutMs,
-        isGroup ? { useCachedGroupMetadata: false } : undefined
-      );
+      const sent = await this.sendTextWithTimeout(raw, content, timeoutMs, {
+        useCachedGroupMetadata: isGroup ? false : undefined,
+        quoted,
+      });
       const messageId = sent?.key?.id;
       this.logger.info(
         `WhatsApp message sent rawJid=${raw} normalizedJid=${normalized} elapsedMs=${Date.now() - started}${messageId ? ` id=${messageId}` : ''}`
@@ -1095,6 +1123,7 @@ export class BaileysClient extends EventEmitter {
           );
           const retried = await this.sendTextWithTimeout(raw, content, timeoutMs, {
             useCachedGroupMetadata: false,
+            quoted,
           });
           const messageId = retried?.key?.id;
           this.logger.info(
@@ -1910,11 +1939,16 @@ export class BaileysClient extends EventEmitter {
     rawJid: string,
     content: string,
     timeoutMs: number,
-    options?: { useCachedGroupMetadata?: boolean }
+    options?: { useCachedGroupMetadata?: boolean; quoted?: proto.IWebMessageInfo }
   ): Promise<proto.WebMessageInfo | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
+    const sendOpts: any = {};
+    if (options?.useCachedGroupMetadata !== undefined) {
+      sendOpts.useCachedGroupMetadata = options.useCachedGroupMetadata;
+    }
+    if (options?.quoted) sendOpts.quoted = options.quoted;
     return this.race(
-      this.sock.sendMessage(rawJid, { text: content }, options),
+      this.sock.sendMessage(rawJid, { text: content }, sendOpts),
       timeoutMs,
       `sendMessage timeout after ${timeoutMs}ms`
     );

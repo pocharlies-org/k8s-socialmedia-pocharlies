@@ -289,7 +289,11 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
         }
 
         const { chatId } = req.params;
-        const body = req.body as { text?: string; topicId?: number | string };
+        const body = req.body as {
+          text?: string;
+          topicId?: number | string;
+          replyTo?: number | string;
+        };
         const text = body.text;
 
         if (!text) {
@@ -306,8 +310,14 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
           }
         }
 
-        await client.sendMessage(chatId, text, tid);
-        res.json({ success: true });
+        let replyTo: number | undefined;
+        if (body.replyTo !== undefined && body.replyTo !== null) {
+          const n = Number(body.replyTo);
+          if (Number.isInteger(n) && n > 0) replyTo = n;
+        }
+
+        const messageId = await client.sendMessage(chatId, text, tid, replyTo);
+        res.json({ success: true, messageId });
       } catch (error) {
         logger.error(`Error sending message: ${String(error)}`);
         res.status(500).json({ error: 'Failed to send message' });
