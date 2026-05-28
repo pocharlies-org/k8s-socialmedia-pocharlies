@@ -1,6 +1,7 @@
 import { TelegramClient, MemoryStorage, InputMedia, Message, Peer, User, Chat } from '@mtcute/node';
 import { EventEmitter } from 'events';
 import pino from 'pino';
+import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 
 export interface TelegramMessage {
   conversationId: string;
@@ -119,6 +120,51 @@ export class TelegramClientWrapper extends EventEmitter {
       }
     });
     this.logger.info('NewMessage event handler registered (incoming + outgoing)');
+
+    // Typing indicator — forward to the dashboard so the chat header shows
+    // "<user> is typing…". mtcute fires UserTypingUpdate every ~5s while the
+    // user keeps typing; the dashboard treats each notify as a TTL refresh.
+    this.client.onUserTyping.add(async (upd: any) => {
+      try {
+        const status = upd?.status;
+        // We only forward "active" statuses so the dashboard can ignore
+        // "paused" noise — the TTL on the dashboard side handles auto-clear.
+        const tlStatus = typeof status === 'object' ? status.constructor.name : String(status);
+        if (!tlStatus || /Cancel|Empty|Pause/i.test(tlStatus)) return;
+        const chatId = `tg_${upd.chatId}`;
+        const senderId = `tg_${upd.userId}`;
+        const senderName = await this.lookupUserName(upd.userId).catch(() => null);
+        await dashboardNotify('/_connector/typing', {
+          conversation_id: chatId,
+          sender_id: senderId,
+          sender_name: senderName,
+          status: 'composing',
+          ttl_ms: 6000,
+        });
+      } catch (e) {
+        this.logger.warn(`typing forward failed: ${(e as Error).message}`);
+      }
+    });
+    this.logger.info('UserTyping event handler registered');
+  }
+
+  private userNameCache = new Map<number, string>();
+  private async lookupUserName(userId: number): Promise<string | null> {
+    const cached = this.userNameCache.get(userId);
+    if (cached !== undefined) return cached;
+    try {
+      const peer: any = await this.client.getPeer(userId);
+      const name = peer.firstName || peer.username || peer.title || String(userId);
+      this.userNameCache.set(userId, name);
+      // Cap cache so it doesn't grow unbounded across long-running sessions.
+      if (this.userNameCache.size > 2000) {
+        const it = this.userNameCache.keys().next();
+        if (!it.done) this.userNameCache.delete(it.value);
+      }
+      return name;
+    } catch {
+      return null;
+    }
   }
 
   private async parseMessage(message: Message): Promise<TelegramMessage | null> {
