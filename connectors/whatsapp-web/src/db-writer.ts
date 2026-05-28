@@ -8,6 +8,19 @@ const DATABASE_URL =
   process.env.DATABASE_URL ||
   'postgresql://whatsappmcp:whatsappmcp_dgx_2026@postgres:5432/whatsappmcp';
 
+// Which WhatsApp account this connector instance serves. 'personal' keeps ids
+// bare (compat with the pre-existing single-account corpus); 'professional'
+// namespaces conversation/participant ids with a "professional:" prefix so the
+// two accounts can coexist in the same Postgres without colliding on PKs.
+const CONNECTOR_ACCOUNT = process.env.CONNECTOR_ACCOUNT || 'personal';
+
+/** Namespace an id by account (idempotent). Mirrors mcp-server domain/account.ts. */
+function accountKey(id: string): string {
+  if (CONNECTOR_ACCOUNT === 'personal') return id;
+  const prefix = `${CONNECTOR_ACCOUNT}:`;
+  return id.startsWith(prefix) ? id : `${prefix}${id}`;
+}
+
 let pool: pg.Pool | null = null;
 
 export function getPool(): pg.Pool {
@@ -110,29 +123,43 @@ export async function ensureHistoryTables(): Promise<void> {
 export async function ensureConversation(data: ConversationData): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO conversations (id, name, is_group, participant_count, avatar_url, last_message_at)
-     VALUES ($1, $2, $3, $4, $5, now())
+    `INSERT INTO conversations (id, name, is_group, participant_count, avatar_url, last_message_at, account)
+     VALUES ($1, $2, $3, $4, $5, now(), $6)
      ON CONFLICT (id) DO UPDATE SET
        name = COALESCE(EXCLUDED.name, conversations.name),
        participant_count = EXCLUDED.participant_count,
        avatar_url = COALESCE(EXCLUDED.avatar_url, conversations.avatar_url),
        last_message_at = now(),
        updated_at = now()`,
-    [data.id, data.name, data.isGroup, data.participantCount, data.avatarUrl || null]
+    [
+      accountKey(data.id),
+      data.name,
+      data.isGroup,
+      data.participantCount,
+      data.avatarUrl || null,
+      CONNECTOR_ACCOUNT,
+    ]
   );
 }
 
 export async function ensureParticipant(data: ParticipantData): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO participants (id, phone, name, push_name, profile_pic_url, last_seen)
-     VALUES ($1, $2, $3, $4, $5, now())
+    `INSERT INTO participants (id, phone, name, push_name, profile_pic_url, last_seen, account)
+     VALUES ($1, $2, $3, $4, $5, now(), $6)
      ON CONFLICT (id) DO UPDATE SET
        name = COALESCE(EXCLUDED.name, participants.name),
        push_name = COALESCE(EXCLUDED.push_name, participants.push_name),
        profile_pic_url = COALESCE(EXCLUDED.profile_pic_url, participants.profile_pic_url),
        last_seen = now()`,
-    [data.id, data.phone, data.name, data.pushName, data.profilePicUrl || null]
+    [
+      accountKey(data.id),
+      data.phone,
+      data.name,
+      data.pushName,
+      data.profilePicUrl || null,
+      CONNECTOR_ACCOUNT,
+    ]
   );
 }
 
@@ -197,22 +224,23 @@ export async function storeMessage(data: MessageData): Promise<bigint | null> {
   const pool = getPool();
   try {
     const result = await pool.query(
-      `INSERT INTO messages (wa_message_id, conversation_id, sender_wa_id, wa_timestamp, direction, content, message_type, is_forwarded, reply_to_message_id, platform, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO messages (wa_message_id, conversation_id, sender_wa_id, wa_timestamp, direction, content, message_type, is_forwarded, reply_to_message_id, platform, metadata, account)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (wa_message_id) DO NOTHING
        RETURNING id`,
       [
-        data.waMessageId,
-        data.conversationId,
-        data.senderWaId,
+        accountKey(data.waMessageId),
+        accountKey(data.conversationId),
+        accountKey(data.senderWaId),
         data.waTimestamp,
         data.direction,
         data.content,
         data.messageType,
         data.isForwarded,
-        data.replyToWaId || null,
+        data.replyToWaId ? accountKey(data.replyToWaId) : null,
         data.platform || 'whatsapp',
         JSON.stringify(data.metadata || {}),
+        CONNECTOR_ACCOUNT,
       ]
     );
     return result.rows[0]?.id || null;

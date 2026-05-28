@@ -44,11 +44,11 @@ const INSTANCE_BY_ACCOUNT: Record<Account, string> = {
 
 interface Cursor {
   last_created_at: string;
-  last_id: string | null;
+  last_id: string | null; // bigint stored as string by pg
 }
 
 interface Row {
-  id: string;
+  id: string; // bigint serialized as string
   wa_message_id: string;
   content: string;
   platform: string; // 'whatsapp' | 'telegram'
@@ -69,11 +69,24 @@ interface BrainDoc {
 }
 
 async function ensureCursorTable(pool: Pool): Promise<void> {
+  // messages.id is bigint (autoincrement); the cursor used to be typed uuid
+  // by mistake — drop legacy table once if its column type is wrong.
+  await pool.query(`
+    DO $$
+    DECLARE col_type text;
+    BEGIN
+      SELECT data_type INTO col_type FROM information_schema.columns
+        WHERE table_name = 'brain_ingest_cursor' AND column_name = 'last_id';
+      IF col_type IS NOT NULL AND col_type <> 'bigint' THEN
+        DROP TABLE brain_ingest_cursor;
+      END IF;
+    END $$;
+  `);
   await pool.query(
     `CREATE TABLE IF NOT EXISTS brain_ingest_cursor (
        account          text PRIMARY KEY,
        last_created_at  timestamptz NOT NULL,
-       last_id          uuid,
+       last_id          bigint,
        updated_at       timestamptz NOT NULL DEFAULT now()
      )`
   );
@@ -92,7 +105,7 @@ async function setCursor(
   pool: Pool,
   account: Account,
   createdAt: Date | string,
-  id: string | null
+  id: string | null // bigint as string, or null on initialization
 ): Promise<void> {
   await pool.query(
     `INSERT INTO brain_ingest_cursor (account, last_created_at, last_id, updated_at)
@@ -111,6 +124,7 @@ function sourceId(platform: string, waMessageId: string): string {
 
 async function fetchBatch(pool: Pool, account: Account, cursor: Cursor): Promise<Row[]> {
   // Keyset pagination on (created_at, id) so duplicate created_at can't skip rows.
+  // messages.id is bigint; coalesce missing cursor to 0 for the first batch.
   const r = await pool.query(
     `SELECT m.id, m.wa_message_id, m.content, m.platform, m.account, m.direction,
             m.message_type, m.wa_timestamp, m.created_at, m.sender_wa_id,
@@ -120,7 +134,7 @@ async function fetchBatch(pool: Pool, account: Account, cursor: Cursor): Promise
       WHERE m.account = $1
         AND m.is_deleted = false
         AND m.content IS NOT NULL AND btrim(m.content) <> ''
-        AND (m.created_at, m.id) > ($2::timestamptz, COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid))
+        AND (m.created_at, m.id) > ($2::timestamptz, COALESCE($3::bigint, 0::bigint))
       ORDER BY m.created_at ASC, m.id ASC
       LIMIT $4`,
     [account, cursor.last_created_at, cursor.last_id, BATCH]
