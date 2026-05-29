@@ -319,7 +319,9 @@ async function main() {
       console.log(
         `[SSE] New session ${transport.sessionId} ip=${ip} ua="${ua}" (${sessions.size} active)`
       );
-      await mcpServer.getServer().connect(transport);
+      // SDK 1.x throws if a Server is connected to a 2nd transport, so each SSE
+      // session gets its own isolated Server (also fixes response routing).
+      await mcpServer.createSessionServer().connect(transport);
       return;
     }
 
