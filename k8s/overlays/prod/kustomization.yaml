@@ -20,5 +20,5 @@ images:
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.31
-    digest: sha256:8f269394bbf7c8f7026b32120aa24fd8c6e9f22cc98e384843f441a4b1a0debb
+    newTag: v1.3.32
+    digest: sha256:215b38901f571d0dfa75229a6759bd69a48445603c99c48a21b489da30e0b368
