@@ -401,8 +401,7 @@ export function createRouter(
             warmSessions: true,
             forceSessions: true,
             clearSenderKeyMemory: true,
-            failOnWarmupError: false,
-            markFailedDevicesAsSenderKeySent: true,
+            failOnWarmupError: true,
           });
           res.json(result);
         } catch (e) {

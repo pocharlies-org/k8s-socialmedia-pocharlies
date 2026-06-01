@@ -716,7 +716,12 @@ export class BaileysClient extends EventEmitter {
       this.emit('chat-update', {
         waChatId: norm,
         updateType,
-        metadata: { participants: participants.map(p => this.normalizeJid(p)), action },
+        metadata: {
+          participants: participants.map(p =>
+            this.normalizeJid(typeof p === 'string' ? p : p.id)
+          ),
+          action,
+        },
       });
       this.groupMetaCache.delete(id);
     });
@@ -1120,9 +1125,9 @@ export class BaileysClient extends EventEmitter {
     if (isGroup) {
       groupRepair = await this.refreshGroupSession(raw, {
         reason: 'send-preflight',
-        warmSessions: process.env.WA_GROUP_SEND_PREFLIGHT_SESSIONS === 'true',
-        forceSessions: false,
-        clearSenderKeyMemory: false,
+        warmSessions: process.env.WA_GROUP_SEND_PREFLIGHT_SESSIONS !== 'false',
+        forceSessions: process.env.WA_GROUP_SEND_FORCE_SESSIONS === 'true',
+        clearSenderKeyMemory: process.env.WA_GROUP_SEND_CLEAR_SENDER_KEY !== 'false',
         failOnWarmupError: false,
       }).catch(e => {
         const failureClass =
@@ -1138,6 +1143,7 @@ export class BaileysClient extends EventEmitter {
     try {
       const sent = await this.sendTextWithTimeout(raw, content, timeoutMs, {
         useCachedGroupMetadata: isGroup ? false : undefined,
+        useUserDevicesCache: isGroup ? false : undefined,
         quoted,
       });
       const messageId = sent?.key?.id;
@@ -1163,14 +1169,14 @@ export class BaileysClient extends EventEmitter {
             warmSessions: true,
             forceSessions: true,
             clearSenderKeyMemory: true,
-            failOnWarmupError: false,
-            markFailedDevicesAsSenderKeySent: true,
+            failOnWarmupError: true,
           });
           this.logger.info(
             `Retrying WhatsApp group send after repair rawJid=${raw} normalizedJid=${normalized} groupSubject="${repair.groupSubject}" participants=${repair.participantCount} devices=${repair.deviceCount}`
           );
           const retried = await this.sendTextWithTimeout(raw, content, timeoutMs, {
             useCachedGroupMetadata: false,
+            useUserDevicesCache: false,
             quoted,
           });
           const messageId = retried?.key?.id;
@@ -1538,7 +1544,11 @@ export class BaileysClient extends EventEmitter {
           new Set(
             devices
               .filter(d => d.user !== undefined && d.user !== null)
-              .map(d => jidEncode(d.user, 's.whatsapp.net', d.device))
+              .map(
+                d =>
+                  (d as any).jid ||
+                  jidEncode(d.user, (d as any).server || 's.whatsapp.net', d.device)
+              )
           )
         );
         deviceCount = deviceJids.length;
@@ -2032,12 +2042,19 @@ export class BaileysClient extends EventEmitter {
     rawJid: string,
     content: string,
     timeoutMs: number,
-    options?: { useCachedGroupMetadata?: boolean; quoted?: proto.IWebMessageInfo }
-  ): Promise<proto.WebMessageInfo | undefined> {
+    options?: {
+      useCachedGroupMetadata?: boolean;
+      useUserDevicesCache?: boolean;
+      quoted?: proto.IWebMessageInfo;
+    }
+  ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     const sendOpts: any = {};
     if (options?.useCachedGroupMetadata !== undefined) {
       sendOpts.useCachedGroupMetadata = options.useCachedGroupMetadata;
+    }
+    if (options?.useUserDevicesCache !== undefined) {
+      sendOpts.useUserDevicesCache = options.useUserDevicesCache;
     }
     if (options?.quoted) sendOpts.quoted = options.quoted;
     return this.race(
