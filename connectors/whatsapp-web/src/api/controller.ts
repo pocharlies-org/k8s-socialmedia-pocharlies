@@ -13,8 +13,10 @@ function statusForSendFailure(
   if (failureClass === 'invalid_request') return 400;
   if (failureClass === 'disabled_sending') return 403;
   if (failureClass === 'disconnected') return 503;
+  if (failureClass === 'account_restricted') return 403;
   if (failureClass === 'timeout') return 504;
   if (failureClass === 'missing_session' || failureClass === 'group_metadata') return 424;
+  if (failureClass === 'invalid_recipient') return 422;
   if (failureClass === 'auth') return 401;
   return 500;
 }

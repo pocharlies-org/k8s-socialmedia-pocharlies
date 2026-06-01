@@ -198,6 +198,7 @@ export async function getConversationAvatar(id: string): Promise<string | null> 
 export async function setMessageStatus(waMessageId: string, status: string): Promise<void> {
   if (!waMessageId) return;
   const pool = getPool();
+  const messageKey = accountKey(waMessageId);
   const rank: Record<string, number> = { pending: 1, sent: 2, delivered: 3, read: 4 };
   if (rank[status] != null) {
     await pool.query(
@@ -209,13 +210,13 @@ export async function setMessageStatus(waMessageId: string, status: string): Pro
               WHEN 'delivered' THEN 3
               WHEN 'read' THEN 4
               ELSE 0 END`,
-      [waMessageId, status, rank[status]]
+      [messageKey, status, rank[status]]
     );
   } else {
     // failed/deleted: overwrite regardless.
     await pool.query(
       `UPDATE messages SET status = $2, status_at = now() WHERE wa_message_id = $1`,
-      [waMessageId, status]
+      [messageKey, status]
     );
   }
 }
@@ -321,8 +322,8 @@ export async function storeMessageKey(data: MessageKeyData): Promise<void> {
        message_timestamp_ms = EXCLUDED.message_timestamp_ms,
        updated_at = now()`,
     [
-      data.waMessageId,
-      data.conversationId,
+      accountKey(data.waMessageId),
+      accountKey(data.conversationId),
       data.remoteJid,
       data.fromMe,
       data.participantJid || null,
