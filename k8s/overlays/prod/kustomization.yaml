@@ -6,6 +6,7 @@ resources:
 patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
+  - path: patch-nodepool.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: v1.3.33
