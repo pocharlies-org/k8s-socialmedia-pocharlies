@@ -4,6 +4,14 @@ kind: Namespace
 metadata:
   name: whatsapp-mcp
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: whatsapp-mcp
+imagePullSecrets:
+  - name: harbor-pull
+---
 # WhatsApp MCP — multi-connector messaging platform
 # Connectors: whatsapp, instagram, telegram; MCP server + SSE bridge
 # Stateful: postgres (pgvector), redis, nats, minio
@@ -354,6 +362,8 @@ spec:
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
+                - { name: BRAIN_INGEST_MAX_ROWS, value: "5000" }
+                - { name: BRAIN_PUSH_RETRIES, value: "5" }
                 # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (Vault) via envFrom.
               envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
               resources:

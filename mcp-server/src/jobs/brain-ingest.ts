@@ -19,6 +19,7 @@
  *                         instead of now() — used for the one-off history backfill.
  *   BRAIN_INGEST_SINCE    ISO timestamp; with BACKFILL, lower bound to start from.
  *   BRAIN_INGEST_DRY_RUN  'true' => count + log only, no push, no cursor advance.
+ *   BRAIN_PUSH_RETRIES    retry count for transient Brain/network failures.
  */
 import { Pool } from 'pg';
 import pino from 'pino';
@@ -35,6 +36,7 @@ const MAX_ROWS = parseInt(process.env.BRAIN_INGEST_MAX_ROWS || '0', 10);
 const BACKFILL = process.env.BRAIN_INGEST_BACKFILL === 'true';
 const SINCE = process.env.BRAIN_INGEST_SINCE || '1970-01-01T00:00:00Z';
 const DRY_RUN = process.env.BRAIN_INGEST_DRY_RUN === 'true';
+const BRAIN_PUSH_RETRIES = parseInt(process.env.BRAIN_PUSH_RETRIES || '5', 10);
 
 const ACCOUNTS = ['personal', 'professional'] as const;
 type Account = (typeof ACCOUNTS)[number];
@@ -168,22 +170,37 @@ async function pushToBrain(
   documents: BrainDoc[]
 ): Promise<number> {
   const url = `${BRAIN_URL}/instances/${instance}/push-ingest`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(BRAIN_API_KEY ? { 'X-API-Key': BRAIN_API_KEY } : {}),
-    },
-    body: JSON.stringify({ adapter, documents }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(
-      `brain push-ingest ${instance}/${adapter} -> ${resp.status}: ${text.slice(0, 300)}`
-    );
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= BRAIN_PUSH_RETRIES; attempt++) {
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(BRAIN_API_KEY ? { 'X-API-Key': BRAIN_API_KEY } : {}),
+        },
+        body: JSON.stringify({ adapter, documents }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(
+          `brain push-ingest ${instance}/${adapter} -> ${resp.status}: ${text.slice(0, 300)}`
+        );
+      }
+      const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+      return Number(body.chunks_ingested ?? 0);
+    } catch (err) {
+      lastError = err;
+      if (attempt >= BRAIN_PUSH_RETRIES) break;
+      const delayMs = Math.min(30_000, 2_000 * attempt);
+      logger.warn(
+        { instance, adapter, docs: documents.length, attempt, retries: BRAIN_PUSH_RETRIES, err: String(err) },
+        'brain push-ingest retrying'
+      );
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
   }
-  const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
-  return Number(body.chunks_ingested ?? 0);
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 function toDoc(row: Row): BrainDoc {
