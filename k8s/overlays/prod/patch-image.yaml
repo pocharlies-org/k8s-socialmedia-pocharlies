@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:v1.3.32@sha256:215b38901f571d0dfa75229a6759bd69a48445603c99c48a21b489da30e0b368
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:v1.3.34@sha256:df01decb558201b9c0267505cb55571e9700824d90a01a0a4a69a4222489e3ab
 ---
 apiVersion: apps/v1
 kind: Deployment
