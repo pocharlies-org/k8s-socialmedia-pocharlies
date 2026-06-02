@@ -15,6 +15,20 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 const CONNECTOR_SHARED_SECRET =
   process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
 
+function isKnownUndiciStreamAbort(error: unknown): boolean {
+  const err = error as any;
+  return err?.name === 'TypeError' && err?.message === 'terminated' && err?.cause?.code === 'UND_ERR_SOCKET';
+}
+
+process.on('uncaughtException', error => {
+  if (isKnownUndiciStreamAbort(error)) {
+    console.warn(`Ignored aborted remote media stream: ${(error as Error).message}`);
+    return;
+  }
+  console.error('Fatal uncaught exception:', error);
+  process.exit(1);
+});
+
 async function main(): Promise<void> {
   const client = new BaileysClient(SESSION_PATH, ENCRYPTION_KEY);
   const qrHandler = new QRHandler();
@@ -89,6 +103,7 @@ window.onload = checkStatus;
   app.get('/status', (_req, res) => {
     res.json({
       ...client.getStatus(),
+      natsConnected: eventPublisher.isConnected(),
       session_path: SESSION_PATH,
     });
   });
@@ -198,6 +213,13 @@ window.onload = checkStatus;
   await client.connect();
 
   process.on('SIGINT', () => {
+    console.log('Shutting down...');
+    client.disconnect();
+    void eventPublisher.disconnect();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
     console.log('Shutting down...');
     client.disconnect();
     void eventPublisher.disconnect();

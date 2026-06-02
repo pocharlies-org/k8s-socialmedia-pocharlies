@@ -227,7 +227,7 @@ spec:
     metadata: { labels: { app: whatsapp-connector } }
     spec:
       enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
       containers:
         - name: whatsapp-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
@@ -285,7 +285,7 @@ spec:
     metadata: { labels: { app: whatsapp-connector-professional } }
     spec:
       enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
       containers:
         - name: whatsapp-connector-professional
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
@@ -628,12 +628,13 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   replicas: 1
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: telegram-sync } }
   template:
     metadata: { labels: { app: telegram-sync } }
     spec:
       enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
       containers:
         - name: telegram-sync
           image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:latest
@@ -651,6 +652,11 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 512Mi }
             limits:   { memory: 2Gi }   # Whisper-small model needs ~1GB RAM
+          readinessProbe:
+            httpGet: { path: /health, port: 3080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
 ---
 apiVersion: v1
 kind: Service
@@ -706,12 +712,13 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   replicas: 1  # active: sauvageadminbot (skirmshop) ingest via telethon
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: telegram-sync-professional } }
   template:
     metadata: { labels: { app: telegram-sync-professional } }
     spec:
       enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
       containers:
         - name: telegram-sync
           image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:latest
@@ -730,6 +737,11 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 512Mi }
             limits:   { memory: 2Gi }
+          readinessProbe:
+            httpGet: { path: /health, port: 3080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
 ---
 apiVersion: v1
 kind: Service

@@ -13,7 +13,21 @@ logging.basicConfig(
 )
 
 from telethon import TelegramClient
+from telethon.errors import AuthKeyDuplicatedError
 from telethon.sessions import StringSession
+
+
+async def run_degraded_bridge(code: str, message: str):
+    from sync import bridge
+    import uvicorn
+
+    bridge.set_startup_error(code, message)
+    bridge_port = int(os.environ.get("BRIDGE_PORT", "3080"))
+    config = uvicorn.Config(bridge.app, host="0.0.0.0", port=bridge_port, log_level="info")
+    server = uvicorn.Server(config)
+    logging.error("%s: %s", code, message)
+    logging.info("Bridge HTTP server running degraded on port %s", bridge_port)
+    await server.serve()
 
 
 async def main():
@@ -27,10 +41,19 @@ async def main():
         api_hash,
     )
 
-    # Use connect() instead of start() to avoid interactive auth prompts
-    await client.connect()
+    # Use connect() instead of start() to avoid interactive auth prompts.
+    # AuthKeyDuplicatedError is terminal for this StringSession; keep the pod
+    # observable instead of CrashLooping until a human regenerates the session.
+    try:
+        await client.connect()
+    except AuthKeyDuplicatedError as e:
+        await run_degraded_bridge("auth_key_duplicated", str(e))
+        return
     if not await client.is_user_authorized():
-        logging.error("Session string is invalid or expired. Generate a new one.")
+        await run_degraded_bridge(
+            "session_invalid",
+            "Session string is invalid or expired. Generate a new one.",
+        )
         return
 
     me = await client.get_me()

@@ -42,6 +42,7 @@ export function createRouter(
       status: connected ? 'ok' : 'degraded',
       ...client.getStatus(),
       connected,
+      serviceReady: connected || qr !== null,
       qrAvailable: qr !== null,
     });
   });

@@ -23,6 +23,7 @@ WEBHOOK_URL = os.environ.get("AUTOREPLY_WEBHOOK_URL", "")
 _telegram_client = None
 _db_pool: asyncpg.Pool | None = None
 _http_client: httpx.AsyncClient | None = None
+_startup_error: dict[str, str] | None = None
 
 
 def set_telegram_client(client):
@@ -33,6 +34,11 @@ def set_telegram_client(client):
 def set_db_pool(pool: asyncpg.Pool):
     global _db_pool
     _db_pool = pool
+
+
+def set_startup_error(code: str, message: str):
+    global _startup_error
+    _startup_error = {"code": code, "message": message}
 
 
 def _sign(payload: str) -> tuple[str, str]:
@@ -162,6 +168,11 @@ async def handle_health(request: Request) -> JSONResponse:
     connected = _telegram_client is not None and _telegram_client.is_connected()
     db_ok = _db_pool is not None
     healthy = connected and db_ok
+    if _startup_error is not None:
+        return JSONResponse(
+            {"status": "unhealthy", "telegram": connected, "db": db_ok, "error": _startup_error},
+            status_code=503,
+        )
     return JSONResponse(
         {"status": "ok" if healthy else "unhealthy", "telegram": connected, "db": db_ok},
         status_code=200 if healthy else 503,

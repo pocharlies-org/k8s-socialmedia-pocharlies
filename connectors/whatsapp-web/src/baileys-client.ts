@@ -1299,10 +1299,16 @@ export class BaileysClient extends EventEmitter {
   ): Promise<void> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
-    const res = await fetch(fileUrl);
-    if (!res.ok) throw new Error(`Failed to fetch file from ${fileUrl}: ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const contentType = res.headers.get('content-type') || '';
+    let buf: Buffer;
+    let contentType = '';
+    try {
+      const res = await fetch(fileUrl);
+      if (!res.ok) throw new Error(`Failed to fetch file from ${fileUrl}: ${res.status}`);
+      buf = Buffer.from(await res.arrayBuffer());
+      contentType = res.headers.get('content-type') || '';
+    } catch (e: any) {
+      throw new Error(`Failed to fetch file from ${fileUrl}: ${e?.message || e}`);
+    }
     const fileName = fileUrl.split('/').pop() || 'attachment';
 
     let payload: AnyMessageContent;

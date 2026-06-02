@@ -9,14 +9,14 @@ patches:
   - path: patch-nodepool.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: v1.3.35
-    digest: sha256:d51b34f7e0d12e7b048095397de33183f6d3c91ec99058fbaca592032c8c1906
+    newTag: v1.3.36
+    digest: sha256:e0b56c344f886aa45867dba1078af85cde5569692b1256b84c72c9a48281f600
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: v1.3.29
     digest: sha256:94bd1aa7de1264e4fb8f28705a5a2d9a6420ad1d5bbb833d7cd2fc4913a923f8
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.21
-    digest: sha256:6cb06be5556feda51aa55396b820ec30cb9e8c05b561dc5cf7f890364ceb0681
+    newTag: v1.3.22
+    digest: sha256:54d41d0b4526d3a544ef71e9b244a88c7b1db2fce538f2eff598a09959887fe3
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
