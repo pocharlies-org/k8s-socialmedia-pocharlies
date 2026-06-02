@@ -342,14 +342,14 @@ spec:
   schedule: "*/5 * * * *"
   timeZone: Europe/Madrid
   concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 120
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
-      backoffLimit: 1
-      activeDeadlineSeconds: 1200
-      ttlSecondsAfterFinished: 86400
+      backoffLimit: 0
+      activeDeadlineSeconds: 360
+      ttlSecondsAfterFinished: 3600
       template:
         spec:
           restartPolicy: Never
@@ -364,7 +364,11 @@ spec:
                 - { name: BRAIN_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
                 - { name: BRAIN_INGEST_BATCH, value: "20" }
                 - { name: BRAIN_INGEST_MAX_ROWS, value: "1000" }
-                - { name: BRAIN_PUSH_RETRIES, value: "5" }
+                - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "240000" }
+                - { name: BRAIN_PUSH_RETRIES, value: "3" }
+                - { name: BRAIN_PUSH_TIMEOUT_MS, value: "15000" }
+                - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "10000" }
+                - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
                 # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (Vault) via envFrom.
               envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
               resources:
