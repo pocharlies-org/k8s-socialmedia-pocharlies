@@ -358,7 +358,7 @@ spec:
           containers:
             - name: brain-ingest
               image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
-              command: ["sh", "-c", "cd mcp-server && tsx src/jobs/brain-ingest.ts"]
+              command: ["sh", "-c", "cd mcp-server && node --import tsx src/jobs/brain-ingest.ts"]
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
