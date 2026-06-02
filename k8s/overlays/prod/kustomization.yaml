@@ -23,3 +23,13 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: v1.3.36
     digest: sha256:c6bd68a8ac5ba567765347675344dd05715abd5446ad7fedb4995d18392011c3
+# Disabled 2026-06: both telegram-sync deployments share their connector's
+# Telethon session → AuthKeyDuplicated crashloop (it also intermittently
+# invalidated the connector's live session). The connectors handle live
+# messaging fine; the sync only does history backfill. Re-enable once each
+# sync has its OWN authorized session (separate from the connector).
+replicas:
+  - name: telegram-sync
+    count: 0
+  - name: telegram-sync-professional
+    count: 0
