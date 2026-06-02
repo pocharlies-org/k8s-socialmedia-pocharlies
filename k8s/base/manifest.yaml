@@ -361,7 +361,7 @@ spec:
               command: ["sh", "-c", "cd mcp-server && node --import tsx src/jobs/brain-ingest.ts"]
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-                - { name: BRAIN_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
+                - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
                 - { name: BRAIN_INGEST_BATCH, value: "20" }
                 - { name: BRAIN_INGEST_MAX_ROWS, value: "1000" }
                 - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "240000" }

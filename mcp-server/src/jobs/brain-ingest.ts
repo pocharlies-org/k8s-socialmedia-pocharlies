@@ -124,7 +124,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): BrainIngestC
     databaseUrl:
       env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp',
     brainUrl:
-      env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local',
+      env.BRAIN_URL || 'http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local',
     brainApiKey: env.BRAIN_API_KEY || '',
     batch: positiveInt(env.BRAIN_INGEST_BATCH, 500),
     maxRows: nonNegativeInt(env.BRAIN_INGEST_MAX_ROWS, 0),
