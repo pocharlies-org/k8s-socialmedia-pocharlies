@@ -9,8 +9,8 @@ patches:
   - path: patch-nodepool.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: v1.3.42
-    digest: sha256:43ccb90591d3314c79e302ededd3b19043f11de16402dc2d8d1c24bfdd3ffb3e
+    newTag: manual-open-20260604
+    digest: sha256:34ea1ad85c70aebefb524add5eac4e7cc01ed06ab95bbb182de37c2b86ac375f
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: v1.3.37
     digest: sha256:d2ab11bbb894be2cd1028abc9efdc4f14d2c59a0fe9897b4394b23fe9dc911ce
@@ -21,8 +21,8 @@ images:
     newTag: v1.3.40
     digest: sha256:b7a0ee7a3f0519cb37971c9ed85c54d52a6ddf10f8e32c148645ec4c559b1c4f
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.42
-    digest: sha256:93c1ad8449a84e8734f7b36b869ea411eb58c21db25573c7ab2d093b1f7f1e61
+    newTag: manual-open-20260604
+    digest: sha256:dc2eaa19c9355bbc76f961ec06fde94a3cad8a09e93bd8938b841f24d59bb748
 # Enabled 2026-06-03 (v1.3.37): telegram-sync is SESSION-LESS — it ingests via the
 # connector (NATS telegram.MessageReceived filtered by the per-account `account`
 # field + connector HTTP API for history/media/avatars/transcription), so it holds

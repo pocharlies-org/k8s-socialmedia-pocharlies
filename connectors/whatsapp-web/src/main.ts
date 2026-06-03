@@ -46,6 +46,14 @@ async function main(): Promise<void> {
     res.redirect(302, '/qr/page');
   });
 
+  app.get('/manual-open', (_req, res) => {
+    res.redirect(302, '/api/v1/manual-open/page');
+  });
+
+  app.get('/manual-open/page', (_req, res) => {
+    res.redirect(302, '/api/v1/manual-open/page');
+  });
+
   // Live QR endpoint — serves QR as PNG image from memory
   app.get('/qr', (_req, res) => {
     const qrData = qrHandler.getCurrentQR();

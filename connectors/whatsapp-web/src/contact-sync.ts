@@ -41,6 +41,12 @@ export interface WhatsAppContactSeedResult {
   actionable?: string;
 }
 
+export function buildManualWhatsAppOpenUrl(phoneE164: string, text?: string | null): string {
+  const digits = phoneE164.replace(/\D/g, '');
+  const suffix = text && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
+  return `https://wa.me/${digits}${suffix}`;
+}
+
 function defaultCountryCode(): string {
   return (process.env.WA_DEFAULT_COUNTRY_CODE || '34').replace(/\D/g, '') || '34';
 }

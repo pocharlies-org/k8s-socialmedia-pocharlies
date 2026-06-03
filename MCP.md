@@ -111,7 +111,12 @@ Both WhatsApp accounts use Baileys as linked WhatsApp Web devices, not the offic
 Use one of these paths:
 
 - Existing/inbound chat: have the customer message the business first, then `whatsapp_send_message` can reply normally.
-- Manual handoff: use the `fallback.manualOpenUrl` returned by the connector/MCP error. It opens a `wa.me` compose URL in the official WhatsApp app/Web session; a human must press send.
+- Manual handoff: the connector now queues a `whatsapp_manual_open_requests`
+  row when a direct send fails with `account_restricted`. Open
+  `https://whatsapp-pro.lan.e-dani.com/manual-open`, paste the admin token,
+  click the `wa.me` compose link, press send in WhatsApp, then mark the row as
+  `sent`. The raw connector response also includes `fallback.manualOpenUrl` and
+  `fallback.manualRequest.id`.
 - Automated first contact: use the official WhatsApp Business Platform/Cloud API with approved message templates. Do not bypass by disabling `WA_DIRECT_PRIVACY_PREFLIGHT`; that only restores the old false-positive behavior where WhatsApp later rejects the message with `463`.
 
 ### Telegram — Send
