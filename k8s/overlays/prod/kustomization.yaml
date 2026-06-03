@@ -12,22 +12,24 @@ images:
     newTag: v1.3.36
     digest: sha256:e0b56c344f886aa45867dba1078af85cde5569692b1256b84c72c9a48281f600
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: v1.3.29
-    digest: sha256:94bd1aa7de1264e4fb8f28705a5a2d9a6420ad1d5bbb833d7cd2fc4913a923f8
+    newTag: v1.3.37
+    digest: sha256:d2ab11bbb894be2cd1028abc9efdc4f14d2c59a0fe9897b4394b23fe9dc911ce
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.22
-    digest: sha256:54d41d0b4526d3a544ef71e9b244a88c7b1db2fce538f2eff598a09959887fe3
+    newTag: v1.3.37
+    digest: sha256:6ac3c6b1ee91210c157304eca340764bc360efe8e659cf469fbe7bd12faac8fc
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: v1.3.36
     digest: sha256:c6bd68a8ac5ba567765347675344dd05715abd5446ad7fedb4995d18392011c3
-# Disabled 2026-06: both telegram-sync deployments share their connector's
-# Telethon session → AuthKeyDuplicated crashloop (it also intermittently
-# invalidated the connector's live session). The connectors handle live
-# messaging fine; the sync only does history backfill. Re-enable once each
-# sync has its OWN authorized session (separate from the connector).
+# Staged 2026-06-03 (v1.3.37): telegram-sync is now SESSION-LESS — it ingests via
+# the connector (NATS telegram.MessageReceived filtered by the new per-account
+# `account` field + connector HTTP API), so it no longer opens its own Telethon
+# session and the old AuthKeyDuplicated crashloop is structurally gone. Kept at 0
+# for ONE phase only: this commit ships the connector (v1.3.37, now emitting
+# `account`) so we can confirm the account tag + dedup against live rows BEFORE
+# enabling the consumers. Flip both to 1 in the follow-up commit once verified.
 replicas:
   - name: telegram-sync
     count: 0
