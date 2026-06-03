@@ -106,8 +106,13 @@ async def run(pool: asyncpg.Pool, connector: ConnectorClient):
             try:
                 file_path = await _download_audio(connector, chat_id, tg_msg_id)
             except TRANSIENT_ERRORS as e:
-                logger.warning(f"Transient download error for {tg_msg_id}: {e}")
-                await db.fail_transcription(pool, msg_id, f"download:{e}", increment_attempts=False)
+                # Increment attempts: some chats' media consistently 500s from the
+                # connector. Without incrementing, get_pending_transcription would
+                # re-pick the same failing message every cycle and block the queue.
+                # After 3 attempts it drops out (attempts<3 filter) and the worker
+                # moves on.
+                logger.warning(f"Download error for {tg_msg_id}: {e}")
+                await db.fail_transcription(pool, msg_id, f"download:{e}", increment_attempts=True)
                 continue
 
             if file_path is None:

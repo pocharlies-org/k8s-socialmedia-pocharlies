@@ -259,19 +259,22 @@ async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE messages SET "
-            "  content = $2, "
+            "  content = $2::text, "
             "  metadata = metadata || '{\"transcription_status\": \"done\"}'::jsonb "
             "WHERE id = $1", msg_id, text
         )
 
 
 async def fail_transcription(pool: asyncpg.Pool, msg_id: int, error: str, increment_attempts: bool = True):
+    # $2 must be cast explicitly: as a jsonb_build_object value arg its type is
+    # "any", which asyncpg cannot infer ("could not determine data type of
+    # parameter $2") and the UPDATE throws.
     async with pool.acquire() as conn:
         if increment_attempts:
             await conn.execute(
                 "UPDATE messages SET metadata = metadata || jsonb_build_object("
                 "  'transcription_status', 'failed', "
-                "  'transcription_error', $2, "
+                "  'transcription_error', $2::text, "
                 "  'transcription_attempts', (COALESCE((metadata->>'transcription_attempts')::int, 0) + 1)"
                 ") WHERE id = $1", msg_id, error
             )
@@ -279,7 +282,7 @@ async def fail_transcription(pool: asyncpg.Pool, msg_id: int, error: str, increm
             await conn.execute(
                 "UPDATE messages SET metadata = metadata || jsonb_build_object("
                 "  'transcription_status', 'pending', "
-                "  'transcription_error', $2"
+                "  'transcription_error', $2::text"
                 ") WHERE id = $1", msg_id, error
             )
 
