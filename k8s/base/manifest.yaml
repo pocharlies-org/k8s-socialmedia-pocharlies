@@ -391,6 +391,7 @@ spec:
       containers:
         - name: instagram-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:latest
+          command: ["sh", "-c", "cd connectors/instagram && node dist/main.js"]
           ports: [{ name: http, containerPort: 3003 }]
           env:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
