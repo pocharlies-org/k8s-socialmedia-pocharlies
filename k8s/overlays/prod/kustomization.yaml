@@ -21,8 +21,8 @@ images:
     newTag: v1.3.40
     digest: sha256:b7a0ee7a3f0519cb37971c9ed85c54d52a6ddf10f8e32c148645ec4c559b1c4f
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.41
-    digest: sha256:3a62a1d6c151b2cc394be5cc056d6a2e6c8f8d2c0de9fceb558ba6674f41c626
+    newTag: v1.3.42
+    digest: sha256:93c1ad8449a84e8734f7b36b869ea411eb58c21db25573c7ab2d093b1f7f1e61
 # Enabled 2026-06-03 (v1.3.37): telegram-sync is SESSION-LESS — it ingests via the
 # connector (NATS telegram.MessageReceived filtered by the per-account `account`
 # field + connector HTTP API for history/media/avatars/transcription), so it holds
