@@ -119,7 +119,9 @@ async function main() {
     streamableSessions.delete(sid);
     clearTimeout(session.maxAgeTimer);
     const ageSec = Math.round((Date.now() - session.createdAt) / 1000);
-    console.log(`[MCP] Streamable session ${sid} ${reason} age=${ageSec}s (${streamableSessions.size} active)`);
+    console.log(
+      `[MCP] Streamable session ${sid} ${reason} age=${ageSec}s (${streamableSessions.size} active)`
+    );
     void session.transport.close().catch(() => {});
   };
 
@@ -173,7 +175,13 @@ async function main() {
           body = await readJsonBody(req);
         } catch {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }));
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32700, message: 'Parse error' },
+              id: null,
+            })
+          );
           return;
         }
 
@@ -199,9 +207,14 @@ async function main() {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (newSid: string) => {
-            const maxAgeTimer = setTimeout(() => closeStreamable(newSid, 'max-age'), SESSION_MAX_AGE_MS);
+            const maxAgeTimer = setTimeout(
+              () => closeStreamable(newSid, 'max-age'),
+              SESSION_MAX_AGE_MS
+            );
             streamableSessions.set(newSid, { transport, createdAt: Date.now(), maxAgeTimer });
-            console.log(`[MCP] New streamable session ${newSid} (${streamableSessions.size} active)`);
+            console.log(
+              `[MCP] New streamable session ${newSid} (${streamableSessions.size} active)`
+            );
           },
         });
         transport.onclose = () => {
@@ -355,7 +368,8 @@ async function main() {
   const shutdown = async (signal: string) => {
     console.log(`[SSE] ${signal} received, shutting down...`);
     for (const s of sessions.values()) s.cleanup(`shutdown-${signal}`);
-    for (const sid of Array.from(streamableSessions.keys())) closeStreamable(sid, `shutdown-${signal}`);
+    for (const sid of Array.from(streamableSessions.keys()))
+      closeStreamable(sid, `shutdown-${signal}`);
     httpServer.close();
     await dbPool.end();
     await redisClient.quit();

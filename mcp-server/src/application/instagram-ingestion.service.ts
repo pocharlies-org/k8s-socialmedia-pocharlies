@@ -129,7 +129,16 @@ export class InstagramIngestionService {
            direction, content, message_type, is_forwarded, platform, metadata, account
          ) VALUES ($1, $2, $3, $4, 'INBOUND', $5, $6, false, 'instagram', $7, $8)
          ON CONFLICT (wa_message_id) DO NOTHING`,
-        [waMessageId, convId, senderWaId, ts, content, messageType, JSON.stringify(metadata), account]
+        [
+          waMessageId,
+          convId,
+          senderWaId,
+          ts,
+          content,
+          messageType,
+          JSON.stringify(metadata),
+          account,
+        ]
       );
 
       if ((result.rowCount || 0) > 0) {

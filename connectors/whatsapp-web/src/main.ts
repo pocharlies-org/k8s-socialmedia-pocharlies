@@ -17,12 +17,16 @@ const CONNECTOR_SHARED_SECRET =
 
 function isKnownUndiciStreamAbort(error: unknown): boolean {
   const err = error as any;
-  return err?.name === 'TypeError' && err?.message === 'terminated' && err?.cause?.code === 'UND_ERR_SOCKET';
+  return (
+    err?.name === 'TypeError' &&
+    err?.message === 'terminated' &&
+    err?.cause?.code === 'UND_ERR_SOCKET'
+  );
 }
 
 process.on('uncaughtException', error => {
   if (isKnownUndiciStreamAbort(error)) {
-    console.warn(`Ignored aborted remote media stream: ${(error as Error).message}`);
+    console.warn(`Ignored aborted remote media stream: ${error.message}`);
     return;
   }
   console.error('Fatal uncaught exception:', error);

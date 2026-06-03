@@ -35,15 +35,18 @@ function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
   return digits.length >= 8 ? digits : null;
 }
 
-function accountRestrictedFallback(chatId: unknown, content: unknown): Record<string, string> | undefined {
+function accountRestrictedFallback(
+  chatId: unknown,
+  content: unknown
+): Record<string, string> | undefined {
   const phone = phoneFromDirectWhatsAppId(chatId);
   if (!phone) return undefined;
-  const text = typeof content === 'string' && content.length > 0 ? `?text=${encodeURIComponent(content)}` : '';
+  const text =
+    typeof content === 'string' && content.length > 0 ? `?text=${encodeURIComponent(content)}` : '';
   return {
     mode: 'manual_whatsapp_compose',
     manualOpenUrl: `https://wa.me/${phone}${text}`,
-    note:
-      'Open this URL in the official WhatsApp app/Web session to compose manually. A human must press send; Baileys cannot reliably automate a first 1:1 reachout without a trusted-contact token.',
+    note: 'Open this URL in the official WhatsApp app/Web session to compose manually. A human must press send; Baileys cannot reliably automate a first 1:1 reachout without a trusted-contact token.',
   };
 }
 

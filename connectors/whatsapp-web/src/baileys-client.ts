@@ -687,15 +687,16 @@ export class BaileysClient extends EventEmitter {
           const status = p?.lastKnownPresence;
           if (status !== 'composing' && status !== 'recording') continue;
           // Lookup display name from the participants we've seen
-          const name = this.contactNames.get(participantJid)
-            || this.contactNames.get(this.normalizeJid(participantJid))
-            || null;
+          const name =
+            this.contactNames.get(participantJid) ||
+            this.contactNames.get(this.normalizeJid(participantJid)) ||
+            null;
           void dashboardNotify('/_connector/typing', {
             conversation_id: convId,
             sender_id: participantJid,
             sender_name: name,
             status: 'composing',
-            ttl_ms: 8000,  // baileys re-emits every ~5s; 8s TTL keeps it lit
+            ttl_ms: 8000, // baileys re-emits every ~5s; 8s TTL keeps it lit
           });
         }
       } catch (e) {
@@ -768,9 +769,7 @@ export class BaileysClient extends EventEmitter {
         waChatId: norm,
         updateType,
         metadata: {
-          participants: participants.map(p =>
-            this.normalizeJid(typeof p === 'string' ? p : p.id)
-          ),
+          participants: participants.map(p => this.normalizeJid(typeof p === 'string' ? p : p.id)),
           action,
         },
       });
@@ -1199,7 +1198,7 @@ export class BaileysClient extends EventEmitter {
           false,
           started,
           0,
-          e,
+          e
         );
       });
     }
@@ -1225,7 +1224,7 @@ export class BaileysClient extends EventEmitter {
           false,
           started,
           1,
-          new Error(immediateFailure.message),
+          new Error(immediateFailure.message)
         );
       }
       if (sent?.key) {
@@ -2207,7 +2206,7 @@ export class BaileysClient extends EventEmitter {
           elapsedMs: Date.now() - started,
           causeMessage: 'target is not on WhatsApp',
           actionable: actionableForFailure('invalid_recipient', false),
-        },
+        }
       );
     }
 
@@ -2249,7 +2248,7 @@ export class BaileysClient extends EventEmitter {
           elapsedMs: Date.now() - started,
           causeMessage: 'missing trusted-contact token after preflight',
           actionable: actionableForFailure('account_restricted', false),
-        },
+        }
       );
     }
   }

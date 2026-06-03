@@ -221,7 +221,12 @@ function adapterForPlatform(platform: string): string {
   return 'whatsapp';
 }
 
-async function fetchBatch(pool: Pool, account: Account, cursor: Cursor, limit: number): Promise<Row[]> {
+async function fetchBatch(
+  pool: Pool,
+  account: Account,
+  cursor: Cursor,
+  limit: number
+): Promise<Row[]> {
   // Keyset pagination on (created_at, id) so duplicate created_at can't skip rows.
   // messages.id is bigint; coalesce missing cursor to 0 for the first batch.
   const r = await pool.query(
@@ -305,12 +310,7 @@ export async function pushToBrain(
 
 export function classifyFailure(err: unknown): ClassifiedFailure {
   const status = err instanceof BrainPushError ? err.status : undefined;
-  const message =
-    err instanceof Error
-      ? err.message
-      : typeof err === 'string'
-        ? err
-        : String(err);
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : String(err);
   const lower = message.toLowerCase();
 
   if (status !== undefined) {
@@ -415,7 +415,10 @@ async function ingestAccount(
 
   for (;;) {
     if (deadlineAt !== null && Date.now() >= deadlineAt) {
-      logger.warn({ account, instance, rows: totalRows }, 'runtime budget reached; stopping account cleanly');
+      logger.warn(
+        { account, instance, rows: totalRows },
+        'runtime budget reached; stopping account cleanly'
+      );
       break;
     }
 
@@ -480,7 +483,14 @@ async function ingestAccount(
     },
     'account ingest done'
   );
-  return { account, instance, rows: totalRows, chunks: totalChunks, partial: failures.length > 0, failures };
+  return {
+    account,
+    instance,
+    rows: totalRows,
+    chunks: totalChunks,
+    partial: failures.length > 0,
+    failures,
+  };
 }
 
 async function main(config = createConfig()): Promise<JobResult> {

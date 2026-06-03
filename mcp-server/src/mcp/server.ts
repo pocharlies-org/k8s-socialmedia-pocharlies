@@ -46,7 +46,8 @@ function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
 function manualWhatsAppOpenUrl(chatId: unknown, text: unknown): string | undefined {
   const phone = phoneFromDirectWhatsAppId(chatId);
   if (!phone) return undefined;
-  const suffix = typeof text === 'string' && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
+  const suffix =
+    typeof text === 'string' && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
   return `https://wa.me/${phone}${suffix}`;
 }
 
@@ -3023,7 +3024,7 @@ export class MCPServer {
   createSessionServer(): Server {
     const prev = this.server;
     const fresh = new Server(
-      { name: "messaging-mcp-server", version: "1.0.0" },
+      { name: 'messaging-mcp-server', version: '1.0.0' },
       { capabilities: { tools: {} } }
     );
     this.server = fresh;
