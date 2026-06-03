@@ -26,6 +26,27 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
+  if (typeof chatId !== 'string') return null;
+  const jid = chatId.includes(':') ? chatId.split(':').pop() || chatId : chatId;
+  if (jid.includes('@g.us')) return null;
+  const user = jid.split('@')[0] || '';
+  const digits = user.replace(/\D/g, '');
+  return digits.length >= 8 ? digits : null;
+}
+
+function accountRestrictedFallback(chatId: unknown, content: unknown): Record<string, string> | undefined {
+  const phone = phoneFromDirectWhatsAppId(chatId);
+  if (!phone) return undefined;
+  const text = typeof content === 'string' && content.length > 0 ? `?text=${encodeURIComponent(content)}` : '';
+  return {
+    mode: 'manual_whatsapp_compose',
+    manualOpenUrl: `https://wa.me/${phone}${text}`,
+    note:
+      'Open this URL in the official WhatsApp app/Web session to compose manually. A human must press send; Baileys cannot reliably automate a first 1:1 reachout without a trusted-contact token.',
+  };
+}
+
 export function createRouter(
   client: BaileysClient,
   qrHandler: QRHandler,
@@ -78,6 +99,8 @@ export function createRouter(
   // Send message (requires auth)
   router.post('/messages/send', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
+      let requestConversationId: unknown;
+      let requestContent: unknown;
       try {
         const body = req.body as {
           sendToken?: string;
@@ -86,6 +109,8 @@ export function createRouter(
           replyToMessageId?: string;
         };
         const { sendToken, conversationId, content, replyToMessageId } = body;
+        requestConversationId = conversationId;
+        requestContent = content;
 
         if (!sendToken || !conversationId || !content) {
           console.warn(
@@ -149,11 +174,19 @@ export function createRouter(
         console.error(
           `WhatsApp send failed failureClass=${failureClass} conversationId=${details.normalizedJid || ''} rawJid=${details.rawJid || ''}${details.groupSubject ? ` groupSubject="${details.groupSubject}"` : ''}: ${errorMessage(error)}`
         );
+        const fallback =
+          failureClass === 'account_restricted'
+            ? accountRestrictedFallback(
+                details.normalizedJid || details.rawJid || requestConversationId,
+                requestContent
+              )
+            : undefined;
         res.status(statusForSendFailure(failureClass)).json({
           error: `Failed to send message: ${errorMessage(error)}`,
           failureClass,
           actionable: details.actionable,
           details,
+          fallback,
         });
       }
     })();

@@ -34,6 +34,22 @@ const ACCOUNT_PROPERTY = {
   },
 } as const;
 
+function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
+  if (typeof chatId !== 'string') return null;
+  const bareId = stripAccount(chatId).id;
+  if (bareId.includes('@g.us')) return null;
+  const user = bareId.split('@')[0] || '';
+  const digits = user.replace(/\D/g, '');
+  return digits.length >= 8 ? digits : null;
+}
+
+function manualWhatsAppOpenUrl(chatId: unknown, text: unknown): string | undefined {
+  const phone = phoneFromDirectWhatsAppId(chatId);
+  if (!phone) return undefined;
+  const suffix = typeof text === 'string' && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
+  return `https://wa.me/${phone}${suffix}`;
+}
+
 export class MCPServer {
   private server: Server;
   private searchService: SearchService;
@@ -1898,8 +1914,14 @@ export class MCPServer {
         const errorPayload = await this.readConnectorError(response);
         const failure = errorPayload.failureClass ? ` (${errorPayload.failureClass})` : '';
         const actionable = errorPayload.actionable ? ` - ${errorPayload.actionable}` : '';
+        const fallbackUrl =
+          errorPayload.fallback?.manualOpenUrl || manualWhatsAppOpenUrl(args.chatId, args.text);
+        const fallback =
+          errorPayload.failureClass === 'account_restricted' && fallbackUrl
+            ? ` Manual fallback: open ${fallbackUrl} in the official WhatsApp app/Web session and press send manually. Automated first-contact sends require an existing inbound chat/trusted-contact token or an official WhatsApp Business Platform template.`
+            : '';
         throw new Error(
-          `Connector returned ${response.status}${failure}: ${errorPayload.error || response.statusText}${actionable}`
+          `Connector returned ${response.status}${failure}: ${errorPayload.error || response.statusText}${actionable}${fallback}`
         );
       }
 
