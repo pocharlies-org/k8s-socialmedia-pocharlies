@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Telegram Sync Worker — history import + real-time capture + transcription + HTTP bridge."""
+"""Telegram Sync Worker (session-less).
+
+Realtime capture (NATS) + history backfill + audio transcription + HTTP bridge —
+ALL via the telegram-connector. This worker holds NO Telegram session of its own,
+which structurally eliminates the shared-auth-key / AuthKeyDuplicated failure that
+took the old Telethon-based sync down. The connector is the single session per
+account; this process only consumes its NATS events and HTTP API.
+"""
 import asyncio
 import logging
 import os
@@ -12,84 +19,49 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 
-from telethon import TelegramClient
-from telethon.errors import AuthKeyDuplicatedError
-from telethon.sessions import StringSession
-
-
-async def run_degraded_bridge(code: str, message: str):
-    from sync import bridge
-    import uvicorn
-
-    bridge.set_startup_error(code, message)
-    bridge_port = int(os.environ.get("BRIDGE_PORT", "3080"))
-    config = uvicorn.Config(bridge.app, host="0.0.0.0", port=bridge_port, log_level="info")
-    server = uvicorn.Server(config)
-    logging.error("%s: %s", code, message)
-    logging.info("Bridge HTTP server running degraded on port %s", bridge_port)
-    await server.serve()
-
 
 async def main():
-    api_id = int(os.environ["TELEGRAM_API_ID"])
-    api_hash = os.environ["TELEGRAM_API_HASH"]
-    session_string = os.environ["TELEGRAM_SESSION_STRING"]
+    from sync import db, history, transcriber, bridge, nats_consumer
+    from sync.connector_client import ConnectorClient
 
-    client = TelegramClient(
-        StringSession(session_string),
-        api_id,
-        api_hash,
-    )
-
-    # Use connect() instead of start() to avoid interactive auth prompts.
-    # AuthKeyDuplicatedError is terminal for this StringSession; keep the pod
-    # observable instead of CrashLooping until a human regenerates the session.
-    try:
-        await client.connect()
-    except AuthKeyDuplicatedError as e:
-        await run_degraded_bridge("auth_key_duplicated", str(e))
-        return
-    if not await client.is_user_authorized():
-        await run_degraded_bridge(
-            "session_invalid",
-            "Session string is invalid or expired. Generate a new one.",
-        )
-        return
-
-    me = await client.get_me()
-    logging.info(f"Telegram connected as {me.first_name} (id={me.id})")
-
-    from sync import db, history, realtime, transcriber, bridge
+    account = os.environ.get("CONNECTOR_ACCOUNT", "personal")
+    connector = ConnectorClient.from_env()
 
     pool = await db.create_pool()
     await db.init_schema(pool)
     await db.recover_stuck_transcriptions(pool)
 
-    # Wire up bridge with telegram client and db pool
-    bridge.set_telegram_client(client)
+    bridge.set_connector(connector)
     bridge.set_db_pool(pool)
 
-    realtime.register(client, pool, me.id)
+    # Best-effort identity log; never blocks startup if the connector is warming up.
+    me = await connector.get_me()
+    if me:
+        logging.info("Connector account=%s identity=%s (id=%s)",
+                     account, me.get("firstName"), me.get("id"))
+    else:
+        logging.warning("Connector /me unreachable at startup; continuing (will retry).")
 
-    # Start HTTP bridge server
+    # HTTP bridge (serves mcp-server's live-unread + send + brain-chat).
     bridge_port = int(os.environ.get("BRIDGE_PORT", "3080"))
-
     import uvicorn
     config = uvicorn.Config(bridge.app, host="0.0.0.0", port=bridge_port, log_level="info")
     server = uvicorn.Server(config)
     bridge_task = asyncio.create_task(server.serve())
     logging.info(f"Bridge HTTP server starting on port {bridge_port}")
 
-    history_task = asyncio.create_task(history.run(client, pool))
+    nats_task = asyncio.create_task(nats_consumer.run(pool, connector, account))
+    history_task = asyncio.create_task(history.run(pool, connector))
+    tasks = [nats_task, history_task, bridge_task]
 
     try:
-        import faster_whisper
-        transcriber_task = asyncio.create_task(transcriber.run(client, pool))
-        logging.info("Sync started: history + realtime + transcription + bridge")
-        await asyncio.gather(history_task, transcriber_task, bridge_task)
+        import faster_whisper  # noqa: F401
+        tasks.append(asyncio.create_task(transcriber.run(pool, connector)))
+        logging.info("Sync started (session-less): nats + history + transcription + bridge")
     except ImportError:
         logging.info("faster-whisper not available, running without transcription")
-        await asyncio.gather(history_task, bridge_task)
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":

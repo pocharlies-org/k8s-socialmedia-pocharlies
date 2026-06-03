@@ -3,6 +3,12 @@ import pino from 'pino';
 
 export interface TelegramMessageReceivedEvent {
   eventType: 'TelegramMessageReceived';
+  // Which Telegram account (connector instance) emitted this event, from
+  // CONNECTOR_ACCOUNT ('personal' | 'professional'). Both connectors publish to
+  // the SAME subject `telegram.MessageReceived`, so consumers that must attribute
+  // an account (e.g. the session-less telegram-sync) filter on this field.
+  // Backward-compatible: existing consumers ignore it.
+  account: string;
   conversationId: string;
   telegramMessageId: string;
   telegramTimestamp: string;

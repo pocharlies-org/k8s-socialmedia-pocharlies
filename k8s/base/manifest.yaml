@@ -642,8 +642,9 @@ spec:
           env:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-            - name: TELEGRAM_SESSION_STRING
-              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: TELETHON_SESSION_STRING } }
+            # Session-less: ingest Telegram via the connector (NATS + HMAC /api/v1),
+            # no Telethon session. CONNECTOR_SHARED_SECRET comes via envFrom.
+            - { name: CONNECTOR_BASE_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -727,8 +728,8 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: CONNECTOR_ACCOUNT, value: "professional" }
-            - name: TELEGRAM_SESSION_STRING
-              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: TELETHON_SESSION_STRING_PROFESSIONAL } }
+            # Session-less: ingest via the professional connector (no Telethon session).
+            - { name: CONNECTOR_BASE_URL, value: "http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002" }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }

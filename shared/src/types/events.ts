@@ -55,6 +55,9 @@ export type WhatsAppEvent = MessageReceivedEvent | MessageUpdatedEvent | ChatUpd
 
 export interface TelegramMessageReceivedEvent {
   eventType: EventType.TELEGRAM_MESSAGE_RECEIVED;
+  // Emitting account/connector instance ('personal' | 'professional'), from
+  // CONNECTOR_ACCOUNT. Optional for backward-compat with pre-existing consumers.
+  account?: string;
   conversationId: string;
   telegramMessageId: string;
   telegramTimestamp: string; // ISO timestamp

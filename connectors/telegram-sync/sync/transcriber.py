@@ -1,4 +1,10 @@
-"""Transcription worker — faster-whisper audio transcription (pass 2)."""
+"""Transcription worker — faster-whisper audio transcription (pass 2).
+
+Session-less: audio bytes are fetched from the connector
+(GET /api/v1/messages/media/:chatId/:msgId) instead of being re-downloaded via
+Telethon. The whisper core is unchanged.
+"""
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -6,10 +12,10 @@ import os
 import shutil
 
 import asyncpg
-from telethon import TelegramClient
-from telethon.errors import FloodWaitError
+import httpx
 
 from sync import db
+from sync.connector_client import ConnectorClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +27,8 @@ DOWNLOADS_DIR = os.environ.get(
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 MIN_DISK_MB = 500
 
-# Transient errors that should not burn retry attempts
-TRANSIENT_ERRORS = (ConnectionError, OSError, TimeoutError, FloodWaitError, asyncpg.PostgresError)
+# Transient errors that should not burn retry attempts.
+TRANSIENT_ERRORS = (ConnectionError, OSError, TimeoutError, asyncpg.PostgresError, httpx.HTTPError)
 
 
 def _load_model():
@@ -40,45 +46,38 @@ def _load_model():
 
 
 def _check_disk_space() -> bool:
-    """Return True if enough disk space available."""
     stat = shutil.disk_usage(DOWNLOADS_DIR)
     free_mb = stat.free / (1024 * 1024)
     return free_mb >= MIN_DISK_MB
 
 
 def _transcribe(model, file_path: str) -> str:
-    """Run transcription and return concatenated text."""
     segments, info = model.transcribe(file_path, language=None)
     texts = [seg.text.strip() for seg in segments if seg.text.strip()]
     full_text = " ".join(texts)
-    logger.info(f"Transcribed {os.path.basename(file_path)}: {info.language} ({info.language_probability:.0%}), {len(full_text)} chars")
+    logger.info(
+        f"Transcribed {os.path.basename(file_path)}: {info.language} "
+        f"({info.language_probability:.0%}), {len(full_text)} chars"
+    )
     return full_text
 
 
-async def _download_audio(client: TelegramClient, chat_id: int, message_id: int) -> str | None:
-    """Download audio file from Telegram. Returns file path or None."""
-    try:
-        entity = await client.get_entity(chat_id)
-        msg = await client.get_messages(entity, ids=message_id)
-    except FloodWaitError as e:
-        logger.warning(f"FloodWait downloading audio: sleeping {e.seconds + 5}s")
-        await asyncio.sleep(e.seconds + 5)
-        raise  # Will be caught as transient
-    except Exception as e:
-        raise
-
-    if msg is None:
-        return None  # Message deleted
-
+async def _download_audio(connector: ConnectorClient, chat_id: int, message_id: int) -> str | None:
+    """Fetch audio bytes from the connector and write to a temp file. Returns the
+    path, or None if the message has no downloadable media (e.g. deleted)."""
+    data = await connector.download_media(str(chat_id), message_id)
+    if not data:
+        return None
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    path = await client.download_media(msg, file=DOWNLOADS_DIR)
+    path = os.path.join(DOWNLOADS_DIR, f"{chat_id}_{message_id}.oga")
+    with open(path, "wb") as f:
+        f.write(data)
     return path
 
 
-async def run(client: TelegramClient, pool: asyncpg.Pool):
-    """Main transcription loop — poll for pending audio, transcribe, save."""
-    # Wait a bit for history import to start populating the queue
-    await asyncio.sleep(10)
+async def run(pool: asyncpg.Pool, connector: ConnectorClient):
+    """Main transcription loop — poll for pending audio, fetch, transcribe, save."""
+    await asyncio.sleep(10)  # let realtime/history populate the queue first
 
     model = await asyncio.get_event_loop().run_in_executor(None, _load_model)
 
@@ -97,28 +96,24 @@ async def run(client: TelegramClient, pool: asyncpg.Pool):
             logger.info(f"Transcribing msg {tg_msg_id} from {chat_title}")
             await db.mark_transcription_processing(pool, msg_id)
 
-            # Check disk space
             if not _check_disk_space():
                 logger.warning("Low disk space — pausing transcription")
                 await db.fail_transcription(pool, msg_id, "low_disk_space", increment_attempts=False)
                 await asyncio.sleep(POLL_INTERVAL * 10)
                 continue
 
-            # Download audio
             file_path = None
             try:
-                file_path = await _download_audio(client, chat_id, tg_msg_id)
+                file_path = await _download_audio(connector, chat_id, tg_msg_id)
             except TRANSIENT_ERRORS as e:
                 logger.warning(f"Transient download error for {tg_msg_id}: {e}")
                 await db.fail_transcription(pool, msg_id, f"download:{e}", increment_attempts=False)
                 continue
 
             if file_path is None:
-                # Message was deleted
                 await db.fail_transcription(pool, msg_id, "message_deleted", increment_attempts=True)
                 continue
 
-            # Transcribe (run in executor to not block event loop)
             try:
                 text = await asyncio.get_event_loop().run_in_executor(
                     None, _transcribe, model, file_path
@@ -132,7 +127,6 @@ async def run(client: TelegramClient, pool: asyncpg.Pool):
                 logger.error(f"Transcription failed for {tg_msg_id}: {e}")
                 await db.fail_transcription(pool, msg_id, str(e)[:500], increment_attempts=True)
             finally:
-                # Clean up audio file
                 if file_path and os.path.exists(file_path):
                     try:
                         os.remove(file_path)

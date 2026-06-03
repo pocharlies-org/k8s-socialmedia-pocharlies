@@ -15,20 +15,24 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from sync import db
+
 logger = logging.getLogger(__name__)
 
 BRIDGE_SECRET = os.environ.get("BRIDGE_SECRET", "telegram-bridge-secret-2026")
 WEBHOOK_URL = os.environ.get("AUTOREPLY_WEBHOOK_URL", "")
 
-_telegram_client = None
+# Session-less: the bridge proxies live Telegram ops to the connector instead of
+# holding its own Telethon client.
+_connector = None
 _db_pool: asyncpg.Pool | None = None
 _http_client: httpx.AsyncClient | None = None
 _startup_error: dict[str, str] | None = None
 
 
-def set_telegram_client(client):
-    global _telegram_client
-    _telegram_client = client
+def set_connector(connector):
+    global _connector
+    _connector = connector
 
 
 def set_db_pool(pool: asyncpg.Pool):
@@ -71,13 +75,19 @@ async def _get_http_client() -> httpx.AsyncClient:
 
 async def notify_autoreply(chat_id: int, chat_title: str | None, sender_id: int,
                            sender_name: str | None, content: str, message_type: str,
-                           telegram_message_id: int, timestamp: str):
+                           telegram_message_id: int, timestamp: str,
+                           account: str = "personal"):
     if not WEBHOOK_URL:
         return
     if message_type != "text":
         return
 
+    # `account` lets the downstream receiver dedup the shared-group double-emission:
+    # when both Telegram accounts are in the same group, each sync instance fires
+    # one webhook for the same human message; the receiver can collapse them on
+    # (conversationId, telegramMessageId), and reply once as the right account.
     payload = json.dumps({
+        "account": account,
         "conversationId": str(chat_id),
         "chatTitle": chat_title,
         "senderId": str(sender_id),
@@ -115,13 +125,13 @@ async def handle_send(request: Request) -> JSONResponse:
     if not chat_id or not text:
         return JSONResponse({"error": "chat_id and text required"}, status_code=400)
 
-    if _telegram_client is None:
-        return JSONResponse({"error": "telegram client not ready"}, status_code=503)
+    if _connector is None:
+        return JSONResponse({"error": "connector not ready"}, status_code=503)
 
     try:
-        entity = await _telegram_client.get_entity(int(chat_id))
-        msg = await _telegram_client.send_message(entity, text)
-        return JSONResponse({"ok": True, "message_id": msg.id})
+        topic_id = data.get("topic_id") or data.get("topicId")
+        result = await _connector.send(str(chat_id), text, int(topic_id) if topic_id else None)
+        return JSONResponse({"ok": True, "result": result})
     except Exception as e:
         logger.error(f"Send failed: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -143,20 +153,23 @@ async def handle_history(request: Request) -> JSONResponse:
         return JSONResponse({"error": "database not ready"}, status_code=503)
 
     try:
+        conv_id = db.account_key(f"tg_{int(chat_id)}")
         async with _db_pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT sender_id, sender_name, content, direction, timestamp "
-                "FROM telegram_messages "
-                "WHERE chat_id = $1 AND message_type = 'text' AND content IS NOT NULL "
-                "ORDER BY timestamp DESC LIMIT $2",
-                int(chat_id), limit
+                "SELECT sender_wa_id, metadata->>'sender_name' AS sender_name, "
+                "       content, direction, wa_timestamp "
+                "FROM messages "
+                "WHERE conversation_id = $1 AND platform = 'telegram' "
+                "  AND message_type = 'TEXT' AND content IS NOT NULL "
+                "ORDER BY wa_timestamp DESC LIMIT $2",
+                conv_id, limit
             )
         messages = [{
-            "sender_id": str(r["sender_id"]),
+            "sender_id": str(r["sender_wa_id"]) if r["sender_wa_id"] else None,
             "sender_name": r["sender_name"],
             "content": r["content"],
-            "direction": r["direction"],
-            "timestamp": r["timestamp"].isoformat() if r["timestamp"] else None,
+            "direction": (r["direction"] or "").lower(),
+            "timestamp": r["wa_timestamp"].isoformat() if r["wa_timestamp"] else None,
         } for r in reversed(rows)]
         return JSONResponse({"messages": messages})
     except Exception as e:
@@ -165,17 +178,25 @@ async def handle_history(request: Request) -> JSONResponse:
 
 
 async def handle_health(request: Request) -> JSONResponse:
-    connected = _telegram_client is not None and _telegram_client.is_connected()
     db_ok = _db_pool is not None
-    healthy = connected and db_ok
     if _startup_error is not None:
         return JSONResponse(
-            {"status": "unhealthy", "telegram": connected, "db": db_ok, "error": _startup_error},
+            {"status": "unhealthy", "db": db_ok, "error": _startup_error},
             status_code=503,
         )
+    # Lenient probe: the sync process is healthy as long as its own critical
+    # dependency (the DB pool) is up. Connector reachability is reported but does
+    # NOT fail the probe — a transient connector restart must not restart-loop
+    # the sync (realtime auto-reconnects; backfill retries next cycle).
+    connector_ok = False
+    if _connector is not None:
+        try:
+            connector_ok = await _connector.health()
+        except Exception:
+            connector_ok = False
     return JSONResponse(
-        {"status": "ok" if healthy else "unhealthy", "telegram": connected, "db": db_ok},
-        status_code=200 if healthy else 503,
+        {"status": "ok" if db_ok else "unhealthy", "connector": connector_ok, "db": db_ok},
+        status_code=200 if db_ok else 503,
     )
 
 
@@ -190,53 +211,56 @@ async def handle_unread(request: Request) -> JSONResponse:
     if not _verify(request, body):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    if _telegram_client is None:
-        return JSONResponse({"error": "telegram client not ready"}, status_code=503)
+    if _connector is None:
+        return JSONResponse({"error": "connector not ready"}, status_code=503)
 
     try:
         data = json.loads(body) if body else {}
-        limit = int(data.get("limit", 200))
         only_with_unread = bool(data.get("only_with_unread", True))
 
-        dialogs = await _telegram_client.get_dialogs(limit=limit)
+        # Connector dialog ids are already the bare marked (bot-style) id; the DB
+        # convention is tg_<marked-id>. mentions/last_message_at are not exposed
+        # by the connector dialog object (lost vs Telethon).
+        dialogs = await _connector.get_dialogs()
         out = []
         total_unread = 0
         for d in dialogs:
-            uc = int(getattr(d, "unread_count", 0) or 0)
+            uc = int(d.get("unreadCount", 0) or 0)
             if only_with_unread and uc == 0:
                 continue
             total_unread += uc
-            entity = d.entity
-            chat_id_int = int(getattr(entity, "id", 0) or 0)
-            # Telethon returns positive ids for users; groups/channels are negative in bot-style id.
-            # Match the DB convention used elsewhere (tg_<bot-style-id>).
-            if hasattr(entity, "megagroup") or hasattr(entity, "broadcast"):
-                bot_style = -1000000000000 - chat_id_int  # supergroup/channel form
-            elif hasattr(entity, "title") and not hasattr(entity, "username"):
-                bot_style = -chat_id_int  # legacy small group
-            else:
-                bot_style = chat_id_int
+            cid = str(d.get("id"))
+            dtype = d.get("type")
             out.append({
-                "id": f"tg_{bot_style}",
-                "chatId": str(bot_style),
-                "name": d.name,
+                "id": f"tg_{cid}",
+                "chatId": cid,
+                "name": d.get("name"),
                 "unread_count": uc,
-                "unread_mentions_count": int(getattr(d, "unread_mentions_count", 0) or 0),
-                "last_message_at": d.date.isoformat() if d.date else None,
-                "is_user": hasattr(entity, "username") and not hasattr(entity, "title"),
-                "is_group": bool(getattr(entity, "title", None) and not getattr(entity, "broadcast", False)),
-                "is_channel": bool(getattr(entity, "broadcast", False)),
+                "unread_mentions_count": 0,
+                "last_message_at": None,
+                "is_user": dtype == "private",
+                "is_group": dtype in ("group", "supergroup"),
+                "is_channel": dtype == "channel",
             })
         out.sort(key=lambda r: r["unread_count"], reverse=True)
         return JSONResponse({
-            "source": "telethon",
+            "source": "connector",
             "total_unread": total_unread,
             "dialogs_with_unread": len(out),
             "dialogs": out,
         })
     except Exception as e:
-        logger.error(f"Unread query failed: {e}", exc_info=True)
-        return JSONResponse({"error": str(e)}, status_code=500)
+        # Live-unread is best-effort: during a connector reconnect (503/conn error)
+        # return an empty list with degraded=true rather than failing mcp-server's
+        # telegram_get_unread tool with a 500.
+        logger.warning(f"Unread query failed (returning empty/degraded): {e}")
+        return JSONResponse({
+            "source": "connector",
+            "degraded": True,
+            "total_unread": 0,
+            "dialogs_with_unread": 0,
+            "dialogs": [],
+        }, status_code=200)
 
 
 app = Starlette(routes=[

@@ -1,152 +1,92 @@
-"""Download Telegram media → upload to MinIO → INSERT attachment row.
+"""Download Telegram media via the connector → upload to MinIO → INSERT
+attachment row.
 
-Used by realtime.py (single-message), history.py (batch ingest), and the
-30-day backfill script. Errors are caught & logged; the caller's flow never
-breaks because of a media failure.
+Session-less: bytes come from the connector's HMAC route
+GET /api/v1/messages/media/:chatId/:msgId (base64-in-JSON), not Telethon.
+Used by nats_consumer.py (realtime) and history.py (backfill). Errors are caught
+& logged so a media failure never breaks the caller's ingest flow.
 """
 from __future__ import annotations
 
-import io
 import logging
-from typing import Optional
 
 import asyncpg
-from telethon import TelegramClient
-from telethon.tl.types import (
-    Message,
-    MessageMediaDocument,
-    MessageMediaPhoto,
-    DocumentAttributeAudio,
-    DocumentAttributeFilename,
-    DocumentAttributeImageSize,
-    DocumentAttributeVideo,
-)
 
-from sync import db, media_storage
+from sync import db, media_storage, mapping
+from sync.connector_client import ConnectorClient
 
 logger = logging.getLogger(__name__)
 
-# Telegram media types that we want to download. Sticker is included so the UI
-# can render it as an image; service messages and plain text are skipped.
-DOWNLOADABLE_TYPES = {"photo", "video", "audio", "voice", "video_note", "sticker", "document"}
-
-
-def _extract_attrs(msg: Message) -> dict:
-    """Pull mime_type, file_name, file_size, duration, width, height from a Telegram
-    Message regardless of whether the media is a Photo or Document."""
-    out: dict = {
-        "mime_type": None,
-        "file_name": None,
-        "file_size": None,
-        "duration": None,
-        "width": None,
-        "height": None,
-    }
-    if not msg.media:
-        return out
-
-    if isinstance(msg.media, MessageMediaPhoto) and msg.media.photo:
-        out["mime_type"] = "image/jpeg"
-        sizes = getattr(msg.media.photo, "sizes", None) or []
-        # Pick the largest size (usually last)
-        for s in reversed(sizes):
-            w = getattr(s, "w", None)
-            h = getattr(s, "h", None)
-            if w and h:
-                out["width"] = w
-                out["height"] = h
-                size = getattr(s, "size", None)
-                if size:
-                    out["file_size"] = size
-                break
-        return out
-
-    if isinstance(msg.media, MessageMediaDocument) and msg.media.document:
-        doc = msg.media.document
-        out["mime_type"] = doc.mime_type
-        out["file_size"] = doc.size
-        for attr in doc.attributes or []:
-            if isinstance(attr, DocumentAttributeFilename):
-                out["file_name"] = attr.file_name
-            elif isinstance(attr, DocumentAttributeVideo):
-                out["duration"] = attr.duration
-                out["width"] = attr.w
-                out["height"] = attr.h
-            elif isinstance(attr, DocumentAttributeAudio):
-                out["duration"] = attr.duration
-            elif isinstance(attr, DocumentAttributeImageSize):
-                out["width"] = attr.w
-                out["height"] = attr.h
-        return out
-
-    return out
+# Re-exported for callers that gate on downloadability.
+DOWNLOADABLE_TYPES = mapping.DOWNLOADABLE_TYPES
 
 
 async def download_and_store_media(
-    client: TelegramClient,
+    connector: ConnectorClient,
     pool: asyncpg.Pool,
-    msg: Message,
+    msg: dict,
     message_id: int,
     message_type: str,
 ) -> bool:
-    """Download msg's media to MinIO and INSERT an attachments row.
-    Returns True on success, False otherwise. Skips silently if message_type
-    isn't in DOWNLOADABLE_TYPES or msg has no media.
-    """
+    """Download msg's media via the connector and INSERT an attachments row.
+    `msg` is a connector message dict (conversationId/telegramMessageId/attachments).
+    Returns True on success, False otherwise."""
     mt = (message_type or "").lower()
     if mt not in DOWNLOADABLE_TYPES:
         return False
-    if not msg.media:
+    if not msg.get("attachments") and mt != "photo":
         return False
 
-    # Skip if we already have an attachment for this message (idempotent on retry)
+    chat_id = msg.get("conversationId")
+    tg_msg_id = mapping._int_or_none(msg.get("telegramMessageId"))
+    if chat_id is None or tg_msg_id is None:
+        return False
+
+    # Idempotent on retry / duplicate events.
     try:
         if await db.attachment_exists_for_message(pool, message_id):
             return False
     except Exception:
-        pass  # fall through and try the download anyway
+        pass
 
     try:
-        buf = io.BytesIO()
-        await client.download_media(msg, file=buf)
-        data = buf.getvalue()
-        if not data:
-            logger.warning(f"download_media returned 0 bytes for msg {message_id}")
-            return False
+        data = await connector.download_media(str(chat_id), tg_msg_id)
     except Exception as e:
-        logger.warning(f"download_media failed for msg {message_id}: {e}")
+        logger.warning("connector download_media failed for msg %s: %s", message_id, e)
+        return False
+    if not data:
         return False
 
-    attrs = _extract_attrs(msg)
+    meta = mapping.attachment_meta(msg)
     try:
         storage_key, size = media_storage.upload_media(
             message_id=message_id,
             data=data,
-            mime_type=attrs["mime_type"],
-            file_name=attrs["file_name"],
+            mime_type=meta["mime_type"],
+            file_name=meta["file_name"],
         )
     except Exception as e:
-        logger.warning(f"MinIO upload failed for msg {message_id}: {e}")
+        logger.warning("MinIO upload failed for msg %s: %s", message_id, e)
         return False
 
-    caption = msg.text or None
+    caption = msg.get("content") or None
     try:
         await db.insert_attachment(
             pool,
             message_id=message_id,
             file_type=message_type.upper(),
-            mime_type=attrs["mime_type"],
-            file_name=attrs["file_name"],
-            file_size=attrs["file_size"] or size,
+            mime_type=meta["mime_type"],
+            file_name=meta["file_name"],
+            file_size=meta["file_size"] or size,
             file_url=storage_key,
-            duration_seconds=attrs["duration"],
-            width=attrs["width"],
-            height=attrs["height"],
+            duration_seconds=meta["duration"],
+            width=meta["width"],
+            height=meta["height"],
             caption=caption,
         )
     except Exception as e:
-        logger.error(f"insert_attachment failed for msg {message_id}: {e}")
+        logger.error("insert_attachment failed for msg %s: %s", message_id, e)
         return False
 
-    logger.info(f"Stored media {storage_key} ({size} bytes) for msg {message_id}")
+    logger.info("Stored media %s (%s bytes) for msg %s", storage_key, size, message_id)
     return True
