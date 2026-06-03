@@ -9,8 +9,8 @@ patches:
   - path: patch-nodepool.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: v1.3.41
-    digest: sha256:20c6b29e6287c6433caccc79ac4077746c09d4cf9af632737e1e0804b95ced7a
+    newTag: v1.3.42
+    digest: sha256:43ccb90591d3314c79e302ededd3b19043f11de16402dc2d8d1c24bfdd3ffb3e
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: v1.3.37
     digest: sha256:d2ab11bbb894be2cd1028abc9efdc4f14d2c59a0fe9897b4394b23fe9dc911ce

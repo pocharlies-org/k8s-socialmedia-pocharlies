@@ -3,6 +3,10 @@
  * Writes incoming messages directly to PostgreSQL, bypassing NATS/MCP.
  */
 import pg from 'pg';
+import {
+  WhatsAppCustomerAllowlistStatus,
+  WhatsAppCustomerTokenStatus,
+} from './contact-sync';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
@@ -12,7 +16,7 @@ const DATABASE_URL =
 // bare (compat with the pre-existing single-account corpus); 'professional'
 // namespaces conversation/participant ids with a "professional:" prefix so the
 // two accounts can coexist in the same Postgres without colliding on PKs.
-const CONNECTOR_ACCOUNT = process.env.CONNECTOR_ACCOUNT || 'personal';
+export const CONNECTOR_ACCOUNT = process.env.CONNECTOR_ACCOUNT || 'personal';
 
 /** Namespace an id by account (idempotent). Mirrors mcp-server domain/account.ts. */
 function accountKey(id: string): string {
@@ -22,6 +26,7 @@ function accountKey(id: string): string {
 }
 
 let pool: pg.Pool | null = null;
+let allowlistTableReady = false;
 
 export function getPool(): pg.Pool {
   if (!pool) {
@@ -81,6 +86,114 @@ export interface HistorySyncState {
   status: string;
   lastError: string | null;
   updatedAt: Date;
+}
+
+export interface WhatsAppCustomerAllowlistData {
+  phoneE164: string;
+  waJid: string;
+  shopifyCustomerId?: string | null;
+  shop?: string | null;
+  email?: string | null;
+  displayName?: string | null;
+  status: WhatsAppCustomerAllowlistStatus;
+  tokenStatus: WhatsAppCustomerTokenStatus;
+  lastProbeAt?: Date | null;
+  lastError?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export async function ensureWhatsAppCustomerAllowlistTable(): Promise<void> {
+  if (allowlistTableReady) return;
+  const pool = getPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_customer_allowlist (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      account TEXT NOT NULL DEFAULT 'professional',
+      phone_e164 TEXT NOT NULL,
+      wa_jid TEXT NOT NULL,
+      shopify_customer_id TEXT,
+      shop TEXT,
+      email TEXT,
+      display_name TEXT,
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'ready',
+          'seeded_missing_token',
+          'not_on_whatsapp',
+          'invalid_phone',
+          'probe_failed'
+        )
+      ),
+      token_status TEXT NOT NULL DEFAULT 'unknown' CHECK (
+        token_status IN (
+          'unknown',
+          'has_token',
+          'missing_token',
+          'not_on_whatsapp',
+          'error'
+        )
+      ),
+      last_probe_at TIMESTAMPTZ,
+      last_error TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CHECK (phone_e164 ~ '^\\+[0-9]{8,15}$')
+    )
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_customer_allowlist_account_phone
+    ON whatsapp_customer_allowlist (account, phone_e164)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_customer_allowlist_shopify_customer
+    ON whatsapp_customer_allowlist (shopify_customer_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_customer_allowlist_status
+    ON whatsapp_customer_allowlist (account, status, updated_at DESC)
+  `);
+  allowlistTableReady = true;
+}
+
+export async function upsertWhatsAppCustomerAllowlist(
+  data: WhatsAppCustomerAllowlistData
+): Promise<void> {
+  await ensureWhatsAppCustomerAllowlistTable();
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO whatsapp_customer_allowlist (
+       account, phone_e164, wa_jid, shopify_customer_id, shop, email,
+       display_name, status, token_status, last_probe_at, last_error, metadata
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+     ON CONFLICT (account, phone_e164) DO UPDATE SET
+       wa_jid = EXCLUDED.wa_jid,
+       shopify_customer_id = COALESCE(EXCLUDED.shopify_customer_id, whatsapp_customer_allowlist.shopify_customer_id),
+       shop = COALESCE(EXCLUDED.shop, whatsapp_customer_allowlist.shop),
+       email = COALESCE(EXCLUDED.email, whatsapp_customer_allowlist.email),
+       display_name = COALESCE(EXCLUDED.display_name, whatsapp_customer_allowlist.display_name),
+       status = EXCLUDED.status,
+       token_status = EXCLUDED.token_status,
+       last_probe_at = COALESCE(EXCLUDED.last_probe_at, whatsapp_customer_allowlist.last_probe_at),
+       last_error = EXCLUDED.last_error,
+       metadata = whatsapp_customer_allowlist.metadata || EXCLUDED.metadata,
+       updated_at = now()`,
+    [
+      CONNECTOR_ACCOUNT,
+      data.phoneE164,
+      data.waJid,
+      data.shopifyCustomerId || null,
+      data.shop || null,
+      data.email || null,
+      data.displayName || null,
+      data.status,
+      data.tokenStatus,
+      data.lastProbeAt || null,
+      data.lastError || null,
+      JSON.stringify(data.metadata || {}),
+    ]
+  );
 }
 
 export async function ensureHistoryTables(): Promise<void> {

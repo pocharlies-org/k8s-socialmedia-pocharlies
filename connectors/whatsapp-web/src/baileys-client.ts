@@ -62,6 +62,13 @@ import {
   setConversationState,
   setMessageStatus,
 } from './db-writer';
+import {
+  displayNameOrPhone,
+  normalizePhoneForWhatsApp,
+  WhatsAppContactSeedInput,
+  WhatsAppContactSeedResult,
+  WhatsAppCustomerTokenStatus,
+} from './contact-sync';
 import { uploadMedia, ensureMediaBucket, fetchMedia, uploadAvatar } from './media-storage';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 
@@ -1290,6 +1297,88 @@ export class BaileysClient extends EventEmitter {
     }
   }
 
+  async seedContactAndProbe(input: WhatsAppContactSeedInput): Promise<WhatsAppContactSeedResult> {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!this.isConnected())
+      throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
+
+    const phone = normalizePhoneForWhatsApp(input.phone);
+    if (!phone) {
+      throw new Error(`Invalid WhatsApp phone: ${String(input.phone || '')}`);
+    }
+
+    const started = Date.now();
+    const sock = this.sock as any;
+    const displayName = displayNameOrPhone(input.displayName, phone.phoneE164);
+
+    const contactResults = await sock.onWhatsApp(phone.rawJid);
+    const contact = Array.isArray(contactResults) ? contactResults[0] : undefined;
+    if (!contact || contact.exists === false) {
+      return {
+        phoneE164: phone.phoneE164,
+        waJid: phone.waJid,
+        rawJid: phone.rawJid,
+        existsOnWhatsApp: false,
+        contactSeeded: false,
+        status: 'not_on_whatsapp',
+        tokenStatus: 'not_on_whatsapp',
+        elapsedMs: Date.now() - started,
+        actionable: actionableForFailure('invalid_recipient', false),
+      };
+    }
+
+    await sock.addOrEditContact(phone.rawJid, {
+      fullName: displayName,
+      firstName: displayName,
+      pnJid: phone.rawJid,
+      saveOnPrimaryAddressbook: true,
+    } satisfies proto.SyncActionValue.IContactAction);
+    this.contactNames.set(phone.rawJid, displayName);
+    this.contactNames.set(phone.waJid, displayName);
+
+    let tokenStatus: WhatsAppCustomerTokenStatus = 'missing_token';
+    let actionable: string | undefined;
+    try {
+      await this.prepareDirectPrivacyToken(phone.rawJid, phone.waJid, started);
+      tokenStatus = (await this.readDirectPrivacyTokenState(phone.rawJid))?.ok
+        ? 'has_token'
+        : 'missing_token';
+    } catch (error) {
+      const failureClass = classifyWhatsAppSendFailure(error);
+      if (failureClass === 'account_restricted') {
+        tokenStatus = 'missing_token';
+        actionable = actionableForFailure('account_restricted', false);
+      } else if (failureClass === 'invalid_recipient') {
+        return {
+          phoneE164: phone.phoneE164,
+          waJid: phone.waJid,
+          rawJid: phone.rawJid,
+          existsOnWhatsApp: false,
+          contactSeeded: true,
+          status: 'not_on_whatsapp',
+          tokenStatus: 'not_on_whatsapp',
+          elapsedMs: Date.now() - started,
+          error: errorMessage(error),
+          actionable: actionableForFailure('invalid_recipient', false),
+        };
+      } else {
+        throw error;
+      }
+    }
+
+    return {
+      phoneE164: phone.phoneE164,
+      waJid: phone.waJid,
+      rawJid: phone.rawJid,
+      existsOnWhatsApp: true,
+      contactSeeded: true,
+      status: tokenStatus === 'has_token' ? 'ready' : 'seeded_missing_token',
+      tokenStatus,
+      elapsedMs: Date.now() - started,
+      actionable,
+    };
+  }
+
   async sendFile(
     chatId: string,
     fileUrl: string,
@@ -2154,6 +2243,28 @@ export class BaileysClient extends EventEmitter {
       timeoutMs,
       `sendMessage timeout after ${timeoutMs}ms`
     );
+  }
+
+  private async readDirectPrivacyTokenState(
+    rawJid: string
+  ): Promise<{ ok: boolean; storageJid: string } | null> {
+    if (!this.sock) return null;
+    const sock = this.sock as any;
+    const lidMapping = sock.signalRepository?.lidMapping;
+    const getLIDForPN =
+      lidMapping?.getLIDForPN?.bind(lidMapping) || (async () => null as string | null);
+    const keys = sock.authState?.keys;
+    if (!keys) return null;
+
+    const storageJid = await resolveTcTokenJid(rawJid, getLIDForPN);
+    const tokenData = await keys.get('tctoken', [storageJid]);
+    const entry = tokenData?.[storageJid];
+    const token = entry?.token;
+    const tokenLength = typeof token?.length === 'number' ? token.length : 0;
+    return {
+      ok: tokenLength > 0 && !isTcTokenExpired(entry?.timestamp),
+      storageJid,
+    };
   }
 
   private async prepareDirectPrivacyToken(

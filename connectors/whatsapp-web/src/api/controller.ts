@@ -6,6 +6,12 @@ import {
 } from '../baileys-client';
 import { QRHandler } from '../qr-handler';
 import { createHMACAuth, AuthenticatedRequest } from './auth';
+import { CONNECTOR_ACCOUNT, upsertWhatsAppCustomerAllowlist } from '../db-writer';
+import {
+  displayNameOrPhone,
+  normalizePhoneForWhatsApp,
+  WhatsAppContactSeedInput,
+} from '../contact-sync';
 
 function statusForSendFailure(
   failureClass: WhatsAppSendFailureClass | 'disabled_sending' | 'invalid_request'
@@ -50,6 +56,12 @@ function accountRestrictedFallback(
   };
 }
 
+function optionalString(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const text = String(value).trim();
+  return text || undefined;
+}
+
 export function createRouter(
   client: BaileysClient,
   qrHandler: QRHandler,
@@ -69,6 +81,108 @@ export function createRouter(
       serviceReady: connected || qr !== null,
       qrAvailable: qr !== null,
     });
+  });
+
+  // Seed a Shopify customer into this connector account's WhatsApp contacts
+  // without sending a message. Production calls this through
+  // whatsapp-connector-professional, so rows are stored as account=professional.
+  router.post('/contacts/seed', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      const body = (req.body || {}) as WhatsAppContactSeedInput;
+      const normalized = normalizePhoneForWhatsApp(body.phone);
+      if (!normalized) {
+        res.status(422).json({
+          error: 'Invalid WhatsApp phone',
+          status: 'invalid_phone',
+          tokenStatus: 'unknown',
+          account: CONNECTOR_ACCOUNT,
+        });
+        return;
+      }
+
+      const displayName = displayNameOrPhone(body.displayName, normalized.phoneE164);
+      const baseAllowlist = {
+        phoneE164: normalized.phoneE164,
+        waJid: normalized.waJid,
+        shopifyCustomerId: optionalString(body.shopifyCustomerId),
+        shop: optionalString(body.shop),
+        email: optionalString(body.email),
+        displayName,
+        metadata: {
+          source: 'shopify_customer',
+          sourceTopic: optionalString(body.sourceTopic),
+          rawJid: normalized.rawJid,
+          connectorAccount: CONNECTOR_ACCOUNT,
+        },
+      };
+
+      if (!client.isConnected()) {
+        const error = `WhatsApp is not connected (state=${client.getCachedState() || 'unknown'})`;
+        await upsertWhatsAppCustomerAllowlist({
+          ...baseAllowlist,
+          status: 'probe_failed',
+          tokenStatus: 'error',
+          lastProbeAt: new Date(),
+          lastError: error,
+        });
+        res.status(statusForSendFailure('disconnected')).json({
+          error,
+          status: 'probe_failed',
+          tokenStatus: 'error',
+          account: CONNECTOR_ACCOUNT,
+        });
+        return;
+      }
+
+      try {
+        const result = await client.seedContactAndProbe({
+          ...body,
+          phone: normalized.phoneE164,
+          displayName,
+        });
+        await upsertWhatsAppCustomerAllowlist({
+          ...baseAllowlist,
+          status: result.status,
+          tokenStatus: result.tokenStatus,
+          lastProbeAt: new Date(),
+          lastError: result.error || null,
+          metadata: {
+            ...baseAllowlist.metadata,
+            existsOnWhatsApp: result.existsOnWhatsApp,
+            contactSeeded: result.contactSeeded,
+            elapsedMs: result.elapsedMs,
+            actionable: result.actionable,
+          },
+        });
+        res.json({
+          ...result,
+          account: CONNECTOR_ACCOUNT,
+        });
+      } catch (error) {
+        const failureClass = classifyWhatsAppSendFailure(error);
+        const message = errorMessage(error);
+        const status = failureClass === 'invalid_recipient' ? 'not_on_whatsapp' : 'probe_failed';
+        const tokenStatus = failureClass === 'invalid_recipient' ? 'not_on_whatsapp' : 'error';
+        await upsertWhatsAppCustomerAllowlist({
+          ...baseAllowlist,
+          status,
+          tokenStatus,
+          lastProbeAt: new Date(),
+          lastError: message,
+          metadata: {
+            ...baseAllowlist.metadata,
+            failureClass,
+          },
+        });
+        res.status(statusForSendFailure(failureClass)).json({
+          error: message,
+          failureClass,
+          status,
+          tokenStatus,
+          account: CONNECTOR_ACCOUNT,
+        });
+      }
+    })();
   });
 
   // Get QR code (no auth required for local dev)
