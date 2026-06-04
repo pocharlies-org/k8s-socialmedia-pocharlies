@@ -641,6 +641,8 @@ spec:
   routes:
     - match: Host(`whatsapp-open.e-dani.com`)
       kind: Rule
+      middlewares:
+        - { name: sso-chain, namespace: keycloak }
       services:
         - name: whatsapp-open-worker-professional
           port: 3005
