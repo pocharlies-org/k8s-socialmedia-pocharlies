@@ -16,4 +16,4 @@ RUN pnpm build
 
 EXPOSE 3005
 
-CMD ["sh", "-c", "pnpm exec playwright install --with-deps chromium && pnpm start"]
+CMD ["sh", "-c", "pnpm exec playwright install --with-deps chromium && xvfb-run -a --server-args='-screen 0 1365x900x24' pnpm start"]

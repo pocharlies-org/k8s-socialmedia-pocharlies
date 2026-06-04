@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-open-worker-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker:auto-send-20260604@sha256:8507d0e4f9ff15af02fe41abeb859cca9a084123b80c5c434dab01f2ee677151
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker:auto-send-headful-20260604@sha256:193e12d50b419155b5797d27d11b84e7bda12e0b3c99962455e9cad13eeeff8c
 ---
 apiVersion: apps/v1
 kind: Deployment

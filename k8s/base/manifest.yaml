@@ -365,7 +365,7 @@ spec:
             - { name: CONNECTOR_ACCOUNT, value: "professional" }
             - { name: WA_OPEN_WORKER_PROFILE_DIR, value: "/app/browser-profile" }
             - { name: PLAYWRIGHT_BROWSERS_PATH, value: "/app/browser-profile/ms-playwright" }
-            - { name: WA_OPEN_WORKER_HEADLESS, value: "true" }
+            - { name: WA_OPEN_WORKER_HEADLESS, value: "false" }
             - { name: WA_OPEN_WORKER_POLL_INTERVAL_MS, value: "5000" }
             - { name: WA_OPEN_WORKER_LOGIN_RETRY_MS, value: "60000" }
             - { name: WA_OPEN_WORKER_SEND_SETTLE_MS, value: "5000" }

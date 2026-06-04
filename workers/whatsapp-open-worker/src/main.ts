@@ -16,8 +16,11 @@ const PROCESSING_STALE_MINUTES = parseInt(
   process.env.WA_OPEN_WORKER_PROCESSING_STALE_MINUTES || '15',
   10
 );
-const HEADLESS = process.env.WA_OPEN_WORKER_HEADLESS !== 'false';
+const HEADLESS = process.env.WA_OPEN_WORKER_HEADLESS === 'true';
 const DRY_RUN = process.env.WA_OPEN_WORKER_DRY_RUN === 'true';
+const CHROME_USER_AGENT =
+  process.env.WA_OPEN_WORKER_USER_AGENT ||
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
 
 type ManualOpenStatus = 'pending' | 'processing' | 'opened' | 'sent' | 'cancelled' | 'failed';
 
@@ -199,7 +202,16 @@ async function launchBrowser(): Promise<Page> {
   context = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless: HEADLESS,
     viewport: { width: 1365, height: 900 },
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    userAgent: CHROME_USER_AGENT,
+    locale: 'es-ES',
+    timezoneId: 'Europe/Madrid',
+    ignoreHTTPSErrors: true,
+    args: [
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-infobars',
+    ],
   });
   page = context.pages()[0] || (await context.newPage());
   page.setDefaultTimeout(15000);
