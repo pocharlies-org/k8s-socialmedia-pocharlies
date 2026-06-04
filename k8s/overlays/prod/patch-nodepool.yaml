@@ -186,3 +186,20 @@ spec:
         kubernetes.io/hostname: sauvage
       tolerations:
         - { key: role, operator: Equal, value: edge, effect: NoSchedule }
+---
+# whatsapp-cloud-connector → sauvage (edge, 2026-06-04). WhatsApp Cloud API (Meta HTTPS +
+# webhook at whatsapp-cloud.e-dani.com via traefik-edge on sauvage) → NO residential IP
+# needed, stateless, no PVC. Drop topology, pin sauvage, keep arch:amd64, tolerate role=edge.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-cloud-connector
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/hostname: sauvage
+      tolerations:
+        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
