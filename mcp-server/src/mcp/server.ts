@@ -373,6 +373,31 @@ export class MCPServer {
             },
           },
           {
+            name: 'whatsapp_send_template',
+            description:
+              'Send an approved WhatsApp Business Cloud API template through the professional account. Use this for first contact or conversations outside the 24-hour customer service window.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: { type: 'string', description: 'Recipient phone or WhatsApp conversation ID' },
+                templateName: { type: 'string', description: 'Approved Meta template name' },
+                languageCode: { type: 'string', default: 'es', description: 'Template language code' },
+                components: {
+                  type: 'array',
+                  description: 'Optional WhatsApp template components array',
+                  items: { type: 'object' },
+                },
+                account: {
+                  type: 'string',
+                  enum: ['professional'],
+                  default: 'professional',
+                  description: 'Templates are only supported on the WhatsApp Business Cloud API account.',
+                },
+              },
+              required: ['chatId', 'templateName'],
+            },
+          },
+          {
             name: 'renew_qr_code',
             description: 'Disconnect WhatsApp and generate a new QR code for re-authentication.',
             inputSchema: {
@@ -1123,6 +1148,8 @@ export class MCPServer {
             return await this.handleSendApprovedReply(args as any);
           case 'whatsapp_send_message':
             return await this.handleSendMessage(args as any);
+          case 'whatsapp_send_template':
+            return await this.handleSendTemplate(args as any);
           case 'renew_qr_code':
             return await this.handleRenewQRCode(args as any);
           case 'get_connection_status':
@@ -1947,6 +1974,59 @@ export class MCPServer {
     } catch (error) {
       this.logger.error(`Error sending message: ${error}`);
       throw new McpError(ErrorCode.InternalError, `Failed to send message: ${error}`);
+    }
+  }
+
+  private async handleSendTemplate(args: {
+    chatId: string;
+    templateName: string;
+    languageCode?: string;
+    components?: unknown[];
+    account?: string;
+  }) {
+    if (process.env.ENABLE_SENDING !== 'true') {
+      throw new McpError(ErrorCode.InvalidRequest, 'Sending is disabled (ENABLE_SENDING != true)');
+    }
+    if (process.env.EMERGENCY_DISABLE_SENDING === 'true') {
+      throw new McpError(ErrorCode.InvalidRequest, 'Sending is emergency disabled');
+    }
+
+    const account = normalizeAccount(args.account || 'professional');
+    if (account !== 'professional') {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        'WhatsApp templates are only supported on the professional Cloud API account'
+      );
+    }
+    if (!args.chatId || !args.templateName) {
+      throw new McpError(ErrorCode.InvalidRequest, 'chatId and templateName are required');
+    }
+
+    try {
+      const result = await this.connectorCall(
+        this.waUrl(account),
+        'POST',
+        '/api/v1/messages/template',
+        {
+          sendToken: `template-${Date.now()}`,
+          conversationId: args.chatId,
+          templateName: args.templateName,
+          languageCode: args.languageCode || 'es',
+          ...(Array.isArray(args.components) ? { components: args.components } : {}),
+        },
+        30000
+      );
+
+      return this.jsonResponse({
+        message: 'Template sent',
+        messageId: result.messageId || null,
+        sentAt: result.sentAt || new Date().toISOString(),
+        chatId: args.chatId,
+        templateName: args.templateName,
+      });
+    } catch (error) {
+      this.logger.error(`Error sending WhatsApp template: ${error}`);
+      throw new McpError(ErrorCode.InternalError, `Failed to send WhatsApp template: ${error}`);
     }
   }
 
