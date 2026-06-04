@@ -3,6 +3,9 @@ FROM node:20-bookworm
 WORKDIR /app
 
 RUN npm install -g pnpm@8.15.0 tsx@4.7.0
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends xauth \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.json ./
 COPY workers/whatsapp-open-worker/package.json workers/whatsapp-open-worker/tsconfig.json ./workers/whatsapp-open-worker/

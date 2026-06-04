@@ -21,8 +21,8 @@ images:
     newTag: v1.3.40
     digest: sha256:b7a0ee7a3f0519cb37971c9ed85c54d52a6ddf10f8e32c148645ec4c559b1c4f
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker
-    newTag: auto-send-headful-20260604
-    digest: sha256:193e12d50b419155b5797d27d11b84e7bda12e0b3c99962455e9cad13eeeff8c
+    newTag: auto-send-headful-xauth-20260604
+    digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: manual-open-20260604
     digest: sha256:dc2eaa19c9355bbc76f961ec06fde94a3cad8a09e93bd8938b841f24d59bb748
