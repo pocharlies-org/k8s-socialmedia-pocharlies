@@ -11,9 +11,13 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: contact-sync-company-20260604
     digest: sha256:dd24587f5b3420c22f4058bd69222fb08fa94b5c131b15854f0de1e4e5de9105
+  # 2026-06-04: multi-arch (amd64+arm64) so the connector runs on the arm64 nvidia-dgx
+  # GPU node (residential LAN, same NAT egress as ubuntu → no IP change for the gramjs
+  # session). Index digest; the kubelet selects the arm64 sub-manifest on nvidia-dgx.
+  # Shared by telegram-connector + telegram-connector-professional.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: v1.3.37
-    digest: sha256:d2ab11bbb894be2cd1028abc9efdc4f14d2c59a0fe9897b4394b23fe9dc911ce
+    newTag: multiarch-20260604
+    digest: sha256:4e21cc60ed58de02715d3118b3d6d7cdfa46a3d9aa0ef07c28aeabcaa4f89757
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
     newTag: v1.3.38
     digest: sha256:37f5b886685b0682bdfa070df67d98cf76e2963e0c61406b634330e72d31bc06
