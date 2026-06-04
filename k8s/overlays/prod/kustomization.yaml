@@ -7,6 +7,7 @@ patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
   - path: patch-nodepool.yaml
+  - path: patch-disable-whatsapp-business.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: contact-sync-company-20260604
@@ -38,6 +39,12 @@ images:
 # against live `tg_<marked>_<id>` rows. Both at replicas:1 (= base default; block
 # kept as documentation of the cutover).
 replicas:
+  # 2026-06-04: WhatsApp Business account was blocked after Baileys/Web probing.
+  # Keep every professional WhatsApp sender offline while migrating to Cloud API.
+  - name: whatsapp-connector-professional
+    count: 0
+  - name: whatsapp-open-worker-professional
+    count: 0
   - name: telegram-sync
     count: 1
   - name: telegram-sync-professional
