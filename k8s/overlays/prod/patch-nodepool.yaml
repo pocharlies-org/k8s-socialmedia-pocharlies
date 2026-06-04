@@ -16,7 +16,9 @@
 # issue during a prior ks5 attempt, not cross-node-same-IP):
 #  - telegram-connector{,-professional}: gramjs, PVC-free, session in the Vault-synced secret
 #    whatsapp-mcp-secrets (TELEGRAM_SESSION_STRING[_PROFESSIONAL]) → recreating the pod reuses
-#    the same session. strategy:Recreate so old+new never hold the authkey simultaneously.
+#    the same session. RollingUpdate maxSurge:0 (terminate old before new) so old+new never
+#    hold the authkey simultaneously — a true Recreate transition errors on a live
+#    RollingUpdate Deployment via server-side apply (rollingUpdate Forbidden under Recreate).
 #    Image is now multi-arch (see kustomization images:). The ks5 EMFILE was tsx watch-mode
 #    (dev), irrelevant in prod (pnpm start). Tolerate dedicated=llm; drop topology+arch keys.
 # MOVED 2026-06-04 to sauvage (edge node, role=edge:NoSchedule → toleration):
@@ -116,7 +118,8 @@ spec:
 ---
 # telegram-connector{,-professional} → nvidia-dgx (arm64 residential GPU node). Drop topology
 # + arch (it's arm64 now), pin to nvidia-dgx, tolerate dedicated=llm. strategy:Recreate so the
-# old pod releases the gramjs authkey before the new one connects (avoids AuthKeyDuplicated).
+# old pod releases the gramjs authkey before the new one connects (avoids AuthKeyDuplicated):
+# RollingUpdate maxSurge:0/maxUnavailable:1 (a real Recreate errors on the apply transition).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -124,8 +127,8 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   strategy:
-    type: Recreate
-    rollingUpdate: null
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
   template:
     spec:
       nodeSelector:
@@ -142,8 +145,8 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   strategy:
-    type: Recreate
-    rollingUpdate: null
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
   template:
     spec:
       nodeSelector:
