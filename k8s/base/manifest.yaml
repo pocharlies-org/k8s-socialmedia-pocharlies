@@ -624,6 +624,29 @@ spec:
   tls:
     store: { name: default, namespace: traefik-edge }
 ---
+# Public temporary access for the Playwright WhatsApp Web sender panel. This
+# avoids LAN-only DNS/networking for browsers that run outside the home network.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whatsapp-open-public
+  namespace: whatsapp-mcp
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: whatsapp-open.e-dani.com
+    external-dns.alpha.kubernetes.io/target: "57.129.17.172"
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  entryPoints: [websecure]
+  ingressClassName: traefik-edge
+  routes:
+    - match: Host(`whatsapp-open.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-open-worker-professional
+          port: 3005
+  tls:
+    store: { name: default, namespace: traefik-edge }
+---
 # LAN-only IngressRoute so in-host workloads (e.g. the synapse-adapter-messaging
 # Hermes worker running on sauvage under user-systemd) can POST
 # /api/v1/messages/send to the WhatsApp connector without going out to
