@@ -21,7 +21,7 @@ import pino from 'pino';
 
 const ACCOUNT_DESCRIPTION =
   "Account to route this call to. 'personal' (default) = WhatsApp web (Baileys, personal number) + Telegram paxanguero. " +
-  "'professional' = WhatsApp web (Baileys, business number) + Telegram sauvageadminbot (skirmshop). " +
+  "'professional' = WhatsApp Business Cloud API + Telegram sauvageadminbot (skirmshop). " +
   'Choose based on the destination chat: skirmshop/business chats → professional; family/personal chats → personal. ' +
   'When the destination is ambiguous, prefer "professional" for Claude/Codex agents.';
 
@@ -361,7 +361,7 @@ export class MCPServer {
           {
             name: 'whatsapp_send_message',
             description:
-              'Send a WhatsApp message directly (no draft flow). Routes by `account`: personal = WhatsApp web (Baileys, personal number), professional = WhatsApp web (Baileys, skirmshop business number).',
+              'Send a WhatsApp message directly (no draft flow). Routes by `account`: personal = WhatsApp web (Baileys, personal number), professional = WhatsApp Business Cloud API.',
             inputSchema: {
               type: 'object',
               properties: {

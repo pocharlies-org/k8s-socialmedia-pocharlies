@@ -339,6 +339,55 @@ spec:
   selector: { app: whatsapp-connector-professional }
   ports: [{ name: http, port: 3001, targetPort: 3001 }]
 ---
+# ── WhatsApp professional Cloud API connector ─────────────────────────────────
+# Official WhatsApp Business Platform transport. Kept with sending disabled by
+# default until Meta WABA/phone credentials and approved templates are installed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-cloud-connector
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: whatsapp-cloud-connector } }
+  template:
+    metadata: { labels: { app: whatsapp-cloud-connector } }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: whatsapp-cloud-connector
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:latest
+          ports: [{ name: http, containerPort: 3004 }]
+          env:
+            - { name: PORT, value: "3004" }
+            - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
+            - { name: CONNECTOR_ACCOUNT, value: "professional" }
+            - { name: WHATSAPP_GRAPH_API_VERSION, value: "v25.0" }
+            - { name: ENABLE_SENDING, value: "false" }
+            - { name: EMERGENCY_DISABLE_SENDING, value: "true" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 30m, memory: 64Mi }
+            limits:   { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /status, port: 3004 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /status, port: 3004 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata: { name: whatsapp-cloud-connector, namespace: whatsapp-mcp }
+spec:
+  selector: { app: whatsapp-cloud-connector }
+  ports: [{ name: http, port: 3004, targetPort: 3004 }]
+---
 # Playwright worker that consumes first-contact fallback rows and presses send
 # in the official WhatsApp Web UI. It uses its own persistent browser profile;
 # scan the QR once at https://whatsapp-open.lan.e-dani.com/ when required.
@@ -524,6 +573,7 @@ spec:
           env:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-cloud-connector.whatsapp-mcp.svc.cluster.local:3004" }
             - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - { name: EMBEDDING_DIMENSION, value: "1024" }
@@ -575,6 +625,7 @@ spec:
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
+            - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-cloud-connector.whatsapp-mcp.svc.cluster.local:3004" }
             - { name: TELEGRAM_CONNECTOR_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
             - { name: INSTAGRAM_CONNECTOR_URL, value: "http://instagram-connector.whatsapp-mcp.svc.cluster.local:3003" }
             - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
@@ -602,6 +653,27 @@ metadata: { name: mcp-sse, namespace: whatsapp-mcp }
 spec:
   selector: { app: mcp-sse }
   ports: [{ name: sse, port: 3010, targetPort: 3010 }]
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whatsapp-cloud-public
+  namespace: whatsapp-mcp
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: whatsapp-cloud.e-dani.com
+    external-dns.alpha.kubernetes.io/target: "57.129.17.172"
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  entryPoints: [websecure]
+  ingressClassName: traefik-edge
+  routes:
+    - match: Host(`whatsapp-cloud.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-cloud-connector
+          port: 3004
+  tls:
+    store: { name: default, namespace: traefik-edge }
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -669,8 +741,25 @@ spec:
   tls:
     store: { name: default, namespace: traefik-lan }
 ---
+# LAN-only IngressRoute for the WhatsApp Cloud connector status/API.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whatsapp-cloud-lan
+  namespace: whatsapp-mcp
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`whatsapp-cloud.lan.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-cloud-connector
+          port: 3004
+  tls:
+    store: { name: default, namespace: traefik-lan }
+---
 # LAN-only IngressRoute for the professional (business) Baileys connector — used
-# to scan the QR (/qr/page) to link the business number, and for in-host send.
+# only for QR/session inspection if we deliberately re-enable Baileys later.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
