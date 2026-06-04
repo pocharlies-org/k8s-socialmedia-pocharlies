@@ -82,6 +82,7 @@ function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
   const status = optionalString(value);
   if (
     status === 'pending' ||
+    status === 'processing' ||
     status === 'opened' ||
     status === 'sent' ||
     status === 'cancelled' ||
@@ -215,6 +216,7 @@ function manualOpenPageHtml(): string {
         <strong>Pendientes</strong>
         <select id="status">
           <option value="pending">pending</option>
+          <option value="processing">processing</option>
           <option value="opened">opened</option>
           <option value="all">all</option>
         </select>

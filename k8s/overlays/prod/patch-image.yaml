@@ -37,6 +37,18 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: whatsapp-open-worker-professional
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-open-worker-professional
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker:auto-send-20260604@sha256:8507d0e4f9ff15af02fe41abeb859cca9a084123b80c5c434dab01f2ee677151
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: telegram-connector
   namespace: whatsapp-mcp
 spec:

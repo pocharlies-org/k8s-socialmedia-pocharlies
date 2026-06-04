@@ -211,6 +211,16 @@ spec:
   accessModes: [ReadWriteOnce]
   resources: { requests: { storage: 1Gi } }
   storageClassName: longhorn
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whatsapp-open-worker-profile-professional
+  namespace: whatsapp-mcp
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 2Gi } }
+  storageClassName: longhorn
 
 # ── Connectors (stateless) ────────────────────────────────────────────────────
 ---
@@ -328,6 +338,58 @@ metadata: { name: whatsapp-connector-professional, namespace: whatsapp-mcp }
 spec:
   selector: { app: whatsapp-connector-professional }
   ports: [{ name: http, port: 3001, targetPort: 3001 }]
+---
+# Playwright worker that consumes first-contact fallback rows and presses send
+# in the official WhatsApp Web UI. It uses its own persistent browser profile;
+# scan the QR once at https://whatsapp-open.lan.e-dani.com/ when required.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-open-worker-professional
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: whatsapp-open-worker-professional } }
+  template:
+    metadata: { labels: { app: whatsapp-open-worker-professional } }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
+      containers:
+        - name: whatsapp-open-worker-professional
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker:latest
+          ports: [{ name: http, containerPort: 3005 }]
+          env:
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            - { name: CONNECTOR_ACCOUNT, value: "professional" }
+            - { name: WA_OPEN_WORKER_PROFILE_DIR, value: "/app/browser-profile" }
+            - { name: PLAYWRIGHT_BROWSERS_PATH, value: "/app/browser-profile/ms-playwright" }
+            - { name: WA_OPEN_WORKER_HEADLESS, value: "true" }
+            - { name: WA_OPEN_WORKER_POLL_INTERVAL_MS, value: "5000" }
+            - { name: WA_OPEN_WORKER_LOGIN_RETRY_MS, value: "60000" }
+            - { name: WA_OPEN_WORKER_SEND_SETTLE_MS, value: "5000" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits:   { memory: 2Gi }
+          readinessProbe:
+            httpGet: { path: /status, port: 3005 }
+            initialDelaySeconds: 15
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: browser-profile
+              mountPath: /app/browser-profile
+      volumes:
+        - name: browser-profile
+          persistentVolumeClaim: { claimName: whatsapp-open-worker-profile-professional }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: whatsapp-open-worker-professional, namespace: whatsapp-mcp }
+spec:
+  selector: { app: whatsapp-open-worker-professional }
+  ports: [{ name: http, port: 3005, targetPort: 3005 }]
 ---
 # Brain ingestion: push WhatsApp/Telegram messages into SkirmBrain RAG, one
 # instance per account (personal -> personal, professional -> skirmshop).
@@ -597,6 +659,23 @@ spec:
       services:
         - name: whatsapp-connector-professional
           port: 3001
+  tls:
+    store: { name: default, namespace: traefik-lan }
+---
+# LAN-only status/screenshot page for the Playwright WhatsApp Web sender.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whatsapp-open-worker-lan
+  namespace: whatsapp-mcp
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`whatsapp-open.lan.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-open-worker-professional
+          port: 3005
   tls:
     store: { name: default, namespace: traefik-lan }
 ---

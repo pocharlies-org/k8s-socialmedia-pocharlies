@@ -2,5 +2,6 @@ packages:
   - 'connectors/whatsapp-web'
   - 'connectors/telegram'
   - 'connectors/instagram'
+  - 'workers/*'
   - 'mcp-server'
   - 'shared'

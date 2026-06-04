@@ -103,7 +103,13 @@ export interface WhatsAppCustomerAllowlistData {
   metadata?: Record<string, unknown>;
 }
 
-export type WhatsAppManualOpenStatus = 'pending' | 'opened' | 'sent' | 'cancelled' | 'failed';
+export type WhatsAppManualOpenStatus =
+  | 'pending'
+  | 'processing'
+  | 'opened'
+  | 'sent'
+  | 'cancelled'
+  | 'failed';
 
 export interface WhatsAppManualOpenRequestInput {
   phoneE164: string;
@@ -273,7 +279,7 @@ export async function ensureWhatsAppManualOpenTable(): Promise<void> {
       source_ref TEXT,
       idempotency_key TEXT,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (
-        status IN ('pending', 'opened', 'sent', 'cancelled', 'failed')
+        status IN ('pending', 'processing', 'opened', 'sent', 'cancelled', 'failed')
       ),
       attempt_count INTEGER NOT NULL DEFAULT 0,
       last_opened_at TIMESTAMPTZ,
