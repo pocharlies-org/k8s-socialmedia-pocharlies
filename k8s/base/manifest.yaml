@@ -668,6 +668,9 @@ kind: IngressRoute
 metadata:
   name: whatsapp-open-worker-lan
   namespace: whatsapp-mcp
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: whatsapp-open.lan.e-dani.com
+    external-dns.alpha.kubernetes.io/target: "192.168.50.240"
 spec:
   entryPoints: [websecure]
   routes:
@@ -678,6 +681,28 @@ spec:
           port: 3005
   tls:
     store: { name: default, namespace: traefik-lan }
+---
+# LAN alias on *.e-dani.com for browsers that bypass the internal
+# *.lan.e-dani.com DNS rewrite.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whatsapp-open-worker-lan-alias
+  namespace: traefik-lan
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: whatsapp-open-lan.e-dani.com
+    external-dns.alpha.kubernetes.io/target: "192.168.50.240"
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`whatsapp-open-lan.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-open-worker-professional
+          namespace: whatsapp-mcp
+          port: 3005
+  tls:
+    secretName: wildcard-edani-tls
 ---
 # LAN-only IngressRoute for the MCP SSE server (port 3010) — so Claude/Codex
 # clients on any LAN/Tailscale host (pc, mac, dgx, dgx2, x86, sauvage) can
