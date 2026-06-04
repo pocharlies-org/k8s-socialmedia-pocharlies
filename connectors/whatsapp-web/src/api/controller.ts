@@ -16,7 +16,9 @@ import {
   WhatsAppManualOpenStatus,
 } from '../db-writer';
 import {
+  appendCompanyToDisplayName,
   buildManualWhatsAppOpenUrl,
+  companyOrNull,
   displayNameOrPhone,
   normalizePhoneForWhatsApp,
   WhatsAppContactSeedInput,
@@ -404,7 +406,12 @@ export function createRouter(
         return;
       }
 
-      const displayName = displayNameOrPhone(body.displayName, normalized.phoneE164);
+      const company = companyOrNull(body.company || body.shopifyOrderName);
+      const sourceTopic = optionalString(body.sourceTopic);
+      const displayName = appendCompanyToDisplayName(
+        displayNameOrPhone(body.displayName, normalized.phoneE164),
+        company
+      );
       const baseAllowlist = {
         phoneE164: normalized.phoneE164,
         waJid: normalized.waJid,
@@ -413,8 +420,11 @@ export function createRouter(
         email: optionalString(body.email),
         displayName,
         metadata: {
-          source: 'shopify_customer',
-          sourceTopic: optionalString(body.sourceTopic),
+          source: sourceTopic && sourceTopic.startsWith('orders/') ? 'shopify_order' : 'shopify_customer',
+          sourceTopic,
+          company,
+          shopifyOrderId: optionalString(body.shopifyOrderId),
+          shopifyOrderName: optionalString(body.shopifyOrderName) || company,
           rawJid: normalized.rawJid,
           connectorAccount: CONNECTOR_ACCOUNT,
         },

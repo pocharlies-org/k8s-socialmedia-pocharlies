@@ -63,6 +63,7 @@ import {
   setMessageStatus,
 } from './db-writer';
 import {
+  appendCompanyToDisplayName,
   displayNameOrPhone,
   normalizePhoneForWhatsApp,
   WhatsAppContactSeedInput,
@@ -1309,7 +1310,10 @@ export class BaileysClient extends EventEmitter {
 
     const started = Date.now();
     const sock = this.sock as any;
-    const displayName = displayNameOrPhone(input.displayName, phone.phoneE164);
+    const displayName = appendCompanyToDisplayName(
+      displayNameOrPhone(input.displayName, phone.phoneE164),
+      input.company
+    );
 
     const contactResults = await sock.onWhatsApp(phone.rawJid);
     const contact = Array.isArray(contactResults) ? contactResults[0] : undefined;

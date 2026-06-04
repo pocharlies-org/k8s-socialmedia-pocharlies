@@ -22,8 +22,11 @@ export interface NormalizedWhatsAppPhone {
 export interface WhatsAppContactSeedInput {
   phone: string;
   displayName?: string;
+  company?: string;
   email?: string;
   shopifyCustomerId?: string;
+  shopifyOrderId?: string;
+  shopifyOrderName?: string;
   shop?: string;
   sourceTopic?: string;
 }
@@ -87,4 +90,18 @@ export function displayNameOrPhone(displayName: unknown, phoneE164: string): str
     return displayName.trim().slice(0, 500);
   }
   return phoneE164;
+}
+
+export function companyOrNull(company: unknown): string | null {
+  if (typeof company === 'string' && company.trim()) {
+    return company.trim().slice(0, 100);
+  }
+  return null;
+}
+
+export function appendCompanyToDisplayName(displayName: string, company: unknown): string {
+  const companyText = companyOrNull(company);
+  if (!companyText) return displayName;
+  if (displayName.toLowerCase().includes(companyText.toLowerCase())) return displayName;
+  return `${displayName} - ${companyText}`.slice(0, 500);
 }
