@@ -249,6 +249,17 @@ spec:
             - { name: ENABLE_SENDING, value: "true" }
             - { name: SESSION_PATH, value: "/app/persistent-session" }
             - { name: WA_QR_PUBLIC_URL, value: "https://whatsapp.e-dani.com/qr/page" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_BUCKET, value: "skirmshop-drive" }
+            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_PREFIX, value: "socialmedia" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -309,6 +320,17 @@ spec:
             # professional account → published events carry account=professional
             - { name: CONNECTOR_ACCOUNT, value: "professional" }
             - { name: WA_QR_PUBLIC_URL, value: "https://whatsapp-pro.lan.e-dani.com/qr/page" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_BUCKET, value: "skirmshop-drive" }
+            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_PREFIX, value: "socialmedia" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -574,6 +596,17 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-cloud-connector.whatsapp-mcp.svc.cluster.local:3004" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_BUCKET, value: "skirmshop-drive" }
+            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_PREFIX, value: "socialmedia" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - { name: EMBEDDING_DIMENSION, value: "1024" }
@@ -630,6 +663,17 @@ spec:
             - { name: INSTAGRAM_CONNECTOR_URL, value: "http://instagram-connector.whatsapp-mcp.svc.cluster.local:3003" }
             - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
             - { name: LLM_CHAT_MODEL, value: "tooling" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_BUCKET, value: "skirmshop-drive" }
+            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_PREFIX, value: "socialmedia" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - name: MCP_SSE_AUTH_TOKEN
@@ -864,10 +908,22 @@ spec:
             # Session-less: ingest Telegram via the connector (NATS + HMAC /api/v1),
             # no Telethon session. CONNECTOR_SHARED_SECRET comes via envFrom.
             - { name: CONNECTOR_BASE_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_BUCKET, value: "skirmshop-drive" }
+            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_PREFIX, value: "socialmedia" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: MINIO_USE_SSL, value: "false" }
+            - { name: MINIO_BUCKET, value: "socialmedia-media" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 100m, memory: 512Mi }
@@ -949,10 +1005,22 @@ spec:
             - { name: CONNECTOR_ACCOUNT, value: "professional" }
             # Session-less: ingest via the professional connector (no Telethon session).
             - { name: CONNECTOR_BASE_URL, value: "http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_BUCKET, value: "skirmshop-drive" }
+            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_PREFIX, value: "socialmedia" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: MINIO_USE_SSL, value: "false" }
+            - { name: MINIO_BUCKET, value: "socialmedia-media" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 100m, memory: 512Mi }

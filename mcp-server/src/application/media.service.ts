@@ -59,14 +59,14 @@ export class MediaService {
     fileName?: string
   ): Promise<string> {
     const storageKey = this.generateStorageKey(messageId, attachmentType, fileName);
-    await this.minio.uploadFile(storageKey, data, mimeType, {
+    const storageRef = await this.minio.uploadFile(storageKey, data, mimeType, {
       messageId,
       attachmentType,
       fileName: fileName || '',
     });
 
-    this.logger.debug(`Uploaded attachment: ${storageKey}`);
-    return storageKey;
+    this.logger.debug(`Uploaded attachment: ${storageRef}`);
+    return storageRef;
   }
 
   /**
