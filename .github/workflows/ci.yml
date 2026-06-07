@@ -47,6 +47,10 @@ jobs:
         with:
           node-version: "20"
       - run: corepack enable
+      - name: Install native build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-setuptools
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @mcp-socialmedia/server test -- --runInBand
 
