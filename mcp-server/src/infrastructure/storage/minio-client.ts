@@ -12,7 +12,11 @@ export interface StorageRef {
 
 export function withStoragePrefix(objectName: string, prefix: string): string {
   const clean = objectName.replace(/^\/+/, '');
-  if (!clean || clean.includes('\\') || clean.split('/').some(part => part === '..' || part === '')) {
+  if (
+    !clean ||
+    clean.includes('\\') ||
+    clean.split('/').some(part => part === '..' || part === '')
+  ) {
     throw new Error(`unsafe object name: ${objectName}`);
   }
   return prefix ? `${prefix.replace(/^\/+|\/+$/g, '')}/${clean}` : clean;
@@ -91,8 +95,13 @@ export class MinIOClient {
     });
   }
 
-  private parseEndpoint(endpoint: string, fallbackSSL: boolean): { host: string; port: number; useSSL: boolean } {
-    const withScheme = /^https?:\/\//i.test(endpoint) ? endpoint : `${fallbackSSL ? 'https' : 'http'}://${endpoint}`;
+  private parseEndpoint(
+    endpoint: string,
+    fallbackSSL: boolean
+  ): { host: string; port: number; useSSL: boolean } {
+    const withScheme = /^https?:\/\//i.test(endpoint)
+      ? endpoint
+      : `${fallbackSSL ? 'https' : 'http'}://${endpoint}`;
     const parsed = new URL(withScheme);
     return {
       host: parsed.hostname,
@@ -152,7 +161,10 @@ export class MinIOClient {
    */
   async downloadFile(objectName: string): Promise<Buffer> {
     const ref = this.parseStorageRef(objectName);
-    const stream = await (ref.legacy ? this.legacyClient : this.client).getObject(ref.bucket, ref.key);
+    const stream = await (ref.legacy ? this.legacyClient : this.client).getObject(
+      ref.bucket,
+      ref.key
+    );
     const chunks: Buffer[] = [];
 
     return new Promise((resolve, reject) => {
@@ -167,7 +179,11 @@ export class MinIOClient {
    */
   async getPresignedUrl(objectName: string, expiresInSeconds: number = 3600): Promise<string> {
     const ref = this.parseStorageRef(objectName);
-    return await (ref.legacy ? this.legacyClient : this.client).presignedGetObject(ref.bucket, ref.key, expiresInSeconds);
+    return await (ref.legacy ? this.legacyClient : this.client).presignedGetObject(
+      ref.bucket,
+      ref.key,
+      expiresInSeconds
+    );
   }
 
   /**

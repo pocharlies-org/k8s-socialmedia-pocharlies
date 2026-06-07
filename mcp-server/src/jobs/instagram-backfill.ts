@@ -79,9 +79,12 @@ function intEnv(name: string, fallback: number): number {
 
 function configFromEnv(): BackfillConfig {
   return {
-    connectorUrl: (process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003').replace(/\/+$/, ''),
+    connectorUrl: (
+      process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003'
+    ).replace(/\/+$/, ''),
     databaseUrl:
-      process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp',
+      process.env.DATABASE_URL ||
+      'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp',
     account: process.env.INSTAGRAM_BACKFILL_ACCOUNT || 'barbelpapis',
     dryRun: boolEnv('INSTAGRAM_BACKFILL_DRY_RUN', true),
     validateOnly: boolEnv('INSTAGRAM_BACKFILL_VALIDATE_ONLY', false),
@@ -108,7 +111,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 async function probe(
   name: string,
-  fn: () => Promise<unknown>,
+  fn: () => Promise<unknown>
 ): Promise<{ name: string; ok: boolean; error?: string }> {
   try {
     await fn();
@@ -126,7 +129,7 @@ async function validateConnector(config: BackfillConfig) {
   const profile = await probe('instagram_business_basic', () => fetchJson(`${base}/profile`));
   const media = await probe('media_read', () => fetchJson(`${base}/media?limit=1`));
   const conversations = await probe('instagram_business_manage_messages', () =>
-    fetchJson(`${base}/conversations?limit=1`),
+    fetchJson(`${base}/conversations?limit=1`)
   );
 
   let comments: ProbeResult = {
@@ -139,7 +142,7 @@ async function validateConnector(config: BackfillConfig) {
     const mediaId = mediaRows.data?.[0]?.id;
     if (mediaId) {
       comments = await probe('instagram_business_manage_comments', () =>
-        fetchJson(`${base}/media/${mediaId}/comments?limit=1`),
+        fetchJson(`${base}/media/${mediaId}/comments?limit=1`)
       );
     }
   } catch (error) {
@@ -151,7 +154,11 @@ async function validateConnector(config: BackfillConfig) {
   return probes;
 }
 
-function messageToEvent(account: string, conversation: Conversation, message: InstagramMessage): InstagramEvent {
+function messageToEvent(
+  account: string,
+  conversation: Conversation,
+  message: InstagramMessage
+): InstagramEvent {
   const from = message.from || {};
   return {
     platform: 'instagram',
@@ -196,7 +203,7 @@ function commentToEvent(account: string, media: MediaItem, comment: CommentItem)
 async function ingestOrLog(
   service: InstagramIngestionService | null,
   event: InstagramEvent,
-  stats: Record<string, number>,
+  stats: Record<string, number>
 ) {
   stats.seen += 1;
   stats[event.eventType] = (stats[event.eventType] || 0) + 1;
@@ -210,20 +217,30 @@ async function ingestOrLog(
 
 async function backfill(config: BackfillConfig, service: InstagramIngestionService | null) {
   const base = `${config.connectorUrl}/api/v1/${config.account}`;
-  const stats: Record<string, number> = { seen: 0, ingested: 0, dm: 0, media: 0, comment: 0, mention: 0 };
+  const stats: Record<string, number> = {
+    seen: 0,
+    ingested: 0,
+    dm: 0,
+    media: 0,
+    comment: 0,
+    mention: 0,
+  };
 
   if (config.includeDms && config.maxConversations > 0) {
     const conversations = await fetchJson<{ data?: Conversation[] }>(
-      `${base}/conversations?limit=${config.maxConversations}`,
+      `${base}/conversations?limit=${config.maxConversations}`
     ).catch(error => {
       logger.warn({ error: String(error) }, 'instagram DMs unavailable; continuing without DMs');
       return { data: [] };
     });
     for (const conversation of conversations.data || []) {
       const messages = await fetchJson<{ data?: InstagramMessage[] }>(
-        `${base}/conversations/${encodeURIComponent(conversation.id)}/messages?limit=${config.maxMessagesPerConversation}`,
+        `${base}/conversations/${encodeURIComponent(conversation.id)}/messages?limit=${config.maxMessagesPerConversation}`
       ).catch(error => {
-        logger.warn({ conversationId: conversation.id, error: String(error) }, 'failed to fetch IG conversation messages');
+        logger.warn(
+          { conversationId: conversation.id, error: String(error) },
+          'failed to fetch IG conversation messages'
+        );
         return { data: conversation.messages?.data || [] };
       });
       for (const message of messages.data || []) {
@@ -238,7 +255,7 @@ async function backfill(config: BackfillConfig, service: InstagramIngestionServi
       await ingestOrLog(service, mediaToEvent(config.account, item), stats);
       if (!config.includeComments || config.maxCommentsPerMedia <= 0) continue;
       const comments = await fetchJson<{ data?: CommentItem[] }>(
-        `${base}/media/${encodeURIComponent(item.id)}/comments?limit=${config.maxCommentsPerMedia}`,
+        `${base}/media/${encodeURIComponent(item.id)}/comments?limit=${config.maxCommentsPerMedia}`
       ).catch(error => {
         logger.warn({ mediaId: item.id, error: String(error) }, 'failed to fetch IG comments');
         return { data: [] };
@@ -250,20 +267,31 @@ async function backfill(config: BackfillConfig, service: InstagramIngestionServi
   }
 
   if (config.includeMentions && config.maxMentions > 0) {
-    const mentions = await fetchJson<{ data?: MediaItem[] }>(`${base}/mentions?limit=${config.maxMentions}`).catch(error => {
-      logger.warn({ error: String(error) }, 'instagram mentions unavailable; continuing without mentions');
+    const mentions = await fetchJson<{ data?: MediaItem[] }>(
+      `${base}/mentions?limit=${config.maxMentions}`
+    ).catch(error => {
+      logger.warn(
+        { error: String(error) },
+        'instagram mentions unavailable; continuing without mentions'
+      );
       return { data: [] };
     });
     for (const mention of mentions.data || []) {
-      await ingestOrLog(service, {
-        platform: 'instagram',
-        account: config.account,
-        eventType: 'mention',
-        senderId: mention.id,
-        mediaId: mention.id,
-        text: [mention.media_type, mention.caption, mention.permalink].filter(Boolean).join(' | '),
-        timestamp: mention.timestamp || new Date().toISOString(),
-      }, stats);
+      await ingestOrLog(
+        service,
+        {
+          platform: 'instagram',
+          account: config.account,
+          eventType: 'mention',
+          senderId: mention.id,
+          mediaId: mention.id,
+          text: [mention.media_type, mention.caption, mention.permalink]
+            .filter(Boolean)
+            .join(' | '),
+          timestamp: mention.timestamp || new Date().toISOString(),
+        },
+        stats
+      );
     }
   }
 
@@ -272,7 +300,10 @@ async function backfill(config: BackfillConfig, service: InstagramIngestionServi
 
 async function main() {
   const config = configFromEnv();
-  logger.info({ config: { ...config, databaseUrl: config.databaseUrl.replace(/:\/\/.*@/, '://***@') } }, 'instagram backfill starting');
+  logger.info(
+    { config: { ...config, databaseUrl: config.databaseUrl.replace(/:\/\/.*@/, '://***@') } },
+    'instagram backfill starting'
+  );
 
   const probes = await validateConnector(config);
   if (config.validateOnly) {
@@ -285,7 +316,10 @@ async function main() {
   try {
     if (pool) await pool.query('SELECT 1');
     const stats = await backfill(config, service);
-    logger.info({ account: config.account, dryRun: config.dryRun, stats }, 'instagram backfill completed');
+    logger.info(
+      { account: config.account, dryRun: config.dryRun, stats },
+      'instagram backfill completed'
+    );
   } finally {
     if (pool) await pool.end();
   }

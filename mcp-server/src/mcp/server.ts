@@ -379,9 +379,16 @@ export class MCPServer {
             inputSchema: {
               type: 'object',
               properties: {
-                chatId: { type: 'string', description: 'Recipient phone or WhatsApp conversation ID' },
+                chatId: {
+                  type: 'string',
+                  description: 'Recipient phone or WhatsApp conversation ID',
+                },
                 templateName: { type: 'string', description: 'Approved Meta template name' },
-                languageCode: { type: 'string', default: 'es', description: 'Template language code' },
+                languageCode: {
+                  type: 'string',
+                  default: 'es',
+                  description: 'Template language code',
+                },
                 components: {
                   type: 'array',
                   description: 'Optional WhatsApp template components array',
@@ -391,7 +398,8 @@ export class MCPServer {
                   type: 'string',
                   enum: ['professional'],
                   default: 'professional',
-                  description: 'Templates are only supported on the WhatsApp Business Cloud API account.',
+                  description:
+                    'Templates are only supported on the WhatsApp Business Cloud API account.',
                 },
               },
               required: ['chatId', 'templateName'],
