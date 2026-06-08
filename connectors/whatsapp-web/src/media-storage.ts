@@ -11,20 +11,34 @@ import * as fs from 'fs';
 import * as https from 'https';
 
 const MINIO_ENDPOINT = process.env.S3_ENDPOINT || process.env.MINIO_ENDPOINT || 'minio:9000';
-const MINIO_ACCESS_KEY = process.env.AWS_ACCESS_KEY_ID || process.env.MINIO_ACCESS_KEY || 'minioadmin';
-const MINIO_SECRET_KEY = process.env.AWS_SECRET_ACCESS_KEY || process.env.MINIO_SECRET_KEY || 'minioadmin';
-const MINIO_USE_SSL = (process.env.S3_USE_SSL || process.env.MINIO_USE_SSL || 'true').toLowerCase() === 'true';
+const MINIO_ACCESS_KEY =
+  process.env.AWS_ACCESS_KEY_ID || process.env.MINIO_ACCESS_KEY || 'minioadmin';
+const MINIO_SECRET_KEY =
+  process.env.AWS_SECRET_ACCESS_KEY || process.env.MINIO_SECRET_KEY || 'minioadmin';
+const MINIO_USE_SSL =
+  (process.env.S3_USE_SSL || process.env.MINIO_USE_SSL || 'true').toLowerCase() === 'true';
 const MINIO_CA_CERT = process.env.MINIO_CA_CERT;
 const BUCKET = process.env.S3_BUCKET || process.env.MINIO_BUCKET || 'socialmedia-media';
 const PREFIX = (process.env.S3_PREFIX || '').replace(/^\/+|\/+$/g, '');
-const LEGACY_MINIO_ENDPOINT = process.env.LEGACY_MINIO_ENDPOINT || process.env.MINIO_ENDPOINT || MINIO_ENDPOINT;
-const LEGACY_MINIO_ACCESS_KEY = process.env.LEGACY_MINIO_ACCESS_KEY || process.env.MINIO_ACCESS_KEY || MINIO_ACCESS_KEY;
-const LEGACY_MINIO_SECRET_KEY = process.env.LEGACY_MINIO_SECRET_KEY || process.env.MINIO_SECRET_KEY || MINIO_SECRET_KEY;
-const LEGACY_MINIO_USE_SSL = (process.env.LEGACY_MINIO_USE_SSL || process.env.MINIO_USE_SSL || 'true').toLowerCase() === 'true';
-const LEGACY_BUCKET = process.env.LEGACY_MINIO_BUCKET || process.env.MINIO_BUCKET || 'socialmedia-media';
+const LEGACY_MINIO_ENDPOINT =
+  process.env.LEGACY_MINIO_ENDPOINT || process.env.MINIO_ENDPOINT || MINIO_ENDPOINT;
+const LEGACY_MINIO_ACCESS_KEY =
+  process.env.LEGACY_MINIO_ACCESS_KEY || process.env.MINIO_ACCESS_KEY || MINIO_ACCESS_KEY;
+const LEGACY_MINIO_SECRET_KEY =
+  process.env.LEGACY_MINIO_SECRET_KEY || process.env.MINIO_SECRET_KEY || MINIO_SECRET_KEY;
+const LEGACY_MINIO_USE_SSL =
+  (process.env.LEGACY_MINIO_USE_SSL || process.env.MINIO_USE_SSL || 'true').toLowerCase() ===
+  'true';
+const LEGACY_BUCKET =
+  process.env.LEGACY_MINIO_BUCKET || process.env.MINIO_BUCKET || 'socialmedia-media';
 
-function endpointParts(endpoint: string, fallbackSsl: boolean): { host: string; port: number; useSSL: boolean } {
-  const withScheme = /^https?:\/\//i.test(endpoint) ? endpoint : `${fallbackSsl ? 'https' : 'http'}://${endpoint}`;
+function endpointParts(
+  endpoint: string,
+  fallbackSsl: boolean
+): { host: string; port: number; useSSL: boolean } {
+  const withScheme = /^https?:\/\//i.test(endpoint)
+    ? endpoint
+    : `${fallbackSsl ? 'https' : 'http'}://${endpoint}`;
   const parsed = new URL(withScheme);
   return {
     host: parsed.hostname,
@@ -33,7 +47,12 @@ function endpointParts(endpoint: string, fallbackSsl: boolean): { host: string; 
   };
 }
 
-function clientFor(endpoint: string, accessKey: string, secretKey: string, useSSL: boolean): MinIO.Client {
+function clientFor(
+  endpoint: string,
+  accessKey: string,
+  secretKey: string,
+  useSSL: boolean
+): MinIO.Client {
   const parts = endpointParts(endpoint, useSSL);
   const opts: MinIO.ClientOptions = {
     endPoint: parts.host,
@@ -50,7 +69,12 @@ function clientFor(endpoint: string, accessKey: string, secretKey: string, useSS
 }
 
 const client = clientFor(MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_USE_SSL);
-const legacyClient = clientFor(LEGACY_MINIO_ENDPOINT, LEGACY_MINIO_ACCESS_KEY, LEGACY_MINIO_SECRET_KEY, LEGACY_MINIO_USE_SSL);
+const legacyClient = clientFor(
+  LEGACY_MINIO_ENDPOINT,
+  LEGACY_MINIO_ACCESS_KEY,
+  LEGACY_MINIO_SECRET_KEY,
+  LEGACY_MINIO_USE_SSL
+);
 
 function withPrefix(key: string): string {
   const clean = key.replace(/^\/+/, '');

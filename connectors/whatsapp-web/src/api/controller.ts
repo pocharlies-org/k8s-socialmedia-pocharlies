@@ -420,7 +420,8 @@ export function createRouter(
         email: optionalString(body.email),
         displayName,
         metadata: {
-          source: sourceTopic && sourceTopic.startsWith('orders/') ? 'shopify_order' : 'shopify_customer',
+          source:
+            sourceTopic && sourceTopic.startsWith('orders/') ? 'shopify_order' : 'shopify_customer',
           sourceTopic,
           company,
           shopifyOrderId: optionalString(body.shopifyOrderId),

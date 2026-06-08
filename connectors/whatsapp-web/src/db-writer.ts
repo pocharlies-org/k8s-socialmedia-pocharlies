@@ -3,10 +3,7 @@
  * Writes incoming messages directly to PostgreSQL, bypassing NATS/MCP.
  */
 import pg from 'pg';
-import {
-  WhatsAppCustomerAllowlistStatus,
-  WhatsAppCustomerTokenStatus,
-} from './contact-sync';
+import { WhatsAppCustomerAllowlistStatus, WhatsAppCustomerTokenStatus } from './contact-sync';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||

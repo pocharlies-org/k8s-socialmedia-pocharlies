@@ -236,7 +236,13 @@ async function isLoggedIn(p: Page): Promise<boolean> {
     'div[contenteditable="true"][role="textbox"]',
   ];
   for (const selector of selectors) {
-    if ((await p.locator(selector).count().catch(() => 0)) > 0) return true;
+    if (
+      (await p
+        .locator(selector)
+        .count()
+        .catch(() => 0)) > 0
+    )
+      return true;
   }
   return false;
 }
@@ -250,7 +256,13 @@ async function looksLikeLoginRequired(p: Page): Promise<boolean> {
     'text=/Inicia sesi[o\\u00f3]n/i',
   ];
   for (const selector of selectors) {
-    if ((await p.locator(selector).count().catch(() => 0)) > 0) return true;
+    if (
+      (await p
+        .locator(selector)
+        .count()
+        .catch(() => 0)) > 0
+    )
+      return true;
   }
   return false;
 }
@@ -262,7 +274,10 @@ async function looksLikeInvalidRecipient(p: Page): Promise<boolean> {
     /n[u\u00fa]mero.*no.*v[a\u00e1]lido/i,
     /invalid phone/i,
   ];
-  const bodyText = await p.locator('body').innerText({ timeout: 2000 }).catch(() => '');
+  const bodyText = await p
+    .locator('body')
+    .innerText({ timeout: 2000 })
+    .catch(() => '');
   return patterns.some(pattern => pattern.test(bodyText));
 }
 
