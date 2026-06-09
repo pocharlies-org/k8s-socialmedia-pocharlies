@@ -398,6 +398,7 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   replicas: 1
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: telegram-connector } }
   template:
     metadata: { labels: { app: telegram-connector } }
@@ -613,6 +614,7 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   replicas: 1
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: telegram-sync } }
   template:
     metadata: { labels: { app: telegram-sync } }
@@ -656,6 +658,7 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   replicas: 1  # resumed: professional session regenerated against the real professional account
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: telegram-connector-professional } }
   template:
     metadata: { labels: { app: telegram-connector-professional } }
@@ -691,6 +694,7 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   replicas: 1  # active: sauvageadminbot (skirmshop) ingest via telethon
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: telegram-sync-professional } }
   template:
     metadata: { labels: { app: telegram-sync-professional } }
