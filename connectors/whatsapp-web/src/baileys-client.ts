@@ -652,15 +652,16 @@ export class BaileysClient extends EventEmitter {
           const status = p?.lastKnownPresence;
           if (status !== 'composing' && status !== 'recording') continue;
           // Lookup display name from the participants we've seen
-          const name = this.contactNames.get(participantJid)
-            || this.contactNames.get(this.normalizeJid(participantJid))
-            || null;
+          const name =
+            this.contactNames.get(participantJid) ||
+            this.contactNames.get(this.normalizeJid(participantJid)) ||
+            null;
           void dashboardNotify('/_connector/typing', {
             conversation_id: convId,
             sender_id: participantJid,
             sender_name: name,
             status: 'composing',
-            ttl_ms: 8000,  // baileys re-emits every ~5s; 8s TTL keeps it lit
+            ttl_ms: 8000, // baileys re-emits every ~5s; 8s TTL keeps it lit
           });
         }
       } catch (e) {

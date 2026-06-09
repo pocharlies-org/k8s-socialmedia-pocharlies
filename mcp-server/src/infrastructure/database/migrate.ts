@@ -18,7 +18,7 @@ async function migrate() {
     // re-running on an already-migrated DB is a no-op.
     const dir = join(__dirname, 'migrations');
     const files = readdirSync(dir)
-      .filter((f) => f.endsWith('.sql'))
+      .filter(f => f.endsWith('.sql'))
       .sort();
 
     for (const file of files) {
