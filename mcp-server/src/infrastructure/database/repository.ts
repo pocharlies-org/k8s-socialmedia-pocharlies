@@ -373,7 +373,10 @@ export class DatabaseRepository {
     }));
   }
 
-  async getUserInfo(waUserId: string, account: string = 'personal'): Promise<{
+  async getUserInfo(
+    waUserId: string,
+    account: string = 'personal'
+  ): Promise<{
     waUserId: string;
     names: string[];
     conversationCount: number;

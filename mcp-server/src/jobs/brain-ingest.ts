@@ -68,7 +68,12 @@ async function ingestAccount(pool: Pool, account: Account): Promise<void> {
       }
     } else {
       for (const [adapter, docs] of byPlatform) {
-        const chunks = await pushToBrain({ brainUrl: BRAIN_URL, apiKey: BRAIN_API_KEY }, instance, adapter, docs);
+        const chunks = await pushToBrain(
+          { brainUrl: BRAIN_URL, apiKey: BRAIN_API_KEY },
+          instance,
+          adapter,
+          docs
+        );
         totalChunks += chunks;
       }
     }

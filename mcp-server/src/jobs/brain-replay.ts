@@ -92,11 +92,19 @@ async function replayAccount(pool: Pool, opts: ReplayOptions, account: Account):
     const byPlatform = groupDocsByAdapter(rows);
     if (opts.dryRun) {
       for (const [adapter, docs] of byPlatform) {
-        logger.info({ runId: opts.runId, account, instance, adapter, docs: docs.length }, 'DRY_RUN would replay');
+        logger.info(
+          { runId: opts.runId, account, instance, adapter, docs: docs.length },
+          'DRY_RUN would replay'
+        );
       }
     } else {
       for (const [adapter, docs] of byPlatform) {
-        const chunks = await pushToBrain({ brainUrl: opts.brainUrl, apiKey: opts.apiKey }, instance, adapter, docs);
+        const chunks = await pushToBrain(
+          { brainUrl: opts.brainUrl, apiKey: opts.apiKey },
+          instance,
+          adapter,
+          docs
+        );
         totalChunks += chunks;
       }
     }
@@ -105,7 +113,14 @@ async function replayAccount(pool: Pool, opts: ReplayOptions, account: Account):
     const last = rows[rows.length - 1];
     cursor = { last_created_at: last.created_at.toISOString(), last_id: last.id };
     if (!opts.dryRun) {
-      await setReplayCursor(pool, opts.runId, account, platformKey, cursor.last_created_at, cursor.last_id);
+      await setReplayCursor(
+        pool,
+        opts.runId,
+        account,
+        platformKey,
+        cursor.last_created_at,
+        cursor.last_id
+      );
     }
     if (rows.length < batchLimit) break;
   }

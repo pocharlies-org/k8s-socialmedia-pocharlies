@@ -3001,7 +3001,7 @@ export class MCPServer {
   createSessionServer(): Server {
     const prev = this.server;
     const fresh = new Server(
-      { name: "messaging-mcp-server", version: "1.0.0" },
+      { name: 'messaging-mcp-server', version: '1.0.0' },
       { capabilities: { tools: {} } }
     );
     this.server = fresh;
