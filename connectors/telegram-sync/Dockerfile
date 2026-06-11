@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM harbor.lan.e-dani.com/cache/library/python:3.12-slim
 
 WORKDIR /app
 

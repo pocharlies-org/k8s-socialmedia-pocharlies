@@ -1,4 +1,4 @@
-FROM node:20-bookworm
+FROM harbor.lan.e-dani.com/cache/library/node:20-bookworm
 
 WORKDIR /app
 
