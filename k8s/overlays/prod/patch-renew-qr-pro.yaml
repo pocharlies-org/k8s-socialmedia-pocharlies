@@ -1,0 +1,18 @@
+# LAN-only renew-QR button (PR #21): ALLOW_WEB_RENEW gates POST /qr/renew and
+# the button on /qr/page. Enabled ONLY on the professional connector — it is
+# reachable just via whatsapp-pro.lan.e-dani.com (LAN IngressRoute). The
+# personal connector is public internet (whatsapp.e-dani.com) and must NOT
+# expose an unauthenticated renew endpoint.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-connector-professional
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-connector-professional
+          env:
+            - name: ALLOW_WEB_RENEW
+              value: "true"

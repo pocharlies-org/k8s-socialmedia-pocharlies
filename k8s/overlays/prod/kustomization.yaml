@@ -6,6 +6,7 @@ resources:
 patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
+  - path: patch-renew-qr-pro.yaml
   # patch-nodepool.yaml (2026-06-04 placement split: backends->ks5, telegram->DGX,
   # sync->sauvage) was live while deploy/prod tracked the codex S3 branch; ArgoCD
   # selfHeal reverted it when deploy/prod was rebuilt from main, so everything runs
@@ -35,6 +36,9 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker
     newTag: auto-send-headful-xauth-20260604
     digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
+  - name: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker
+    newTag: f14-voice-20260609
+    digest: sha256:ef688e80bacfd008b14f5e92174ad3127abc7256b48fc93dab0ba298491c0a1a
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: v1.3.42
     digest: sha256:8498b854121c8b8f549dedb0072c1851047aa82af831cfead0dfa6f51dfcd477
