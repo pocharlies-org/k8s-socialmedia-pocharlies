@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "lint": "eslint src --ext .ts",
-    "test": "tsx --test src/db-writer.test.ts src/read-paths.test.ts"
+    "test": "tsx --test src/db-writer.test.ts src/read-paths.test.ts src/lid-pn.test.ts"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

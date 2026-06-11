@@ -218,6 +218,40 @@ export async function setParticipantAvatar(id: string, profilePicUrl: string): P
   );
 }
 
+/**
+ * Persist the phone-number chat id for a conversation (conversations.wa_chat_id).
+ *
+ * Context: WhatsApp's privacy migration moves 1:1 chats to LID-addressed
+ * conversation ids (`...@lid`). The conversation PK (conversations.id) stays the
+ * LID (namespaced) so we never re-key existing rows or break replica routing,
+ * but the LID alone is useless to downstream consumers that need the real phone
+ * (e.g. skirmshop-labels' opt-in poller). When Baileys hands us the alternate
+ * phone-number JID for a LID chat, we record it here in the long-empty
+ * `wa_chat_id` column as a side-channel — best effort, never a prerequisite for
+ * message ingest.
+ *
+ * Invariant (PR #22): `conversations.wa_chat_id` is UNIQUE and every id that
+ * references a conversation row is stored under the account-namespaced id. We
+ * therefore route the value through the SAME `accountKey` helper as every other
+ * conversation-scoped id, so the professional account cannot collide with a
+ * personal row on the UNIQUE index and the namespacing stays internally
+ * consistent. No-op (does not overwrite) once a non-null value exists.
+ */
+export async function setConversationWaChatId(id: string, waChatId: string): Promise<void> {
+  if (!id || !waChatId) return;
+  const pool = getPool();
+  // conversations.id is stored namespaced; namespace the WHERE id so the UPDATE
+  // targets the real row on professional. The stored wa_chat_id value is also
+  // namespaced (UNIQUE column shared across accounts — see PR #22 invariant).
+  await pool.query(
+    `UPDATE conversations
+        SET wa_chat_id = $2, updated_at = now()
+      WHERE id = $1
+        AND (wa_chat_id IS NULL OR wa_chat_id = '' OR wa_chat_id = id)`,
+    [accountKey(id), accountKey(waChatId)]
+  );
+}
+
 export async function getConversationAvatar(id: string): Promise<string | null> {
   const pool = getPool();
   // SELECT against the namespaced id so professional reads its own row.

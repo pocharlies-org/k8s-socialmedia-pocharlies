@@ -57,6 +57,7 @@ import {
   setParticipantAvatar,
   setConversationState,
   setMessageStatus,
+  setConversationWaChatId,
 } from './db-writer';
 import { uploadMedia, ensureMediaBucket, fetchMedia, uploadAvatar } from './media-storage';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
@@ -277,6 +278,105 @@ function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: b
 // chat) so we can react/forward/delete/download without keeping every message
 // in memory.
 const KEY_CACHE_MAX = 2000;
+
+// ---------------------------------------------------------------------------
+// LID → phone-number (PN) extraction
+//
+// WhatsApp's privacy migration re-addresses 1:1 chats with LID jids
+// (`<lid>@lid`). The LID is an opaque privacy id — it is NOT a phone number, so
+// the legacy "digits before @" extraction yields garbage for downstream
+// consumers that need the real MSISDN (skirmshop-labels' opt-in poller keys on
+// the phone). Baileys exposes the real phone-number jid alongside the LID, but
+// the EXACT field name has moved across releases, so we probe every known
+// carrier defensively rather than pin one:
+//
+//   - Baileys 7.x (decode-wa-message.js): the decoded key carries the alternate
+//     (PN) address as `key.remoteJidAlt` for 1:1 chats and `key.participantAlt`
+//     for groups. These are fed from the stanza attrs
+//     `participant_pn || sender_pn || peer_recipient_pn` when addressingMode is
+//     'lid' — i.e. the real `…@s.whatsapp.net`.
+//   - 6.17.x / messages.upsert variants the field has also appeared as
+//     `key.senderPn` / `key.participantPn` and (on the upsert payload itself)
+//     `msg.senderPn`. We read those too so the feature lights up the moment the
+//     connector runs on a Baileys build that surfaces the PN, without inventing
+//     anything on builds that don't (origin/main currently resolves 6.17.16,
+//     which does NOT surface a per-message PN — the helper correctly returns
+//     undefined there).
+//
+// The function is pure and side-effect free so it is unit-testable without a
+// live socket. It returns nothing unless the chat/sender is genuinely `@lid`
+// AND a plausible PN jid is found — we never fabricate a number.
+// ---------------------------------------------------------------------------
+
+/** A `@lid` jid is the privacy id; anything else is already phone-addressable. */
+function isLidJid(jid: string | null | undefined): boolean {
+  return typeof jid === 'string' && jid.endsWith('@lid');
+}
+
+/**
+ * Derive an E.164 string (with leading '+') from a phone-number jid such as
+ * `34659695630@s.whatsapp.net` or `34659695630:3@s.whatsapp.net`. Returns
+ * undefined if the user part is not a plausible run of digits (so a LID jid,
+ * a group jid, or anything non-numeric never produces a fake number).
+ */
+export function pnJidToE164(pnJid: string | null | undefined): string | undefined {
+  if (!pnJid || typeof pnJid !== 'string') return undefined;
+  // Only phone-number jids carry a real MSISDN. A `@lid` user part is opaque.
+  if (!pnJid.endsWith('@s.whatsapp.net') && !pnJid.endsWith('@c.us')) return undefined;
+  const at = pnJid.indexOf('@');
+  let user = at > 0 ? pnJid.slice(0, at) : pnJid;
+  const colon = user.indexOf(':'); // strip device suffix like ":3"
+  if (colon > 0) user = user.slice(0, colon);
+  if (!/^\d{6,15}$/.test(user)) return undefined; // E.164 is 6–15 digits
+  return `+${user}`;
+}
+
+export interface LidPnInfo {
+  /** Bare phone-number jid, e.g. `34659695630@s.whatsapp.net`. */
+  pnJid: string;
+  /** E.164 with '+', e.g. `+34659695630`. */
+  e164: string;
+}
+
+/**
+ * If (and only if) the message's chat/sender is LID-addressed and Baileys
+ * provided the alternate phone-number jid, return that PN jid + its E.164 form.
+ * Returns undefined otherwise (normal `@c.us`/`@s.whatsapp.net` chats, or a LID
+ * chat where no PN was attached). Pure — safe to call from tests with a plain
+ * object that mimics the relevant `WAMessage` fields.
+ */
+export function pnFromLidMessage(msg: WAMessage | undefined | null): LidPnInfo | undefined {
+  const key = msg?.key;
+  if (!key) return undefined;
+
+  // Only act when the chat or the sender is genuinely LID-addressed; a normal
+  // phone-addressed chat already carries the number in remoteJid/participant and
+  // needs no side-channel.
+  const lidAddressed = isLidJid(key.remoteJid) || isLidJid(key.participant);
+  if (!lidAddressed) return undefined;
+
+  // Probe every known PN-carrying field, in priority order, across Baileys
+  // versions. Cast through a loose shape because the older type defs do not
+  // declare the newer `*Alt` / `*Pn` fields.
+  const k = key as unknown as Record<string, unknown>;
+  const m = msg as unknown as Record<string, unknown>;
+  const candidates = [
+    k.remoteJidAlt, // Baileys 7.x — 1:1 alternate (PN) address
+    k.participantAlt, // Baileys 7.x — group alternate (PN) address
+    k.senderPn, // 6.17.x / variant naming on the key
+    k.participantPn, // 6.17.x / variant naming on the key
+    m.senderPn, // messages.upsert payload-level fallback
+    m.participantPn,
+  ];
+
+  for (const c of candidates) {
+    if (typeof c !== 'string' || !c) continue;
+    if (isLidJid(c)) continue; // an alt that is itself a LID is not a PN
+    const e164 = pnJidToE164(c);
+    if (e164) return { pnJid: c, e164 };
+  }
+  return undefined;
+}
 
 export class BaileysClient extends EventEmitter {
   private sock: WASocket | null = null;
@@ -853,6 +953,28 @@ export class BaileysClient extends EventEmitter {
       participantCount,
     });
 
+    // WhatsApp privacy migration: when the chat/sender is LID-addressed
+    // (`…@lid`), the LID is NOT a phone number, so neither the conversation id
+    // nor `phoneFromJid(senderRaw)` yields the real MSISDN that downstream
+    // consumers (skirmshop-labels opt-in poller) require. If Baileys attached
+    // the alternate phone-number jid, capture it here ONCE and (a) ride it into
+    // the message metadata as `senderPnE164`, (b) backfill the long-empty
+    // `conversations.wa_chat_id` with the PN jid. Both are best-effort and must
+    // never block or abort the message persist. The conversation PK stays the
+    // LID (namespaced) — we do not re-key anything.
+    const lidPn = pnFromLidMessage(msg);
+    if (lidPn) {
+      // (b) wa_chat_id backfill — fire-and-forget; a failure here must never
+      // drop the message (the metadata field is the load-bearing path).
+      void setConversationWaChatId(waMessage.conversationId, lidPn.pnJid).catch(e =>
+        this.logger.warn(
+          `wa_chat_id backfill failed for conversation=${waMessage.conversationId}: ${
+            e?.message || e
+          }`
+        )
+      );
+    }
+
     const senderRaw = msg.key.fromMe
       ? this.meJid || waMessage.senderWaId
       : msg.key.participant || rawChatJid;
@@ -902,6 +1024,10 @@ export class BaileysClient extends EventEmitter {
           options.source === 'baileys_history_sync' ? 'baileys_history_sync' : undefined,
         is_latest_history_sync: options.isLatest,
         sync_type: options.syncType,
+        // (a) Real sender phone in E.164 (with '+'), ONLY when the chat is LID
+        // and Baileys surfaced the PN. Omitted entirely otherwise — never an
+        // invented value. Consumer contract: messages.metadata->>'senderPnE164'.
+        senderPnE164: lidPn?.e164,
       },
     };
     const msgId = await storeMessage(data);
