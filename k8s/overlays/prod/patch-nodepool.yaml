@@ -1,0 +1,205 @@
+# Node placement split (2026-06-02):
+#
+# Move only IP-AGNOSTIC workloads off the `ubuntu` node onto the ks5 NVMe pool, so ubuntu
+# can shrink toward a residential-only worker.
+#
+# STILL on ubuntu's residential IP (NOT moved):
+#  - whatsapp-connector{,-professional} + whatsapp-open-worker-professional: Baileys/WhatsApp
+#    Web — WhatsApp flags datacenter IPs. They also carry Longhorn RWO session/profile PVCs,
+#    and the Longhorn CSI DaemonSet does NOT tolerate dedicated=llm:NoSchedule → no CSI driver
+#    on the arm64 GPU nodes → those PVCs can't attach there. Moving these needs (a) a
+#    dedicated=llm toleration on the Longhorn CSI/engine DaemonSets and (b) a WIP-free arm64
+#    image rebuild (the whatsapp-web source has active uncommitted work as of 2026-06-04).
+#
+# MOVED 2026-06-04 to the arm64 nvidia-dgx GPU node (residential LAN, SAME NAT egress IP as
+# ubuntu → NOT a datacenter IP → no telethon AuthKeyDuplicatedError, which was a cross-IP
+# issue during a prior ks5 attempt, not cross-node-same-IP):
+#  - telegram-connector{,-professional}: gramjs, PVC-free, session in the Vault-synced secret
+#    whatsapp-mcp-secrets (TELEGRAM_SESSION_STRING[_PROFESSIONAL]) → recreating the pod reuses
+#    the same session. RollingUpdate maxSurge:0 (terminate old before new) so old+new never
+#    hold the authkey simultaneously — a true Recreate transition errors on a live
+#    RollingUpdate Deployment via server-side apply (rollingUpdate Forbidden under Recreate).
+#    Image is now multi-arch (see kustomization images:). The ks5 EMFILE was tsx watch-mode
+#    (dev), irrelevant in prod (pnpm start). Tolerate dedicated=llm; drop topology+arch keys.
+# MOVED 2026-06-04 to sauvage (edge node, role=edge:NoSchedule → toleration):
+#  - telegram-sync{,-professional}: SESSION-LESS since v1.3.38 (ingests via NATS + the connector
+#    HTTP API, holds no Telethon session) → no IP binding → safe on the OVH edge node (amd64).
+#
+# MOVED to node-pool=ks5-nvme (no IP-bound session): instagram-connector (Graph API tokens),
+# mcp-server, mcp-sse, brain-ingest, and the nats/minio/redis backends. nats/minio carry RWO
+# Longhorn PVCs but use strategy: Recreate, so the cross-node move is safe. topology:null
+# deletes the inherited topology=lan key; mcp-sse also drops its explicit hostname=ubuntu pin.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-mcp-redis
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        node-pool: ks5-nvme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-mcp-nats
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        node-pool: ks5-nvme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-mcp-minio
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        node-pool: ks5-nvme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: instagram-connector
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        node-pool: ks5-nvme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-server
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        node-pool: ks5-nvme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-sse
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: null
+        node-pool: ks5-nvme
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: brain-ingest
+  namespace: whatsapp-mcp
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            topology: null
+            node-pool: ks5-nvme
+---
+# telegram-connector{,-professional} → nvidia-dgx (arm64 residential GPU node). Drop topology
+# + arch (it's arm64 now), pin to nvidia-dgx, tolerate dedicated=llm. strategy:Recreate so the
+# old pod releases the gramjs authkey before the new one connects (avoids AuthKeyDuplicated):
+# RollingUpdate maxSurge:0/maxUnavailable:1 (a real Recreate errors on the apply transition).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector
+  namespace: whatsapp-mcp
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/arch: null
+        kubernetes.io/hostname: nvidia-dgx
+      tolerations:
+        - { key: dedicated, operator: Equal, value: llm, effect: NoSchedule }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector-professional
+  namespace: whatsapp-mcp
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/arch: null
+        kubernetes.io/hostname: nvidia-dgx
+      tolerations:
+        - { key: dedicated, operator: Equal, value: llm, effect: NoSchedule }
+---
+# telegram-sync{,-professional} → sauvage (edge, amd64). Session-less since v1.3.38, no IP
+# binding. Drop topology, pin to sauvage, keep arch:amd64, tolerate role=edge. (base already
+# has strategy:Recreate.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-sync
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/hostname: sauvage
+      tolerations:
+        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-sync-professional
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/hostname: sauvage
+      tolerations:
+        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
+---
+# whatsapp-cloud-connector → sauvage (edge, 2026-06-04). WhatsApp Cloud API (Meta HTTPS +
+# webhook at whatsapp-cloud.e-dani.com via traefik-edge on sauvage) → NO residential IP
+# needed, stateless, no PVC. Drop topology, pin sauvage, keep arch:amd64, tolerate role=edge.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-cloud-connector
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/hostname: sauvage
+      tolerations:
+        - { key: role, operator: Equal, value: edge, effect: NoSchedule }

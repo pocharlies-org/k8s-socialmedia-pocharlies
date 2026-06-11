@@ -6,19 +6,41 @@ resources:
 patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
+  # patch-nodepool.yaml (2026-06-04 placement split: backends->ks5, telegram->DGX,
+  # sync->sauvage) was live while deploy/prod tracked the codex S3 branch; ArgoCD
+  # selfHeal reverted it when deploy/prod was rebuilt from main, so everything runs
+  # on ubuntu again. Re-enable as a deliberate ops change — it reschedules live
+  # messaging workloads (redis/nats/minio carry RWO PVCs, Recreate downtime).
+  # - path: patch-nodepool.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: v1.3.43
     digest: sha256:e89ccfa8542b775dd2b6b02d3ae9a1d5c96c2762f0d4d5098a9e13b1d29c7844
+  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector
+    newTag: cloud-api-20260604
+    digest: sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: v1.3.29
     digest: sha256:94bd1aa7de1264e4fb8f28705a5a2d9a6420ad1d5bbb833d7cd2fc4913a923f8
+  # telegram-sync v1.3.38 = SESSION-LESS (ingests via the connector NATS+HTTP API,
+  # holds no Telethon session). The pre-branch v1.3.21 regressed back in when
+  # deploy/prod lost the codex branch and crashloops (0/1 ready) — this pin
+  # restores the working session-less sync.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.21
-    digest: sha256:6cb06be5556feda51aa55396b820ec30cb9e8c05b561dc5cf7f890364ceb0681
+    newTag: v1.3.38
+    digest: sha256:37f5b886685b0682bdfa070df67d98cf76e2963e0c61406b634330e72d31bc06
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
+  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker
+    newTag: auto-send-headful-xauth-20260604
+    digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: v1.3.42
     digest: sha256:8498b854121c8b8f549dedb0072c1851047aa82af831cfead0dfa6f51dfcd477
+replicas:
+  # Baileys/Web auto-sender for the Business account stays offline (Cloud API
+  # covers outbound templates). whatsapp-connector-professional itself is BACK ON
+  # since the 2026-06-11 QR relink — do not zero it here.
+  - name: whatsapp-open-worker-professional
+    count: 0

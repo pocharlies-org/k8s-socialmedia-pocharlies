@@ -1,239 +1,154 @@
-"""History importer — full Telegram message history to PostgreSQL (pass 1)."""
+"""History importer / backfill — pulls Telegram history through the connector
+into PostgreSQL. This is the SAFETY NET for the at-most-once NATS realtime path:
+anything the live consumer missed (consumer downtime, connector restart) is
+recovered here within one cycle.
+
+Session-less: enumerates chats via GET /api/v1/dialogs and pages each chat's
+history via GET /api/v1/messages/:chatId?limit&offsetId (newest-first,
+older-than cursor). Resume watermark per chat = telegram_sync_state.last_message_id.
+"""
+from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+import os
 
 import asyncpg
-from telethon import TelegramClient
-from telethon.tl.types import (
-    Channel, Chat, User, Message,
-    MessageMediaDocument, MessageMediaPhoto,
-)
-from telethon.errors import FloodWaitError
 
-from sync import db, media_download
+from sync import db, mapping, media_download, avatar_sync
+from sync.connector_client import ConnectorClient
 
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 100
-DELAY_BETWEEN_CHATS = 1  # seconds
-CATCHUP_INTERVAL = 30 * 60  # 30 minutes
+DELAY_BETWEEN_CHATS = 1          # seconds, gentle on the shared connector session
+CATCHUP_INTERVAL = 30 * 60       # 30 minutes
+STARTUP_DELAY = 5               # let NATS realtime attach first
+# Per-chat page cap per cycle — a runaway backstop and a bound on how hard a
+# single first-run backfill can hammer the shared connector session. The
+# no-progress + empty-page + watermark checks are the real terminators; normal
+# catch-up finishes far under this. ~100k messages/chat/cycle.
+MAX_PAGES_PER_CHAT = 1000
+# Download historical media inline (parity with the old sync). Tunable because a
+# first full backfill of a media-heavy account is the heaviest load on the
+# connector's single session.
+HISTORY_MEDIA = os.environ.get("HISTORY_MEDIA", "true").lower() == "true"
 
 
-def _classify_message(msg: Message) -> tuple[str, bool]:
-    """Return (message_type, needs_transcription)."""
-    if not msg.media:
-        return ("text", False)
+async def import_chat(connector: ConnectorClient, pool: asyncpg.Pool, dialog: dict) -> None:
+    """Import messages newer than the stored watermark for a single chat."""
+    chat_id = str(dialog.get("id"))
+    chat_title = dialog.get("name")
 
-    if isinstance(msg.media, MessageMediaPhoto):
-        return ("photo", False)
+    state = await db.get_sync_state(pool, int(chat_id))
+    min_id = int(state["last_message_id"]) if state else 0
 
-    if isinstance(msg.media, MessageMediaDocument) and msg.media.document:
-        doc = msg.media.document
-        attrs = {type(a).__name__: a for a in (doc.attributes or [])}
+    offset_id: int | None = None
+    new_count = 0
+    highest_seen = min_id
+    stop = False        # reached the watermark / true start → range fully imported
+    aborted = False     # error or page cap → range incomplete, do NOT advance watermark
+    pages = 0
 
-        if "DocumentAttributeAudio" in attrs:
-            audio = attrs["DocumentAttributeAudio"]
-            msg_type = "voice" if audio.voice else "audio"
-            return (msg_type, True)
-        if "DocumentAttributeVideo" in attrs:
-            video = attrs["DocumentAttributeVideo"]
-            return ("video_note" if video.round_message else "video", False)
-        if "DocumentAttributeSticker" in attrs:
-            return ("sticker", False)
-        return ("document", False)
+    while not stop:
+        if pages >= MAX_PAGES_PER_CHAT:
+            aborted = True
+            logger.warning("%s (%s): hit page cap (%s) — will resume next cycle",
+                           chat_title, chat_id, MAX_PAGES_PER_CHAT)
+            break
+        pages += 1
+        try:
+            msgs = await connector.get_messages(chat_id, limit=BATCH_SIZE, offset_id=offset_id)
+        except Exception as e:
+            logger.warning("get_messages failed for %s (%s): %s", chat_title, chat_id, e)
+            aborted = True
+            break
+        if not msgs:
+            break  # paged to the true start of history → complete
 
-    return ("other", False)
-
-
-def _get_chat_info(entity) -> tuple[str | None, str]:
-    """Return (chat_title, chat_type) from entity."""
-    if isinstance(entity, User):
-        name = " ".join(filter(None, [entity.first_name, entity.last_name]))
-        return (name or str(entity.id), "private")
-    if isinstance(entity, Channel):
-        chat_type = "channel" if entity.broadcast else "supergroup"
-        return (entity.title, chat_type)
-    if isinstance(entity, Chat):
-        return (entity.title, "group")
-    return (None, "unknown")
-
-
-def _get_sender_name(msg: Message) -> str | None:
-    """Extract sender display name from message."""
-    if msg.sender:
-        if isinstance(msg.sender, User):
-            return " ".join(filter(None, [msg.sender.first_name, msg.sender.last_name]))
-        if hasattr(msg.sender, "title"):
-            return msg.sender.title
-    return None
-
-
-async def _flush_batch(client: TelegramClient, pool: asyncpg.Pool, batch: list) -> None:
-    """Insert each (msg, args) in the batch; for messages with media, download
-    them to MinIO inline. Inline (not background) to avoid spawning hundreds of
-    parallel telegram fetches that trigger FloodWait — at ~1s/file the historical
-    pace is fine and matches the iter_messages cadence.
-    """
-    for msg, args in batch:
-        message_id = await db.insert_message(pool, *args)
-        if message_id is None:
-            continue
-        # args[7] is message_type (see batch.append signature)
-        message_type = args[7]
-        if msg.media and message_type and message_type.lower() in media_download.DOWNLOADABLE_TYPES:
-            try:
-                await media_download.download_and_store_media(
-                    client, pool, msg, message_id, message_type
-                )
-            except Exception as e:
-                logger.warning(f"media download error in batch (msg {message_id}): {e}")
-
-
-async def import_chat(
-    client: TelegramClient,
-    pool: asyncpg.Pool,
-    dialog,
-    my_id: int,
-):
-    """Import all messages from a single chat."""
-    entity = dialog.entity
-    chat_id = dialog.id
-    chat_title, chat_type = _get_chat_info(entity)
-
-    # Check resume point
-    state = await db.get_sync_state(pool, chat_id)
-    min_id = state["last_message_id"] if state else 0
-
-    # Snapshot max_id to set upper bound
-    try:
-        latest = await client.get_messages(entity, limit=1)
-        max_id = latest[0].id if latest else 0
-    except Exception as e:
-        logger.warning(f"Could not get latest message for {chat_title}: {e}")
-        return
-
-    if min_id >= max_id:
-        if state and not state.get("completed"):
-            await db.mark_chat_completed(pool, chat_id)
-        return  # Already fully imported
-
-    logger.info(f"Importing {chat_title} (chat_id={chat_id}) from msg {min_id} to {max_id}")
-
-    batch = []
-    count = 0
-
-    try:
-        async for msg in client.iter_messages(
-            entity, min_id=min_id, max_id=max_id + 1, reverse=True
-        ):
-            if not isinstance(msg, Message):
+        for m in msgs:  # newest-first (descending)
+            tg_id = mapping._int_or_none(m.get("telegramMessageId"))
+            if tg_id is None:
                 continue
+            if tg_id <= min_id:
+                stop = True
+                break
 
-            message_type, needs_transcription = _classify_message(msg)
-            direction = "outbound" if msg.sender_id == my_id else "inbound"
-            sender_name = _get_sender_name(msg)
+            kwargs = mapping.to_insert_kwargs(m)
+            if kwargs is None:
+                continue
+            try:
+                message_id, is_new = await db.insert_message_ex(pool, **kwargs)
+            except Exception as e:
+                logger.error("history insert failed (chat %s msg %s): %s", chat_id, tg_id, e)
+                continue
+            if message_id is None:
+                continue
+            highest_seen = max(highest_seen, tg_id)
+            if is_new:
+                new_count += 1
+                if (HISTORY_MEDIA and m.get("attachments")
+                        and kwargs["message_type"] in media_download.DOWNLOADABLE_TYPES):
+                    try:
+                        await media_download.download_and_store_media(
+                            connector, pool, m, message_id, kwargs["message_type"]
+                        )
+                    except Exception as e:
+                        logger.warning("history media error (msg %s): %s", message_id, e)
 
-            # Service messages (user joined, etc.)
-            if msg.action:
-                message_type = "service"
-                needs_transcription = False
+        # Advance the cursor to the oldest id in this page and page OLDER. Do NOT
+        # stop on a short page: Telegram/connector can return < limit even when
+        # more history exists (server windowing + null-parsed drops). The
+        # no-progress guard (oldest not strictly older than the cursor) is the
+        # hard infinite-loop backstop.
+        oldest = mapping._int_or_none(msgs[-1].get("telegramMessageId"))
+        if oldest is None:
+            break
+        if offset_id is not None and oldest >= offset_id:
+            break
+        offset_id = oldest
 
-            batch.append((msg, (
-                msg.id, chat_id, chat_title, chat_type,
-                msg.sender_id, sender_name,
-                msg.text,  # None for media-only messages
-                message_type, direction,
-                msg.date,  # Already timezone-aware from Telethon
-                bool(msg.forward), msg.reply_to.reply_to_msg_id if msg.reply_to else None,
-                needs_transcription,
-            )))
-
-            if len(batch) >= BATCH_SIZE:
-                await _flush_batch(client, pool, batch)
-                last_id = batch[-1][1][0]
-                await db.update_sync_state(pool, chat_id, chat_title, last_id, len(batch))
-                count += len(batch)
-                batch.clear()
-
-    except FloodWaitError as e:
-        logger.warning(f"FloodWait for {chat_title}: sleeping {e.seconds + 5}s")
-        # Save progress before sleeping
-        if batch:
-            await _flush_batch(client, pool, batch)
-            last_id = batch[-1][1][0]
-            await db.update_sync_state(pool, chat_id, chat_title, last_id, len(batch))
-            count += len(batch)
-            batch.clear()
-        await asyncio.sleep(e.seconds + 5)
-        return  # Will be retried next cycle
-
-    # Flush remaining
-    if batch:
-        await _flush_batch(client, pool, batch)
-        last_id = batch[-1][1][0]
-        await db.update_sync_state(pool, chat_id, chat_title, last_id, len(batch))
-        count += len(batch)
-
-    await db.mark_chat_completed(pool, chat_id)
-    logger.info(f"Completed {chat_title}: {count} messages imported")
+    # Watermark = highest id imported, but ONLY advance it once the whole range
+    # down to the previous watermark is contiguously imported. We page newest→old,
+    # so on an aborted scan the OLDER portion is still missing; advancing then
+    # would skip it forever. Leave the watermark put and re-scan next cycle
+    # (idempotent via ON CONFLICT) when aborted.
+    if not aborted and highest_seen > min_id:
+        await db.update_sync_state(pool, int(chat_id), chat_title, highest_seen, new_count)
+        await db.mark_chat_completed(pool, int(chat_id))
+    if new_count:
+        logger.info("Backfilled %s: %s new messages%s", chat_title, new_count,
+                    " (partial — capped)" if aborted else "")
 
 
-async def run(client: TelegramClient, pool: asyncpg.Pool):
-    """Main entry point — import all history, then periodic catch-up."""
-    me = await client.get_me()
-    my_id = me.id
-    consecutive_disconnect_failures = 0
+async def run(pool: asyncpg.Pool, connector: ConnectorClient) -> None:
+    """Periodic backfill loop. Never raises out — the connector recovers on its
+    own and the bridge keeps serving; we just retry next cycle."""
+    await asyncio.sleep(STARTUP_DELAY)
 
     while True:
         try:
-            if not client.is_connected():
-                logger.error("Telegram client is not connected — exiting so restart policy can recover")
-                raise SystemExit(1)
+            dialogs = await connector.get_dialogs()
+            logger.info("Backfill cycle: %s chats", len(dialogs))
 
-            dialogs = await client.get_dialogs()
-            logger.info(f"Starting sync for {len(dialogs)} chats")
-
-            from sync import avatar_sync
             avatars_done = 0
             for dialog in dialogs:
-                # Always-on: persists real unread badge + archived flag every
-                # cycle, and downloads avatar when avatar_url IS NULL. Never
-                # blocks the message import (errors swallowed inside avatar_sync).
                 try:
-                    if await avatar_sync.sync_dialog_state(client, pool, dialog):
+                    if await avatar_sync.sync_dialog_state(connector, pool, dialog):
                         avatars_done += 1
                 except Exception as e:
-                    logger.warning(f"dialog state sync failed for {dialog.name}: {e}")
+                    logger.warning("dialog state sync failed for %s: %s", dialog.get("name"), e)
 
                 try:
-                    await import_chat(client, pool, dialog, my_id)
-                except FloodWaitError as e:
-                    logger.warning(f"FloodWait between chats: sleeping {e.seconds + 5}s")
-                    await asyncio.sleep(e.seconds + 5)
+                    await import_chat(connector, pool, dialog)
                 except Exception as e:
-                    logger.error(f"Error importing chat {dialog.name}: {e}")
+                    logger.error("Error importing chat %s: %s", dialog.get("name"), e)
                 await asyncio.sleep(DELAY_BETWEEN_CHATS)
+
             if avatars_done:
-                logger.info(f"Backfilled {avatars_done} conversation avatars this cycle")
-
-            logger.info("Sync cycle complete. Next run in 30 minutes.")
-            consecutive_disconnect_failures = 0
-
-        except FloodWaitError as e:
-            logger.warning(f"FloodWait on get_dialogs: sleeping {e.seconds + 5}s")
-            await asyncio.sleep(e.seconds + 5)
-            continue
+                logger.info("Backfilled %s conversation avatars this cycle", avatars_done)
+            logger.info("Backfill cycle complete. Next run in 30 minutes.")
         except Exception as e:
-            err_str = str(e)
-            logger.error(f"Sync cycle failed: {err_str}")
-            if "disconnected" in err_str.lower() or "not connected" in err_str.lower():
-                consecutive_disconnect_failures += 1
-                if consecutive_disconnect_failures >= 2:
-                    logger.error(
-                        f"Disconnected for {consecutive_disconnect_failures} cycles — exiting for restart"
-                    )
-                    raise SystemExit(1)
+            logger.error("Backfill cycle failed: %s", e)
 
         await asyncio.sleep(CATCHUP_INTERVAL)

@@ -44,18 +44,24 @@ async function ingestAccount(pool: Pool, account: Account): Promise<void> {
       if (!DRY_RUN) await setLiveCursor(pool, account, now, null);
       logger.info(
         { account, at: now.toISOString() },
-        'no cursor — initialized to now(), skipping history'
+        'no cursor - initialized to now(), skipping history'
       );
-      return;
+      return { account, instance, rows: 0, chunks: 0, partial: false, failures: [] };
     }
   }
 
   let totalRows = 0;
   let totalChunks = 0;
+  const failures: ClassifiedFailure[] = [];
 
   for (;;) {
-    const remaining = MAX_ROWS > 0 ? MAX_ROWS - totalRows : BATCH;
-    if (MAX_ROWS > 0 && remaining <= 0) break;
+    if (deadlineAt !== null && Date.now() >= deadlineAt) {
+      logger.warn(
+        { account, instance, rows: totalRows },
+        'runtime budget reached; stopping account cleanly'
+      );
+      break;
+    }
 
     const batchLimit = MAX_ROWS > 0 ? Math.min(BATCH, remaining) : BATCH;
     const rows = await fetchBatch(pool, { account, cursor, limit: batchLimit });
@@ -87,29 +93,77 @@ async function ingestAccount(pool: Pool, account: Account): Promise<void> {
   }
 
   logger.info(
-    { account, instance, rows: totalRows, chunks: totalChunks, dryRun: DRY_RUN, maxRows: MAX_ROWS },
+    {
+      account,
+      instance,
+      rows: totalRows,
+      chunks: totalChunks,
+      dryRun: config.dryRun,
+      maxRows: config.maxRows,
+      partial: failures.length > 0,
+      failures: failures.length,
+    },
     'account ingest done'
   );
+  return {
+    account,
+    instance,
+    rows: totalRows,
+    chunks: totalChunks,
+    partial: failures.length > 0,
+    failures,
+  };
 }
 
-async function main(): Promise<void> {
-  if (!BRAIN_API_KEY && !DRY_RUN) {
+async function main(config = createConfig()): Promise<JobResult> {
+  if (!config.brainApiKey && !config.dryRun) {
     logger.warn('BRAIN_API_KEY not set — pushes will be unauthenticated (brain may reject)');
   }
-  const pool = new Pool({ connectionString: DATABASE_URL, max: 4 });
+  const pool = new Pool({ connectionString: config.databaseUrl, max: 4 });
+  const deadlineAt = config.maxRuntimeMs > 0 ? Date.now() + config.maxRuntimeMs : null;
+  const results: AccountIngestResult[] = [];
   try {
     await ensureLiveCursorTable(pool);
     for (const account of ACCOUNTS) {
-      await ingestAccount(pool, account);
+      results.push(await ingestAccount(pool, account, config, deadlineAt));
     }
   } finally {
     await pool.end();
   }
+
+  const failures = results.flatMap(result => result.failures);
+  const fatalFailures = failures.filter(failure => failure.kind === 'fatal');
+  const transientFailures = failures.filter(failure => failure.kind === 'transient');
+  const rows = results.reduce((sum, result) => sum + result.rows, 0);
+  const chunks = results.reduce((sum, result) => sum + result.chunks, 0);
+
+  if (fatalFailures.length > 0) {
+    throw new Error(`brain-ingest fatal failures: ${fatalFailures.map(f => f.message).join('; ')}`);
+  }
+
+  if (transientFailures.length > 0) {
+    if (rows > 0) {
+      logger.warn(
+        { rows, chunks, failures: transientFailures.map(f => f.message) },
+        'brain-ingest completed partially after transient failures; next run will resume from cursor'
+      );
+    } else {
+      throw new Error(
+        `brain-ingest transient failures before progress: ${transientFailures
+          .map(f => f.message)
+          .join('; ')}`
+      );
+    }
+  }
+
+  return { accounts: results, rows, chunks, fatalFailures, transientFailures };
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch(err => {
-    logger.error({ err: String(err) }, 'brain-ingest failed');
-    process.exit(1);
-  });
+if (require.main === module) {
+  main()
+    .then(() => process.exit(0))
+    .catch(err => {
+      logger.error({ err: String(err) }, 'brain-ingest failed');
+      process.exit(1);
+    });
+}

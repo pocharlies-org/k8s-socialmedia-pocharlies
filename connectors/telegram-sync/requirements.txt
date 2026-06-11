@@ -1,4 +1,4 @@
-telethon>=1.42.0
+nats-py>=2.6.0
 python-dotenv>=1.0.0
 asyncpg>=0.29.0
 faster-whisper>=1.0.0

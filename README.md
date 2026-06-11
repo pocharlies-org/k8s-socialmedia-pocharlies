@@ -12,7 +12,7 @@ Repo: `git@github.com:pocharlies/whatsappmcp.git` (the directory is `mcp-socialm
 | `telegram-connector` (gramjs) | 3002 | Telegram API, send + realtime |
 | `telegram-sync` (telethon, Python) | 3080 | Telegram message ingestion to Postgres |
 | `instagram-connector` (Graph API) | 3003 | Multi-account Instagram (DMs, comments, publish) |
-| `whatsapp-cloud-connector` (Cloud API) | 3004 | Deferred — pending dedicated phone |
+| `whatsapp-cloud-connector` (Cloud API) | 3004 | WhatsApp Business Platform transport, webhook + send API |
 | `mcp-server` | 3000 | Internal MCP server (HTTP) |
 | `mcp-sse` | 3010 | Public MCP over SSE for Claude / clients |
 
@@ -24,7 +24,7 @@ Tool inventory (49 tools across the 3 platforms): see [MCP.md](./MCP.md).
 mcp-socialmedia/
 ├── connectors/
 │   ├── whatsapp-web/        # whatsapp-web.js / Baileys connector (3001)
-│   ├── whatsapp-cloud/      # WhatsApp Cloud API connector (3004, deferred)
+│   ├── whatsapp-cloud/      # WhatsApp Cloud API connector (3004)
 │   ├── telegram/            # gramjs connector — send + realtime (3002)
 │   ├── telegram-sync/       # telethon ingestion to Postgres (3080)
 │   └── instagram/           # Graph API connector (3003)
@@ -122,7 +122,7 @@ FACEBOOK_APP_ID=
 FACEBOOK_APP_SECRET=
 INSTAGRAM_WEBHOOK_VERIFY_TOKEN=
 
-# WhatsApp Cloud (deferred — needs dedicated phone)
+# WhatsApp Cloud (official Business Platform transport)
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
 WHATSAPP_BUSINESS_ACCOUNT_ID=

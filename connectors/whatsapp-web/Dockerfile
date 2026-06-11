@@ -21,4 +21,4 @@ WORKDIR /app
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "cd connectors/whatsapp-web && pnpm dev"]
+CMD ["sh", "-c", "cd connectors/whatsapp-web && pnpm start"]

@@ -115,7 +115,7 @@ async def recover_stuck_transcriptions(pool: asyncpg.Pool) -> int:
     return count
 
 
-async def insert_message(
+async def insert_message_ex(
     pool: asyncpg.Pool,
     telegram_message_id: int,
     chat_id: int,
@@ -130,9 +130,13 @@ async def insert_message(
     is_forwarded: bool = False,
     reply_to_message_id: int | None = None,
     needs_transcription: bool = False,
-) -> int | None:
-    """Insert a message into unified table. Returns the bigint message_id if inserted,
-    or the existing id if duplicate (lookup by wa_message_id)."""
+) -> tuple[int | None, bool]:
+    """Insert a message into the unified table.
+
+    Returns (message_id, is_new): is_new=True when this call actually created the
+    row, False when it already existed (ON CONFLICT). Callers gate one-shot side
+    effects (auto-reply webhook, avatar/media pulls) on is_new to stay idempotent
+    when realtime + history backfill see the same message."""
     raw_conv_id = f"tg_{chat_id}"
     conv_id = account_key(raw_conv_id)
     wa_msg_id = account_key(f"tg_{chat_id}_{telegram_message_id}")
@@ -164,10 +168,35 @@ async def insert_message(
                 is_forwarded, reply_ref, json.dumps(metadata), ACCOUNT,
             )
             if new_id is not None:
-                return int(new_id)
+                return int(new_id), True
             # ON CONFLICT — fetch existing id so callers (e.g. attachment writer) can still wire up
             existing = await conn.fetchval(GET_MESSAGE_ID_SQL, wa_msg_id)
-            return int(existing) if existing is not None else None
+            return (int(existing) if existing is not None else None), False
+
+
+async def insert_message(
+    pool: asyncpg.Pool,
+    telegram_message_id: int,
+    chat_id: int,
+    chat_title: str | None,
+    chat_type: str,
+    sender_id: int | None,
+    sender_name: str | None,
+    content: str | None,
+    message_type: str,
+    direction: str,
+    timestamp,
+    is_forwarded: bool = False,
+    reply_to_message_id: int | None = None,
+    needs_transcription: bool = False,
+) -> int | None:
+    """Back-compat wrapper: returns the message id (new or existing), or None."""
+    msg_id, _is_new = await insert_message_ex(
+        pool, telegram_message_id, chat_id, chat_title, chat_type,
+        sender_id, sender_name, content, message_type, direction, timestamp,
+        is_forwarded, reply_to_message_id, needs_transcription,
+    )
+    return msg_id
 
 
 async def insert_attachment(
@@ -230,19 +259,22 @@ async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE messages SET "
-            "  content = $2, "
+            "  content = $2::text, "
             "  metadata = metadata || '{\"transcription_status\": \"done\"}'::jsonb "
             "WHERE id = $1", msg_id, text
         )
 
 
 async def fail_transcription(pool: asyncpg.Pool, msg_id: int, error: str, increment_attempts: bool = True):
+    # $2 must be cast explicitly: as a jsonb_build_object value arg its type is
+    # "any", which asyncpg cannot infer ("could not determine data type of
+    # parameter $2") and the UPDATE throws.
     async with pool.acquire() as conn:
         if increment_attempts:
             await conn.execute(
                 "UPDATE messages SET metadata = metadata || jsonb_build_object("
                 "  'transcription_status', 'failed', "
-                "  'transcription_error', $2, "
+                "  'transcription_error', $2::text, "
                 "  'transcription_attempts', (COALESCE((metadata->>'transcription_attempts')::int, 0) + 1)"
                 ") WHERE id = $1", msg_id, error
             )
@@ -250,7 +282,7 @@ async def fail_transcription(pool: asyncpg.Pool, msg_id: int, error: str, increm
             await conn.execute(
                 "UPDATE messages SET metadata = metadata || jsonb_build_object("
                 "  'transcription_status', 'pending', "
-                "  'transcription_error', $2"
+                "  'transcription_error', $2::text"
                 ") WHERE id = $1", msg_id, error
             )
 

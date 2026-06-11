@@ -9,6 +9,7 @@ const TELEGRAM_SESSION_STRING = process.env.TELEGRAM_SESSION_STRING || '';
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const PORT = parseInt(process.env.PORT || '3002', 10);
+const CONNECTOR_ACCOUNT = process.env.CONNECTOR_ACCOUNT || 'personal';
 const CONNECTOR_SHARED_SECRET =
   process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
 
@@ -64,6 +65,7 @@ async function main() {
   client.on('message', async (message: TelegramMessage) => {
     const event: TelegramMessageReceivedEvent = {
       eventType: 'TelegramMessageReceived',
+      account: CONNECTOR_ACCOUNT,
       conversationId: message.conversationId,
       telegramMessageId: message.telegramMessageId,
       telegramTimestamp: message.telegramTimestamp.toISOString(),

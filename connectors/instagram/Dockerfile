@@ -22,7 +22,8 @@ WORKDIR /app/shared
 RUN pnpm exec tsc --skipLibCheck --noEmit false || true
 
 WORKDIR /app
+RUN cd connectors/instagram && pnpm build
 
 EXPOSE 3003
 
-CMD ["sh", "-c", "cd connectors/instagram && pnpm dev"]
+CMD ["sh", "-c", "cd connectors/instagram && pnpm start"]

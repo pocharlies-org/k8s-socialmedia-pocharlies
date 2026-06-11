@@ -104,6 +104,21 @@ whatsapp_send_message chatId='31611848681-1598895615@g.us' text='MCP group send 
 
 Connector logs should show `failureClass=timeout`, `failureClass=missing_session`, `failureClass=disabled_sending`, or `failureClass=disconnected` instead of a generic send failure.
 
+### WhatsApp — New 1:1 Conversations
+
+Both WhatsApp accounts use Baileys as linked WhatsApp Web devices, not the official WhatsApp Business Platform. For a new direct 1:1 chat, WhatsApp may require a trusted-contact token (`tctoken`). If Baileys cannot obtain it, the professional connector returns `403 account_restricted` instead of reporting a false "sent".
+
+Use one of these paths:
+
+- Existing/inbound chat: have the customer message the business first, then `whatsapp_send_message` can reply normally.
+- Manual handoff: the connector now queues a `whatsapp_manual_open_requests`
+  row when a direct send fails with `account_restricted`. Open
+  `https://whatsapp-pro.lan.e-dani.com/manual-open`, paste the admin token,
+  click the `wa.me` compose link, press send in WhatsApp, then mark the row as
+  `sent`. The raw connector response also includes `fallback.manualOpenUrl` and
+  `fallback.manualRequest.id`.
+- Automated first contact: use the official WhatsApp Business Platform/Cloud API with approved message templates. Do not bypass by disabling `WA_DIRECT_PRIVACY_PREFLIGHT`; that only restores the old false-positive behavior where WhatsApp later rejects the message with `463`.
+
 ### Telegram — Send
 
 | Tool | Description | Required params |

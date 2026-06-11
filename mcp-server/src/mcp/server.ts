@@ -21,7 +21,7 @@ import pino from 'pino';
 
 const ACCOUNT_DESCRIPTION =
   "Account to route this call to. 'personal' (default) = WhatsApp web (Baileys, personal number) + Telegram paxanguero. " +
-  "'professional' = WhatsApp web (Baileys, business number) + Telegram sauvageadminbot (skirmshop). " +
+  "'professional' = WhatsApp Business Cloud API + Telegram sauvageadminbot (skirmshop). " +
   'Choose based on the destination chat: skirmshop/business chats → professional; family/personal chats → personal. ' +
   'When the destination is ambiguous, prefer "professional" for Claude/Codex agents.';
 
@@ -33,6 +33,23 @@ const ACCOUNT_PROPERTY = {
     default: 'personal',
   },
 } as const;
+
+function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
+  if (typeof chatId !== 'string') return null;
+  const bareId = stripAccount(chatId).id;
+  if (bareId.includes('@g.us')) return null;
+  const user = bareId.split('@')[0] || '';
+  const digits = user.replace(/\D/g, '');
+  return digits.length >= 8 ? digits : null;
+}
+
+function manualWhatsAppOpenUrl(chatId: unknown, text: unknown): string | undefined {
+  const phone = phoneFromDirectWhatsAppId(chatId);
+  if (!phone) return undefined;
+  const suffix =
+    typeof text === 'string' && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
+  return `https://wa.me/${phone}${suffix}`;
+}
 
 export class MCPServer {
   private server: Server;
@@ -344,7 +361,7 @@ export class MCPServer {
           {
             name: 'whatsapp_send_message',
             description:
-              'Send a WhatsApp message directly (no draft flow). Routes by `account`: personal = WhatsApp web (Baileys, personal number), professional = WhatsApp web (Baileys, skirmshop business number).',
+              'Send a WhatsApp message directly (no draft flow). Routes by `account`: personal = WhatsApp web (Baileys, personal number), professional = WhatsApp Business Cloud API.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -353,6 +370,39 @@ export class MCPServer {
                 ...ACCOUNT_PROPERTY,
               },
               required: ['chatId', 'text'],
+            },
+          },
+          {
+            name: 'whatsapp_send_template',
+            description:
+              'Send an approved WhatsApp Business Cloud API template through the professional account. Use this for first contact or conversations outside the 24-hour customer service window.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description: 'Recipient phone or WhatsApp conversation ID',
+                },
+                templateName: { type: 'string', description: 'Approved Meta template name' },
+                languageCode: {
+                  type: 'string',
+                  default: 'es',
+                  description: 'Template language code',
+                },
+                components: {
+                  type: 'array',
+                  description: 'Optional WhatsApp template components array',
+                  items: { type: 'object' },
+                },
+                account: {
+                  type: 'string',
+                  enum: ['professional'],
+                  default: 'professional',
+                  description:
+                    'Templates are only supported on the WhatsApp Business Cloud API account.',
+                },
+              },
+              required: ['chatId', 'templateName'],
             },
           },
           {
@@ -1106,6 +1156,8 @@ export class MCPServer {
             return await this.handleSendApprovedReply(args as any);
           case 'whatsapp_send_message':
             return await this.handleSendMessage(args as any);
+          case 'whatsapp_send_template':
+            return await this.handleSendTemplate(args as any);
           case 'renew_qr_code':
             return await this.handleRenewQRCode(args as any);
           case 'get_connection_status':
@@ -1898,8 +1950,14 @@ export class MCPServer {
         const errorPayload = await this.readConnectorError(response);
         const failure = errorPayload.failureClass ? ` (${errorPayload.failureClass})` : '';
         const actionable = errorPayload.actionable ? ` - ${errorPayload.actionable}` : '';
+        const fallbackUrl =
+          errorPayload.fallback?.manualOpenUrl || manualWhatsAppOpenUrl(args.chatId, args.text);
+        const fallback =
+          errorPayload.failureClass === 'account_restricted' && fallbackUrl
+            ? ` Manual fallback: open ${fallbackUrl} in the official WhatsApp app/Web session and press send manually. Automated first-contact sends require an existing inbound chat/trusted-contact token or an official WhatsApp Business Platform template.`
+            : '';
         throw new Error(
-          `Connector returned ${response.status}${failure}: ${errorPayload.error || response.statusText}${actionable}`
+          `Connector returned ${response.status}${failure}: ${errorPayload.error || response.statusText}${actionable}${fallback}`
         );
       }
 
@@ -1924,6 +1982,59 @@ export class MCPServer {
     } catch (error) {
       this.logger.error(`Error sending message: ${error}`);
       throw new McpError(ErrorCode.InternalError, `Failed to send message: ${error}`);
+    }
+  }
+
+  private async handleSendTemplate(args: {
+    chatId: string;
+    templateName: string;
+    languageCode?: string;
+    components?: unknown[];
+    account?: string;
+  }) {
+    if (process.env.ENABLE_SENDING !== 'true') {
+      throw new McpError(ErrorCode.InvalidRequest, 'Sending is disabled (ENABLE_SENDING != true)');
+    }
+    if (process.env.EMERGENCY_DISABLE_SENDING === 'true') {
+      throw new McpError(ErrorCode.InvalidRequest, 'Sending is emergency disabled');
+    }
+
+    const account = normalizeAccount(args.account || 'professional');
+    if (account !== 'professional') {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        'WhatsApp templates are only supported on the professional Cloud API account'
+      );
+    }
+    if (!args.chatId || !args.templateName) {
+      throw new McpError(ErrorCode.InvalidRequest, 'chatId and templateName are required');
+    }
+
+    try {
+      const result = await this.connectorCall(
+        this.waUrl(account),
+        'POST',
+        '/api/v1/messages/template',
+        {
+          sendToken: `template-${Date.now()}`,
+          conversationId: args.chatId,
+          templateName: args.templateName,
+          languageCode: args.languageCode || 'es',
+          ...(Array.isArray(args.components) ? { components: args.components } : {}),
+        },
+        30000
+      );
+
+      return this.jsonResponse({
+        message: 'Template sent',
+        messageId: result.messageId || null,
+        sentAt: result.sentAt || new Date().toISOString(),
+        chatId: args.chatId,
+        templateName: args.templateName,
+      });
+    } catch (error) {
+      this.logger.error(`Error sending WhatsApp template: ${error}`);
+      throw new McpError(ErrorCode.InternalError, `Failed to send WhatsApp template: ${error}`);
     }
   }
 

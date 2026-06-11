@@ -29,6 +29,12 @@ import {
   GroupMetadata,
   Browsers,
 } from '@whiskeysockets/baileys';
+import {
+  isTcTokenExpired,
+  resolveIssuanceJid,
+  resolveTcTokenJid,
+  storeTcTokensFromIqResult,
+} from '@whiskeysockets/baileys/lib/Utils/tc-token-utils.js';
 import { Boom } from '@hapi/boom';
 import { EventEmitter } from 'events';
 import { promises as fsp } from 'fs';
@@ -59,6 +65,14 @@ import {
   setMessageStatus,
   setConversationWaChatId,
 } from './db-writer';
+import {
+  appendCompanyToDisplayName,
+  displayNameOrPhone,
+  normalizePhoneForWhatsApp,
+  WhatsAppContactSeedInput,
+  WhatsAppContactSeedResult,
+  WhatsAppCustomerTokenStatus,
+} from './contact-sync';
 import { uploadMedia, ensureMediaBucket, fetchMedia, uploadAvatar } from './media-storage';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 
@@ -127,6 +141,8 @@ export type WhatsAppSendFailureClass =
   | 'missing_session'
   | 'group_metadata'
   | 'disconnected'
+  | 'account_restricted'
+  | 'invalid_recipient'
   | 'auth'
   | 'unknown';
 
@@ -165,6 +181,12 @@ interface SendFailureDetails {
   causeMessage: string;
   actionable: string;
   repair?: GroupSessionRefreshResult;
+}
+
+interface ImmediateSendFailure {
+  failureClass: WhatsAppSendFailureClass;
+  code?: string;
+  message: string;
 }
 
 class TtlCache implements CacheStore {
@@ -247,6 +269,16 @@ export function classifyWhatsAppSendFailure(error: unknown): WhatsAppSendFailure
     text.includes('connection lost')
   )
     return 'disconnected';
+  if (
+    text.includes('463') ||
+    text.includes('tctoken') ||
+    text.includes('trusted contact') ||
+    text.includes('reachout') ||
+    text.includes('account restricted')
+  )
+    return 'account_restricted';
+  if (text.includes('not on whatsapp') || text.includes('invalid recipient'))
+    return 'invalid_recipient';
   if (text.includes('group metadata') || text.includes('not a group jid')) return 'group_metadata';
   return 'unknown';
 }
@@ -262,6 +294,12 @@ function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: b
   }
   if (failureClass === 'group_metadata') {
     return 'The connector could not refresh group metadata. Confirm the linked WhatsApp account is still a member of the group and that the group JID is correct.';
+  }
+  if (failureClass === 'account_restricted') {
+    return 'WhatsApp rejected a 1:1 reachout because the linked device has no usable trusted-contact token for that contact, or the account is under a new-chat/reachout restriction. Use an existing conversation, have the customer message the business first, or send first contact through an official approved channel.';
+  }
+  if (failureClass === 'invalid_recipient') {
+    return 'The target phone/JID could not be resolved as a WhatsApp contact.';
   }
   if (failureClass === 'disconnected') {
     return 'WhatsApp is disconnected. Check get_connection_status and re-authenticate with the QR flow if needed.';
@@ -431,6 +469,11 @@ export class BaileysClient extends EventEmitter {
   private presenceSubscribed = new Set<string>();
   private groupMetaCache = new Map<string, GroupMetadata>(); // by raw JID
   private keyCache = new Map<string, { key: WAMessageKey; chatJid: string }>(); // by waMessageId
+  private immediateSendFailureWaiters = new Map<string, (failure: ImmediateSendFailure) => void>();
+  private recentImmediateSendFailures = new Map<
+    string,
+    { failure: ImmediateSendFailure; expiresAt: number }
+  >();
   private retryMessageCache: CacheStore;
   private msgRetryCounterCache: CacheStore;
   private userDevicesCache: CacheStore;
@@ -775,6 +818,8 @@ export class BaileysClient extends EventEmitter {
       for (const u of updates) {
         if (!u.key?.id) continue;
         const waMessageId = u.key.id;
+        const stubParams = (u.update as any)?.messageStubParameters;
+        const ackErrorCode = Array.isArray(stubParams) ? String(stubParams[0] || '') : undefined;
         // Detect deletions
         const stub = u.update?.messageStubType;
         const isDeleted =
@@ -787,7 +832,21 @@ export class BaileysClient extends EventEmitter {
         const st: number | undefined = (u.update as any)?.status;
         if (typeof st === 'number') {
           const mapped = mapWaStatus(st);
-          if (mapped) void setMessageStatus(waMessageId, mapped).catch(() => {});
+          if (mapped) {
+            void setMessageStatus(waMessageId, mapped).catch(() => {});
+            if (mapped === 'failed') {
+              const failureClass: WhatsAppSendFailureClass =
+                ackErrorCode === '463' ? 'account_restricted' : 'unknown';
+              this.resolveImmediateSendFailure(waMessageId, {
+                failureClass,
+                code: ackErrorCode,
+                message:
+                  ackErrorCode === '463'
+                    ? 'WhatsApp rejected this 1:1 send with 463: account restricted or missing trusted-contact token.'
+                    : `WhatsApp rejected this send${ackErrorCode ? ` with ack error ${ackErrorCode}` : ''}.`,
+              });
+            }
+          }
         }
       }
     });
@@ -819,7 +878,10 @@ export class BaileysClient extends EventEmitter {
       this.emit('chat-update', {
         waChatId: norm,
         updateType,
-        metadata: { participants: participants.map(p => this.normalizeJid(p)), action },
+        metadata: {
+          participants: participants.map(p => this.normalizeJid(typeof p === 'string' ? p : p.id)),
+          action,
+        },
       });
       this.groupMetaCache.delete(id);
     });
@@ -1259,9 +1321,9 @@ export class BaileysClient extends EventEmitter {
     if (isGroup) {
       groupRepair = await this.refreshGroupSession(raw, {
         reason: 'send-preflight',
-        warmSessions: process.env.WA_GROUP_SEND_PREFLIGHT_SESSIONS === 'true',
-        forceSessions: false,
-        clearSenderKeyMemory: false,
+        warmSessions: process.env.WA_GROUP_SEND_PREFLIGHT_SESSIONS !== 'false',
+        forceSessions: process.env.WA_GROUP_SEND_FORCE_SESSIONS === 'true',
+        clearSenderKeyMemory: process.env.WA_GROUP_SEND_CLEAR_SENDER_KEY !== 'false',
         failOnWarmupError: false,
       }).catch(e => {
         const failureClass =
@@ -1273,16 +1335,44 @@ export class BaileysClient extends EventEmitter {
     this.logger.info(
       `Sending WhatsApp message rawJid=${raw} normalizedJid=${normalized} type=${isGroup ? 'group' : 'direct'}${groupRepair?.groupSubject ? ` groupSubject="${groupRepair.groupSubject}" participants=${groupRepair.participantCount}` : ''}`
     );
+    if (!isGroup && this.isDirectUserJid(raw)) {
+      await this.prepareDirectPrivacyToken(raw, normalized, started).catch(e => {
+        throw this.buildSendError(
+          classifyWhatsAppSendFailure(e),
+          raw,
+          normalized,
+          false,
+          started,
+          0,
+          e
+        );
+      });
+    }
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
     try {
       const sent = await this.sendTextWithTimeout(raw, content, timeoutMs, {
         useCachedGroupMetadata: isGroup ? false : undefined,
+        useUserDevicesCache: isGroup ? false : undefined,
         quoted,
       });
       const messageId = sent?.key?.id;
       this.logger.info(
         `WhatsApp message sent rawJid=${raw} normalizedJid=${normalized} elapsedMs=${Date.now() - started}${messageId ? ` id=${messageId}` : ''}`
       );
+      const immediateFailure = messageId
+        ? await this.waitForImmediateSendFailure(messageId)
+        : undefined;
+      if (immediateFailure) {
+        throw this.buildSendError(
+          immediateFailure.failureClass,
+          raw,
+          normalized,
+          false,
+          started,
+          1,
+          new Error(immediateFailure.message)
+        );
+      }
       if (sent?.key) {
         this.rememberKey(messageId || '', sent.key, raw);
         this.rememberMessageForRetry(sent.key, sent.message);
@@ -1302,14 +1392,14 @@ export class BaileysClient extends EventEmitter {
             warmSessions: true,
             forceSessions: true,
             clearSenderKeyMemory: true,
-            failOnWarmupError: false,
-            markFailedDevicesAsSenderKeySent: true,
+            failOnWarmupError: true,
           });
           this.logger.info(
             `Retrying WhatsApp group send after repair rawJid=${raw} normalizedJid=${normalized} groupSubject="${repair.groupSubject}" participants=${repair.participantCount} devices=${repair.deviceCount}`
           );
           const retried = await this.sendTextWithTimeout(raw, content, timeoutMs, {
             useCachedGroupMetadata: false,
+            useUserDevicesCache: false,
             quoted,
           });
           const messageId = retried?.key?.id;
@@ -1346,6 +1436,91 @@ export class BaileysClient extends EventEmitter {
     }
   }
 
+  async seedContactAndProbe(input: WhatsAppContactSeedInput): Promise<WhatsAppContactSeedResult> {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!this.isConnected())
+      throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
+
+    const phone = normalizePhoneForWhatsApp(input.phone);
+    if (!phone) {
+      throw new Error(`Invalid WhatsApp phone: ${String(input.phone || '')}`);
+    }
+
+    const started = Date.now();
+    const sock = this.sock as any;
+    const displayName = appendCompanyToDisplayName(
+      displayNameOrPhone(input.displayName, phone.phoneE164),
+      input.company
+    );
+
+    const contactResults = await sock.onWhatsApp(phone.rawJid);
+    const contact = Array.isArray(contactResults) ? contactResults[0] : undefined;
+    if (!contact || contact.exists === false) {
+      return {
+        phoneE164: phone.phoneE164,
+        waJid: phone.waJid,
+        rawJid: phone.rawJid,
+        existsOnWhatsApp: false,
+        contactSeeded: false,
+        status: 'not_on_whatsapp',
+        tokenStatus: 'not_on_whatsapp',
+        elapsedMs: Date.now() - started,
+        actionable: actionableForFailure('invalid_recipient', false),
+      };
+    }
+
+    await sock.addOrEditContact(phone.rawJid, {
+      fullName: displayName,
+      firstName: displayName,
+      pnJid: phone.rawJid,
+      saveOnPrimaryAddressbook: true,
+    } satisfies proto.SyncActionValue.IContactAction);
+    this.contactNames.set(phone.rawJid, displayName);
+    this.contactNames.set(phone.waJid, displayName);
+
+    let tokenStatus: WhatsAppCustomerTokenStatus = 'missing_token';
+    let actionable: string | undefined;
+    try {
+      await this.prepareDirectPrivacyToken(phone.rawJid, phone.waJid, started);
+      tokenStatus = (await this.readDirectPrivacyTokenState(phone.rawJid))?.ok
+        ? 'has_token'
+        : 'missing_token';
+    } catch (error) {
+      const failureClass = classifyWhatsAppSendFailure(error);
+      if (failureClass === 'account_restricted') {
+        tokenStatus = 'missing_token';
+        actionable = actionableForFailure('account_restricted', false);
+      } else if (failureClass === 'invalid_recipient') {
+        return {
+          phoneE164: phone.phoneE164,
+          waJid: phone.waJid,
+          rawJid: phone.rawJid,
+          existsOnWhatsApp: false,
+          contactSeeded: true,
+          status: 'not_on_whatsapp',
+          tokenStatus: 'not_on_whatsapp',
+          elapsedMs: Date.now() - started,
+          error: errorMessage(error),
+          actionable: actionableForFailure('invalid_recipient', false),
+        };
+      } else {
+        throw error;
+      }
+    }
+
+    return {
+      phoneE164: phone.phoneE164,
+      waJid: phone.waJid,
+      rawJid: phone.rawJid,
+      existsOnWhatsApp: true,
+      contactSeeded: true,
+      status: tokenStatus === 'has_token' ? 'ready' : 'seeded_missing_token',
+      tokenStatus,
+      elapsedMs: Date.now() - started,
+      actionable,
+    };
+  }
+
   async sendFile(
     chatId: string,
     fileUrl: string,
@@ -1354,10 +1529,16 @@ export class BaileysClient extends EventEmitter {
   ): Promise<void> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
-    const res = await fetch(fileUrl);
-    if (!res.ok) throw new Error(`Failed to fetch file from ${fileUrl}: ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const contentType = res.headers.get('content-type') || '';
+    let buf: Buffer;
+    let contentType = '';
+    try {
+      const res = await fetch(fileUrl);
+      if (!res.ok) throw new Error(`Failed to fetch file from ${fileUrl}: ${res.status}`);
+      buf = Buffer.from(await res.arrayBuffer());
+      contentType = res.headers.get('content-type') || '';
+    } catch (e: any) {
+      throw new Error(`Failed to fetch file from ${fileUrl}: ${e?.message || e}`);
+    }
     const fileName = fileUrl.split('/').pop() || 'attachment';
 
     let payload: AnyMessageContent;
@@ -1682,7 +1863,11 @@ export class BaileysClient extends EventEmitter {
           new Set(
             devices
               .filter(d => d.user !== undefined && d.user !== null)
-              .map(d => jidEncode(d.user, 's.whatsapp.net', d.device))
+              .map(
+                d =>
+                  (d as any).jid ||
+                  jidEncode(d.user, (d as any).server || 's.whatsapp.net', d.device)
+              )
           )
         );
         deviceCount = deviceJids.length;
@@ -2037,6 +2222,15 @@ export class BaileysClient extends EventEmitter {
     return !!isJidGroup(jid) || jid.endsWith('@g.us');
   }
 
+  private isDirectUserJid(jid: string): boolean {
+    return (
+      jid.endsWith('@s.whatsapp.net') ||
+      jid.endsWith('@lid') ||
+      jid.endsWith('@hosted') ||
+      jid.endsWith('@hosted.lid')
+    );
+  }
+
   private cacheGroupMetadata(meta: GroupMetadata): void {
     const raw = meta.id;
     const normalized = this.normalizeJid(raw);
@@ -2197,12 +2391,19 @@ export class BaileysClient extends EventEmitter {
     rawJid: string,
     content: string,
     timeoutMs: number,
-    options?: { useCachedGroupMetadata?: boolean; quoted?: proto.IWebMessageInfo }
-  ): Promise<proto.WebMessageInfo | undefined> {
+    options?: {
+      useCachedGroupMetadata?: boolean;
+      useUserDevicesCache?: boolean;
+      quoted?: proto.IWebMessageInfo;
+    }
+  ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     const sendOpts: any = {};
     if (options?.useCachedGroupMetadata !== undefined) {
       sendOpts.useCachedGroupMetadata = options.useCachedGroupMetadata;
+    }
+    if (options?.useUserDevicesCache !== undefined) {
+      sendOpts.useUserDevicesCache = options.useUserDevicesCache;
     }
     if (options?.quoted) sendOpts.quoted = options.quoted;
     return this.race(
@@ -2210,6 +2411,164 @@ export class BaileysClient extends EventEmitter {
       timeoutMs,
       `sendMessage timeout after ${timeoutMs}ms`
     );
+  }
+
+  private async readDirectPrivacyTokenState(
+    rawJid: string
+  ): Promise<{ ok: boolean; storageJid: string } | null> {
+    if (!this.sock) return null;
+    const sock = this.sock as any;
+    const lidMapping = sock.signalRepository?.lidMapping;
+    const getLIDForPN =
+      lidMapping?.getLIDForPN?.bind(lidMapping) || (async () => null as string | null);
+    const keys = sock.authState?.keys;
+    if (!keys) return null;
+
+    const storageJid = await resolveTcTokenJid(rawJid, getLIDForPN);
+    const tokenData = await keys.get('tctoken', [storageJid]);
+    const entry = tokenData?.[storageJid];
+    const token = entry?.token;
+    const tokenLength = typeof token?.length === 'number' ? token.length : 0;
+    return {
+      ok: tokenLength > 0 && !isTcTokenExpired(entry?.timestamp),
+      storageJid,
+    };
+  }
+
+  private async prepareDirectPrivacyToken(
+    rawJid: string,
+    normalizedJid: string,
+    started: number
+  ): Promise<void> {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (process.env.WA_DIRECT_PRIVACY_PREFLIGHT === 'false') return;
+
+    const sock = this.sock as any;
+    const lidMapping = sock.signalRepository?.lidMapping;
+    const getLIDForPN =
+      lidMapping?.getLIDForPN?.bind(lidMapping) || (async () => null as string | null);
+    const getPNForLID = lidMapping?.getPNForLID?.bind(lidMapping);
+    const keys = sock.authState?.keys;
+    if (!keys) return;
+
+    const hasValidToken = async (): Promise<{ ok: boolean; storageJid: string }> => {
+      const storageJid = await resolveTcTokenJid(rawJid, getLIDForPN);
+      const tokenData = await keys.get('tctoken', [storageJid]);
+      const entry = tokenData?.[storageJid];
+      const token = entry?.token;
+      const tokenLength = typeof token?.length === 'number' ? token.length : 0;
+      return {
+        ok: tokenLength > 0 && !isTcTokenExpired(entry?.timestamp),
+        storageJid,
+      };
+    };
+
+    let tokenState = await hasValidToken();
+    if (tokenState.ok) return;
+
+    const contactResults = await sock.onWhatsApp(rawJid).catch((err: Error) => {
+      this.logger.warn(
+        `WhatsApp direct preflight onWhatsApp failed rawJid=${rawJid} normalizedJid=${normalizedJid}: ${err.message}`
+      );
+      return undefined;
+    });
+    const contact = Array.isArray(contactResults) ? contactResults[0] : undefined;
+    if (contact && contact.exists === false) {
+      throw new WhatsAppSendError(
+        `WhatsApp direct preflight failed: ${normalizedJid} is not on WhatsApp`,
+        {
+          failureClass: 'invalid_recipient',
+          rawJid,
+          normalizedJid,
+          isGroup: false,
+          attempts: 0,
+          elapsedMs: Date.now() - started,
+          causeMessage: 'target is not on WhatsApp',
+          actionable: actionableForFailure('invalid_recipient', false),
+        }
+      );
+    }
+
+    await sock.getUSyncDevices([rawJid], false, false).catch((err: Error) => {
+      this.logger.warn(
+        `WhatsApp direct preflight device sync failed rawJid=${rawJid} normalizedJid=${normalizedJid}: ${err.message}`
+      );
+    });
+
+    const issueTimestamp = Math.floor(Date.now() / 1000);
+    const issueToLid = Boolean(sock.serverProps?.lidTrustedTokenIssueToLid);
+    const issueJid = await resolveIssuanceJid(rawJid, issueToLid, getLIDForPN, getPNForLID);
+    const result = await sock.issuePrivacyTokens([issueJid], issueTimestamp);
+    tokenState = await hasValidToken();
+    await storeTcTokensFromIqResult({
+      result,
+      fallbackJid: tokenState.storageJid,
+      keys,
+      getLIDForPN,
+    });
+
+    tokenState = await hasValidToken();
+    if (tokenState.ok) {
+      this.logger.info(
+        `WhatsApp direct preflight stored trusted-contact token rawJid=${rawJid} normalizedJid=${normalizedJid}`
+      );
+      return;
+    }
+
+    if (sock.serverProps?.privacyTokenOn1to1) {
+      throw new WhatsAppSendError(
+        'WhatsApp direct preflight could not obtain a trusted-contact token for this 1:1 target',
+        {
+          failureClass: 'account_restricted',
+          rawJid,
+          normalizedJid,
+          isGroup: false,
+          attempts: 0,
+          elapsedMs: Date.now() - started,
+          causeMessage: 'missing trusted-contact token after preflight',
+          actionable: actionableForFailure('account_restricted', false),
+        }
+      );
+    }
+  }
+
+  private resolveImmediateSendFailure(waMessageId: string, failure: ImmediateSendFailure): void {
+    const waiter = this.immediateSendFailureWaiters.get(waMessageId);
+    if (!waiter) {
+      this.recentImmediateSendFailures.set(waMessageId, {
+        failure,
+        expiresAt: Date.now() + 15000,
+      });
+      return;
+    }
+    this.immediateSendFailureWaiters.delete(waMessageId);
+    waiter(failure);
+  }
+
+  private async waitForImmediateSendFailure(
+    waMessageId: string
+  ): Promise<ImmediateSendFailure | undefined> {
+    const waitMs = parseInt(process.env.WA_SEND_ERROR_ACK_WAIT_MS || '5000', 10);
+    if (!waMessageId || waitMs <= 0) return undefined;
+    const now = Date.now();
+    for (const [id, entry] of this.recentImmediateSendFailures.entries()) {
+      if (entry.expiresAt <= now) this.recentImmediateSendFailures.delete(id);
+    }
+    const recent = this.recentImmediateSendFailures.get(waMessageId);
+    if (recent) {
+      this.recentImmediateSendFailures.delete(waMessageId);
+      return recent.failure;
+    }
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        this.immediateSendFailureWaiters.delete(waMessageId);
+        resolve(undefined);
+      }, waitMs);
+      this.immediateSendFailureWaiters.set(waMessageId, failure => {
+        clearTimeout(timer);
+        resolve(failure);
+      });
+    });
   }
 
   private buildSendError(

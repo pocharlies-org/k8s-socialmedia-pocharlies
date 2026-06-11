@@ -14,7 +14,7 @@ import pino from 'pino';
 export interface InstagramEvent {
   platform: 'instagram';
   account: string; // 'skirmshop' | 'barbelpapis'
-  eventType: 'dm' | 'comment' | 'mention' | 'story_mention' | 'unknown';
+  eventType: 'dm' | 'comment' | 'mention' | 'story_mention' | 'media' | 'unknown';
   senderId: string;
   senderUsername?: string;
   conversationId?: string;
@@ -79,6 +79,15 @@ export class InstagramIngestionService {
         messageType = 'STORY_MENTION';
         waMessageId = `ig_${event.account}_story_${event.mediaId || event.senderId}_${ts.getTime()}`;
         content = content || `story mention by @${event.senderUsername || event.senderId}`;
+      } else if (event.eventType === 'media') {
+        convId = `ig_${event.account}_media`;
+        convName = `Instagram ${event.account} media`;
+        convType = 'GROUP';
+        messageType = 'MEDIA';
+        waMessageId = event.mediaId
+          ? `ig_${event.account}_media_${event.mediaId}`
+          : `ig_${event.account}_media_${ts.getTime()}`;
+        content = content || `instagram media ${event.mediaId || ''}`.trim();
       } else {
         this.logger.debug(`Skipping unknown IG event type: ${event.eventType}`);
         return;

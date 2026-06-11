@@ -3,6 +3,7 @@
  * Writes incoming messages directly to PostgreSQL, bypassing NATS/MCP.
  */
 import pg from 'pg';
+import { WhatsAppCustomerAllowlistStatus, WhatsAppCustomerTokenStatus } from './contact-sync';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
@@ -52,6 +53,8 @@ export function stripAccountKey(id: string): string {
 }
 
 let pool: pg.Pool | null = null;
+let allowlistTableReady = false;
+let manualOpenTableReady = false;
 
 export function getPool(): pg.Pool {
   if (!pool) {
@@ -111,6 +114,331 @@ export interface HistorySyncState {
   status: string;
   lastError: string | null;
   updatedAt: Date;
+}
+
+export interface WhatsAppCustomerAllowlistData {
+  phoneE164: string;
+  waJid: string;
+  shopifyCustomerId?: string | null;
+  shop?: string | null;
+  email?: string | null;
+  displayName?: string | null;
+  status: WhatsAppCustomerAllowlistStatus;
+  tokenStatus: WhatsAppCustomerTokenStatus;
+  lastProbeAt?: Date | null;
+  lastError?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export type WhatsAppManualOpenStatus =
+  | 'pending'
+  | 'processing'
+  | 'opened'
+  | 'sent'
+  | 'cancelled'
+  | 'failed';
+
+export interface WhatsAppManualOpenRequestInput {
+  phoneE164: string;
+  waJid: string;
+  displayName?: string | null;
+  messageText?: string | null;
+  manualOpenUrl: string;
+  source?: string | null;
+  sourceRef?: string | null;
+  idempotencyKey?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WhatsAppManualOpenRequest {
+  id: string;
+  account: string;
+  phoneE164: string;
+  waJid: string;
+  displayName: string | null;
+  messageText: string;
+  manualOpenUrl: string;
+  source: string | null;
+  sourceRef: string | null;
+  idempotencyKey: string | null;
+  status: WhatsAppManualOpenStatus;
+  attemptCount: number;
+  lastOpenedAt: string | null;
+  completedAt: string | null;
+  completedBy: string | null;
+  lastError: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapManualOpenRequestRow(row: any): WhatsAppManualOpenRequest {
+  return {
+    id: row.id,
+    account: row.account,
+    phoneE164: row.phone_e164,
+    waJid: row.wa_jid,
+    displayName: row.display_name,
+    messageText: row.message_text || '',
+    manualOpenUrl: row.manual_open_url,
+    source: row.source,
+    sourceRef: row.source_ref,
+    idempotencyKey: row.idempotency_key,
+    status: row.status,
+    attemptCount: Number(row.attempt_count || 0),
+    lastOpenedAt: row.last_opened_at ? row.last_opened_at.toISOString() : null,
+    completedAt: row.completed_at ? row.completed_at.toISOString() : null,
+    completedBy: row.completed_by,
+    lastError: row.last_error,
+    metadata: row.metadata || {},
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+export async function ensureWhatsAppCustomerAllowlistTable(): Promise<void> {
+  if (allowlistTableReady) return;
+  const pool = getPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_customer_allowlist (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      account TEXT NOT NULL DEFAULT 'professional',
+      phone_e164 TEXT NOT NULL,
+      wa_jid TEXT NOT NULL,
+      shopify_customer_id TEXT,
+      shop TEXT,
+      email TEXT,
+      display_name TEXT,
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'ready',
+          'seeded_missing_token',
+          'not_on_whatsapp',
+          'invalid_phone',
+          'probe_failed'
+        )
+      ),
+      token_status TEXT NOT NULL DEFAULT 'unknown' CHECK (
+        token_status IN (
+          'unknown',
+          'has_token',
+          'missing_token',
+          'not_on_whatsapp',
+          'error'
+        )
+      ),
+      last_probe_at TIMESTAMPTZ,
+      last_error TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CHECK (phone_e164 ~ '^\\+[0-9]{8,15}$')
+    )
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_customer_allowlist_account_phone
+    ON whatsapp_customer_allowlist (account, phone_e164)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_customer_allowlist_shopify_customer
+    ON whatsapp_customer_allowlist (shopify_customer_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_customer_allowlist_status
+    ON whatsapp_customer_allowlist (account, status, updated_at DESC)
+  `);
+  allowlistTableReady = true;
+}
+
+export async function upsertWhatsAppCustomerAllowlist(
+  data: WhatsAppCustomerAllowlistData
+): Promise<void> {
+  await ensureWhatsAppCustomerAllowlistTable();
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO whatsapp_customer_allowlist (
+       account, phone_e164, wa_jid, shopify_customer_id, shop, email,
+       display_name, status, token_status, last_probe_at, last_error, metadata
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+     ON CONFLICT (account, phone_e164) DO UPDATE SET
+       wa_jid = EXCLUDED.wa_jid,
+       shopify_customer_id = COALESCE(EXCLUDED.shopify_customer_id, whatsapp_customer_allowlist.shopify_customer_id),
+       shop = COALESCE(EXCLUDED.shop, whatsapp_customer_allowlist.shop),
+       email = COALESCE(EXCLUDED.email, whatsapp_customer_allowlist.email),
+       display_name = COALESCE(EXCLUDED.display_name, whatsapp_customer_allowlist.display_name),
+       status = EXCLUDED.status,
+       token_status = EXCLUDED.token_status,
+       last_probe_at = COALESCE(EXCLUDED.last_probe_at, whatsapp_customer_allowlist.last_probe_at),
+       last_error = EXCLUDED.last_error,
+       metadata = whatsapp_customer_allowlist.metadata || EXCLUDED.metadata,
+       updated_at = now()`,
+    [
+      CONNECTOR_ACCOUNT,
+      data.phoneE164,
+      data.waJid,
+      data.shopifyCustomerId || null,
+      data.shop || null,
+      data.email || null,
+      data.displayName || null,
+      data.status,
+      data.tokenStatus,
+      data.lastProbeAt || null,
+      data.lastError || null,
+      JSON.stringify(data.metadata || {}),
+    ]
+  );
+}
+
+export async function ensureWhatsAppManualOpenTable(): Promise<void> {
+  if (manualOpenTableReady) return;
+  const pool = getPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_manual_open_requests (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      account TEXT NOT NULL DEFAULT 'professional',
+      phone_e164 TEXT NOT NULL,
+      wa_jid TEXT NOT NULL,
+      display_name TEXT,
+      message_text TEXT NOT NULL DEFAULT '',
+      manual_open_url TEXT NOT NULL,
+      source TEXT,
+      source_ref TEXT,
+      idempotency_key TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (
+        status IN ('pending', 'processing', 'opened', 'sent', 'cancelled', 'failed')
+      ),
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      last_opened_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      completed_by TEXT,
+      last_error TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CHECK (phone_e164 ~ '^\\+[0-9]{8,15}$')
+    )
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_manual_open_account_idempotency
+    ON whatsapp_manual_open_requests (account, idempotency_key)
+    WHERE idempotency_key IS NOT NULL
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_manual_open_status
+    ON whatsapp_manual_open_requests (account, status, created_at ASC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_manual_open_phone
+    ON whatsapp_manual_open_requests (account, phone_e164, created_at DESC)
+  `);
+  manualOpenTableReady = true;
+}
+
+export async function createWhatsAppManualOpenRequest(
+  data: WhatsAppManualOpenRequestInput
+): Promise<WhatsAppManualOpenRequest> {
+  await ensureWhatsAppManualOpenTable();
+  const pool = getPool();
+  const result = await pool.query(
+    `INSERT INTO whatsapp_manual_open_requests (
+       account, phone_e164, wa_jid, display_name, message_text, manual_open_url,
+       source, source_ref, idempotency_key, metadata, attempt_count
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,1)
+     ON CONFLICT (account, idempotency_key) WHERE idempotency_key IS NOT NULL
+     DO UPDATE SET
+       wa_jid = EXCLUDED.wa_jid,
+       display_name = COALESCE(EXCLUDED.display_name, whatsapp_manual_open_requests.display_name),
+       message_text = EXCLUDED.message_text,
+       manual_open_url = EXCLUDED.manual_open_url,
+       source = COALESCE(EXCLUDED.source, whatsapp_manual_open_requests.source),
+       source_ref = COALESCE(EXCLUDED.source_ref, whatsapp_manual_open_requests.source_ref),
+       status = CASE
+         WHEN whatsapp_manual_open_requests.status IN ('sent', 'cancelled') THEN whatsapp_manual_open_requests.status
+         ELSE 'pending'
+       END,
+       attempt_count = whatsapp_manual_open_requests.attempt_count + 1,
+       last_error = NULL,
+       metadata = whatsapp_manual_open_requests.metadata || EXCLUDED.metadata,
+       updated_at = now()
+     RETURNING *`,
+    [
+      CONNECTOR_ACCOUNT,
+      data.phoneE164,
+      data.waJid,
+      data.displayName || null,
+      data.messageText || '',
+      data.manualOpenUrl,
+      data.source || null,
+      data.sourceRef || null,
+      data.idempotencyKey || null,
+      JSON.stringify(data.metadata || {}),
+    ]
+  );
+  return mapManualOpenRequestRow(result.rows[0]);
+}
+
+export async function listWhatsAppManualOpenRequests(
+  options: { status?: WhatsAppManualOpenStatus | 'all'; limit?: number } = {}
+): Promise<WhatsAppManualOpenRequest[]> {
+  await ensureWhatsAppManualOpenTable();
+  const pool = getPool();
+  const status = !options.status || options.status === 'all' ? null : options.status;
+  const limit = Math.min(Math.max(Number(options.limit || 50), 1), 200);
+  const result = await pool.query(
+    `SELECT *
+     FROM whatsapp_manual_open_requests
+     WHERE account = $1
+       AND ($2::text IS NULL OR status = $2)
+     ORDER BY
+       CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+       created_at ASC
+     LIMIT $3`,
+    [CONNECTOR_ACCOUNT, status, limit]
+  );
+  return result.rows.map(mapManualOpenRequestRow);
+}
+
+export async function updateWhatsAppManualOpenRequestStatus(
+  id: string,
+  status: WhatsAppManualOpenStatus,
+  options: {
+    completedBy?: string | null;
+    lastError?: string | null;
+    metadata?: Record<string, unknown>;
+  } = {}
+): Promise<WhatsAppManualOpenRequest | null> {
+  await ensureWhatsAppManualOpenTable();
+  const pool = getPool();
+  const result = await pool.query(
+    `UPDATE whatsapp_manual_open_requests
+     SET status = $3,
+         last_opened_at = CASE
+           WHEN $3 = 'opened' THEN now()
+           ELSE last_opened_at
+         END,
+         completed_at = CASE
+           WHEN $3 IN ('sent', 'cancelled', 'failed') THEN now()
+           ELSE completed_at
+         END,
+         completed_by = COALESCE($4, completed_by),
+         last_error = $5,
+         metadata = metadata || $6::jsonb,
+         updated_at = now()
+     WHERE account = $1
+       AND id = $2
+     RETURNING *`,
+    [
+      CONNECTOR_ACCOUNT,
+      id,
+      status,
+      options.completedBy || null,
+      options.lastError || null,
+      JSON.stringify(options.metadata || {}),
+    ]
+  );
+  return result.rows[0] ? mapManualOpenRequestRow(result.rows[0]) : null;
 }
 
 export async function ensureHistoryTables(): Promise<void> {
@@ -269,6 +597,7 @@ export async function getConversationAvatar(id: string): Promise<string | null> 
 export async function setMessageStatus(waMessageId: string, status: string): Promise<void> {
   if (!waMessageId) return;
   const pool = getPool();
+  const messageKey = accountKey(waMessageId);
   const rank: Record<string, number> = { pending: 1, sent: 2, delivered: 3, read: 4 };
   // messages.wa_message_id is stored namespaced; route the bare id through
   // accountKey so the status UPDATE is not a silent no-op on professional.

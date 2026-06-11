@@ -68,4 +68,16 @@ spec:
     spec:
       containers:
         - name: telegram-sync
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.21@sha256:6cb06be5556feda51aa55396b820ec30cb9e8c05b561dc5cf7f890364ceb0681
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.38@sha256:37f5b886685b0682bdfa070df67d98cf76e2963e0c61406b634330e72d31bc06
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-cloud-connector
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-cloud-connector
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:cloud-api-20260604@sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0

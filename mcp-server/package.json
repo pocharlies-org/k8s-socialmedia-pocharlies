@@ -10,6 +10,8 @@
     "start": "node dist/index.js",
     "start:mcp": "node dist/mcp/index.js",
     "db:migrate": "tsx src/infrastructure/database/migrate.ts",
+    "instagram:validate": "INSTAGRAM_BACKFILL_VALIDATE_ONLY=true tsx src/jobs/instagram-backfill.ts",
+    "instagram:backfill": "tsx src/jobs/instagram-backfill.ts",
     "backfill:embeddings": "tsx src/infrastructure/jobs/backfill-embeddings.ts",
     "lint": "eslint src --ext .ts",
     "test": "jest",
