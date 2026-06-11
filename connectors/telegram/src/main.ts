@@ -37,7 +37,7 @@ async function main() {
 
   // Setup Express API
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '25mb' }));
   app.use('/api/v1', createRouter(client, CONNECTOR_SHARED_SECRET));
 
   // Health check endpoint

@@ -324,6 +324,39 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * POST /messages/voice - Send a voice note from base64 audio bytes.
+   *
+   * This route must be registered before /messages/:chatId so "voice" is not
+   * interpreted as a chat id by Express.
+   */
+  router.post('/messages/voice', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const { chatId, audioBase64, caption, mimeType, voiceNote } = req.body as {
+          chatId?: string;
+          audioBase64?: string;
+          caption?: string;
+          mimeType?: string;
+          voiceNote?: boolean;
+        };
+        if (!chatId || !audioBase64) {
+          res.status(400).json({ error: 'Missing chatId or audioBase64' });
+          return;
+        }
+
+        const audio = Buffer.from(audioBase64, 'base64');
+        await client.sendFile(chatId, audio, {
+          caption,
+          voiceNote: voiceNote !== false,
+        });
+        res.json({ sent: true, mimeType: mimeType || 'audio/ogg' });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
    * POST /messages/:chatId - Send a message
    */
   router.post('/messages/:chatId', (req: Request, res: Response): void => {
