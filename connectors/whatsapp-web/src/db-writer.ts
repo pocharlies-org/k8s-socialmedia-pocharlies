@@ -597,7 +597,6 @@ export async function getConversationAvatar(id: string): Promise<string | null> 
 export async function setMessageStatus(waMessageId: string, status: string): Promise<void> {
   if (!waMessageId) return;
   const pool = getPool();
-  const messageKey = accountKey(waMessageId);
   const rank: Record<string, number> = { pending: 1, sent: 2, delivered: 3, read: 4 };
   // messages.wa_message_id is stored namespaced; route the bare id through
   // accountKey so the status UPDATE is not a silent no-op on professional.
