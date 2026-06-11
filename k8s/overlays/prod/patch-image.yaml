@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:voice-json-limit-20260611@sha256:d70dfc364e19c6b1415e177aaa78132a40f55080861f7c2c8a6ba3d268922557
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:telegram-voice-route-20260611@sha256:adcb8682a2d5503e385f553fa13bc179368f4de1b2c3447c990a63a666434891
 ---
 apiVersion: apps/v1
 kind: Deployment

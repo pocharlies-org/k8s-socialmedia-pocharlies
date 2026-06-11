@@ -625,7 +625,7 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async sendFile(
     chatId: string,
-    filePath: string,
+    filePath: string | Buffer,
     options?: {
       caption?: string;
       voiceNote?: boolean;
