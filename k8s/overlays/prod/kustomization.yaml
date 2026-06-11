@@ -9,7 +9,7 @@ patches:
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: v1.3.43
-    digest: sha256:7a29c320359241de4d065be9604269eded59e082c6f45c8706a03de95b47c73c
+    digest: sha256:e89ccfa8542b775dd2b6b02d3ae9a1d5c96c2762f0d4d5098a9e13b1d29c7844
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: v1.3.29
     digest: sha256:94bd1aa7de1264e4fb8f28705a5a2d9a6420ad1d5bbb833d7cd2fc4913a923f8
