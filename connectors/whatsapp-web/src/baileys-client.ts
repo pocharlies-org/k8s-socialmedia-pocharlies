@@ -2021,7 +2021,9 @@ export class BaileysClient extends EventEmitter {
          FROM messages
          WHERE wa_message_id = $1 AND platform = 'whatsapp'
          LIMIT 1`,
-        [messageId]
+        // wa_message_id is stored namespaced (accountKey) by storeMessage;
+        // Baileys hands us the bare WhatsApp id on getMessage retries.
+        [accountKey(messageId)]
       );
       const row = r.rows[0] as { content: string | null; message_type: string | null } | undefined;
       if (!row || row.message_type !== 'TEXT' || !row.content) return undefined;

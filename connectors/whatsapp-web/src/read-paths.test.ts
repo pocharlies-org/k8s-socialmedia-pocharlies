@@ -190,3 +190,51 @@ test('professional recordHistorySyncProgress namespaces the sync_state FK (idemp
     restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Connector READ path: reconstructMessageForRetryFromDb (Baileys getMessage
+// retry callback — receives the BARE WhatsApp message id from the wire)
+// ---------------------------------------------------------------------------
+
+test('professional message-retry reconstruction queries with the namespaced wa_message_id', async () => {
+  const { calls, restore } = stubPoolQuery([{ content: 'hola', message_type: 'TEXT' }]);
+  try {
+    const { BaileysClient } = await loadClient('professional');
+    const client = new BaileysClient('/tmp/unused-session', 'k'.repeat(16));
+    const reconstruct = (
+      client as unknown as {
+        reconstructMessageForRetryFromDb(id: string): Promise<{ conversation?: string } | undefined>;
+      }
+    ).reconstructMessageForRetryFromDb.bind(client);
+
+    const out = await reconstruct('3EB0EABFF068A71576FE7C');
+
+    assert.equal(
+      whereParam(calls[0]),
+      'professional:3EB0EABFF068A71576FE7C',
+      'retry reconstruction must namespace the wa_message_id it filters on'
+    );
+    assert.equal(out?.conversation, 'hola');
+  } finally {
+    restore();
+  }
+});
+
+test('personal message-retry reconstruction keeps the wa_message_id bare', async () => {
+  const { calls, restore } = stubPoolQuery([{ content: 'hey', message_type: 'TEXT' }]);
+  try {
+    const { BaileysClient } = await loadClient('personal');
+    const client = new BaileysClient('/tmp/unused-session', 'k'.repeat(16));
+    const reconstruct = (
+      client as unknown as {
+        reconstructMessageForRetryFromDb(id: string): Promise<{ conversation?: string } | undefined>;
+      }
+    ).reconstructMessageForRetryFromDb.bind(client);
+
+    await reconstruct('3EB0AAAA');
+
+    assert.equal(whereParam(calls[0]), '3EB0AAAA');
+  } finally {
+    restore();
+  }
+});
