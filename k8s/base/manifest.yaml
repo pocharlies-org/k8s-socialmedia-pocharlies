@@ -558,6 +558,12 @@ spec:
         - name: telegram-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest
           ports: [{ name: http, containerPort: 3002 }]
+          livenessProbe:
+            httpGet: { path: /health, port: 3002 }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 4
           env:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
@@ -965,6 +971,12 @@ spec:
         - name: telegram-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest
           ports: [{ name: http, containerPort: 3002 }]
+          livenessProbe:
+            httpGet: { path: /health, port: 3002 }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 4
           env:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: CONNECTOR_ACCOUNT, value: "professional" }
