@@ -1,0 +1,43 @@
+# Phase B of the 2026-06-11 placement re-apply: telegram-connector{,-professional}
+# -> nvidia-dgx (arm64). BLOCKED until a multi-arch image built from current main
+# is pinned in kustomization images: — v1.3.47 from the release CI is amd64-only.
+# Activate by adding `- path: patch-telegram-dgx.yaml` to kustomization patches.
+# telegram-connector{,-professional} → nvidia-dgx (arm64 residential GPU node). Drop topology
+# + arch (it's arm64 now), pin to nvidia-dgx, tolerate dedicated=llm. strategy:Recreate so the
+# old pod releases the gramjs authkey before the new one connects (avoids AuthKeyDuplicated):
+# RollingUpdate maxSurge:0/maxUnavailable:1 (a real Recreate errors on the apply transition).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector
+  namespace: whatsapp-mcp
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/arch: null
+        kubernetes.io/hostname: nvidia-dgx
+      tolerations:
+        - { key: dedicated, operator: Equal, value: llm, effect: NoSchedule }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector-professional
+  namespace: whatsapp-mcp
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        kubernetes.io/arch: null
+        kubernetes.io/hostname: nvidia-dgx
+      tolerations:
+        - { key: dedicated, operator: Equal, value: llm, effect: NoSchedule }

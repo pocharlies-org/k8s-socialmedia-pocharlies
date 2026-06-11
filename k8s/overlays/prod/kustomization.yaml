@@ -7,12 +7,7 @@ patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
   - path: patch-renew-qr-pro.yaml
-  # patch-nodepool.yaml (2026-06-04 placement split: backends->ks5, telegram->DGX,
-  # sync->sauvage) was live while deploy/prod tracked the codex S3 branch; ArgoCD
-  # selfHeal reverted it when deploy/prod was rebuilt from main, so everything runs
-  # on ubuntu again. Re-enable as a deliberate ops change — it reschedules live
-  # messaging workloads (redis/nats/minio carry RWO PVCs, Recreate downtime).
-  # - path: patch-nodepool.yaml
+  - path: patch-nodepool.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: v1.3.47
