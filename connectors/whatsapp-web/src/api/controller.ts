@@ -8,7 +8,7 @@ import {
 import { QRHandler } from '../qr-handler';
 import { createHMACAuth, AuthenticatedRequest } from './auth';
 import {
-  CONNECTOR_ACCOUNT,
+  connectorAccount,
   createWhatsAppManualOpenRequest,
   listWhatsAppManualOpenRequests,
   updateWhatsAppManualOpenRequestStatus,
@@ -97,7 +97,7 @@ function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
 
 function manualOpenIdempotencyKey(phoneE164: string, text: string): string {
   const digest = createHash('sha256')
-    .update(`${CONNECTOR_ACCOUNT}\n${phoneE164}\n${text}`)
+    .update(`${connectorAccount()}\n${phoneE164}\n${text}`)
     .digest('hex')
     .slice(0, 32);
   return `send:${digest}`;
@@ -139,7 +139,7 @@ async function enqueueManualOpenFromSendFailure(
     sourceRef: optionalString(sourceRef),
     idempotencyKey: manualOpenIdempotencyKey(normalized.phoneE164, text),
     metadata: {
-      connectorAccount: CONNECTOR_ACCOUNT,
+      connectorAccount: connectorAccount(),
       failureClass: 'account_restricted',
       rawJid: details.rawJid,
       normalizedJid: details.normalizedJid,
@@ -316,7 +316,7 @@ export function createRouter(
             status: status || 'pending',
             limit: Number((req.query as any).limit || 50),
           });
-          res.json({ account: CONNECTOR_ACCOUNT, requests });
+          res.json({ account: connectorAccount(), requests });
         } catch (error) {
           res.status(500).json({ error: `Failed to list manual open requests: ${String(error)}` });
         }
@@ -349,11 +349,11 @@ export function createRouter(
             idempotencyKey: optionalString(body.idempotencyKey),
             metadata: {
               ...optionalObject(body.metadata),
-              connectorAccount: CONNECTOR_ACCOUNT,
+              connectorAccount: connectorAccount(),
               rawJid: normalized.rawJid,
             },
           });
-          res.status(201).json({ account: CONNECTOR_ACCOUNT, request });
+          res.status(201).json({ account: connectorAccount(), request });
         } catch (error) {
           res.status(500).json({ error: `Failed to create manual open request: ${String(error)}` });
         }
@@ -381,7 +381,7 @@ export function createRouter(
             res.status(404).json({ error: 'Manual open request not found' });
             return;
           }
-          res.json({ account: CONNECTOR_ACCOUNT, request });
+          res.json({ account: connectorAccount(), request });
         } catch (error) {
           res.status(500).json({ error: `Failed to update manual open request: ${String(error)}` });
         }
@@ -401,7 +401,7 @@ export function createRouter(
           error: 'Invalid WhatsApp phone',
           status: 'invalid_phone',
           tokenStatus: 'unknown',
-          account: CONNECTOR_ACCOUNT,
+          account: connectorAccount(),
         });
         return;
       }
@@ -427,7 +427,7 @@ export function createRouter(
           shopifyOrderId: optionalString(body.shopifyOrderId),
           shopifyOrderName: optionalString(body.shopifyOrderName) || company,
           rawJid: normalized.rawJid,
-          connectorAccount: CONNECTOR_ACCOUNT,
+          connectorAccount: connectorAccount(),
         },
       };
 
@@ -444,7 +444,7 @@ export function createRouter(
           error,
           status: 'probe_failed',
           tokenStatus: 'error',
-          account: CONNECTOR_ACCOUNT,
+          account: connectorAccount(),
         });
         return;
       }
@@ -471,7 +471,7 @@ export function createRouter(
         });
         res.json({
           ...result,
-          account: CONNECTOR_ACCOUNT,
+          account: connectorAccount(),
         });
       } catch (error) {
         const failureClass = classifyWhatsAppSendFailure(error);
@@ -494,7 +494,7 @@ export function createRouter(
           failureClass,
           status,
           tokenStatus,
-          account: CONNECTOR_ACCOUNT,
+          account: connectorAccount(),
         });
       }
     })();

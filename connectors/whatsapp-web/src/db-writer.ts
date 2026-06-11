@@ -15,7 +15,7 @@ const DATABASE_URL =
 // two accounts can coexist in the same Postgres without colliding on PKs.
 // Read at call time (not captured at module load) so the value is honoured even
 // if the env is set after import — and so tests can exercise both accounts.
-function connectorAccount(): string {
+export function connectorAccount(): string {
   return process.env.CONNECTOR_ACCOUNT || 'personal';
 }
 
@@ -274,7 +274,7 @@ export async function upsertWhatsAppCustomerAllowlist(
        metadata = whatsapp_customer_allowlist.metadata || EXCLUDED.metadata,
        updated_at = now()`,
     [
-      CONNECTOR_ACCOUNT,
+      connectorAccount(),
       data.phoneE164,
       data.waJid,
       data.shopifyCustomerId || null,
@@ -364,7 +364,7 @@ export async function createWhatsAppManualOpenRequest(
        updated_at = now()
      RETURNING *`,
     [
-      CONNECTOR_ACCOUNT,
+      connectorAccount(),
       data.phoneE164,
       data.waJid,
       data.displayName || null,
@@ -395,7 +395,7 @@ export async function listWhatsAppManualOpenRequests(
        CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
        created_at ASC
      LIMIT $3`,
-    [CONNECTOR_ACCOUNT, status, limit]
+    [connectorAccount(), status, limit]
   );
   return result.rows.map(mapManualOpenRequestRow);
 }
@@ -430,7 +430,7 @@ export async function updateWhatsAppManualOpenRequestStatus(
        AND id = $2
      RETURNING *`,
     [
-      CONNECTOR_ACCOUNT,
+      connectorAccount(),
       id,
       status,
       options.completedBy || null,
