@@ -867,7 +867,17 @@ export class BaileysClient extends EventEmitter {
       pushName,
       phone: this.phoneFromJid(senderRaw),
     });
-    await linkParticipantToConversation(waMessage.conversationId, waMessage.senderWaId);
+    // Best-effort: the conversation<->participant link is a convenience join,
+    // NOT a prerequisite for messages (which FK only conversations+participants,
+    // already upserted above). A link failure must never abort the ingest and
+    // drop the message — the opt-in poller reads `messages`, so losing it is the
+    // actual outage. Log with full context instead of swallowing silently.
+    await linkParticipantToConversation(waMessage.conversationId, waMessage.senderWaId).catch(e =>
+      this.logger.error(
+        `participant link persist failed for conversation=${waMessage.conversationId} ` +
+          `participant=${waMessage.senderWaId}: ${e?.message || e}`
+      )
+    );
 
     // Lazy avatar pulls. Don't await — fire-and-forget so a slow profile
     // picture fetch never delays the message persist.

@@ -12,12 +12,27 @@ const DATABASE_URL =
 // bare (compat with the pre-existing single-account corpus); 'professional'
 // namespaces conversation/participant ids with a "professional:" prefix so the
 // two accounts can coexist in the same Postgres without colliding on PKs.
-const CONNECTOR_ACCOUNT = process.env.CONNECTOR_ACCOUNT || 'personal';
+// Read at call time (not captured at module load) so the value is honoured even
+// if the env is set after import — and so tests can exercise both accounts.
+function connectorAccount(): string {
+  return process.env.CONNECTOR_ACCOUNT || 'personal';
+}
 
-/** Namespace an id by account (idempotent). Mirrors mcp-server domain/account.ts. */
-function accountKey(id: string): string {
-  if (CONNECTOR_ACCOUNT === 'personal') return id;
-  const prefix = `${CONNECTOR_ACCOUNT}:`;
+/**
+ * Namespace an id by account (idempotent). Mirrors mcp-server domain/account.ts.
+ *
+ * IMPORTANT: every writer that references conversations.id / participants.id MUST
+ * route the id through this helper. `conversations` and `participants` rows are
+ * stored under the namespaced id (e.g. `professional:34600...`), so any FK that
+ * points at them (`conversation_participants`, `whatsapp_message_keys`,
+ * `messages`) has to use the SAME namespaced id — otherwise the FK target row
+ * does not exist and Postgres rejects the insert. For `personal` this is a no-op
+ * (bare == namespaced), which is why the personal account never hit the bug.
+ */
+export function accountKey(id: string): string {
+  const account = connectorAccount();
+  if (account === 'personal') return id;
+  const prefix = `${account}:`;
   return id.startsWith(prefix) ? id : `${prefix}${id}`;
 }
 
@@ -137,7 +152,7 @@ export async function ensureConversation(data: ConversationData): Promise<void> 
       data.isGroup,
       data.participantCount,
       data.avatarUrl || null,
-      CONNECTOR_ACCOUNT,
+      connectorAccount(),
     ]
   );
 }
@@ -158,7 +173,7 @@ export async function ensureParticipant(data: ParticipantData): Promise<void> {
       data.name,
       data.pushName,
       data.profilePicUrl || null,
-      CONNECTOR_ACCOUNT,
+      connectorAccount(),
     ]
   );
 }
@@ -270,7 +285,7 @@ export async function storeMessage(data: MessageData): Promise<bigint | null> {
         data.replyToWaId ? accountKey(data.replyToWaId) : null,
         data.platform || 'whatsapp',
         JSON.stringify(data.metadata || {}),
-        CONNECTOR_ACCOUNT,
+        connectorAccount(),
       ]
     );
     return result.rows[0]?.id || null;
@@ -321,8 +336,11 @@ export async function storeMessageKey(data: MessageKeyData): Promise<void> {
        message_timestamp_ms = EXCLUDED.message_timestamp_ms,
        updated_at = now()`,
     [
-      data.waMessageId,
-      data.conversationId,
+      // wa_message_id FK -> messages.wa_message_id and conversation_id FK ->
+      // conversations.id are both stored namespaced; the caller hands us bare
+      // ids, so namespace them here to keep the FK targets resolvable.
+      accountKey(data.waMessageId),
+      accountKey(data.conversationId),
       data.remoteJid,
       data.fromMe,
       data.participantJid || null,
@@ -400,10 +418,29 @@ export async function linkParticipantToConversation(
   participantId: string
 ): Promise<void> {
   const pool = getPool();
-  await pool.query(
-    `INSERT INTO conversation_participants (conversation_id, participant_id)
-     VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-    [conversationId, participantId]
-  );
+  // conversation_id FK -> conversations.id and participant_id FK -> participants.id.
+  // Both parent rows are written under the account-namespaced id (see accountKey),
+  // so the link row MUST reference the namespaced ids too. Without this the
+  // professional account inserted bare ids here while conversations/participants
+  // held `professional:`-prefixed ids -> conversation_participants_conversation_id_fkey
+  // violation -> the whole message ingest aborted and nothing was persisted.
+  const convId = accountKey(conversationId);
+  const partId = accountKey(participantId);
+  try {
+    await pool.query(
+      `INSERT INTO conversation_participants (conversation_id, participant_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [convId, partId]
+    );
+  } catch (e) {
+    const err = e as { code?: string; constraint?: string; message?: string };
+    // Re-throw with full context so the caller's structured log pins the exact
+    // id/account that failed instead of an opaque FK string.
+    throw new Error(
+      `linkParticipantToConversation failed (account=${connectorAccount()}, ` +
+        `conversation_id=${convId}, participant_id=${partId}, ` +
+        `pgcode=${err.code ?? '?'}, constraint=${err.constraint ?? '?'}): ${err.message ?? e}`
+    );
+  }
 }
