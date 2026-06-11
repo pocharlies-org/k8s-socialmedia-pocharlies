@@ -376,7 +376,7 @@ spec:
     metadata: { labels: { app: whatsapp-cloud-connector } }
     spec:
       enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      nodeSelector: { kubernetes.io/hostname: sauvage, kubernetes.io/arch: amd64 }
       containers:
         - name: whatsapp-cloud-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:latest
