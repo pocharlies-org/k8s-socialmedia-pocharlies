@@ -15,7 +15,7 @@ patches:
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: v1.3.45
-    digest: 
+    digest: sha256:482b369d26bbb6541c25b990ddb658c90e094e251f762e0606ec18dabdd3da1a
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector
     newTag: cloud-api-20260604
     digest: sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
