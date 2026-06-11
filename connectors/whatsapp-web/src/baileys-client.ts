@@ -37,6 +37,8 @@ import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
 import pino from 'pino';
 import {
+  accountKey,
+  stripAccountKey,
   storeMessage,
   ensureConversation,
   ensureParticipant,
@@ -1323,12 +1325,17 @@ export class BaileysClient extends EventEmitter {
     const raw = this.toRawJid(chatId);
     // Read latest known key for that chat from the BD.
     const pool = getPool();
+    // messages.conversation_id is stored namespaced (see accountKey); the caller
+    // hands us a bare chatId, so namespace it or professional reads zero rows.
     const r = await pool.query(
       `SELECT wa_message_id FROM messages WHERE conversation_id = $1 ORDER BY wa_timestamp DESC LIMIT 1`,
-      [chatId]
+      [accountKey(chatId)]
     );
-    const lastId = r.rows[0]?.wa_message_id as string | undefined;
-    if (!lastId) return;
+    const stored = r.rows[0]?.wa_message_id as string | undefined;
+    if (!stored) return;
+    // wa_message_id is stored namespaced; the keyCache and the WhatsApp message
+    // key both speak the BARE id, so strip the prefix back off before use.
+    const lastId = stripAccountKey(stored);
     const cached = this.keyCache.get(lastId);
     const key: WAMessageKey = cached?.key || { remoteJid: raw, id: lastId, fromMe: false };
     await this.sock.readMessages([key]);
@@ -1656,17 +1663,21 @@ export class BaileysClient extends EventEmitter {
 
   async fetchChatHistory(chatId: string, limit: number = 500): Promise<any[]> {
     const pool = getPool();
+    // messages.conversation_id is stored namespaced (see accountKey); the caller
+    // hands us a bare chatId, so namespace it or professional reads zero rows.
     const r = await pool.query(
       `SELECT wa_message_id, sender_wa_id, content, wa_timestamp, is_forwarded, message_type
        FROM messages
        WHERE conversation_id = $1 AND platform = 'whatsapp'
        ORDER BY wa_timestamp DESC LIMIT $2`,
-      [chatId, limit]
+      [accountKey(chatId), limit]
     );
     return r.rows.map(row => ({
-      id: row.wa_message_id,
-      from: row.sender_wa_id,
-      author: row.sender_wa_id,
+      // ids are stored namespaced; the sync service speaks bare WhatsApp ids, so
+      // strip the prefix back off on the way out to keep the wire shape stable.
+      id: stripAccountKey(row.wa_message_id),
+      from: stripAccountKey(row.sender_wa_id),
+      author: stripAccountKey(row.sender_wa_id),
       body: row.content,
       timestamp: Math.floor(new Date(row.wa_timestamp).getTime() / 1000),
       fromMe: false, // direction info not exposed cheap here
@@ -1719,7 +1730,10 @@ export class BaileysClient extends EventEmitter {
     const loadOldest = async () => {
       const params: any[] = [];
       const where = options.chatId ? 'WHERE k.conversation_id = $1' : '';
-      if (options.chatId) params.push(options.chatId);
+      // whatsapp_message_keys.conversation_id is stored namespaced (see accountKey
+      // in storeMessageKey); the caller filters by a bare chatId, so namespace it
+      // or professional matches zero rows.
+      if (options.chatId) params.push(accountKey(options.chatId));
       params.push(maxChats);
       const limitParam = `$${params.length}`;
       return pool.query(
@@ -1740,10 +1754,15 @@ export class BaileysClient extends EventEmitter {
 
       for (const row of rows) {
         const oldestTimestamp = new Date(Number(row.message_timestamp_ms));
+        // Rows come back namespaced (conversation_id / wa_message_id). The wire
+        // contract + the Baileys WAMessageKey both speak the bare id, so strip the
+        // prefix once here and use the bare values everywhere downstream.
+        const bareConversationId = stripAccountKey(row.conversation_id);
+        const bareWaMessageId = stripAccountKey(row.wa_message_id);
         if (batch === 0) {
           candidates.push({
-            chatId: row.conversation_id,
-            oldestMessageId: row.wa_message_id,
+            chatId: bareConversationId,
+            oldestMessageId: bareWaMessageId,
             oldestTimestamp: oldestTimestamp.toISOString(),
           });
         }
@@ -1752,7 +1771,7 @@ export class BaileysClient extends EventEmitter {
 
         const key: WAMessageKey = {
           remoteJid: row.remote_jid,
-          id: row.wa_message_id,
+          id: bareWaMessageId,
           fromMe: row.from_me,
           participant: row.participant_jid || undefined,
         };
@@ -1764,8 +1783,8 @@ export class BaileysClient extends EventEmitter {
         );
         requested += 1;
         await recordHistorySyncProgress({
-          conversationId: row.conversation_id,
-          oldestMessageId: row.wa_message_id,
+          conversationId: bareConversationId,
+          oldestMessageId: bareWaMessageId,
           oldestTimestamp,
           insertedCount: 0,
           status: 'requested',
@@ -1796,12 +1815,14 @@ export class BaileysClient extends EventEmitter {
     // its stored object (attachments.file_url) and stream it back as base64.
     try {
       const pool = getPool();
+      // messages.wa_message_id is stored namespaced; the caller hands us the bare
+      // WhatsApp id, so namespace it or professional finds no attachment row.
       const r = await pool.query(
         `SELECT a.file_url, a.mime_type, a.file_name
            FROM attachments a JOIN messages m ON m.id = a.message_id
           WHERE m.wa_message_id = $1
           ORDER BY a.id DESC LIMIT 1`,
-        [messageId]
+        [accountKey(messageId)]
       );
       const row = r.rows[0];
       if (!row?.file_url) {
@@ -2018,9 +2039,11 @@ export class BaileysClient extends EventEmitter {
     chatId: string
   ): Promise<WAMessageKey | null> {
     const pool = getPool();
+    // messages.wa_message_id is stored namespaced; the caller hands us the bare
+    // WhatsApp id, so namespace it for the lookup or professional finds nothing.
     const r = await pool.query(
       `SELECT direction, sender_wa_id FROM messages WHERE wa_message_id = $1 LIMIT 1`,
-      [waMessageId]
+      [accountKey(waMessageId)]
     );
     if (!r.rows.length) return null;
     const row = r.rows[0];
@@ -2028,8 +2051,11 @@ export class BaileysClient extends EventEmitter {
     const remoteJid = this.toRawJid(chatId);
     let participant: string | undefined;
     if (isJidGroup(remoteJid)) {
-      participant = this.toRawJid(row.sender_wa_id);
+      // sender_wa_id is stored namespaced; strip back to the bare JID before
+      // building a raw WhatsApp JID for the message key.
+      participant = this.toRawJid(stripAccountKey(row.sender_wa_id));
     }
+    // The returned key.id must stay bare — it is the real WhatsApp message id.
     return { id: waMessageId, remoteJid, fromMe, participant };
   }
 

@@ -36,6 +36,21 @@ export function accountKey(id: string): string {
   return id.startsWith(prefix) ? id : `${prefix}${id}`;
 }
 
+/**
+ * Inverse of accountKey: strip the account prefix off a (possibly namespaced)
+ * id, recovering the bare value. Idempotent and a no-op on `personal` and on an
+ * already-bare id. Use this when an id read back from the DB (stored namespaced)
+ * must be handed to an external system that only knows the bare WhatsApp id —
+ * e.g. a WAMessageKey passed to sock.readMessages, or a keyCache lookup keyed by
+ * the raw Baileys message id.
+ */
+export function stripAccountKey(id: string): string {
+  const account = connectorAccount();
+  if (account === 'personal') return id;
+  const prefix = `${account}:`;
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+}
+
 let pool: pg.Pool | null = null;
 
 export function getPool(): pg.Pool {
@@ -185,23 +200,30 @@ export async function ensureParticipant(data: ParticipantData): Promise<void> {
  */
 export async function setConversationAvatar(id: string, avatarUrl: string): Promise<void> {
   const pool = getPool();
+  // conversations.id is stored namespaced (see accountKey); route the caller's
+  // bare id through it so the UPDATE matches the real row on professional.
   await pool.query(`UPDATE conversations SET avatar_url = $2, updated_at = now() WHERE id = $1`, [
-    id,
+    accountKey(id),
     avatarUrl,
   ]);
 }
 
 export async function setParticipantAvatar(id: string, profilePicUrl: string): Promise<void> {
   const pool = getPool();
+  // participants.id is stored namespaced; namespace the id so the UPDATE is not
+  // a silent no-op on the professional account.
   await pool.query(
     `UPDATE participants SET profile_pic_url = $2, last_seen = now() WHERE id = $1`,
-    [id, profilePicUrl]
+    [accountKey(id), profilePicUrl]
   );
 }
 
 export async function getConversationAvatar(id: string): Promise<string | null> {
   const pool = getPool();
-  const r = await pool.query(`SELECT avatar_url FROM conversations WHERE id = $1`, [id]);
+  // SELECT against the namespaced id so professional reads its own row.
+  const r = await pool.query(`SELECT avatar_url FROM conversations WHERE id = $1`, [
+    accountKey(id),
+  ]);
   return r.rows[0]?.avatar_url || null;
 }
 
@@ -214,6 +236,9 @@ export async function setMessageStatus(waMessageId: string, status: string): Pro
   if (!waMessageId) return;
   const pool = getPool();
   const rank: Record<string, number> = { pending: 1, sent: 2, delivered: 3, read: 4 };
+  // messages.wa_message_id is stored namespaced; route the bare id through
+  // accountKey so the status UPDATE is not a silent no-op on professional.
+  const wamId = accountKey(waMessageId);
   if (rank[status] != null) {
     await pool.query(
       `UPDATE messages SET status = $2, status_at = now()
@@ -224,13 +249,13 @@ export async function setMessageStatus(waMessageId: string, status: string): Pro
               WHEN 'delivered' THEN 3
               WHEN 'read' THEN 4
               ELSE 0 END`,
-      [waMessageId, status, rank[status]]
+      [wamId, status, rank[status]]
     );
   } else {
     // failed/deleted: overwrite regardless.
     await pool.query(
       `UPDATE messages SET status = $2, status_at = now() WHERE wa_message_id = $1`,
-      [waMessageId, status]
+      [wamId, status]
     );
   }
 }
@@ -246,22 +271,28 @@ export async function setConversationState(
   archived?: boolean
 ): Promise<void> {
   const pool = getPool();
+  // conversations.id is stored namespaced; route the bare id through accountKey
+  // so the state UPDATE is not a silent no-op on the professional account.
+  const convId = accountKey(id);
   if (archived === undefined) {
     await pool.query(
       `UPDATE conversations SET unread_count = $2, updated_at = now() WHERE id = $1`,
-      [id, Math.max(0, unreadCount | 0)]
+      [convId, Math.max(0, unreadCount | 0)]
     );
   } else {
     await pool.query(
       `UPDATE conversations SET unread_count = $2, archived = $3, updated_at = now() WHERE id = $1`,
-      [id, Math.max(0, unreadCount | 0), archived]
+      [convId, Math.max(0, unreadCount | 0), archived]
     );
   }
 }
 
 export async function getParticipantAvatar(id: string): Promise<string | null> {
   const pool = getPool();
-  const r = await pool.query(`SELECT profile_pic_url FROM participants WHERE id = $1`, [id]);
+  // SELECT against the namespaced id so professional reads its own row.
+  const r = await pool.query(`SELECT profile_pic_url FROM participants WHERE id = $1`, [
+    accountKey(id),
+  ]);
   return r.rows[0]?.profile_pic_url || null;
 }
 
@@ -380,7 +411,10 @@ export async function recordHistorySyncProgress(data: {
        last_error = EXCLUDED.last_error,
        updated_at = now()`,
     [
-      data.conversationId,
+      // whatsapp_sync_state.conversation_id FK -> conversations.id (namespaced).
+      // accountKey is idempotent, so callers that already hold a namespaced id
+      // (e.g. backfillHistory's loadOldest rows) are not double-prefixed.
+      accountKey(data.conversationId),
       data.oldestMessageId || null,
       data.oldestTimestamp || null,
       data.newestTimestamp || null,
