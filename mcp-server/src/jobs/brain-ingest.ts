@@ -20,8 +20,6 @@ import {
 
 const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
 
-const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp';
 const BRAIN_URL =
   process.env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local';
 const BRAIN_API_KEY = process.env.BRAIN_API_KEY || '';
