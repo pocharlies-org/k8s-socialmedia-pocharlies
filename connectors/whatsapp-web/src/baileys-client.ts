@@ -1644,8 +1644,8 @@ export class BaileysClient extends EventEmitter {
     // key both speak the BARE id, so strip the prefix back off before use.
     const lastId = stripAccountKey(stored);
     const cached = this.keyCache.get(lastId);
-    const key =
-      cached?.key || (await this.reconstructKeyFromDb(lastId, chatId)) || {
+    const key = cached?.key ||
+      (await this.reconstructKeyFromDb(lastId, chatId)) || {
         remoteJid: raw,
         id: lastId,
         fromMe: false,
