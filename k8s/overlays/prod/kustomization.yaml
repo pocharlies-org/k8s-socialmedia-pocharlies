@@ -31,9 +31,6 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker
     newTag: auto-send-headful-xauth-20260604
     digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
-  - name: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker
-    newTag: 20260612-omnivoice-audio-1
-    digest: sha256:ec62259b7f81b35b549fa7ebce9633f634a8934ac4ca1499d4743ee79ebe8f02
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: v1.3.42
     digest: sha256:8498b854121c8b8f549dedb0072c1851047aa82af831cfead0dfa6f51dfcd477
