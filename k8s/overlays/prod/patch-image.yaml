@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:telegram-voice-route-20260611@sha256:adcb8682a2d5503e385f553fa13bc179368f4de1b2c3447c990a63a666434891
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:telegram-delete-peer-fix-20260613@sha256:159db9926d12540eaf8d8acf9a1abdaf865c79b70100818466d0688bf8ae35b5
 ---
 apiVersion: apps/v1
 kind: Deployment

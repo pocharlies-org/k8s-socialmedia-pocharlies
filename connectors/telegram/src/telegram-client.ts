@@ -518,7 +518,7 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async deleteMessage(chatId: string, messageId: number): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    await this.client.deleteMessagesById(chatId, [messageId], { revoke: true });
+    await this.client.deleteMessagesById(toMtcutePeer(chatId), [messageId], { revoke: true });
   }
 
   /**
