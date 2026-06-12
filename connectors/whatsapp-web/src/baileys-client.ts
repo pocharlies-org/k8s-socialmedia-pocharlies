@@ -1644,8 +1644,17 @@ export class BaileysClient extends EventEmitter {
     // key both speak the BARE id, so strip the prefix back off before use.
     const lastId = stripAccountKey(stored);
     const cached = this.keyCache.get(lastId);
-    const key: WAMessageKey = cached?.key || { remoteJid: raw, id: lastId, fromMe: false };
+    const key =
+      cached?.key || (await this.reconstructKeyFromDb(lastId, chatId)) || {
+        remoteJid: raw,
+        id: lastId,
+        fromMe: false,
+      };
     await this.sock.readMessages([key]);
+    const norm = this.normalizeJid(raw);
+    const chat = this.chatStore.get(norm);
+    if (chat) chat.unreadCount = 0;
+    await setConversationState(norm, 0);
   }
 
   // ---------------------------------------------------------------------------

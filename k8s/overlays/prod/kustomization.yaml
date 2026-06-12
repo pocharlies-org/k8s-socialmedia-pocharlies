@@ -10,8 +10,8 @@ patches:
   - path: patch-nodepool.yaml
 images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: v1.3.47
-    digest: sha256:c1c781976220132d6b6eccc278ba2cb27b9e5ed21df2f8b4372b1d23556c9000
+    newTag: mark-read-fix-20260612-prod
+    digest: sha256:4a68f63468224b0104510ff1cac4a636c8b546b62c4f6a1db6a7c23cef885e2a
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector
     newTag: cloud-api-20260604
     digest: sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
