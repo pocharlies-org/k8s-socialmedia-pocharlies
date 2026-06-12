@@ -377,6 +377,10 @@ spec:
     spec:
       enableServiceLinks: false
       nodeSelector: { kubernetes.io/hostname: sauvage, kubernetes.io/arch: amd64 }
+      # sauvage lleva taint role=edge:NoSchedule — sin esta toleration el pod es
+      # imposible de programar (selector y toleration deben viajar juntos).
+      tolerations:
+        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
       containers:
         - name: whatsapp-cloud-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:latest
