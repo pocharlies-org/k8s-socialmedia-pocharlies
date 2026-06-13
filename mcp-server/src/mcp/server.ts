@@ -2455,8 +2455,8 @@ export class MCPServer {
       await this.dbClient.query(
         `UPDATE messages
             SET is_deleted = true,
-                deleted_at = COALESCE(deleted_at, NOW()),
-                updated_at = NOW()
+                status = 'deleted',
+                status_at = NOW()
           WHERE conversation_id = $1
             AND (
               wa_message_id = $2

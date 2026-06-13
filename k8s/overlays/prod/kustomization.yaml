@@ -32,8 +32,8 @@ images:
     newTag: auto-send-headful-xauth-20260604
     digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: telegram-delete-cache-20260613
-    digest: sha256:8f716c7f485608d7eaf85a7b9ee005593ad44836bd729dd4634a9891aa836257
+    newTag: telegram-delete-cache-20260613-r2
+    digest: sha256:80e9ddb1ef7b024b703ce60a999db4bfe2449e3ee854741ccb2cda4577c39932
 replicas:
   # Baileys/Web auto-sender for the Business account stays offline (Cloud API
   # covers outbound templates). whatsapp-connector-professional itself is BACK ON
