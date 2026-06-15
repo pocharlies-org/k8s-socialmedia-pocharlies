@@ -2385,7 +2385,7 @@ export class MCPServer {
       );
     const limit = Math.min(args.limit ?? 50, 500);
     const params: any[] = [id, limit];
-    let where = `conversation_id = $1`;
+    let where = `conversation_id = $1 AND (is_deleted IS NULL OR is_deleted = false)`;
     if (args.offsetId) {
       params.push(args.offsetId);
       where += ` AND id < $3`;
@@ -2444,11 +2444,27 @@ export class MCPServer {
     messageId: string;
     account?: string;
   }) {
+    const account = normalizeAccount(args.account);
     const data = await this.connectorCall(
       this.tgUrl(args.account),
       'DELETE',
       `/api/v1/messages/${args.chatId}/${args.messageId}`
     );
+    const id = await this.resolveTelegramChatId(args.chatId, account);
+    if (id && data?.deleted === true) {
+      await this.dbClient.query(
+        `UPDATE messages
+            SET is_deleted = true,
+                status = 'deleted',
+                status_at = NOW()
+          WHERE conversation_id = $1
+            AND (
+              wa_message_id = $2
+              OR metadata->>'telegram_message_id' = $2
+            )`,
+        [id, String(args.messageId)]
+      );
+    }
     return this.jsonResponse(data);
   }
 
@@ -2465,7 +2481,9 @@ export class MCPServer {
     const account = normalizeAccount(args?.account);
     const result = await this.dbClient.query(
       `SELECT c.id, c.name, c.type, c.is_group, c.last_message_at, c.metadata,
-              (SELECT count(*)::int FROM messages WHERE conversation_id = c.id) AS message_count
+              (SELECT count(*)::int FROM messages
+                WHERE conversation_id = c.id
+                  AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
          FROM conversations c
         WHERE c.id LIKE $1
         ORDER BY c.last_message_at DESC NULLS LAST
@@ -2779,7 +2797,9 @@ export class MCPServer {
       );
     const result = await this.dbClient.query(
       `SELECT id, name, type, is_group, participant_count, last_message_at, metadata,
-              (SELECT count(*)::int FROM messages WHERE conversation_id = c.id) AS message_count
+              (SELECT count(*)::int FROM messages
+                WHERE conversation_id = c.id
+                  AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
          FROM conversations c WHERE id = $1`,
       [id]
     );
