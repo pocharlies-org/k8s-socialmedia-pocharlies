@@ -265,7 +265,7 @@ spec:
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: MINIO_USE_SSL, value: "false" }
             - { name: MINIO_BUCKET, value: "socialmedia-media" }
-            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
+            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding-cpu.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - { name: EMBEDDING_DIMENSION, value: "1024" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
@@ -336,7 +336,7 @@ spec:
             - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: MINIO_USE_SSL, value: "false" }
             - { name: MINIO_BUCKET, value: "socialmedia-media" }
-            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
+            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding-cpu.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - { name: EMBEDDING_DIMENSION, value: "1024" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
@@ -618,7 +618,7 @@ spec:
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: LEGACY_MINIO_USE_SSL, value: "false" }
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
-            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
+            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding-cpu.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - { name: EMBEDDING_DIMENSION, value: "1024" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
@@ -685,7 +685,7 @@ spec:
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: LEGACY_MINIO_USE_SSL, value: "false" }
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
-            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
+            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding-cpu.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - name: MCP_SSE_AUTH_TOKEN
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-sse-secrets, key: MCP_SSE_AUTH_TOKEN } }
