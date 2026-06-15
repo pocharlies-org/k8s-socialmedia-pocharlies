@@ -478,6 +478,9 @@ metadata:
 spec:
   schedule: "*/5 * * * *"
   timeZone: Europe/Madrid
+  # Paused after repeated 502/fetch failures against skirmshop-brain-ingest.
+  # Keep this quiet until the Brain/BGE ingest path is repaired and verified.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 2
