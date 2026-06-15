@@ -499,11 +499,11 @@ spec:
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
-                - { name: BRAIN_INGEST_BATCH, value: "10" }
-                - { name: BRAIN_INGEST_MAX_ROWS, value: "1000" }
+                - { name: BRAIN_INGEST_BATCH, value: "2" }
+                - { name: BRAIN_INGEST_MAX_ROWS, value: "60" }
                 - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
                 - { name: BRAIN_PUSH_RETRIES, value: "3" }
-                - { name: BRAIN_PUSH_TIMEOUT_MS, value: "60000" }
+                - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
                 - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "10000" }
                 - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
                 # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (Vault) via envFrom.
