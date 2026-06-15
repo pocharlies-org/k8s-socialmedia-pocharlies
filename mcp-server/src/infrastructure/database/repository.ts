@@ -244,7 +244,9 @@ export class DatabaseRepository {
     const result = await this.client.query(
       `SELECT c.*,
               COALESCE(c.type, CASE WHEN c.is_group THEN 'GROUP' ELSE 'INDIVIDUAL' END) as conv_type,
-              (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
+              (SELECT COUNT(*) FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND (m.is_deleted IS NULL OR m.is_deleted = false)) as message_count
        FROM conversations c
        WHERE ($1::VARCHAR IS NULL OR COALESCE(c.type, CASE WHEN c.is_group THEN 'GROUP' ELSE 'INDIVIDUAL' END) = $1)
          AND ($2::VARCHAR IS NULL OR c.name ILIKE $2

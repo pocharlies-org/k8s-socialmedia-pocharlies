@@ -2481,7 +2481,9 @@ export class MCPServer {
     const account = normalizeAccount(args?.account);
     const result = await this.dbClient.query(
       `SELECT c.id, c.name, c.type, c.is_group, c.last_message_at, c.metadata,
-              (SELECT count(*)::int FROM messages WHERE conversation_id = c.id) AS message_count
+              (SELECT count(*)::int FROM messages
+                WHERE conversation_id = c.id
+                  AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
          FROM conversations c
         WHERE c.id LIKE $1
         ORDER BY c.last_message_at DESC NULLS LAST
@@ -2795,7 +2797,9 @@ export class MCPServer {
       );
     const result = await this.dbClient.query(
       `SELECT id, name, type, is_group, participant_count, last_message_at, metadata,
-              (SELECT count(*)::int FROM messages WHERE conversation_id = c.id) AS message_count
+              (SELECT count(*)::int FROM messages
+                WHERE conversation_id = c.id
+                  AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
          FROM conversations c WHERE id = $1`,
       [id]
     );
