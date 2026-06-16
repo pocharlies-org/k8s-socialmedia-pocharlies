@@ -78,6 +78,8 @@ export class TelegramClientWrapper extends EventEmitter {
   private logger: pino.Logger;
   private connected: boolean = false;
   private selfId?: string;
+  private unreadChatsCache: { expiresAtMs: number; value: any[] } | null = null;
+  private unreadChatsInflight: Promise<any[]> | null = null;
 
   constructor(config: TelegramClientConfig) {
     super();
@@ -501,18 +503,40 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async getUnreadChats(): Promise<any[]> {
     if (!this.connected) throw new Error('Not connected');
-    const out: any[] = [];
-    for await (const d of this.client.iterDialogs({})) {
-      if (d.unreadCount > 0) {
-        out.push({
-          id: d.peer.id.toString(),
-          name: chatTitleOf(d.peer) || 'Unknown',
-          type: mapChatType(d.peer),
-          unreadCount: d.unreadCount,
-        });
-      }
+    const now = Date.now();
+    if (this.unreadChatsCache && this.unreadChatsCache.expiresAtMs > now) {
+      return this.unreadChatsCache.value;
     }
-    return out;
+    if (this.unreadChatsInflight) return this.unreadChatsInflight;
+
+    const refresh = (async (): Promise<any[]> => {
+      const out: any[] = [];
+      for await (const d of this.client.iterDialogs({})) {
+        if (d.unreadCount > 0) {
+          out.push({
+            id: d.peer.id.toString(),
+            name: chatTitleOf(d.peer) || 'Unknown',
+            type: mapChatType(d.peer),
+            unreadCount: d.unreadCount,
+          });
+        }
+      }
+      this.unreadChatsCache = { value: out, expiresAtMs: Date.now() + 30_000 };
+      return out;
+    })();
+
+    this.unreadChatsInflight = refresh;
+    try {
+      return await refresh;
+    } catch (e) {
+      if (this.unreadChatsCache) {
+        this.logger.warn(`getUnreadChats failed; returning cached value: ${e}`);
+        return this.unreadChatsCache.value;
+      }
+      throw e;
+    } finally {
+      if (this.unreadChatsInflight === refresh) this.unreadChatsInflight = null;
+    }
   }
 
   /**

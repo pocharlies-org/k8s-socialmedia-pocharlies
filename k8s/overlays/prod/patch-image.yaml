@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:synapse-topic-audit-20260616-2@sha256:e5c0b12f875a04cae741acf8476b4a2d2c505d8e8c0f1d2aad6629406af40aef
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:synapse-unread-cache-20260616-1@sha256:9688eb22a93a5bce04e6dc34bef3bc3d9d3cd04d24df989758bcde1ed89a21ef
 ---
 apiVersion: apps/v1
 kind: Deployment

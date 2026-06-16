@@ -102,6 +102,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
         const chats = await client.getUnreadChats();
         res.json({ chats });
       } catch (e) {
+        logger.error(`Error getting unread chats: ${String(e)}`);
         res.status(500).json({ error: String(e) });
       }
     })();
