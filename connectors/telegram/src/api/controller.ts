@@ -137,6 +137,28 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * GET /chats/:id/topics - List forum topics for a supergroup
+   */
+  router.get('/chats/:id/topics', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const limit = parseInt(req.query.limit as string) || 100;
+        const query = typeof req.query.query === 'string' ? req.query.query : '';
+        const topics = await client.getForumTopics(req.params.id, limit, query);
+        res.json({ topics });
+      } catch (e) {
+        logger.error(`Error getting forum topics: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
    * GET /messages/:chatId - Get messages for a chat
    */
   router.get('/messages/:chatId', (req: Request, res: Response): void => {
@@ -167,12 +189,38 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   router.post('/messages/search', (req: Request, res: Response): void => {
     void (async () => {
       try {
-        const { query, chatId, limit } = req.body;
-        if (!query) {
+        const { query, chatId, limit, threadId, offsetId } = req.body;
+        if (query === undefined || query === null) {
           res.status(400).json({ error: 'Missing query' });
           return;
         }
-        const results = await client.searchMessages(query, chatId, limit || 20);
+        const parsedThreadId =
+          threadId !== undefined && threadId !== null ? Number(threadId) : undefined;
+        if (
+          parsedThreadId !== undefined &&
+          (!Number.isInteger(parsedThreadId) || parsedThreadId <= 0)
+        ) {
+          res.status(400).json({ error: 'threadId must be a positive integer' });
+          return;
+        }
+
+        const parsedOffsetId =
+          offsetId !== undefined && offsetId !== null ? Number(offsetId) : undefined;
+        if (
+          parsedOffsetId !== undefined &&
+          (!Number.isInteger(parsedOffsetId) || parsedOffsetId <= 0)
+        ) {
+          res.status(400).json({ error: 'offsetId must be a positive integer' });
+          return;
+        }
+
+        const results = await client.searchMessages(
+          String(query),
+          chatId,
+          limit || 20,
+          parsedThreadId,
+          parsedOffsetId
+        );
         res.json({ results });
       } catch (e) {
         res.status(500).json({ error: String(e) });

@@ -16,8 +16,8 @@ images:
     newTag: cloud-api-20260604
     digest: sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: telegram-delete-peer-fix-20260613
-    digest: sha256:159db9926d12540eaf8d8acf9a1abdaf865c79b70100818466d0688bf8ae35b5
+    newTag: synapse-topic-audit-20260616-2
+    digest: sha256:e5c0b12f875a04cae741acf8476b4a2d2c505d8e8c0f1d2aad6629406af40aef
   # telegram-sync v1.3.38 = SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session). The pre-branch v1.3.21 regressed back in when
   # deploy/prod lost the codex branch and crashloops (0/1 ready) — this pin

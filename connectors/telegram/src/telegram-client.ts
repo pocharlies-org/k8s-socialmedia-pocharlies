@@ -31,6 +31,7 @@ export interface TelegramMessage {
   }>;
   isForwarded: boolean;
   replyToMessageId?: string;
+  topicId?: string;
   isOutbound: boolean;
   chatType: 'private' | 'group' | 'supergroup' | 'channel';
   chatTitle?: string;
@@ -279,6 +280,7 @@ export class TelegramClientWrapper extends EventEmitter {
         attachments: attachments.length > 0 ? attachments : undefined,
         isForwarded: !!message.forward,
         replyToMessageId: message.replyToMessage?.id?.toString(),
+        topicId: message.replyToMessage?.threadId?.toString(),
         isOutbound,
         chatType: mapChatType(chat),
         chatTitle: chatTitleOf(chat),
@@ -460,6 +462,41 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * List forum topics for a supergroup.
+   */
+  async getForumTopics(chatId: string, limit: number = 100, query: string = ''): Promise<any[]> {
+    if (!this.connected) throw new Error('Not connected');
+    const topics = await this.client.getForumTopics(toMtcutePeer(chatId), { limit, query });
+    return topics.map(topic => {
+      let lastMessage: any = null;
+      try {
+        lastMessage = topic.lastMessage
+          ? {
+              id: topic.lastMessage.id.toString(),
+              text: topic.lastMessage.text || '',
+              date: topic.lastMessage.date.toISOString(),
+              senderId: topic.lastMessage.sender?.id?.toString() || null,
+            }
+          : null;
+      } catch {
+        lastMessage = null;
+      }
+
+      return {
+        id: topic.id.toString(),
+        title: topic.title,
+        isClosed: topic.isClosed,
+        isPinned: topic.isPinned,
+        unreadCount: topic.unreadCount,
+        unreadMentionsCount: topic.unreadMentionsCount,
+        unreadReactionsCount: topic.unreadReactionsCount,
+        lastRead: topic.lastRead,
+        lastMessage,
+      };
+    });
+  }
+
+  /**
    * Chats with unread messages
    */
   async getUnreadChats(): Promise<any[]> {
@@ -481,7 +518,13 @@ export class TelegramClientWrapper extends EventEmitter {
   /**
    * Search messages globally or within a chat
    */
-  async searchMessages(query: string, chatId?: string, limit: number = 20): Promise<any[]> {
+  async searchMessages(
+    query: string,
+    chatId?: string,
+    limit: number = 20,
+    threadId?: number,
+    offsetId?: number
+  ): Promise<any[]> {
     if (!this.connected) throw new Error('Not connected');
     if (!chatId) {
       const result = await this.client.searchGlobal({ query, limit });
@@ -490,14 +533,24 @@ export class TelegramClientWrapper extends EventEmitter {
         chatId: m.chat.id.toString(),
         text: m.text || '',
         date: m.date.toISOString(),
+        senderId: m.sender?.id?.toString() || null,
+        topicId: m.replyToMessage?.threadId?.toString(),
       }));
     }
-    const result = await this.client.searchMessages({ chatId: toMtcutePeer(chatId), query, limit });
+    const result = await this.client.searchMessages({
+      chatId: toMtcutePeer(chatId),
+      query,
+      limit,
+      ...(threadId ? { threadId } : {}),
+      ...(offsetId ? { offset: offsetId } : {}),
+    });
     return result.map(m => ({
       id: m.id.toString(),
       chatId,
       text: m.text || '',
       date: m.date.toISOString(),
+      senderId: m.sender?.id?.toString() || null,
+      topicId: m.replyToMessage?.threadId?.toString(),
     }));
   }
 
