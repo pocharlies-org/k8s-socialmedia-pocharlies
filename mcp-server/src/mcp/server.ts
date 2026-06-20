@@ -2232,6 +2232,7 @@ export class MCPServer {
                 name: conv.name,
                 lastMessageAt: conv.lastMessageAt?.toISOString() || null,
                 messageCount: conv.messageCount,
+                unreadCount: conv.unreadCount,
                 participants: conv.participants,
               })),
             },
@@ -2655,26 +2656,77 @@ export class MCPServer {
   }
 
   private async handleGetUnreadChats(args?: { account?: string }) {
-    // The whatsapp-web.js connector enumerates every chat to compute unread —
-    // can be slow on accounts with hundreds of chats. Cap at 8s so we don't
-    // hang the SSE client; surface a clear error if the connector is too slow
-    // (the user can fall back to list_conversations / get_user_messages).
+    const account = normalizeAccount(args?.account);
+    // The connector live store can be stale/empty after WhatsApp Web conflict
+    // reconnects. Prefer live data when present, but fall back to the persisted
+    // DB unread counters so agents do not report a false zero.
     try {
       const data = await this.connectorCall(
-        this.waUrl(args?.account),
+        this.waUrl(account),
         'GET',
         '/api/v1/chats/unread',
         undefined,
         8000
       );
-      return this.jsonResponse(data);
+      if (Array.isArray(data?.chats) && data.chats.length > 0) {
+        return this.jsonResponse({
+          source: 'live-connector',
+          totalResults: data.chats.length,
+          ...data,
+        });
+      }
+
+      const fallback = await this.getUnreadWhatsAppChatsFromDb(account, 'live connector returned 0');
+      return this.jsonResponse(fallback.totalResults > 0 ? fallback : data);
     } catch (e: any) {
       const reason = e?.name === 'TimeoutError' ? 'timeout after 8s' : e?.message || String(e);
+      const fallback = await this.getUnreadWhatsAppChatsFromDb(account, reason);
+      if (fallback.totalResults > 0) return this.jsonResponse(fallback);
       throw new McpError(
         ErrorCode.InternalError,
-        `get_unread_chats failed (${reason}). The whatsapp connector enumerates every chat — try list_conversations(limit=20) or get_user_messages for specific contacts instead.`
+        `get_unread_chats failed (${reason}) and database fallback found no WhatsApp unread chats.`
       );
     }
+  }
+
+  private async getUnreadWhatsAppChatsFromDb(account: Account, reason: string) {
+    const result = await this.dbClient.query(
+      `SELECT c.id, c.name, c.type, c.is_group, c.unread_count, c.last_message_at
+         FROM conversations c
+        WHERE c.account = $1
+          AND COALESCE(c.unread_count, 0) > 0
+          AND regexp_replace(c.id, '^(personal|professional):', '') NOT LIKE 'tg_%'
+          AND (
+            regexp_replace(c.id, '^(personal|professional):', '') LIKE '%@%'
+            OR regexp_replace(COALESCE(c.wa_chat_id, ''), '^(personal|professional):', '') LIKE '%@%'
+            OR EXISTS (
+              SELECT 1
+                FROM messages m
+               WHERE m.conversation_id = c.id
+                 AND m.account = $1
+                 AND m.platform = 'whatsapp'
+               LIMIT 1
+            )
+          )
+        ORDER BY c.unread_count DESC, c.last_message_at DESC NULLS LAST
+        LIMIT 200`,
+      [account]
+    );
+
+    return {
+      source: 'database-fallback',
+      reason,
+      totalResults: result.rows.length,
+      chats: result.rows.map(row => ({
+        id: row.id,
+        waChatId: stripAccount(row.id).id,
+        name: row.name,
+        unreadCount: Number(row.unread_count || 0),
+        isGroup: Boolean(row.is_group),
+        type: row.type || (row.is_group ? 'GROUP' : 'INDIVIDUAL'),
+        lastMessageAt: row.last_message_at?.toISOString?.() || row.last_message_at || null,
+      })),
+    };
   }
 
   private async handleGetGroupInfo(args: { groupId: string; account?: string }) {

@@ -2,7 +2,12 @@
 
 Multi-platform messaging MCP server for WhatsApp, Telegram, and Instagram. Exposes tools for searching, summarizing, and sending messages across all platforms.
 
-**Server**: x86 at `192.168.50.142:3010` (SSE transport)
+**Server**: Kubernetes `whatsapp-mcp/mcp-sse` via `https://mcp-socialmedia.lan.e-dani.com`.
+
+- SSE transport: `https://mcp-socialmedia.lan.e-dani.com/sse`
+- Streamable HTTP transport: `https://mcp-socialmedia.lan.e-dani.com/mcp`
+- In-cluster service: `http://mcp-sse.whatsapp-mcp.svc.cluster.local:3010`
+- Current OpenClaw-on-sauvage shortcut may also use the stable Service ClusterIP, but do not hard-code old node IPs such as `192.168.50.142:3010`.
 
 ## Setup
 
@@ -13,9 +18,9 @@ Multi-platform messaging MCP server for WhatsApp, Telegram, and Instagram. Expos
   "mcpServers": {
     "messaging": {
       "type": "sse",
-      "url": "http://192.168.50.142:3010/sse",
+      "url": "https://mcp-socialmedia.lan.e-dani.com/sse",
       "headers": {
-        "Authorization": "Bearer 5UyoEnAQRtzisPouXoMy_TAhkF6zUBZCu5RCYOnzLPI"
+        "Authorization": "Bearer <MCP_SSE_AUTH_TOKEN>"
       }
     }
   }
@@ -28,9 +33,9 @@ Multi-platform messaging MCP server for WhatsApp, Telegram, and Instagram. Expos
 {
   "messaging": {
     "transport": "sse",
-    "url": "http://192.168.50.142:3010/sse",
+    "url": "https://mcp-socialmedia.lan.e-dani.com/sse",
     "headers": {
-      "Authorization": "Bearer 5UyoEnAQRtzisPouXoMy_TAhkF6zUBZCu5RCYOnzLPI"
+      "Authorization": "Bearer <MCP_SSE_AUTH_TOKEN>"
     }
   }
 }

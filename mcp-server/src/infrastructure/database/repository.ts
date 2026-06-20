@@ -6,7 +6,7 @@ import {
   Message,
   Attachment,
 } from '../../domain/entities';
-import { accountKey, normalizeAccount } from '../../domain/account';
+import { accountKey, normalizeAccount, stripAccount } from '../../domain/account';
 
 export class DatabaseRepository {
   constructor(private client: Pool) {}
@@ -234,6 +234,7 @@ export class DatabaseRepository {
       name: string | null;
       lastMessageAt: Date | null;
       messageCount: number;
+      unreadCount: number;
       participants?: { waUserId: string; name: string | null; isAdmin: boolean }[];
     }[]
   > {
@@ -269,14 +270,16 @@ export class DatabaseRepository {
           name: string | null;
           lastMessageAt: Date | null;
           messageCount: number;
+          unreadCount: number;
           participants?: { waUserId: string; name: string | null; isAdmin: boolean }[];
         } = {
           id: row.id,
-          waChatId: row.wa_chat_id || row.id,
+          waChatId: stripAccount(row.id).id,
           type: row.conv_type,
           name: row.name,
           lastMessageAt: row.last_message_at,
           messageCount: parseInt(row.message_count, 10),
+          unreadCount: parseInt(row.unread_count || '0', 10),
         };
 
         if (includeParticipants) {

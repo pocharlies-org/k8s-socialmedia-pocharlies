@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:synapse-deleted-filter-20260615-r2@sha256:1baf8f3d1620acdff4c55c5070a68ddc0fc16bd97683c67ced6810822fe8a678
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:whatsapp-unread-db-fallback-20260620@sha256:0cb3b6da6968c32341e188051678e2182a6a0f9b3d9518bb141f2073709583b9
 ---
 apiVersion: apps/v1
 kind: Deployment
