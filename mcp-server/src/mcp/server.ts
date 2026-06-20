@@ -2658,35 +2658,12 @@ export class MCPServer {
   private async handleGetUnreadChats(args?: { account?: string }) {
     const account = normalizeAccount(args?.account);
     // The connector live store can be stale/empty after WhatsApp Web conflict
-    // reconnects. Prefer live data when present, but fall back to the persisted
-    // DB unread counters so agents do not report a false zero.
-    try {
-      const data = await this.connectorCall(
-        this.waUrl(account),
-        'GET',
-        '/api/v1/chats/unread',
-        undefined,
-        8000
-      );
-      if (Array.isArray(data?.chats) && data.chats.length > 0) {
-        return this.jsonResponse({
-          source: 'live-connector',
-          totalResults: data.chats.length,
-          ...data,
-        });
-      }
-
-      const fallback = await this.getUnreadWhatsAppChatsFromDb(account, 'live connector returned 0');
-      return this.jsonResponse(fallback.totalResults > 0 ? fallback : data);
-    } catch (e: any) {
-      const reason = e?.name === 'TimeoutError' ? 'timeout after 8s' : e?.message || String(e);
-      const fallback = await this.getUnreadWhatsAppChatsFromDb(account, reason);
-      if (fallback.totalResults > 0) return this.jsonResponse(fallback);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `get_unread_chats failed (${reason}) and database fallback found no WhatsApp unread chats.`
-      );
-    }
+    // reconnects, and enumerating live chats can block. Use persisted unread
+    // counters as the primary source so agents answer fast and do not report a
+    // false zero when the live Baileys store is empty.
+    return this.jsonResponse(
+      await this.getUnreadWhatsAppChatsFromDb(account, 'database unread counters')
+    );
   }
 
   private async getUnreadWhatsAppChatsFromDb(account: Account, reason: string) {
