@@ -38,7 +38,7 @@ interface SessionRecord {
   ip: string;
   ua: string;
   createdAt: number;
-  heartbeat: NodeJS.Timeout;
+  heartbeat: () => void;
   maxAgeTimer: NodeJS.Timeout;
   cleanup: (reason: string) => void;
 }
@@ -68,6 +68,49 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on('error', reject);
   });
+}
+
+/**
+ * Best-effort TCP keepalive on a long-lived stream's socket so a dead peer (NAT
+ * drop, proxy crash) is noticed within ~a minute instead of lingering as a
+ * zombie. `setTimeout(0)` disables Node's own per-socket idle timeout.
+ */
+function applyTcpKeepAlive(req: IncomingMessage): void {
+  try {
+    req.socket.setKeepAlive(true, TCP_KEEPALIVE_MS);
+    req.socket.setTimeout(0);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * SSE heartbeat: periodic comment lines (`: ping`) keep proxies / NAT / load
+ * balancers from idling a long-lived stream out, and surface a dead client when
+ * the write throws. Comment lines are valid SSE and are ignored by every MCP
+ * client, so this is safe to interleave with the SDK's own event frames.
+ * Returns stop() (also wired to fire on socket close/error). `onFail` runs at
+ * most once, when a heartbeat write fails (peer gone).
+ */
+function startSseHeartbeat(res: ServerResponse, onFail: () => void): () => void {
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+  };
+  const timer = setInterval(() => {
+    if (!res.headersSent || res.writableEnded) return;
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      stop();
+      onFail();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+  res.on('close', stop);
+  res.on('error', stop);
+  return stop;
 }
 
 async function main() {
@@ -234,6 +277,36 @@ async function main() {
           res.end(JSON.stringify({ error: 'Invalid or missing mcp-session-id' }));
           return;
         }
+        if (req.method === 'DELETE') {
+          // Explicit client teardown. Logged so eviction-pattern diagnosis can
+          // tell deliberate closes apart from idle-stream deaths.
+          console.log(`[MCP] DELETE streamable session ${sid}`);
+          await session.transport.handleRequest(req, res);
+          return;
+        }
+
+        // GET opens the long-lived server->client notification stream. The MCP
+        // client (StreamableHTTPClientTransport) keeps it open to receive
+        // notifications and only retries it maxRetries=2 times before giving up
+        // with onerror. Nothing was keeping it alive: an idle stream is dropped
+        // by a proxy/NAT/conntrack hop after a few minutes, the client exhausts
+        // its 2 retries, and the host (e.g. Claude Code) then treats the server
+        // as "not connected" (and/or DELETEs the session) without re-initing —
+        // until the whole agent session restarts. The heartbeat (`: ping` every
+        // 30s, exactly like the /sse path below) keeps the stream live so the
+        // client never gives up. We deliberately do NOT evict the session on a
+        // heartbeat-write failure: the SDK owns the streamable session lifecycle
+        // (DELETE / transport.close / max-age) and a GET stream may legitimately
+        // drop and be re-opened with the same id.
+        applyTcpKeepAlive(req);
+        const stopBeat = startSseHeartbeat(res, () => {});
+        const openedAt = Date.now();
+        console.log(`[MCP] GET stream open ${sid} (keepalive on)`);
+        res.on('close', () => {
+          stopBeat();
+          const ageSec = Math.round((Date.now() - openedAt) / 1000);
+          console.log(`[MCP] GET stream closed ${sid} age=${ageSec}s`);
+        });
         await session.transport.handleRequest(req, res);
         return;
       }
@@ -281,29 +354,17 @@ async function main() {
       const ua = String(req.headers['user-agent'] || '').slice(0, 200);
       const createdAt = Date.now();
 
-      // TCP keepalive: detect zombies (NAT, proxy crash) within a minute.
-      try {
-        req.socket.setKeepAlive(true, TCP_KEEPALIVE_MS);
-        req.socket.setTimeout(0);
-      } catch {
-        /* ignore */
-      }
-
-      // SSE heartbeat: comment lines keep proxies / load balancers from
-      // idling the connection out.
-      const heartbeat = setInterval(() => {
-        try {
-          res.write(': ping\n\n');
-        } catch {
-          doCleanup('heartbeat-write-failed');
-        }
-      }, HEARTBEAT_INTERVAL_MS);
+      // Keep the stream alive through proxies/NAT and notice dead clients. Here
+      // the SSE stream *is* the session, so a failed heartbeat write (peer gone)
+      // tears the session down.
+      applyTcpKeepAlive(req);
+      const heartbeat = startSseHeartbeat(res, () => doCleanup('heartbeat-write-failed'));
 
       const maxAgeTimer = setTimeout(() => doCleanup('max-age'), SESSION_MAX_AGE_MS);
 
       const doCleanup = (reason: string) => {
         if (sessions.delete(transport.sessionId)) {
-          clearInterval(heartbeat);
+          heartbeat();
           clearTimeout(maxAgeTimer);
           const ageSec = Math.round((Date.now() - createdAt) / 1000);
           console.log(
