@@ -92,4 +92,4 @@ spec:
     spec:
       containers:
         - name: whatsapp-synapse-bridge
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge:latest
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge:whatsapp-ingress-20260623@sha256:d126b29aff8a28869fe397cc6ee522a74141c97a6ba8e8943aeddfcfb8bc63f6
