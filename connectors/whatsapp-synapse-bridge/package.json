@@ -1,0 +1,23 @@
+{
+  "name": "@mcp-socialmedia/whatsapp-synapse-bridge",
+  "version": "1.0.0",
+  "description": "Fail-closed bridge: NATS whatsapp.MessageReceived -> HMAC-signed POST to the synapse gateway webhook",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "test": "tsx --test src/filter.test.ts src/dedup.test.ts src/gateway-client.test.ts"
+  },
+  "dependencies": {
+    "@mcp-socialmedia/shared": "workspace:*",
+    "nats": "^2.10.0",
+    "pino": "^8.16.0",
+    "pino-pretty": "^10.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.2"
+  }
+}
