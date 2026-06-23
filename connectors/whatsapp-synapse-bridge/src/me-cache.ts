@@ -96,8 +96,12 @@ export class MeCache {
   private async doFetch(): Promise<string | null> {
     const url = `${this.connectorUrl}/api/v1/me`;
     const timestampSec = Math.floor(this.now() / 1000);
-    // Connector verifies `${timestamp}:${JSON.stringify(req.body)}`. An empty
-    // body parsed by express.json() is {} => JSON.stringify({}) === "{}".
+    // Connector verifies `${timestamp}:${JSON.stringify(req.body)}`. For a GET
+    // with Content-Type application/json and no body, express.json() yields
+    // req.body = {} => "{}", so we sign over the empty object. We must NOT send
+    // a body on the wire: fetch/undici rejects a GET/HEAD with a body
+    // ("Request with GET/HEAD method cannot have body."). Verified against the
+    // live connector: bodyless GET + signature over `${ts}:{}` returns 200.
     const body = {};
     const signature = signConnectorRequest(body, timestampSec, this.connectorSharedSecret);
 
@@ -110,7 +114,6 @@ export class MeCache {
             'X-Connector-Signature': signature,
             'X-Connector-Timestamp': String(timestampSec),
           },
-          body: JSON.stringify(body),
         }),
         this.requestTimeoutMs,
         'connector /me'

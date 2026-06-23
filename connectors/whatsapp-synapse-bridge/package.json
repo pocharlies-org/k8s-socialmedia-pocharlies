@@ -7,7 +7,7 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/filter.test.ts src/dedup.test.ts src/gateway-client.test.ts"
+    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/filter.test.ts src/dedup.test.ts src/gateway-client.test.ts src/me-cache.test.ts"
   },
   "dependencies": {
     "@mcp-socialmedia/shared": "workspace:*",
