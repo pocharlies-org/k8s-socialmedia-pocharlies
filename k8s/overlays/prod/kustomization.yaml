@@ -32,8 +32,8 @@ images:
     newTag: auto-send-headful-xauth-20260604
     digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: coldsend-gate-fix-20260624
-    digest: sha256:d9199b537327c71cf3b3042880a280d0d5b1f337dee47db6710c61a3e30a8012
+    newTag: streamable-session-reclaim-20260625-r2
+    digest: sha256:ce20fb6759881fbb42e3f72b8565deef4455c3e8ba5967c3a63f91f57a2d66bc
   # whatsapp-synapse-bridge (Phase F3b). Pinned to the E2E-validated build
   # (built + pushed 2026-06-23; identical source to feat/whatsapp-synapse-bridge).
   # A future manifest-release run can re-pin from CI; the digest is immutable.
