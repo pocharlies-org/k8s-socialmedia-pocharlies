@@ -2464,6 +2464,7 @@ export class MCPServer {
                 name: conv.name,
                 lastMessageAt: conv.lastMessageAt?.toISOString() || null,
                 messageCount: conv.messageCount,
+                unreadCount: conv.unreadCount,
                 participants: conv.participants,
               })),
             },
@@ -3009,13 +3010,60 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
-  private async handleGetUnreadChats(args?: { account?: string; limit?: number }) {
+  private async handleGetUnreadChats(args?: { account?: string }) {
     const account = normalizeAccount(args?.account);
-    const limit = clampInteger(args?.limit, 50, 1, 200);
-    const data = await this.getWhatsAppUnreadPayload(account, limit);
-    return this.jsonResponse(data);
+    // The connector live store can be stale/empty after WhatsApp Web conflict
+    // reconnects, and enumerating live chats can block. Use persisted unread
+    // counters as the primary source so agents answer fast and do not report a
+    // false zero when the live Baileys store is empty.
+    return this.jsonResponse(
+      await this.getUnreadWhatsAppChatsFromDb(account, 'database unread counters')
+    );
   }
 
+  private async getUnreadWhatsAppChatsFromDb(account: Account, reason: string) {
+    const result = await this.dbClient.query(
+      `SELECT c.id, c.name, c.type, c.is_group, c.unread_count, c.last_message_at
+         FROM conversations c
+        WHERE c.account = $1
+          AND COALESCE(c.unread_count, 0) > 0
+          AND regexp_replace(c.id, '^(personal|professional):', '') NOT LIKE 'tg_%'
+          AND (
+            regexp_replace(c.id, '^(personal|professional):', '') LIKE '%@%'
+            OR regexp_replace(COALESCE(c.wa_chat_id, ''), '^(personal|professional):', '') LIKE '%@%'
+            OR EXISTS (
+              SELECT 1
+                FROM messages m
+               WHERE m.conversation_id = c.id
+                 AND m.account = $1
+                 AND m.platform = 'whatsapp'
+               LIMIT 1
+            )
+          )
+        ORDER BY c.unread_count DESC, c.last_message_at DESC NULLS LAST
+        LIMIT 200`,
+      [account]
+    );
+
+    return {
+      source: 'database-fallback',
+      reason,
+      totalResults: result.rows.length,
+      chats: result.rows.map(row => ({
+        id: row.id,
+        waChatId: stripAccount(row.id).id,
+        name: row.name,
+        unreadCount: Number(row.unread_count || 0),
+        isGroup: Boolean(row.is_group),
+        type: row.type || (row.is_group ? 'GROUP' : 'INDIVIDUAL'),
+        lastMessageAt: row.last_message_at?.toISOString?.() || row.last_message_at || null,
+      })),
+    };
+  }
+
+  // Live-connector unread enumeration. Retained as the data source for
+  // unread_digest (collectUnreadDigestChats); the get_unread_chats tool itself
+  // now prefers persisted db counters via handleGetUnreadChats above.
   private async getWhatsAppUnreadPayload(account: Account, limit: number): Promise<any> {
     // The whatsapp-web.js connector enumerates every chat to compute unread —
     // can be slow on accounts with hundreds of chats. Cap at 8s so we don't

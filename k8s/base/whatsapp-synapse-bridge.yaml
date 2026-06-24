@@ -1,0 +1,67 @@
+# WhatsApp -> synapse-gateway bridge (Phase F3b).
+#
+# Subscribes the NATS subject `whatsapp.MessageReceived` (in-cluster ClusterIP
+# bus), runs a FAIL-CLOSED filter pipeline (professional 1:1 only, drop on any
+# uncertainty), and HMAC-POSTs surviving events to the synapse gateway webhook
+# on sauvage. This is the boundary bridge NATS (in-cluster) -> RabbitMQ (sauvage).
+#
+# Single replica + Recreate: the in-memory dedup cache and /me own-JID cache are
+# process-local. NATS-core gives at-most-once delivery within the `synapse-bridge`
+# queue group, so a single consumer is the simplest correct topology (the gateway
+# is expected to dedup on waMessageId for the restart window).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-synapse-bridge
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: whatsapp-synapse-bridge } }
+  template:
+    metadata: { labels: { app: whatsapp-synapse-bridge } }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: whatsapp-synapse-bridge
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge:latest
+          ports: [{ name: http, containerPort: 3006 }]
+          env:
+            - { name: PORT, value: "3006" }
+            - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
+            - { name: NATS_QUEUE_GROUP, value: "synapse-bridge" }
+            - { name: GATEWAY_WEBHOOK_URL, value: "https://synapse.e-dani.com/webhooks/whatsapp" }
+            - { name: CONNECTOR_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
+            - { name: ALLOWED_ACCOUNT, value: "professional" }
+            - { name: DEDUP_TTL_MS, value: "86400000" }
+            - { name: DEDUP_MAX, value: "50000" }
+            - { name: ME_CACHE_TTL_MS, value: "600000" }
+            # WHATSAPP_WEBHOOK_SECRET: gateway HMAC key. A new Vault key under
+            # secret/whatsapp-mcp is auto-synced into whatsapp-mcp-secrets by the
+            # ESO dataFrom.extract — populate it before this pod can forward.
+            - name: WHATSAPP_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: WHATSAPP_WEBHOOK_SECRET } }
+          # CONNECTOR_SHARED_SECRET (connector HMAC for GET /api/v1/me) comes via
+          # envFrom from the same shared secret used by every connector.
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 30m, memory: 64Mi }
+            limits:   { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 3006 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 3006 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata: { name: whatsapp-synapse-bridge, namespace: whatsapp-mcp }
+spec:
+  selector: { app: whatsapp-synapse-bridge }
+  ports: [{ name: http, port: 3006, targetPort: 3006 }]

@@ -151,6 +151,7 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   replicas: 1
+  revisionHistoryLimit: 0
   strategy: { type: Recreate }
   selector: { matchLabels: { app: whatsapp-mcp-minio } }
   template:
@@ -160,7 +161,7 @@ spec:
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
       containers:
         - name: minio
-          image: minio/minio:latest
+          image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
           args: [server, /data, --console-address, ":9001"]
           ports:
             - { name: api, containerPort: 9000 }
@@ -377,6 +378,10 @@ spec:
     spec:
       enableServiceLinks: false
       nodeSelector: { kubernetes.io/hostname: sauvage, kubernetes.io/arch: amd64 }
+      # sauvage lleva taint role=edge:NoSchedule — sin esta toleration el pod es
+      # imposible de programar (selector y toleration deben viajar juntos).
+      tolerations:
+        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
       containers:
         - name: whatsapp-cloud-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:latest
@@ -474,6 +479,9 @@ metadata:
 spec:
   schedule: "*/5 * * * *"
   timeZone: Europe/Madrid
+  # Paused after repeated 502/fetch failures against skirmshop-brain-ingest.
+  # Keep this quiet until the Brain/BGE ingest path is repaired and verified.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 2
@@ -495,11 +503,11 @@ spec:
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
-                - { name: BRAIN_INGEST_BATCH, value: "10" }
-                - { name: BRAIN_INGEST_MAX_ROWS, value: "1000" }
+                - { name: BRAIN_INGEST_BATCH, value: "2" }
+                - { name: BRAIN_INGEST_MAX_ROWS, value: "60" }
                 - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
                 - { name: BRAIN_PUSH_RETRIES, value: "3" }
-                - { name: BRAIN_PUSH_TIMEOUT_MS, value: "60000" }
+                - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
                 - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "10000" }
                 - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
                 # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (Vault) via envFrom.
@@ -662,6 +670,11 @@ spec:
             - { name: sse, containerPort: 3010, hostPort: 3010 }
           env:
             - { name: MCP_SSE_PORT, value: "3010" }
+            # Reclaim idle Streamable-HTTP sessions (no open notification stream +
+            # idle > this) so orphaned sessions don't leak heap until the 6h max-age.
+            # Tunable without an image rebuild. Also: SSE_STREAMABLE_SWEEP_MS (60s),
+            # SSE_STREAMABLE_MAX_SESSIONS (100) default in code.
+            - { name: SSE_STREAMABLE_IDLE_MS, value: "600000" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
