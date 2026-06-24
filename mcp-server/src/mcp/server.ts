@@ -2956,6 +2956,12 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
+    if (normalizeAccount(account) === 'professional') {
+      // Same cold-send guard as text sends: block first-contact media to a
+      // professional chat with no prior inbound (Baileys account_restricted /
+      // ban risk) and resolve the @lid-aware send jid. Mirrors handleSendMessage.
+      body.conversationId = await this.requireProfessionalInboundChat(body.conversationId);
+    }
     const data = await this.connectorCall(
       this.waUrl(account),
       'POST',
@@ -2975,6 +2981,12 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
+    if (normalizeAccount(account) === 'professional') {
+      // Gate the forward DESTINATION (toChatId) through the same inbound guard
+      // as text/media sends — chatId is only the source we read from, so it
+      // does not initiate contact. Resolves the @lid-aware send jid too.
+      body.toChatId = await this.requireProfessionalInboundChat(body.toChatId);
+    }
     const data = await this.connectorCall(
       this.waUrl(account),
       'POST',
