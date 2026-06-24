@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:whatsapp-unread-db-first-20260620@sha256:916d79b6437fd6556dc5e64158906fa2103a7644b0fb1e37c15624bf1d7df0a8
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:unread-digest-20260624@sha256:dd1182d24f098eb726671937e3960ce014280140922b8f05454934ad3d01bbd4
 ---
 apiVersion: apps/v1
 kind: Deployment
