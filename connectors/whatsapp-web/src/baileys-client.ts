@@ -45,6 +45,7 @@ import pino from 'pino';
 import {
   accountKey,
   stripAccountKey,
+  connectorAccount,
   storeMessage,
   ensureConversation,
   ensureParticipant,
@@ -2141,12 +2142,14 @@ export class BaileysClient extends EventEmitter {
       // professional finds no attachment row; messages.id is the global numeric PK
       // and is never namespaced, so match it raw ($2). Mirrors the dual lookup the
       // MCP server already does for get_messages (wa_message_id OR id::text).
+      // Scope to this connector's account ($3) so the numeric-id branch cannot
+      // cross the personal/professional boundary in the shared DB.
       const r = await pool.query(
         `SELECT a.file_url, a.mime_type, a.file_name
            FROM attachments a JOIN messages m ON m.id = a.message_id
-          WHERE m.wa_message_id = $1 OR m.id::text = $2
+          WHERE (m.wa_message_id = $1 OR m.id::text = $2) AND m.account = $3
           ORDER BY a.id DESC LIMIT 1`,
-        [accountKey(messageId), messageId]
+        [accountKey(messageId), messageId, connectorAccount()]
       );
       const row = r.rows[0];
       if (!row?.file_url) {
