@@ -33,12 +33,25 @@ const HEARTBEAT_INTERVAL_MS = parseInt(process.env.SSE_HEARTBEAT_MS || '30000', 
 const SESSION_MAX_AGE_MS = parseInt(process.env.SSE_MAX_AGE_MS || `${6 * 3600 * 1000}`, 10);
 const TCP_KEEPALIVE_MS = parseInt(process.env.SSE_TCP_KEEPALIVE_MS || '60000', 10);
 
+// Streamable-HTTP sessions are torn down only by an explicit DELETE (which MCP
+// clients' close() does NOT send — terminateSession() is separate/optional) or
+// by max-age. Dropping the GET notification stream does not fire the SDK
+// transport's onclose either. Without reclamation, every client connect/
+// disconnect cycle (agent turns, reconnects, multiple agents) leaks a session
+// plus its isolated per-session MCP Server until the 6h max-age fires, growing
+// the heap until the pod hits its memory limit and the server starts refusing
+// new connections ("not connected"). The idle-sweep below reclaims sessions that
+// have no open notification stream and have seen no POST/GET for STREAMABLE_IDLE_MS.
+const STREAMABLE_IDLE_MS = parseInt(process.env.SSE_STREAMABLE_IDLE_MS || `${10 * 60 * 1000}`, 10);
+const STREAMABLE_SWEEP_MS = parseInt(process.env.SSE_STREAMABLE_SWEEP_MS || '60000', 10);
+const STREAMABLE_MAX_SESSIONS = parseInt(process.env.SSE_STREAMABLE_MAX_SESSIONS || '100', 10);
+
 interface SessionRecord {
   transport: SSEServerTransport;
   ip: string;
   ua: string;
   createdAt: number;
-  heartbeat: NodeJS.Timeout;
+  heartbeat: () => void;
   maxAgeTimer: NodeJS.Timeout;
   cleanup: (reason: string) => void;
 }
@@ -68,6 +81,49 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on('error', reject);
   });
+}
+
+/**
+ * Best-effort TCP keepalive on a long-lived stream's socket so a dead peer (NAT
+ * drop, proxy crash) is noticed within ~a minute instead of lingering as a
+ * zombie. `setTimeout(0)` disables Node's own per-socket idle timeout.
+ */
+function applyTcpKeepAlive(req: IncomingMessage): void {
+  try {
+    req.socket.setKeepAlive(true, TCP_KEEPALIVE_MS);
+    req.socket.setTimeout(0);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * SSE heartbeat: periodic comment lines (`: ping`) keep proxies / NAT / load
+ * balancers from idling a long-lived stream out, and surface a dead client when
+ * the write throws. Comment lines are valid SSE and are ignored by every MCP
+ * client, so this is safe to interleave with the SDK's own event frames.
+ * Returns stop() (also wired to fire on socket close/error). `onFail` runs at
+ * most once, when a heartbeat write fails (peer gone).
+ */
+function startSseHeartbeat(res: ServerResponse, onFail: () => void): () => void {
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+  };
+  const timer = setInterval(() => {
+    if (!res.headersSent || res.writableEnded) return;
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      stop();
+      onFail();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+  res.on('close', stop);
+  res.on('error', stop);
+  return stop;
 }
 
 async function main() {
@@ -109,6 +165,12 @@ async function main() {
   interface StreamableSession {
     transport: StreamableHTTPServerTransport;
     createdAt: number;
+    // Bumped on every POST/GET for the session and while a notification stream
+    // is open; drives the idle-sweep so abandoned sessions are reclaimed.
+    lastActivity: number;
+    // Count of currently-open server->client GET notification streams. A session
+    // with an open stream (>0) is never idle-swept: the client is still here.
+    openStreams: number;
     maxAgeTimer: NodeJS.Timeout;
   }
   const streamableSessions = new Map<string, StreamableSession>();
@@ -124,6 +186,34 @@ async function main() {
     );
     void session.transport.close().catch(() => {});
   };
+
+  // Reclaim abandoned streamable sessions. A client that merely close()s its
+  // transport sends no DELETE, and dropping the GET notification stream does not
+  // fire the SDK transport's onclose, so without this the only cleanup is the 6h
+  // max-age — an unbounded heap leak (one MCP Server per orphan). Sessions with a
+  // live notification stream are protected (openStreams>0); idle, streamless ones
+  // are evicted after STREAMABLE_IDLE_MS. A hard cap is the backstop for reconnect
+  // storms faster than the idle window.
+  const sweepStreamable = () => {
+    const now = Date.now();
+    for (const [sid, s] of streamableSessions) {
+      if (s.openStreams <= 0 && now - s.lastActivity > STREAMABLE_IDLE_MS) {
+        closeStreamable(sid, 'idle-sweep');
+      }
+    }
+    if (streamableSessions.size > STREAMABLE_MAX_SESSIONS) {
+      const evictable = Array.from(streamableSessions.entries())
+        .filter(([, s]) => s.openStreams <= 0)
+        .sort((a, b) => a[1].lastActivity - b[1].lastActivity);
+      let over = streamableSessions.size - STREAMABLE_MAX_SESSIONS;
+      for (const [sid] of evictable) {
+        if (over-- <= 0) break;
+        closeStreamable(sid, 'over-capacity');
+      }
+    }
+  };
+  const sweepTimer = setInterval(sweepStreamable, STREAMABLE_SWEEP_MS);
+  sweepTimer.unref();
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://localhost:${SSE_PORT}`);
@@ -187,6 +277,7 @@ async function main() {
 
         const existing = sid ? streamableSessions.get(sid) : undefined;
         if (existing) {
+          existing.lastActivity = Date.now();
           await existing.transport.handleRequest(req, res, body);
           return;
         }
@@ -211,7 +302,13 @@ async function main() {
               () => closeStreamable(newSid, 'max-age'),
               SESSION_MAX_AGE_MS
             );
-            streamableSessions.set(newSid, { transport, createdAt: Date.now(), maxAgeTimer });
+            streamableSessions.set(newSid, {
+              transport,
+              createdAt: Date.now(),
+              lastActivity: Date.now(),
+              openStreams: 0,
+              maxAgeTimer,
+            });
             console.log(
               `[MCP] New streamable session ${newSid} (${streamableSessions.size} active)`
             );
@@ -234,6 +331,42 @@ async function main() {
           res.end(JSON.stringify({ error: 'Invalid or missing mcp-session-id' }));
           return;
         }
+        if (req.method === 'DELETE') {
+          // Explicit client teardown. Logged so eviction-pattern diagnosis can
+          // tell deliberate closes apart from idle-stream deaths.
+          console.log(`[MCP] DELETE streamable session ${sid}`);
+          await session.transport.handleRequest(req, res);
+          return;
+        }
+
+        // GET opens the long-lived server->client notification stream. The MCP
+        // client (StreamableHTTPClientTransport) keeps it open to receive
+        // notifications and only retries it maxRetries=2 times before giving up
+        // with onerror. Nothing was keeping it alive: an idle stream is dropped
+        // by a proxy/NAT/conntrack hop after a few minutes, the client exhausts
+        // its 2 retries, and the host (e.g. Claude Code) then treats the server
+        // as "not connected" (and/or DELETEs the session) without re-initing —
+        // until the whole agent session restarts. The heartbeat (`: ping` every
+        // 30s, exactly like the /sse path below) keeps the stream live so the
+        // client never gives up. We deliberately do NOT evict the session on a
+        // heartbeat-write failure: the SDK owns the streamable session lifecycle
+        // (DELETE / transport.close / max-age) and a GET stream may legitimately
+        // drop and be re-opened with the same id.
+        applyTcpKeepAlive(req);
+        const stopBeat = startSseHeartbeat(res, () => {});
+        const openedAt = Date.now();
+        session.openStreams += 1;
+        session.lastActivity = openedAt;
+        console.log(
+          `[MCP] GET stream open ${sid} (keepalive on, ${session.openStreams} stream(s))`
+        );
+        res.on('close', () => {
+          stopBeat();
+          session.openStreams = Math.max(0, session.openStreams - 1);
+          session.lastActivity = Date.now();
+          const ageSec = Math.round((Date.now() - openedAt) / 1000);
+          console.log(`[MCP] GET stream closed ${sid} age=${ageSec}s`);
+        });
         await session.transport.handleRequest(req, res);
         return;
       }
@@ -281,29 +414,17 @@ async function main() {
       const ua = String(req.headers['user-agent'] || '').slice(0, 200);
       const createdAt = Date.now();
 
-      // TCP keepalive: detect zombies (NAT, proxy crash) within a minute.
-      try {
-        req.socket.setKeepAlive(true, TCP_KEEPALIVE_MS);
-        req.socket.setTimeout(0);
-      } catch {
-        /* ignore */
-      }
-
-      // SSE heartbeat: comment lines keep proxies / load balancers from
-      // idling the connection out.
-      const heartbeat = setInterval(() => {
-        try {
-          res.write(': ping\n\n');
-        } catch {
-          doCleanup('heartbeat-write-failed');
-        }
-      }, HEARTBEAT_INTERVAL_MS);
+      // Keep the stream alive through proxies/NAT and notice dead clients. Here
+      // the SSE stream *is* the session, so a failed heartbeat write (peer gone)
+      // tears the session down.
+      applyTcpKeepAlive(req);
+      const heartbeat = startSseHeartbeat(res, () => doCleanup('heartbeat-write-failed'));
 
       const maxAgeTimer = setTimeout(() => doCleanup('max-age'), SESSION_MAX_AGE_MS);
 
       const doCleanup = (reason: string) => {
         if (sessions.delete(transport.sessionId)) {
-          clearInterval(heartbeat);
+          heartbeat();
           clearTimeout(maxAgeTimer);
           const ageSec = Math.round((Date.now() - createdAt) / 1000);
           console.log(
@@ -363,10 +484,14 @@ async function main() {
     console.log(
       `[SSE] heartbeat=${HEARTBEAT_INTERVAL_MS}ms tcp-keepalive=${TCP_KEEPALIVE_MS}ms max-age=${SESSION_MAX_AGE_MS}ms`
     );
+    console.log(
+      `[MCP] streamable idle-sweep=${STREAMABLE_IDLE_MS}ms interval=${STREAMABLE_SWEEP_MS}ms cap=${STREAMABLE_MAX_SESSIONS}`
+    );
   });
 
   const shutdown = async (signal: string) => {
     console.log(`[SSE] ${signal} received, shutting down...`);
+    clearInterval(sweepTimer);
     for (const s of sessions.values()) s.cleanup(`shutdown-${signal}`);
     for (const sid of Array.from(streamableSessions.keys()))
       closeStreamable(sid, `shutdown-${signal}`);

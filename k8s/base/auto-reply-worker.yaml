@@ -1,5 +1,5 @@
-# auto-reply-worker (F14 voice auto-replies) — adopted into GitOps 2026-06-11.
-# Was hand-applied (f14-voice image, 06-09 session) and invisible to ArgoCD.
+# auto-reply-worker (OmniVoice audio auto-replies) — adopted into GitOps 2026-06-11.
+# Voice uses the central omnivoice-audio gateway; ASR/TTS internals are hidden.
 # LLM_API_KEY / CONNECTOR_SECRET come from whatsapp-mcp-secrets (Vault
 # secret/whatsapp-mcp AUTO_REPLY_* keys) — values match what ran before.
 apiVersion: v1
@@ -91,17 +91,13 @@ spec:
               key: AUTO_REPLY_CONNECTOR_SECRET
         - name: CONFIG_PATH
           value: /worker/config.json
-        - name: STT_URL
-          value: http://stt-turbo.llm.svc.cluster.local:8000/v1/audio/transcriptions
-        - name: STT_MODEL
-          value: openai/whisper-large-v3-turbo
-        - name: XTTS_URL
-          value: http://xtts-tts.llm.svc.cluster.local:8000/v1/audio/speech
-        - name: XTTS_VOICE
-          value: lbvx_f14_native
-        - name: XTTS_LANGUAGE
+        - name: OMNIVOICE_BASE_URL
+          value: http://omnivoice-audio.llm.svc.cluster.local:8000
+        - name: OMNIVOICE_VOICE
+          value: daniel_hq_30s
+        - name: OMNIVOICE_LANGUAGE
           value: es
-        - name: XTTS_SPEED
+        - name: OMNIVOICE_SPEED
           value: '1.3'
         - name: VOICE_REPLIES
           value: 'true'
@@ -110,7 +106,7 @@ spec:
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets
-        image: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker:latest
+        image: harbor.e-dani.com/homelab/whatsappmcp-auto-reply-worker:20260612-omnivoice-audio-1@sha256:ec62259b7f81b35b549fa7ebce9633f634a8934ac4ca1499d4743ee79ebe8f02
         imagePullPolicy: IfNotPresent
         livenessProbe:
           failureThreshold: 3

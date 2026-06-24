@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.47@sha256:c1c781976220132d6b6eccc278ba2cb27b9e5ed21df2f8b4372b1d23556c9000
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:download-media-id-fix-20260624@sha256:6d0ebd34f94746706055ff5d5fd7e53c9d646db8d9d996f4ac2df779556ac124
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.47@sha256:c1c781976220132d6b6eccc278ba2cb27b9e5ed21df2f8b4372b1d23556c9000
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:download-media-id-fix-20260624@sha256:6d0ebd34f94746706055ff5d5fd7e53c9d646db8d9d996f4ac2df779556ac124
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:telegram-voice-route-20260611@sha256:adcb8682a2d5503e385f553fa13bc179368f4de1b2c3447c990a63a666434891
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:synapse-unread-cache-20260616-1@sha256:9688eb22a93a5bce04e6dc34bef3bc3d9d3cd04d24df989758bcde1ed89a21ef
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -81,3 +81,15 @@ spec:
       containers:
         - name: whatsapp-cloud-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:cloud-api-20260604@sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-synapse-bridge
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-synapse-bridge
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge:whatsapp-ingress-20260623@sha256:d126b29aff8a28869fe397cc6ee522a74141c97a6ba8e8943aeddfcfb8bc63f6
