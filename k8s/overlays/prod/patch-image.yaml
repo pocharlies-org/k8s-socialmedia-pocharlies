@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:lid-send-fix-20260624@sha256:41e3d427268d43dcb0613722b04ae01bff52e1814222bddf5071a10bc0a75556
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:telegram-media-account-fix-20260624@sha256:4216635e73c514303cfbd112713a018f4efda56b2868d59e3a3867453fcc1c87
 ---
 apiVersion: apps/v1
 kind: Deployment
