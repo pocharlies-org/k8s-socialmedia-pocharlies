@@ -670,6 +670,11 @@ spec:
             - { name: sse, containerPort: 3010, hostPort: 3010 }
           env:
             - { name: MCP_SSE_PORT, value: "3010" }
+            # Reclaim idle Streamable-HTTP sessions (no open notification stream +
+            # idle > this) so orphaned sessions don't leak heap until the 6h max-age.
+            # Tunable without an image rebuild. Also: SSE_STREAMABLE_SWEEP_MS (60s),
+            # SSE_STREAMABLE_MAX_SESSIONS (100) default in code.
+            - { name: SSE_STREAMABLE_IDLE_MS, value: "600000" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
