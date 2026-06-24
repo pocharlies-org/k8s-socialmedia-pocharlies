@@ -362,8 +362,8 @@ spec:
   ports: [{ name: http, port: 3001, targetPort: 3001 }]
 ---
 # ── WhatsApp professional Cloud API connector ─────────────────────────────────
-# Official WhatsApp Business Platform transport. Kept with sending disabled by
-# default until Meta WABA/phone credentials and approved templates are installed.
+# Official WhatsApp Business Platform transport. Direct text sends are enabled,
+# but the MCP only permits them after an inbound customer message.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -386,8 +386,8 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: CONNECTOR_ACCOUNT, value: "professional" }
             - { name: WHATSAPP_GRAPH_API_VERSION, value: "v25.0" }
-            - { name: ENABLE_SENDING, value: "false" }
-            - { name: EMERGENCY_DISABLE_SENDING, value: "true" }
+            - { name: ENABLE_SENDING, value: "true" }
+            - { name: EMERGENCY_DISABLE_SENDING, value: "false" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 30m, memory: 64Mi }

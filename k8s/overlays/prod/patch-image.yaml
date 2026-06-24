@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:synapse-deleted-filter-20260615@sha256:6d919eb391a85585f89347936b55bbf083f5ab6358e4e55bdaa844317cc5aa5f
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:coldsend-gate-fix-20260624@sha256:d9199b537327c71cf3b3042880a280d0d5b1f337dee47db6710c61a3e30a8012
 ---
 apiVersion: apps/v1
 kind: Deployment

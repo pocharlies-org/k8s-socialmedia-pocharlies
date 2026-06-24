@@ -35,8 +35,8 @@ images:
     newTag: f14-voice-20260609
     digest: sha256:ef688e80bacfd008b14f5e92174ad3127abc7256b48fc93dab0ba298491c0a1a
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: synapse-deleted-filter-20260615
-    digest: sha256:6d919eb391a85585f89347936b55bbf083f5ab6358e4e55bdaa844317cc5aa5f
+    newTag: coldsend-gate-fix-20260624
+    digest: sha256:d9199b537327c71cf3b3042880a280d0d5b1f337dee47db6710c61a3e30a8012
 replicas:
   # Baileys/Web auto-sender for the Business account stays offline (Cloud API
   # covers outbound templates). whatsapp-connector-professional itself is BACK ON
