@@ -31,6 +31,7 @@ export interface TelegramMessage {
   }>;
   isForwarded: boolean;
   replyToMessageId?: string;
+  topicId?: string;
   isOutbound: boolean;
   chatType: 'private' | 'group' | 'supergroup' | 'channel';
   chatTitle?: string;
@@ -77,6 +78,8 @@ export class TelegramClientWrapper extends EventEmitter {
   private logger: pino.Logger;
   private connected: boolean = false;
   private selfId?: string;
+  private unreadChatsCache: { expiresAtMs: number; value: any[] } | null = null;
+  private unreadChatsInflight: Promise<any[]> | null = null;
 
   constructor(config: TelegramClientConfig) {
     super();
@@ -279,6 +282,7 @@ export class TelegramClientWrapper extends EventEmitter {
         attachments: attachments.length > 0 ? attachments : undefined,
         isForwarded: !!message.forward,
         replyToMessageId: message.replyToMessage?.id?.toString(),
+        topicId: message.replyToMessage?.threadId?.toString(),
         isOutbound,
         chatType: mapChatType(chat),
         chatTitle: chatTitleOf(chat),
@@ -460,28 +464,91 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * List forum topics for a supergroup.
+   */
+  async getForumTopics(chatId: string, limit: number = 100, query: string = ''): Promise<any[]> {
+    if (!this.connected) throw new Error('Not connected');
+    const topics = await this.client.getForumTopics(toMtcutePeer(chatId), { limit, query });
+    return topics.map(topic => {
+      let lastMessage: any = null;
+      try {
+        lastMessage = topic.lastMessage
+          ? {
+              id: topic.lastMessage.id.toString(),
+              text: topic.lastMessage.text || '',
+              date: topic.lastMessage.date.toISOString(),
+              senderId: topic.lastMessage.sender?.id?.toString() || null,
+            }
+          : null;
+      } catch {
+        lastMessage = null;
+      }
+
+      return {
+        id: topic.id.toString(),
+        title: topic.title,
+        isClosed: topic.isClosed,
+        isPinned: topic.isPinned,
+        unreadCount: topic.unreadCount,
+        unreadMentionsCount: topic.unreadMentionsCount,
+        unreadReactionsCount: topic.unreadReactionsCount,
+        lastRead: topic.lastRead,
+        lastMessage,
+      };
+    });
+  }
+
+  /**
    * Chats with unread messages
    */
   async getUnreadChats(): Promise<any[]> {
     if (!this.connected) throw new Error('Not connected');
-    const out: any[] = [];
-    for await (const d of this.client.iterDialogs({})) {
-      if (d.unreadCount > 0) {
-        out.push({
-          id: d.peer.id.toString(),
-          name: chatTitleOf(d.peer) || 'Unknown',
-          type: mapChatType(d.peer),
-          unreadCount: d.unreadCount,
-        });
-      }
+    const now = Date.now();
+    if (this.unreadChatsCache && this.unreadChatsCache.expiresAtMs > now) {
+      return this.unreadChatsCache.value;
     }
-    return out;
+    if (this.unreadChatsInflight) return this.unreadChatsInflight;
+
+    const refresh = (async (): Promise<any[]> => {
+      const out: any[] = [];
+      for await (const d of this.client.iterDialogs({})) {
+        if (d.unreadCount > 0) {
+          out.push({
+            id: d.peer.id.toString(),
+            name: chatTitleOf(d.peer) || 'Unknown',
+            type: mapChatType(d.peer),
+            unreadCount: d.unreadCount,
+          });
+        }
+      }
+      this.unreadChatsCache = { value: out, expiresAtMs: Date.now() + 30_000 };
+      return out;
+    })();
+
+    this.unreadChatsInflight = refresh;
+    try {
+      return await refresh;
+    } catch (e) {
+      if (this.unreadChatsCache) {
+        this.logger.warn(`getUnreadChats failed; returning cached value: ${e}`);
+        return this.unreadChatsCache.value;
+      }
+      throw e;
+    } finally {
+      if (this.unreadChatsInflight === refresh) this.unreadChatsInflight = null;
+    }
   }
 
   /**
    * Search messages globally or within a chat
    */
-  async searchMessages(query: string, chatId?: string, limit: number = 20): Promise<any[]> {
+  async searchMessages(
+    query: string,
+    chatId?: string,
+    limit: number = 20,
+    threadId?: number,
+    offsetId?: number
+  ): Promise<any[]> {
     if (!this.connected) throw new Error('Not connected');
     if (!chatId) {
       const result = await this.client.searchGlobal({ query, limit });
@@ -490,14 +557,24 @@ export class TelegramClientWrapper extends EventEmitter {
         chatId: m.chat.id.toString(),
         text: m.text || '',
         date: m.date.toISOString(),
+        senderId: m.sender?.id?.toString() || null,
+        topicId: m.replyToMessage?.threadId?.toString(),
       }));
     }
-    const result = await this.client.searchMessages({ chatId: toMtcutePeer(chatId), query, limit });
+    const result = await this.client.searchMessages({
+      chatId: toMtcutePeer(chatId),
+      query,
+      limit,
+      ...(threadId ? { threadId } : {}),
+      ...(offsetId ? { offset: offsetId } : {}),
+    });
     return result.map(m => ({
       id: m.id.toString(),
       chatId,
       text: m.text || '',
       date: m.date.toISOString(),
+      senderId: m.sender?.id?.toString() || null,
+      topicId: m.replyToMessage?.threadId?.toString(),
     }));
   }
 
@@ -518,7 +595,7 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async deleteMessage(chatId: string, messageId: number): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    await this.client.deleteMessagesById(chatId, [messageId], { revoke: true });
+    await this.client.deleteMessagesById(toMtcutePeer(chatId), [messageId], { revoke: true });
   }
 
   /**
@@ -625,7 +702,7 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async sendFile(
     chatId: string,
-    filePath: string,
+    filePath: string | Buffer,
     options?: {
       caption?: string;
       voiceNote?: boolean;

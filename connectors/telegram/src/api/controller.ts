@@ -102,6 +102,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
         const chats = await client.getUnreadChats();
         res.json({ chats });
       } catch (e) {
+        logger.error(`Error getting unread chats: ${String(e)}`);
         res.status(500).json({ error: String(e) });
       }
     })();
@@ -131,6 +132,28 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
         const participants = await client.getParticipants(req.params.id, limit);
         res.json({ participants });
       } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * GET /chats/:id/topics - List forum topics for a supergroup
+   */
+  router.get('/chats/:id/topics', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const limit = parseInt(req.query.limit as string) || 100;
+        const query = typeof req.query.query === 'string' ? req.query.query : '';
+        const topics = await client.getForumTopics(req.params.id, limit, query);
+        res.json({ topics });
+      } catch (e) {
+        logger.error(`Error getting forum topics: ${String(e)}`);
         res.status(500).json({ error: String(e) });
       }
     })();
@@ -167,12 +190,38 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   router.post('/messages/search', (req: Request, res: Response): void => {
     void (async () => {
       try {
-        const { query, chatId, limit } = req.body;
-        if (!query) {
+        const { query, chatId, limit, threadId, offsetId } = req.body;
+        if (query === undefined || query === null) {
           res.status(400).json({ error: 'Missing query' });
           return;
         }
-        const results = await client.searchMessages(query, chatId, limit || 20);
+        const parsedThreadId =
+          threadId !== undefined && threadId !== null ? Number(threadId) : undefined;
+        if (
+          parsedThreadId !== undefined &&
+          (!Number.isInteger(parsedThreadId) || parsedThreadId <= 0)
+        ) {
+          res.status(400).json({ error: 'threadId must be a positive integer' });
+          return;
+        }
+
+        const parsedOffsetId =
+          offsetId !== undefined && offsetId !== null ? Number(offsetId) : undefined;
+        if (
+          parsedOffsetId !== undefined &&
+          (!Number.isInteger(parsedOffsetId) || parsedOffsetId <= 0)
+        ) {
+          res.status(400).json({ error: 'offsetId must be a positive integer' });
+          return;
+        }
+
+        const results = await client.searchMessages(
+          String(query),
+          chatId,
+          limit || 20,
+          parsedThreadId,
+          parsedOffsetId
+        );
         res.json({ results });
       } catch (e) {
         res.status(500).json({ error: String(e) });
@@ -258,6 +307,35 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
         }
         await client.sendFile(chatId, filePath, { caption, voiceNote, videoNote, sticker });
         res.json({ sent: true });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /messages/voice - Send a voice note from base64 audio bytes.
+   */
+  router.post('/messages/voice', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const { chatId, audioBase64, caption, mimeType, voiceNote } = req.body as {
+          chatId?: string;
+          audioBase64?: string;
+          caption?: string;
+          mimeType?: string;
+          voiceNote?: boolean;
+        };
+        if (!chatId || !audioBase64) {
+          res.status(400).json({ error: 'Missing chatId or audioBase64' });
+          return;
+        }
+        const audio = Buffer.from(audioBase64, 'base64');
+        await client.sendFile(chatId, audio, {
+          caption,
+          voiceNote: voiceNote !== false,
+        });
+        res.json({ sent: true, mimeType: mimeType || 'audio/ogg' });
       } catch (e) {
         res.status(500).json({ error: String(e) });
       }

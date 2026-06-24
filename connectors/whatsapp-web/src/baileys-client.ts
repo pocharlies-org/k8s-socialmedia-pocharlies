@@ -1501,8 +1501,17 @@ export class BaileysClient extends EventEmitter {
     const lastId = r.rows[0]?.wa_message_id as string | undefined;
     if (!lastId) return;
     const cached = this.keyCache.get(lastId);
-    const key: WAMessageKey = cached?.key || { remoteJid: raw, id: lastId, fromMe: false };
+    const key =
+      cached?.key || (await this.reconstructKeyFromDb(lastId, chatId)) || {
+        remoteJid: raw,
+        id: lastId,
+        fromMe: false,
+      };
     await this.sock.readMessages([key]);
+    const norm = this.normalizeJid(raw);
+    const chat = this.chatStore.get(norm);
+    if (chat) chat.unreadCount = 0;
+    await setConversationState(norm, 0);
   }
 
   // ---------------------------------------------------------------------------

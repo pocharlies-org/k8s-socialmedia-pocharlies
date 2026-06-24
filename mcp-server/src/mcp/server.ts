@@ -10,6 +10,12 @@ import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { SearchService } from '../application/search.service';
 import { SummarizationService } from '../application/summarization.service';
+import {
+  UnreadDigestService,
+  type MessagingPlatform,
+  type DigestLanguage,
+  type UnreadDigestChat,
+} from '../application/unread-digest.service';
 import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
 import { ConversationType } from '../domain/entities/conversation.entity';
@@ -34,13 +40,64 @@ const ACCOUNT_PROPERTY = {
   },
 } as const;
 
+function isObject(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asObject(value: unknown): Record<string, any> {
+  return isObject(value) ? value : {};
+}
+
+function extractArrayPayload(value: unknown, keys: string[]): any[] {
+  if (Array.isArray(value)) return value;
+  if (!isObject(value)) return [];
+  for (const key of keys) {
+    if (Array.isArray(value[key])) return value[key];
+  }
+  return [];
+}
+
+function pickString(value: unknown, keys: string[]): string {
+  if (!isObject(value)) return '';
+  for (const key of keys) {
+    const raw = value[key];
+    if (raw !== undefined && raw !== null && String(raw).trim()) {
+      return String(raw).trim();
+    }
+  }
+  return '';
+}
+
+function pickNumber(value: unknown, keys: string[], fallback: number): number {
+  if (!isObject(value)) return fallback;
+  for (const key of keys) {
+    const raw = Number(value[key]);
+    if (Number.isFinite(raw)) return raw;
+  }
+  return fallback;
+}
+
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function safeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeDigestPlatforms(value: unknown): MessagingPlatform[] {
+  const raw = Array.isArray(value) ? value : ['whatsapp', 'telegram'];
+  const platforms = raw.filter(
+    (item): item is MessagingPlatform => item === 'whatsapp' || item === 'telegram'
+  );
+  return platforms.length ? [...new Set(platforms)] : ['whatsapp', 'telegram'];
+}
+
 function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
-  if (typeof chatId !== 'string') return null;
-  const bareId = stripAccount(chatId).id;
-  if (bareId.includes('@g.us')) return null;
-  const user = bareId.split('@')[0] || '';
-  const digits = user.replace(/\D/g, '');
-  return digits.length >= 8 ? digits : null;
+  const jid = normalizeDirectWhatsAppJid(chatId);
+  return jid ? jid.split('@')[0] || null : null;
 }
 
 function manualWhatsAppOpenUrl(chatId: unknown, text: unknown): string | undefined {
@@ -51,10 +108,65 @@ function manualWhatsAppOpenUrl(chatId: unknown, text: unknown): string | undefin
   return `https://wa.me/${phone}${suffix}`;
 }
 
+/**
+ * True for WhatsApp LID jids (`<n>@lid` / `<n>@hosted.lid`). LID ids are an
+ * opaque Baileys identity, NOT a phone number: they must be looked up and sent
+ * to verbatim (digit-stripping + forcing `@s.whatsapp.net` would point at a
+ * non-existent conversation and the wrong recipient).
+ */
+export function isLidJid(chatId: unknown): boolean {
+  if (typeof chatId !== 'string') return false;
+  const id = stripAccount(chatId.trim()).id;
+  return id.endsWith('@lid') || id.endsWith('@hosted.lid');
+}
+
+/**
+ * Resolve a professional WhatsApp direct-send chatId into the conversation key
+ * to gate on and the jid to actually send to.
+ *
+ * - LID jids keep their opaque id verbatim: lookupKey = `professional:<lid>`,
+ *   sendJid = `<lid>` (Baileys sends to LID natively).
+ * - Bare phones / `@c.us` / `@s.whatsapp.net` normalize to a phone jid:
+ *   sendJid = `<digits>@s.whatsapp.net`, lookupKey = `professional:<jid>`.
+ *
+ * Returns null when the id is neither a LID jid nor a normalizable phone jid,
+ * so the caller can raise the "valid individual phone or WhatsApp chat ID" error.
+ */
+export function resolveProfessionalSendTarget(
+  chatId: unknown
+): { lookupKey: string; sendJid: string } | null {
+  if (isLidJid(chatId)) {
+    const lidJid = stripAccount(String(chatId).trim()).id;
+    return { lookupKey: accountKey('professional', lidJid), sendJid: lidJid };
+  }
+  const waJid = normalizeDirectWhatsAppJid(chatId);
+  if (!waJid) return null;
+  return { lookupKey: accountKey('professional', waJid), sendJid: waJid };
+}
+
+export function normalizeDirectWhatsAppJid(chatId: unknown): string | null {
+  if (typeof chatId !== 'string' && typeof chatId !== 'number') return null;
+
+  let raw = String(chatId).trim();
+  if (!raw) return null;
+  raw = stripAccount(raw).id;
+  if (raw.includes('@g.us')) return null;
+
+  const user = raw.split('@')[0] || raw;
+  let digits = user.replace(/\D/g, '');
+  if (digits.length === 9 && /^[6789]/.test(digits)) {
+    digits = `34${digits}`;
+  }
+  if (digits.length < 8 || digits.length > 15) return null;
+
+  return `${digits}@s.whatsapp.net`;
+}
+
 export class MCPServer {
   private server: Server;
   private searchService: SearchService;
   private summarizationService: SummarizationService;
+  private unreadDigestService: UnreadDigestService;
   private draftService: DraftService;
   private repository: DatabaseRepository;
   private dbClient: Pool;
@@ -100,6 +212,12 @@ export class MCPServer {
       dbClient,
       redisClient.options.host || 'localhost',
       encryptionKey,
+      llmBaseUrl,
+      llmModel
+    );
+    this.unreadDigestService = new UnreadDigestService(
+      dbClient,
+      openaiApiKey,
       llmBaseUrl,
       llmModel
     );
@@ -569,7 +687,67 @@ export class MCPServer {
           {
             name: 'get_unread_chats',
             description: 'Get WhatsApp chats with unread messages.',
-            inputSchema: { type: 'object', properties: { ...ACCOUNT_PROPERTY } },
+            inputSchema: {
+              type: 'object',
+              properties: {
+                limit: {
+                  type: 'integer',
+                  default: 50,
+                  maximum: 200,
+                  description: 'Max unread chats to return after connector listing',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+            },
+          },
+          {
+            name: 'unread_digest',
+            description:
+              'Guardrail for long unread-message tasks. Starts or continues a persisted batch digest across WhatsApp/Telegram for personal/professional. Processes only 1-10 chats per call, returns a partial summary and cursor checkpoint, and returns a global summary when completed.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                action: {
+                  type: 'string',
+                  enum: ['start', 'continue', 'status'],
+                  default: 'start',
+                  description:
+                    'start creates a checkpoint and processes the first batch; continue processes the next batch; status reads checkpoint without processing.',
+                },
+                digestId: {
+                  type: 'string',
+                  description: 'Required for continue/status. Returned by start.',
+                },
+                platforms: {
+                  type: 'array',
+                  items: { type: 'string', enum: ['whatsapp', 'telegram'] },
+                  description: 'Default: both whatsapp and telegram.',
+                },
+                batchSize: {
+                  type: 'integer',
+                  default: 5,
+                  minimum: 1,
+                  maximum: 10,
+                  description: 'Chats to process in this call. Use 5-10 for long tasks.',
+                },
+                maxChats: {
+                  type: 'integer',
+                  default: 50,
+                  minimum: 1,
+                  maximum: 100,
+                  description: 'Maximum unread chats to checkpoint on start.',
+                },
+                messageLimit: {
+                  type: 'integer',
+                  default: 30,
+                  minimum: 5,
+                  maximum: 100,
+                  description: 'Recent indexed messages per chat used for the digest.',
+                },
+                language: { type: 'string', enum: ['es', 'en'], default: 'es' },
+                ...ACCOUNT_PROPERTY,
+              },
+            },
           },
           {
             name: 'get_group_info',
@@ -1180,6 +1358,8 @@ export class MCPServer {
             return await this.handleGetMe(args as any);
           case 'get_unread_chats':
             return await this.handleGetUnreadChats(args as any);
+          case 'unread_digest':
+            return await this.handleUnreadDigest(args as any);
           case 'get_group_info':
             return await this.handleGetGroupInfo(args as any);
           case 'get_group_participants':
@@ -1924,12 +2104,17 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending is emergency disabled');
     }
 
-    const connectorUrl = this.waUrl(args.account);
+    const account = normalizeAccount(args.account);
+    const conversationId =
+      account === 'professional'
+        ? await this.requireProfessionalInboundChat(args.chatId)
+        : args.chatId;
+    const connectorUrl = this.waUrl(account);
     const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
     const timestamp = Math.floor(Date.now() / 1000);
     const body = {
       sendToken: `direct-${Date.now()}`,
-      conversationId: args.chatId,
+      conversationId,
       content: args.text,
     };
 
@@ -1971,7 +2156,7 @@ export class MCPServer {
                 message: 'Message sent',
                 messageId: result.messageId || null,
                 sentAt: result.sentAt || new Date().toISOString(),
-                chatId: args.chatId,
+                chatId: conversationId,
               },
               null,
               2
@@ -1983,6 +2168,53 @@ export class MCPServer {
       this.logger.error(`Error sending message: ${error}`);
       throw new McpError(ErrorCode.InternalError, `Failed to send message: ${error}`);
     }
+  }
+
+  private async hasProfessionalInbound(conversationId: string): Promise<boolean> {
+    const result = await this.dbClient.query(
+      `SELECT c.id, max(m.wa_timestamp) AS last_inbound_at
+         FROM conversations c
+         JOIN messages m ON m.conversation_id = c.id
+        WHERE c.id = $1
+          AND c.account = 'professional'
+          AND m.account = 'professional'
+          AND m.platform = 'whatsapp'
+          AND m.direction = 'INBOUND'
+        GROUP BY c.id
+        LIMIT 1`,
+      [conversationId]
+    );
+    return result.rows.length > 0;
+  }
+
+  /**
+   * Gate professional WhatsApp direct sends behind an existing inbound message
+   * (no cold first-contact sends) and return the jid that must actually be sent.
+   *
+   * LID chats (`<n>@lid` / `<n>@hosted.lid`) are an opaque Baileys identity, not
+   * a phone: the conversation is stored verbatim (e.g. `professional:198...@lid`)
+   * so we look it up under the ORIGINAL jid and send to the LID jid unchanged.
+   * Bare phones / `@c.us` / `@s.whatsapp.net` keep the legacy normalize+gate path.
+   */
+  private async requireProfessionalInboundChat(chatId: string): Promise<string> {
+    const target = resolveProfessionalSendTarget(chatId);
+    if (!target) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        'Professional WhatsApp direct sends require a valid individual phone or WhatsApp chat ID'
+      );
+    }
+
+    if (!(await this.hasProfessionalInbound(target.lookupKey))) {
+      const fallbackUrl = isLidJid(chatId) ? undefined : manualWhatsAppOpenUrl(target.sendJid, '');
+      const fallback = fallbackUrl ? ` Manual fallback: ${fallbackUrl}` : '';
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Professional WhatsApp direct sends are only allowed after the customer has sent an inbound message.${fallback}`
+      );
+    }
+
+    return target.sendJid;
   }
 
   private async handleSendTemplate(args: {
@@ -2385,7 +2617,7 @@ export class MCPServer {
       );
     const limit = Math.min(args.limit ?? 50, 500);
     const params: any[] = [id, limit];
-    let where = `conversation_id = $1`;
+    let where = `conversation_id = $1 AND (is_deleted IS NULL OR is_deleted = false)`;
     if (args.offsetId) {
       params.push(args.offsetId);
       where += ` AND id < $3`;
@@ -2444,11 +2676,27 @@ export class MCPServer {
     messageId: string;
     account?: string;
   }) {
+    const account = normalizeAccount(args.account);
     const data = await this.connectorCall(
       this.tgUrl(args.account),
       'DELETE',
       `/api/v1/messages/${args.chatId}/${args.messageId}`
     );
+    const id = await this.resolveTelegramChatId(args.chatId, account);
+    if (id && data?.deleted === true) {
+      await this.dbClient.query(
+        `UPDATE messages
+            SET is_deleted = true,
+                status = 'deleted',
+                status_at = NOW()
+          WHERE conversation_id = $1
+            AND (
+              wa_message_id = $2
+              OR metadata->>'telegram_message_id' = $2
+            )`,
+        [id, String(args.messageId)]
+      );
+    }
     return this.jsonResponse(data);
   }
 
@@ -2465,7 +2713,9 @@ export class MCPServer {
     const account = normalizeAccount(args?.account);
     const result = await this.dbClient.query(
       `SELECT c.id, c.name, c.type, c.is_group, c.last_message_at, c.metadata,
-              (SELECT count(*)::int FROM messages WHERE conversation_id = c.id) AS message_count
+              (SELECT count(*)::int FROM messages
+                WHERE conversation_id = c.id
+                  AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
          FROM conversations c
         WHERE c.id LIKE $1
         ORDER BY c.last_message_at DESC NULLS LAST
@@ -2492,19 +2742,33 @@ export class MCPServer {
     only_with_unread?: boolean;
     account?: string;
   }) {
+    const account = normalizeAccount(args?.account);
+    const data = await this.getTelegramUnreadPayload(
+      account,
+      args?.limit ?? 200,
+      args?.only_with_unread ?? true
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async getTelegramUnreadPayload(
+    account: Account,
+    limit: number,
+    onlyWithUnread: boolean
+  ): Promise<any> {
     // Live unread state — fetched via telegram-sync (Telethon) over its
     // HMAC-authenticated bridge. The Node connector (gramJS) cannot read this
     // against current Telegram MTProto.
     const payload = {
-      limit: Math.min(args?.limit ?? 200, 500),
-      only_with_unread: args?.only_with_unread ?? true,
+      limit: Math.min(limit, 500),
+      only_with_unread: onlyWithUnread,
     };
     const body = JSON.stringify(payload);
     const ts = String(Math.floor(Date.now() / 1000));
     const sig = createHmac('sha256', this.telegramBridgeSecret)
       .update(`${ts}:${body}`)
       .digest('hex');
-    const resp = await fetch(`${this.tgBridgeUrl(args?.account)}/unread`, {
+    const resp = await fetch(`${this.tgBridgeUrl(account)}/unread`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2517,7 +2781,7 @@ export class MCPServer {
     if (!resp.ok) {
       throw new Error(`telegram-sync /unread error ${resp.status}: ${await resp.text()}`);
     }
-    return this.jsonResponse(await resp.json());
+    return resp.json();
   }
 
   private async handleTelegramDownloadMedia(args: {
@@ -2636,20 +2900,28 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
-  private async handleGetUnreadChats(args?: { account?: string }) {
+  private async handleGetUnreadChats(args?: { account?: string; limit?: number }) {
+    const account = normalizeAccount(args?.account);
+    const limit = clampInteger(args?.limit, 50, 1, 200);
+    const data = await this.getWhatsAppUnreadPayload(account, limit);
+    return this.jsonResponse(data);
+  }
+
+  private async getWhatsAppUnreadPayload(account: Account, limit: number): Promise<any> {
     // The whatsapp-web.js connector enumerates every chat to compute unread —
     // can be slow on accounts with hundreds of chats. Cap at 8s so we don't
     // hang the SSE client; surface a clear error if the connector is too slow
     // (the user can fall back to list_conversations / get_user_messages).
     try {
       const data = await this.connectorCall(
-        this.waUrl(args?.account),
+        this.waUrl(account),
         'GET',
         '/api/v1/chats/unread',
         undefined,
         8000
       );
-      return this.jsonResponse(data);
+      const chats = extractArrayPayload(data, ['chats', 'unreadChats', 'conversations', 'results']);
+      return { ...asObject(data), chats: chats.slice(0, limit), count: Math.min(chats.length, limit) };
     } catch (e: any) {
       const reason = e?.name === 'TimeoutError' ? 'timeout after 8s' : e?.message || String(e);
       throw new McpError(
@@ -2657,6 +2929,140 @@ export class MCPServer {
         `get_unread_chats failed (${reason}). The whatsapp connector enumerates every chat — try list_conversations(limit=20) or get_user_messages for specific contacts instead.`
       );
     }
+  }
+
+  private async handleUnreadDigest(args?: {
+    action?: 'start' | 'continue' | 'status';
+    digestId?: string;
+    platforms?: string[];
+    batchSize?: number;
+    maxChats?: number;
+    messageLimit?: number;
+    language?: string;
+    account?: string;
+  }) {
+    const action = args?.action || (args?.digestId ? 'continue' : 'start');
+    const digestId = String(args?.digestId || '').trim();
+    const batchSize = clampInteger(args?.batchSize, 5, 1, 10);
+
+    if (action === 'continue') {
+      if (!digestId) {
+        throw new McpError(ErrorCode.InvalidRequest, 'digestId is required for continue');
+      }
+      return this.jsonResponse(await this.unreadDigestService.continue(digestId, batchSize));
+    }
+
+    if (action === 'status') {
+      if (!digestId) {
+        throw new McpError(ErrorCode.InvalidRequest, 'digestId is required for status');
+      }
+      return this.jsonResponse(await this.unreadDigestService.status(digestId));
+    }
+
+    const account = normalizeAccount(args?.account);
+    const platforms = normalizeDigestPlatforms(args?.platforms);
+    const maxChats = clampInteger(args?.maxChats, 50, 1, 100);
+    const messageLimit = clampInteger(args?.messageLimit, 30, 5, 100);
+    const language: DigestLanguage = args?.language === 'en' ? 'en' : 'es';
+    const { chats, warnings } = await this.collectUnreadDigestChats(account, platforms, maxChats);
+
+    return this.jsonResponse(
+      await this.unreadDigestService.start(
+        {
+          account,
+          platforms,
+          batchSize,
+          messageLimit,
+          language,
+        },
+        chats,
+        warnings
+      )
+    );
+  }
+
+  private async collectUnreadDigestChats(
+    account: Account,
+    platforms: MessagingPlatform[],
+    maxChats: number
+  ): Promise<{ chats: UnreadDigestChat[]; warnings: string[] }> {
+    const chats: UnreadDigestChat[] = [];
+    const warnings: string[] = [];
+    const perPlatformLimit = maxChats;
+
+    if (platforms.includes('whatsapp')) {
+      try {
+        const payload = await this.getWhatsAppUnreadPayload(account, perPlatformLimit);
+        for (const chat of extractArrayPayload(payload, [
+          'chats',
+          'unreadChats',
+          'conversations',
+          'results',
+        ])) {
+          const chatId = stripAccount(
+            pickString(chat, ['chatId', 'waChatId', 'waUserId', 'conversationId', 'id', 'jid'])
+          ).id;
+          if (!chatId) continue;
+          chats.push({
+            platform: 'whatsapp',
+            account,
+            chatId,
+            dbConversationId: accountKey(account, chatId),
+            name: pickString(chat, ['name', 'displayName', 'pushName', 'contactName', 'title']) || null,
+            unreadCount: pickNumber(chat, ['unreadCount', 'unread_count'], 0),
+            isGroup: Boolean((chat as any)?.isGroup) || /@g\.us$/i.test(chatId),
+            source: 'whatsapp-unread',
+            metadata: isObject(chat) ? chat : {},
+          });
+        }
+      } catch (error) {
+        warnings.push(`WhatsApp unread failed for ${account}: ${safeError(error)}`);
+      }
+    }
+
+    if (platforms.includes('telegram')) {
+      try {
+        const payload = await this.getTelegramUnreadPayload(account, perPlatformLimit, true);
+        for (const dialog of extractArrayPayload(payload, ['dialogs', 'chats', 'results', 'unread'])) {
+          const rawId = pickString(dialog, ['id', 'chatId', 'dialogId', 'peerId']);
+          if (!rawId) continue;
+          const bareId = stripAccount(rawId).id;
+          const chatId = bareId.startsWith('tg_') ? bareId : `tg_${bareId}`;
+          chats.push({
+            platform: 'telegram',
+            account,
+            chatId,
+            dbConversationId: accountKey(account, chatId),
+            name: pickString(dialog, ['name', 'title', 'displayName']) || null,
+            unreadCount: pickNumber(dialog, ['unread_count', 'unreadCount'], 0),
+            isGroup:
+              Boolean((dialog as any)?.is_group) ||
+              Boolean((dialog as any)?.isGroup) ||
+              String((dialog as any)?.type || '').includes('group'),
+            source: 'telegram-unread',
+            metadata: isObject(dialog) ? dialog : {},
+          });
+        }
+      } catch (error) {
+        warnings.push(`Telegram unread failed for ${account}: ${safeError(error)}`);
+      }
+    }
+
+    const seen = new Set<string>();
+    const deduped = chats
+      .filter(chat => {
+        const key = `${chat.platform}:${chat.dbConversationId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => b.unreadCount - a.unreadCount)
+      .slice(0, maxChats);
+
+    if (deduped.length === 0 && warnings.length === 0) {
+      warnings.push(`No unread chats found for ${account} (${platforms.join(', ')}).`);
+    }
+    return { chats: deduped, warnings };
   }
 
   private async handleGetGroupInfo(args: { groupId: string; account?: string }) {
@@ -2779,7 +3185,9 @@ export class MCPServer {
       );
     const result = await this.dbClient.query(
       `SELECT id, name, type, is_group, participant_count, last_message_at, metadata,
-              (SELECT count(*)::int FROM messages WHERE conversation_id = c.id) AS message_count
+              (SELECT count(*)::int FROM messages
+                WHERE conversation_id = c.id
+                  AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
          FROM conversations c WHERE id = $1`,
       [id]
     );

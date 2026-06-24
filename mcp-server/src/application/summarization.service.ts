@@ -177,6 +177,7 @@ export class SummarizationService {
        FROM conversations c
        JOIN messages m ON m.conversation_id = c.id
        WHERE m.wa_timestamp >= $1 AND m.wa_timestamp <= $2
+         AND (m.is_deleted IS NULL OR m.is_deleted = false)
        ORDER BY c.name`,
       [startOfDay, endOfDay]
     );
@@ -227,6 +228,7 @@ export class SummarizationService {
        FROM conversations c
        JOIN messages m ON m.conversation_id = c.id
        WHERE m.wa_timestamp >= $1 AND m.wa_timestamp <= $2
+         AND (m.is_deleted IS NULL OR m.is_deleted = false)
        ORDER BY c.name`,
       [startOfWeek, endOfWeek]
     );
