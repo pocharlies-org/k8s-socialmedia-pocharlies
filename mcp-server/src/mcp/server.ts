@@ -20,7 +20,7 @@ import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
 import { ConversationType } from '../domain/entities/conversation.entity';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
-import { accountKey, normalizeAccount, stripAccount, type Account } from '../domain/account';
+import { ACCOUNTS, accountKey, normalizeAccount, stripAccount, type Account } from '../domain/account';
 import { createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
@@ -2603,6 +2603,82 @@ export class MCPServer {
     return null;
   }
 
+  private bareTelegramTgId(chatId: string): string | null {
+    const id = stripAccount(String(chatId).trim()).id;
+    if (id.startsWith('tg_')) return id;
+    if (/^-?\d+$/.test(id)) return `tg_${id}`;
+    return null;
+  }
+
+  private async resolveTelegramMediaAccount(
+    chatId: string,
+    messageId: string,
+    requested: Account
+  ): Promise<{
+    account: Account;
+    source:
+      | 'message'
+      | 'message-ambiguous'
+      | 'conversation'
+      | 'conversation-ambiguous'
+      | 'fallback';
+    candidates: string[];
+  }> {
+    const bare = this.bareTelegramTgId(chatId);
+    let candidates: string[];
+    if (bare) {
+      candidates = [...new Set(ACCOUNTS.map(a => accountKey(a, bare)))];
+    } else {
+      const resolved = await Promise.all(
+        ACCOUNTS.map(a => this.resolveTelegramChatId(chatId, a))
+      );
+      candidates = [...new Set(resolved.filter((c): c is string => !!c))];
+    }
+    if (!candidates.length) return { account: requested, source: 'fallback', candidates };
+
+    const accountsFrom = (rows: Array<{ conversation_id?: string; id?: string }>) => {
+      const set = new Set<Account>();
+      for (const row of rows) {
+        const key = row.conversation_id ?? row.id;
+        if (key) set.add(stripAccount(String(key)).account);
+      }
+      return set;
+    };
+    const pick = (set: Set<Account>): Account =>
+      set.size === 1 ? [...set][0] : set.has(requested) ? requested : 'personal';
+
+    const msg = await this.dbClient.query(
+      `SELECT DISTINCT conversation_id
+         FROM messages
+        WHERE conversation_id = ANY($1::text[])
+          AND (wa_message_id = $2 OR metadata->>'telegram_message_id' = $2)`,
+      [candidates, String(messageId)]
+    );
+    const msgAccounts = accountsFrom(msg.rows);
+    if (msgAccounts.size) {
+      return {
+        account: pick(msgAccounts),
+        source: msgAccounts.size > 1 ? 'message-ambiguous' : 'message',
+        candidates,
+      };
+    }
+
+    const conv = await this.dbClient.query(
+      `SELECT id FROM conversations WHERE id = ANY($1::text[])`,
+      [candidates]
+    );
+    const convAccounts = accountsFrom(conv.rows);
+    if (convAccounts.size) {
+      return {
+        account: pick(convAccounts),
+        source: convAccounts.size > 1 ? 'conversation-ambiguous' : 'conversation',
+        candidates,
+      };
+    }
+
+    return { account: requested, source: 'fallback', candidates };
+  }
+
   private async handleTelegramGetMessages(args: {
     chatId: string;
     limit?: number;
@@ -2789,11 +2865,32 @@ export class MCPServer {
     messageId: string;
     account?: string;
   }) {
-    const data = await this.connectorCall(
-      this.tgUrl(args.account),
-      'GET',
-      `/api/v1/messages/media/${args.chatId}/${args.messageId}`
+    const requested = normalizeAccount(args.account);
+    const resolution = await this.resolveTelegramMediaAccount(
+      args.chatId,
+      String(args.messageId),
+      requested
     );
+    const logCtx = {
+      tool: 'telegram_download_media',
+      chatId: args.chatId,
+      messageId: String(args.messageId),
+      requestedAccount: requested,
+      resolvedAccount: resolution.account,
+      source: resolution.source,
+    };
+    if (resolution.account !== requested) {
+      this.logger.warn(
+        logCtx,
+        'telegram_download_media: routing account overridden from DB evidence'
+      );
+    } else {
+      this.logger.debug(logCtx, 'telegram_download_media: routing account confirmed');
+    }
+    const path = `/api/v1/messages/media/${encodeURIComponent(args.chatId)}/${encodeURIComponent(
+      String(args.messageId)
+    )}`;
+    const data = await this.connectorCall(this.tgUrl(resolution.account), 'GET', path);
     return this.jsonResponse(data);
   }
 
