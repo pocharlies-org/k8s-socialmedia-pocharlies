@@ -2135,14 +2135,18 @@ export class BaileysClient extends EventEmitter {
     // its stored object (attachments.file_url) and stream it back as base64.
     try {
       const pool = getPool();
-      // messages.wa_message_id is stored namespaced; the caller hands us the bare
-      // WhatsApp id, so namespace it or professional finds no attachment row.
+      // The caller may hand us either the WhatsApp message id or the numeric
+      // messages.id (whatsapp_get_messages exposes both as `waMessageId` and `id`).
+      // messages.wa_message_id is stored namespaced, so namespace the wa id ($1) or
+      // professional finds no attachment row; messages.id is the global numeric PK
+      // and is never namespaced, so match it raw ($2). Mirrors the dual lookup the
+      // MCP server already does for get_messages (wa_message_id OR id::text).
       const r = await pool.query(
         `SELECT a.file_url, a.mime_type, a.file_name
            FROM attachments a JOIN messages m ON m.id = a.message_id
-          WHERE m.wa_message_id = $1
+          WHERE m.wa_message_id = $1 OR m.id::text = $2
           ORDER BY a.id DESC LIMIT 1`,
-        [accountKey(messageId)]
+        [accountKey(messageId), messageId]
       );
       const row = r.rows[0];
       if (!row?.file_url) {
