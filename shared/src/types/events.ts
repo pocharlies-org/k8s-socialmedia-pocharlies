@@ -30,6 +30,13 @@ export interface MessageReceivedEvent {
   replyToWaId?: string;
   /** Owning account: 'personal' | 'professional'. Defaults to 'personal'. */
   account?: string;
+  /**
+   * Sender's WhatsApp display name (Baileys `pushName`). Attacker-controlled
+   * (the sender sets it) and PII; same trust class as `content`. Optional:
+   * omitted when unavailable (e.g. history sync). Lets downstream label
+   * @lid privacy senders whose `senderWaId` is an opaque identifier.
+   */
+  pushName?: string;
 }
 
 export interface MessageUpdatedEvent {
