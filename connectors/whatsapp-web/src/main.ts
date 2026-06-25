@@ -199,6 +199,7 @@ ${renewScript}
       attachments: message.attachments,
       isForwarded: message.isForwarded,
       replyToWaId: message.replyToWaId,
+      pushName: message.pushName,
     };
     eventPublisher.publishMessageReceived(event);
   });

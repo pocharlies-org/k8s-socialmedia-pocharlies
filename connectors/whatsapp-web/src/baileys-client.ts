@@ -107,6 +107,8 @@ export interface WhatsAppMessage {
   messageType: string;
   isForwarded: boolean;
   replyToWaId?: string;
+  /** Sender's WhatsApp display name (Baileys `pushName`). Optional. */
+  pushName?: string;
   attachments?: Array<{
     type: string;
     url: string;
@@ -1206,6 +1208,9 @@ export class BaileysClient extends EventEmitter {
       messageType,
       isForwarded,
       replyToWaId,
+      // Sender display name (attacker-controlled + PII; do NOT log).
+      // Omitted when absent (e.g. history sync).
+      pushName: msg.pushName || undefined,
     };
   }
 
