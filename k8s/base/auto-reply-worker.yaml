@@ -88,19 +88,13 @@ spec:
         - name: LLM_OMNI_MODEL
           value: tooling
         - name: LLM_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: whatsapp-mcp-secrets
-              key: AUTO_REPLY_LLM_API_KEY
+          value: $(OPENAI_API_KEY)
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: CONNECTOR_URL
           value: http://127.0.0.1:9/deprecated-dgx-autoreply-disabled
         - name: CONNECTOR_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: whatsapp-mcp-secrets
-              key: AUTO_REPLY_CONNECTOR_SECRET
+          value: $(CONNECTOR_SHARED_SECRET)
         - name: CONFIG_PATH
           value: /worker/config.json
         - name: OMNIVOICE_BASE_URL
