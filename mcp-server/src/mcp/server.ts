@@ -27,7 +27,7 @@ import pino from 'pino';
 
 const ACCOUNT_DESCRIPTION =
   "Account to route this call to. 'personal' (default) = WhatsApp web (Baileys, personal number) + Telegram paxanguero. " +
-  "'professional' = WhatsApp Business Cloud API + Telegram sauvageadminbot (skirmshop). " +
+  "'professional' = Skirmshop WhatsApp web/Baileys connector + Telegram sauvageadminbot. " +
   'Choose based on the destination chat: skirmshop/business chats → professional; family/personal chats → personal. ' +
   'When the destination is ambiguous, prefer "professional" for Claude/Codex agents.';
 
@@ -125,6 +125,83 @@ function manualWhatsAppOpenUrl(chatId: unknown, text: unknown): string | undefin
   return `https://wa.me/${phone}${suffix}`;
 }
 
+function phoneFromManualOpenUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw) return null;
+
+  try {
+    const url = new URL(raw);
+    if (/^(wa\.me|www\.wa\.me)$/i.test(url.hostname)) {
+      const phone = url.pathname.split('/').filter(Boolean)[0] || '';
+      return phone.replace(/\D/g, '') || null;
+    }
+    if (/(^|\.)whatsapp\.com$/i.test(url.hostname)) {
+      const phone = url.searchParams.get('phone') || '';
+      return phone.replace(/\D/g, '') || null;
+    }
+  } catch {
+    // Fall back to regex parsing below.
+  }
+
+  const match = raw.match(/(?:wa\.me\/|[?&]phone=)(\+?[0-9][0-9\s().-]{7,20})/i);
+  return match ? match[1].replace(/\D/g, '') : null;
+}
+
+function phoneE164FromSendJid(sendJid: string): string {
+  return `+${sendJid.split('@')[0].replace(/\D/g, '')}`;
+}
+
+function phoneWaJidFromSendJid(sendJid: string): string {
+  return `${sendJid.split('@')[0].replace(/\D/g, '')}@c.us`;
+}
+
+function manualWhatsAppOpenUrlFromPhone(phoneE164: string, text: unknown): string {
+  const digits = phoneE164.replace(/\D/g, '');
+  const suffix =
+    typeof text === 'string' && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
+  return `https://wa.me/${digits}${suffix}`;
+}
+
+type TrustedPhoneEvidenceSource = 'phone' | 'phoneE164' | 'manualOpenUrl';
+
+interface TrustedPhoneEvidence {
+  sendJid: string;
+  phoneE164: string;
+  phoneWaJid: string;
+  manualOpenUrl?: string;
+  source: TrustedPhoneEvidenceSource;
+}
+
+function trustedPhoneEvidence(args: {
+  phone?: unknown;
+  phoneE164?: unknown;
+  manualOpenUrl?: unknown;
+}): TrustedPhoneEvidence | null {
+  const candidates: Array<{ source: TrustedPhoneEvidenceSource; value: unknown }> = [
+    { source: 'phoneE164', value: args.phoneE164 },
+    { source: 'phone', value: args.phone },
+    { source: 'manualOpenUrl', value: phoneFromManualOpenUrl(args.manualOpenUrl) },
+  ];
+
+  for (const candidate of candidates) {
+    const sendJid = normalizeDirectWhatsAppJid(candidate.value);
+    if (!sendJid) continue;
+    return {
+      sendJid,
+      phoneE164: phoneE164FromSendJid(sendJid),
+      phoneWaJid: phoneWaJidFromSendJid(sendJid),
+      manualOpenUrl:
+        typeof args.manualOpenUrl === 'string' && args.manualOpenUrl.trim()
+          ? args.manualOpenUrl.trim()
+          : undefined,
+      source: candidate.source,
+    };
+  }
+
+  return null;
+}
+
 /**
  * True for WhatsApp LID jids (`<n>@lid` / `<n>@hosted.lid`). LID ids are an
  * opaque Baileys identity, NOT a phone number: they must be looked up and sent
@@ -150,15 +227,41 @@ export function isLidJid(chatId: unknown): boolean {
  * so the caller can raise the "valid individual phone or WhatsApp chat ID" error.
  */
 export function resolveProfessionalSendTarget(
-  chatId: unknown
-): { lookupKey: string; sendJid: string } | null {
+  chatId: unknown,
+  evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {}
+): {
+  lookupKey: string;
+  lookupKeys: string[];
+  sendJid: string;
+  sourceLidJid?: string;
+  phoneE164?: string;
+  phoneWaJid?: string;
+  manualOpenUrl?: string;
+  phoneEvidenceSource?: TrustedPhoneEvidenceSource;
+} | null {
   if (isLidJid(chatId)) {
     const lidJid = stripAccount(String(chatId).trim()).id;
-    return { lookupKey: accountKey('professional', lidJid), sendJid: lidJid };
+    const lidLookupKey = accountKey('professional', lidJid);
+    const phone = trustedPhoneEvidence(evidence);
+    if (!phone) {
+      return { lookupKey: lidLookupKey, lookupKeys: [lidLookupKey], sendJid: lidJid };
+    }
+    const phoneLookupKey = accountKey('professional', phone.sendJid);
+    return {
+      lookupKey: lidLookupKey,
+      lookupKeys: [lidLookupKey, phoneLookupKey],
+      sendJid: phone.sendJid,
+      sourceLidJid: lidJid,
+      phoneE164: phone.phoneE164,
+      phoneWaJid: phone.phoneWaJid,
+      manualOpenUrl: phone.manualOpenUrl,
+      phoneEvidenceSource: phone.source,
+    };
   }
   const waJid = normalizeDirectWhatsAppJid(chatId);
   if (!waJid) return null;
-  return { lookupKey: accountKey('professional', waJid), sendJid: waJid };
+  const lookupKey = accountKey('professional', waJid);
+  return { lookupKey, lookupKeys: [lookupKey], sendJid: waJid };
 }
 
 export function normalizeDirectWhatsAppJid(chatId: unknown): string | null {
@@ -496,12 +599,27 @@ export class MCPServer {
           {
             name: 'whatsapp_send_message',
             description:
-              'Send a WhatsApp message directly (no draft flow). Routes by `account`: personal = WhatsApp web (Baileys, personal number), professional = WhatsApp Business Cloud API.',
+              'Send a WhatsApp message directly (no draft flow). Routes by `account`: personal = WhatsApp web (Baileys, personal number), professional = Skirmshop WhatsApp web/Baileys connector.',
             inputSchema: {
               type: 'object',
               properties: {
                 chatId: { type: 'string', description: 'Chat/conversation ID' },
                 text: { type: 'string', description: 'Message text to send' },
+                phone: {
+                  type: 'string',
+                  description:
+                    'Trusted destination phone evidence for professional @lid sends. Use only when it comes from customer/order context or an explicit operator-provided fallback.',
+                },
+                phoneE164: {
+                  type: 'string',
+                  description:
+                    'Trusted E.164 destination phone evidence for professional @lid sends, e.g. +35796658668.',
+                },
+                manualOpenUrl: {
+                  type: 'string',
+                  description:
+                    'Trusted wa.me/manual fallback URL generated for this recipient; used to recover the phone while preserving cold-send guards.',
+                },
                 ...ACCOUNT_PROPERTY,
               },
               required: ['chatId', 'text'],
@@ -2183,7 +2301,14 @@ export class MCPServer {
     }
   }
 
-  private async handleSendMessage(args: { chatId: string; text: string; account?: string }) {
+  private async handleSendMessage(args: {
+    chatId: string;
+    text: string;
+    account?: string;
+    phone?: string;
+    phoneE164?: string;
+    manualOpenUrl?: string;
+  }) {
     if (process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending is disabled (ENABLE_SENDING != true)');
     }
@@ -2194,7 +2319,11 @@ export class MCPServer {
     const account = normalizeAccount(args.account);
     const conversationId =
       account === 'professional'
-        ? await this.requireProfessionalInboundChat(args.chatId)
+        ? await this.requireProfessionalInboundChat(args.chatId, {
+            phone: args.phone,
+            phoneE164: args.phoneE164,
+            manualOpenUrl: args.manualOpenUrl,
+          })
         : args.chatId;
     const connectorUrl = this.waUrl(account);
     const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
@@ -2222,8 +2351,16 @@ export class MCPServer {
         const errorPayload = await this.readConnectorError(response);
         const failure = errorPayload.failureClass ? ` (${errorPayload.failureClass})` : '';
         const actionable = errorPayload.actionable ? ` - ${errorPayload.actionable}` : '';
+        const phoneEvidence = trustedPhoneEvidence({
+          phone: args.phone,
+          phoneE164: args.phoneE164,
+          manualOpenUrl: args.manualOpenUrl,
+        });
         const fallbackUrl =
-          errorPayload.fallback?.manualOpenUrl || manualWhatsAppOpenUrl(args.chatId, args.text);
+          errorPayload.fallback?.manualOpenUrl ||
+          phoneEvidence?.manualOpenUrl ||
+          (phoneEvidence ? manualWhatsAppOpenUrlFromPhone(phoneEvidence.phoneE164, args.text) : undefined) ||
+          manualWhatsAppOpenUrl(args.chatId, args.text);
         const fallback =
           errorPayload.failureClass === 'account_restricted' && fallbackUrl
             ? ` Manual fallback: open ${fallbackUrl} in the official WhatsApp app/Web session and press send manually. Automated first-contact sends require an existing inbound chat/trusted-contact token or an official WhatsApp Business Platform template.`
@@ -2262,7 +2399,7 @@ export class MCPServer {
       `SELECT c.id, max(m.wa_timestamp) AS last_inbound_at
          FROM conversations c
          JOIN messages m ON m.conversation_id = c.id
-        WHERE c.id = $1
+        WHERE (c.id = $1 OR c.wa_chat_id = $1)
           AND c.account = 'professional'
           AND m.account = 'professional'
           AND m.platform = 'whatsapp'
@@ -2274,6 +2411,45 @@ export class MCPServer {
     return result.rows.length > 0;
   }
 
+  private async hasProfessionalInboundAny(conversationIds: string[]): Promise<boolean> {
+    const unique = [...new Set(conversationIds.filter(Boolean))];
+    for (const id of unique) {
+      if (await this.hasProfessionalInbound(id)) return true;
+    }
+    return false;
+  }
+
+  private async persistProfessionalLidPhoneMapping(target: {
+    sourceLidJid?: string;
+    sendJid: string;
+    phoneEvidenceSource?: TrustedPhoneEvidenceSource;
+  }): Promise<void> {
+    if (!target.sourceLidJid || !normalizeDirectWhatsAppJid(target.sendJid)) return;
+    try {
+      await this.dbClient.query(
+        `UPDATE conversations
+            SET wa_chat_id = $2,
+                metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+                updated_at = now()
+          WHERE id = $1
+            AND account = 'professional'
+            AND (wa_chat_id IS NULL OR wa_chat_id = '' OR wa_chat_id = id)`,
+        [
+          accountKey('professional', target.sourceLidJid),
+          accountKey('professional', target.sendJid),
+          JSON.stringify({
+            lidPhoneMappingSource: 'professional_send_phone_evidence',
+            phoneEvidenceSource: target.phoneEvidenceSource || 'unknown',
+          }),
+        ]
+      );
+    } catch (error) {
+      (this.logger as pino.Logger | undefined)?.warn?.(
+        `Could not persist professional LID phone mapping source=${target.phoneEvidenceSource || 'unknown'}: ${safeError(error)}`
+      );
+    }
+  }
+
   /**
    * Gate professional WhatsApp direct sends behind an existing inbound message
    * (no cold first-contact sends) and return the jid that must actually be sent.
@@ -2283,8 +2459,11 @@ export class MCPServer {
    * so we look it up under the ORIGINAL jid and send to the LID jid unchanged.
    * Bare phones / `@c.us` / `@s.whatsapp.net` keep the legacy normalize+gate path.
    */
-  private async requireProfessionalInboundChat(chatId: string): Promise<string> {
-    const target = resolveProfessionalSendTarget(chatId);
+  private async requireProfessionalInboundChat(
+    chatId: string,
+    evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {}
+  ): Promise<string> {
+    const target = resolveProfessionalSendTarget(chatId, evidence);
     if (!target) {
       throw new McpError(
         ErrorCode.InvalidRequest,
@@ -2292,8 +2471,19 @@ export class MCPServer {
       );
     }
 
-    if (!(await this.hasProfessionalInbound(target.lookupKey))) {
-      const fallbackUrl = isLidJid(chatId) ? undefined : manualWhatsAppOpenUrl(target.sendJid, '');
+    if (isLidJid(chatId) && !target.phoneE164) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        'Professional WhatsApp @lid sends require trusted phone evidence (phone, phoneE164, or manualOpenUrl/wa.me) before automated sending.'
+      );
+    }
+
+    if (!(await this.hasProfessionalInboundAny(target.lookupKeys || [target.lookupKey]))) {
+      const fallbackUrl =
+        target.manualOpenUrl ||
+        (target.phoneE164
+          ? manualWhatsAppOpenUrlFromPhone(target.phoneE164, '')
+          : manualWhatsAppOpenUrl(target.sendJid, ''));
       const fallback = fallbackUrl ? ` Manual fallback: ${fallbackUrl}` : '';
       throw new McpError(
         ErrorCode.InvalidRequest,
@@ -2301,6 +2491,7 @@ export class MCPServer {
       );
     }
 
+    await this.persistProfessionalLidPhoneMapping(target);
     return target.sendJid;
   }
 

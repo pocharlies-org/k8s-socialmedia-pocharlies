@@ -85,20 +85,17 @@ describe('handleSendFile cold-send gate (professional)', () => {
     );
   });
 
-  it('with a prior inbound, sends a @lid conversation verbatim (opaque Baileys identity)', async () => {
+  it('blocks a @lid media send without trusted phone evidence, even when an inbound exists', async () => {
     const { sendFile, connectorCall, query } = serverWith(hasInbound);
-    await sendFile({
-      conversationId: '198517716955152@lid',
-      fileUrl: 'http://f/x.jpg',
-      account: 'professional',
-    });
-    expect(query).toHaveBeenCalledWith(expect.any(String), ['professional:198517716955152@lid']);
-    expect(connectorCall).toHaveBeenCalledWith(
-      'http://wa-professional',
-      'POST',
-      '/api/v1/messages/media/send',
-      expect.objectContaining({ conversationId: '198517716955152@lid' })
-    );
+    await expect(
+      sendFile({
+        conversationId: '198517716955152@lid',
+        fileUrl: 'http://f/x.jpg',
+        account: 'professional',
+      })
+    ).rejects.toThrow(/require trusted phone evidence/);
+    expect(query).not.toHaveBeenCalled();
+    expect(connectorCall).not.toHaveBeenCalled();
   });
 
   it('blocks a professional media send to a group/unusable id before touching the DB (parity with text)', async () => {
@@ -211,21 +208,18 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
     );
   });
 
-  it('forwards to a @lid destination verbatim (opaque Baileys identity)', async () => {
+  it('blocks a @lid forward destination without trusted phone evidence', async () => {
     const { forward, connectorCall, query } = serverWith(hasInbound);
-    await forward({
-      chatId: 'professional:source@s.whatsapp.net',
-      messageId: 'm1',
-      toChatId: '198517716955152@lid',
-      account: 'professional',
-    });
-    expect(query).toHaveBeenCalledWith(expect.any(String), ['professional:198517716955152@lid']);
-    expect(connectorCall).toHaveBeenCalledWith(
-      'http://wa-professional',
-      'POST',
-      '/api/v1/messages/forward',
-      expect.objectContaining({ toChatId: '198517716955152@lid' })
-    );
+    await expect(
+      forward({
+        chatId: 'professional:source@s.whatsapp.net',
+        messageId: 'm1',
+        toChatId: '198517716955152@lid',
+        account: 'professional',
+      })
+    ).rejects.toThrow(/require trusted phone evidence/);
+    expect(query).not.toHaveBeenCalled();
+    expect(connectorCall).not.toHaveBeenCalled();
   });
 
   it('blocks a professional forward to a group/unusable destination before touching the DB', async () => {

@@ -32,8 +32,8 @@ images:
     newTag: auto-send-headful-xauth-20260604
     digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: taskflow-telegram-topics-20260629-amd64
-    digest: sha256:c578ef007d33927c5bd12a9f3fdb7b20b4e59f3dc9092de74d403fb9bb9c395c
+    newTag: lid-phone-send-20260629-1
+    digest: sha256:dbd204ca6a4aa8a259b6349e38e432e81c34df286ffa5320e511154eb3505cc2
   # whatsapp-synapse-bridge (Phase F3b). Pinned to the E2E-validated build
   # (built + pushed 2026-06-23; identical source to feat/whatsapp-synapse-bridge).
   # A future manifest-release run can re-pin from CI; the digest is immutable.
