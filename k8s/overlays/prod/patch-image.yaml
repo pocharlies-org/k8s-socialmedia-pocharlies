@@ -68,7 +68,7 @@ spec:
     spec:
       containers:
         - name: telegram-sync
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:taskflow-telegram-topics-20260629-amd64@sha256:6199e1cb067292e06fef76b3c70a27f889347a578c8ffaeb7cadca9b7f434e30
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:retire-autoreply-20260629-amd64@sha256:e64a86bfd05e0d8b9874b30fc29011be55e88e13ee8fda8507f6131226c04b82
 ---
 apiVersion: apps/v1
 kind: Deployment

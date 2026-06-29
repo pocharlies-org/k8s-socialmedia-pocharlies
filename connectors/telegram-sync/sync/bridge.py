@@ -1,4 +1,4 @@
-"""HTTP Bridge — webhook notifier + send/history endpoints for auto-reply."""
+"""HTTP Bridge — send/history endpoints for Telegram sync."""
 
 import asyncio
 import hashlib
@@ -20,8 +20,6 @@ from sync import db
 logger = logging.getLogger(__name__)
 
 BRIDGE_SECRET = os.environ.get("BRIDGE_SECRET", "telegram-bridge-secret-2026")
-WEBHOOK_URL = os.environ.get("AUTOREPLY_WEBHOOK_URL", "")
-
 # Session-less: the bridge proxies live Telegram ops to the connector instead of
 # holding its own Telethon client.
 _connector = None
@@ -45,12 +43,6 @@ def set_startup_error(code: str, message: str):
     _startup_error = {"code": code, "message": message}
 
 
-def _sign(payload: str) -> tuple[str, str]:
-    ts = str(int(time.time()))
-    sig = hmac.new(BRIDGE_SECRET.encode(), f"{ts}:{payload}".encode(), hashlib.sha256).hexdigest()
-    return ts, f"sha256={sig}"
-
-
 def _verify(request: Request, body: bytes) -> bool:
     ts = request.headers.get("x-bridge-timestamp", "")
     sig = request.headers.get("x-bridge-signature", "")
@@ -71,46 +63,6 @@ async def _get_http_client() -> httpx.AsyncClient:
     if _http_client is None:
         _http_client = httpx.AsyncClient(timeout=10)
     return _http_client
-
-
-async def notify_autoreply(chat_id: int, chat_title: str | None, sender_id: int,
-                           sender_name: str | None, content: str, message_type: str,
-                           telegram_message_id: int, timestamp: str,
-                           account: str = "personal"):
-    if not WEBHOOK_URL:
-        return
-    if message_type != "text":
-        return
-
-    # `account` lets the downstream receiver dedup the shared-group double-emission:
-    # when both Telegram accounts are in the same group, each sync instance fires
-    # one webhook for the same human message; the receiver can collapse them on
-    # (conversationId, telegramMessageId), and reply once as the right account.
-    payload = json.dumps({
-        "account": account,
-        "conversationId": str(chat_id),
-        "chatTitle": chat_title,
-        "senderId": str(sender_id),
-        "senderName": sender_name,
-        "content": content,
-        "messageType": "TEXT",
-        "telegramMessageId": str(telegram_message_id),
-        "timestamp": timestamp,
-    })
-    ts, sig = _sign(payload)
-    try:
-        client = await _get_http_client()
-        resp = await client.post(WEBHOOK_URL, content=payload, headers={
-            "Content-Type": "application/json",
-            "X-Bridge-Timestamp": ts,
-            "X-Bridge-Signature": sig,
-        })
-        if resp.status_code != 200:
-            logger.warning(f"Webhook returned {resp.status_code}: {resp.text}")
-        else:
-            logger.info(f"Webhook notified for chat {chat_id}")
-    except Exception as e:
-        logger.warning(f"Webhook failed: {e}")
 
 
 async def handle_send(request: Request) -> JSONResponse:

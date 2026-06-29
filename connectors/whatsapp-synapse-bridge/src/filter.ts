@@ -3,9 +3,8 @@ import { MessageReceivedEvent } from '@mcp-socialmedia/shared';
 /**
  * FAIL-CLOSED forwarding filter for the WhatsApp -> synapse bridge.
  *
- * The existing auto-reply-worker is fail-OPEN (when unsure, it acts). This
- * bridge does the OPPOSITE: when ANYTHING is uncertain we DROP. We only forward
- * a message when every gate explicitly passes.
+ * This bridge is intentionally fail-CLOSED: when ANYTHING is uncertain we DROP.
+ * We only forward a message when every gate explicitly passes.
  */
 
 export interface FilterResult {

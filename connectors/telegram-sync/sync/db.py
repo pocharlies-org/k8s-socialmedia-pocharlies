@@ -136,7 +136,7 @@ async def insert_message_ex(
 
     Returns (message_id, is_new): is_new=True when this call actually created the
     row, False when it already existed (ON CONFLICT). Callers gate one-shot side
-    effects (auto-reply webhook, avatar/media pulls) on is_new to stay idempotent
+    effects (avatar/media pulls) on is_new to stay idempotent
     when realtime + history backfill see the same message."""
     raw_conv_id = f"tg_{chat_id}"
     conv_id = account_key(raw_conv_id)

@@ -18,13 +18,11 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: taskflow-telegram-topics-20260629-amd64
     digest: sha256:d3eecbb5ccfe0c71d26d5b47d5bd6b9ec496fbf3cec2520ccf7e3fafa5df1288
-  # telegram-sync v1.3.38 = SESSION-LESS (ingests via the connector NATS+HTTP API,
-  # holds no Telethon session). The pre-branch v1.3.21 regressed back in when
-  # deploy/prod lost the codex branch and crashloops (0/1 ready) — this pin
-  # restores the working session-less sync.
+  # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
+  # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: taskflow-telegram-topics-20260629-amd64
-    digest: sha256:6199e1cb067292e06fef76b3c70a27f889347a578c8ffaeb7cadca9b7f434e30
+    newTag: retire-autoreply-20260629-amd64
+    digest: sha256:e64a86bfd05e0d8b9874b30fc29011be55e88e13ee8fda8507f6131226c04b82
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
