@@ -1,12 +1,18 @@
-# auto-reply-worker (OmniVoice audio auto-replies) — adopted into GitOps 2026-06-11.
-# Voice uses the central omnivoice-audio gateway; ASR/TTS internals are hidden.
-# LLM_API_KEY / CONNECTOR_SECRET come from whatsapp-mcp-secrets (Vault
-# secret/whatsapp-mcp AUTO_REPLY_* keys) — values match what ran before.
+# auto-reply-worker (DGX personal autoreply) — DEPRECATED 2026-06-29.
+#
+# This worker sends through the personal Baileys connector. It must stay
+# disabled now that Synapse owns Skirmshop conversational autopilot. Keep
+# config.json rules empty, replicas at 0, and CONNECTOR_URL pointed at an
+# unroutable local endpoint so an accidental manual scale cannot send from
+# Daniel's personal WhatsApp.
 apiVersion: v1
 data:
   config.json: "{\n  \"rules\": []\n}"
 kind: ConfigMap
 metadata:
+  annotations:
+    skirmshop.es/deprecated: "true"
+    skirmshop.es/deprecated-reason: "personal-dgx-autoreply-replaced-by-synapse-autopilot"
   labels:
     app.kubernetes.io/instance: auto-reply-worker
     app.kubernetes.io/managed-by: Helm
@@ -19,6 +25,9 @@ metadata:
 apiVersion: v1
 kind: Service
 metadata:
+  annotations:
+    skirmshop.es/deprecated: "true"
+    skirmshop.es/deprecated-reason: "personal-dgx-autoreply-replaced-by-synapse-autopilot"
   labels:
     app.kubernetes.io/instance: auto-reply-worker
     app.kubernetes.io/managed-by: Helm
@@ -42,11 +51,14 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    skirmshop.es/deprecated: "true"
+    skirmshop.es/deprecated-reason: "personal-dgx-autoreply-replaced-by-synapse-autopilot"
   name: auto-reply-worker
   namespace: whatsapp-mcp
 spec:
   progressDeadlineSeconds: 600
-  replicas: 1
+  replicas: 0
   revisionHistoryLimit: 10
   selector:
     matchLabels:
@@ -83,7 +95,7 @@ spec:
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: CONNECTOR_URL
-          value: http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001/api/v1/messages/send
+          value: http://127.0.0.1:9/deprecated-dgx-autoreply-disabled
         - name: CONNECTOR_SECRET
           valueFrom:
             secretKeyRef:
