@@ -83,6 +83,23 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
   return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
+function optionalPositiveInteger(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new McpError(ErrorCode.InvalidParams, `${field} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function requiredPositiveInteger(value: unknown, field: string): number {
+  const parsed = optionalPositiveInteger(value, field);
+  if (parsed === undefined) {
+    throw new McpError(ErrorCode.InvalidParams, `${field} is required`);
+  }
+  return parsed;
+}
+
 function safeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -808,12 +825,21 @@ export class MCPServer {
           {
             name: 'telegram_search',
             description:
-              'Search Telegram messages globally or within a chat, scoped to the selected account.',
+              'Search Telegram messages globally, within a chat, or within a forum topic, scoped to the selected account.',
             inputSchema: {
               type: 'object',
               properties: {
                 query: { type: 'string', description: 'Search query' },
-                chatId: { type: 'string', description: 'Optional: restrict to specific chat' },
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Optional: restrict to a chat. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic>.',
+                },
+                topicId: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Optional Telegram forum topic/thread id. Can also be embedded in chatId as tg_<chat>_<topic>.',
+                },
                 limit: { type: 'integer', default: 20 },
                 ...ACCOUNT_PROPERTY,
               },
@@ -848,15 +874,65 @@ export class MCPServer {
           {
             name: 'telegram_send_message',
             description:
-              'Send a text message in Telegram. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+              'Send a text message in Telegram, including forum topics. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
             inputSchema: {
               type: 'object',
               properties: {
-                chatId: { type: 'string', description: 'Telegram chat ID' },
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
+                },
+                topicId: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Optional forum topic/thread id. Required for sending into a topic unless embedded in chatId.',
+                },
+                replyTo: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Optional Telegram message id to quote while keeping topicId as the forum thread.',
+                },
                 text: { type: 'string', description: 'Message text' },
                 ...ACCOUNT_PROPERTY,
               },
               required: ['chatId', 'text'],
+            },
+          },
+          {
+            name: 'telegram_click_button',
+            description:
+              'Click a real Telegram inline callback button by chat, message id, and callback data.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram chat ID containing the inline keyboard. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic>.',
+                },
+                messageId: {
+                  type: ['integer', 'string'],
+                  description: 'Telegram message id that contains the inline keyboard.',
+                },
+                data: {
+                  type: 'string',
+                  description: 'Callback data stored in the inline button.',
+                },
+                timeoutMs: {
+                  type: 'integer',
+                  default: 10000,
+                  description: 'Callback answer timeout in milliseconds.',
+                },
+                fireAndForget: {
+                  type: 'boolean',
+                  default: false,
+                  description:
+                    'Return as soon as Telegram accepts the callback request; useful for bots that never answer callbacks.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'messageId', 'data'],
             },
           },
           {
@@ -876,11 +952,20 @@ export class MCPServer {
           },
           {
             name: 'telegram_get_messages',
-            description: 'Get messages from a Telegram chat.',
+            description: 'Get messages from a Telegram chat, optionally filtered to a forum topic.',
             inputSchema: {
               type: 'object',
               properties: {
-                chatId: { type: 'string', description: 'Telegram chat ID' },
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
+                },
+                topicId: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Optional Telegram forum topic/thread id. Can also be embedded in chatId as tg_<chat>_<topic>.',
+                },
                 limit: { type: 'integer', default: 50, maximum: 200 },
                 offsetId: { type: 'integer', description: 'Message ID to start from' },
                 ...ACCOUNT_PROPERTY,
@@ -1378,6 +1463,8 @@ export class MCPServer {
             return await this.handleTelegramParticipants(args as any);
           case 'telegram_send_message':
             return await this.handleTelegramSendMessage(args as any);
+          case 'telegram_click_button':
+            return await this.handleTelegramClickButton(args as any);
           case 'telegram_send_file':
             return await this.handleTelegramSendFile(args as any);
           case 'telegram_get_messages':
@@ -2550,13 +2637,47 @@ export class MCPServer {
   private async handleTelegramSendMessage(args: {
     chatId: string;
     text: string;
+    topicId?: number | string;
+    replyTo?: number | string;
     account?: string;
   }) {
+    const target = this.telegramTopicTarget(args.chatId, args.topicId);
+    const replyTo = optionalPositiveInteger(args.replyTo, 'replyTo');
     const data = await this.connectorCall(
       this.tgUrl(args.account),
       'POST',
-      `/api/v1/messages/${args.chatId}`,
-      { text: args.text }
+      `/api/v1/messages/${encodeURIComponent(target.chatId)}`,
+      {
+        text: args.text,
+        ...(target.topicId ? { topicId: target.topicId } : {}),
+        ...(replyTo ? { replyTo } : {}),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramClickButton(args: {
+    chatId: string;
+    messageId: number | string;
+    data: string;
+    timeoutMs?: number;
+    fireAndForget?: boolean;
+    account?: string;
+  }) {
+    const target = this.telegramTopicTarget(args.chatId);
+    const messageId = requiredPositiveInteger(args.messageId, 'messageId');
+    const timeoutMs = clampInteger(args.timeoutMs, 10000, 1000, 60000);
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      '/api/v1/messages/callback',
+      {
+        chatId: target.chatId,
+        messageId,
+        data: args.data,
+        timeoutMs,
+        fireAndForget: args.fireAndForget === true,
+      }
     );
     return this.jsonResponse(data);
   }
@@ -2591,8 +2712,8 @@ export class MCPServer {
     chatId: string,
     account: Account = 'personal'
   ): Promise<string | null> {
-    if (chatId.startsWith('tg_')) return accountKey(account, chatId);
-    if (/^-?\d+$/.test(chatId)) return accountKey(account, `tg_${chatId}`);
+    const target = this.telegramTopicTarget(chatId);
+    if (/^-?\d+$/.test(target.chatId)) return accountKey(account, `tg_${target.chatId}`);
     if (chatId.startsWith('@')) {
       const username = chatId.slice(1).toLowerCase();
       const r = await this.dbClient.query(
@@ -2602,6 +2723,46 @@ export class MCPServer {
       return r.rows[0]?.id ?? null;
     }
     return null;
+  }
+
+  private telegramTopicTarget(
+    chatId: string,
+    explicitTopicId?: number | string
+  ): { chatId: string; topicId?: number } {
+    if (!chatId || !String(chatId).trim()) {
+      throw new McpError(ErrorCode.InvalidParams, 'chatId is required');
+    }
+    let id = stripAccount(String(chatId).trim()).id;
+    if (id.startsWith('tg_')) id = id.slice(3);
+
+    let topicId = optionalPositiveInteger(explicitTopicId, 'topicId');
+    if (!topicId) {
+      const match = id.match(/^(-?\d+)_(\d+)$/);
+      if (match) {
+        id = match[1];
+        topicId = Number(match[2]);
+      }
+    }
+    return { chatId: id, ...(topicId ? { topicId } : {}) };
+  }
+
+  private appendTelegramTopicWhere(
+    where: string,
+    params: any[],
+    conversationParamIndex: number,
+    topicId?: number
+  ): string {
+    if (!topicId) return where;
+    params.push(String(topicId));
+    const topicParamIndex = params.length;
+    return `${where}
+          AND (
+            metadata->>'topic_id' = $${topicParamIndex}
+            OR metadata->>'topicId' = $${topicParamIndex}
+            OR metadata->>'thread_id' = $${topicParamIndex}
+            OR metadata->>'threadId' = $${topicParamIndex}
+            OR reply_to_message_id = ($${conversationParamIndex} || '_' || $${topicParamIndex})
+          )`;
   }
 
   private bareTelegramTgId(chatId: string): string | null {
@@ -2682,11 +2843,13 @@ export class MCPServer {
 
   private async handleTelegramGetMessages(args: {
     chatId: string;
+    topicId?: number | string;
     limit?: number;
     offsetId?: number;
     account?: string;
   }) {
-    const id = await this.resolveTelegramChatId(args.chatId, normalizeAccount(args.account));
+    const target = this.telegramTopicTarget(args.chatId, args.topicId);
+    const id = await this.resolveTelegramChatId(target.chatId, normalizeAccount(args.account));
     if (!id)
       throw new McpError(
         ErrorCode.InvalidParams,
@@ -2699,6 +2862,7 @@ export class MCPServer {
       params.push(args.offsetId);
       where += ` AND id < $3`;
     }
+    where = this.appendTelegramTopicWhere(where, params, 1, target.topicId);
     const result = await this.dbClient.query(
       `SELECT id, conversation_id, sender_wa_id, direction, content, message_type,
               wa_timestamp, is_forwarded, is_edited, is_deleted, reply_to_message_id, metadata
@@ -2711,6 +2875,7 @@ export class MCPServer {
     return this.jsonResponse({
       source: 'db',
       chatId: id,
+      topicId: target.topicId ?? null,
       count: result.rows.length,
       messages: result.rows.map((m: any) => ({
         id: m.id,
@@ -2724,6 +2889,12 @@ export class MCPServer {
         edited: m.is_edited,
         deleted: m.is_deleted,
         replyTo: m.reply_to_message_id,
+        topicId:
+          m.metadata?.topic_id ??
+          m.metadata?.topicId ??
+          m.metadata?.thread_id ??
+          m.metadata?.threadId ??
+          null,
         metadata: m.metadata,
       })),
     });
@@ -3295,6 +3466,7 @@ export class MCPServer {
   private async handleTelegramSearch(args: {
     query: string;
     chatId?: string;
+    topicId?: number | string;
     limit?: number;
     account?: string;
   }) {
@@ -3302,8 +3474,11 @@ export class MCPServer {
     const limit = Math.min(args.limit ?? 20, 200);
     const params: any[] = [`%${args.query}%`, limit, account];
     let where = `platform = 'telegram' AND account = $3 AND content ILIKE $1`;
+    let topicId: number | undefined;
     if (args.chatId) {
-      const id = await this.resolveTelegramChatId(args.chatId, account);
+      const target = this.telegramTopicTarget(args.chatId, args.topicId);
+      topicId = target.topicId;
+      const id = await this.resolveTelegramChatId(target.chatId, account);
       if (!id)
         throw new McpError(
           ErrorCode.InvalidParams,
@@ -3311,9 +3486,13 @@ export class MCPServer {
         );
       params.push(id);
       where += ` AND conversation_id = $4`;
+      where = this.appendTelegramTopicWhere(where, params, 4, topicId);
+    } else if (args.topicId !== undefined) {
+      throw new McpError(ErrorCode.InvalidParams, 'topicId requires chatId');
     }
     const result = await this.dbClient.query(
-      `SELECT id, conversation_id, sender_wa_id, direction, content, wa_timestamp
+      `SELECT id, conversation_id, sender_wa_id, direction, content, wa_timestamp,
+              reply_to_message_id, metadata
          FROM messages WHERE ${where}
         ORDER BY wa_timestamp DESC LIMIT $2`,
       params
@@ -3321,6 +3500,7 @@ export class MCPServer {
     return this.jsonResponse({
       source: 'db',
       query: args.query,
+      topicId: topicId ?? null,
       count: result.rows.length,
       messages: result.rows.map((m: any) => ({
         id: m.id,
@@ -3329,6 +3509,13 @@ export class MCPServer {
         direction: m.direction,
         content: m.content,
         timestamp: m.wa_timestamp,
+        replyTo: m.reply_to_message_id,
+        topicId:
+          m.metadata?.topic_id ??
+          m.metadata?.topicId ??
+          m.metadata?.thread_id ??
+          m.metadata?.threadId ??
+          null,
       })),
     });
   }

@@ -331,6 +331,40 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * Click a real inline callback button on a Telegram message.
+   */
+  async clickCallbackButton(
+    chatId: string,
+    messageId: number,
+    data: string,
+    options?: { timeoutMs?: number; fireAndForget?: boolean }
+  ): Promise<{
+    alert: boolean;
+    hasUrl: boolean;
+    nativeUi: boolean;
+    message: string | null;
+    url: string | null;
+    cacheTime: number;
+  }> {
+    if (!this.connected) throw new Error('Not connected to Telegram');
+    const answer = await this.client.getCallbackAnswer({
+      chatId: toMtcutePeer(chatId),
+      message: messageId,
+      data,
+      ...(options?.timeoutMs ? { timeout: options.timeoutMs } : {}),
+      ...(options?.fireAndForget ? { fireAndForget: true } : {}),
+    });
+    return {
+      alert: !!answer.alert,
+      hasUrl: !!answer.hasUrl,
+      nativeUi: !!answer.nativeUi,
+      message: answer.message || null,
+      url: answer.url || null,
+      cacheTime: answer.cacheTime ?? 0,
+    };
+  }
+
+  /**
    * Get all dialogs (chats)
    */
   async getDialogs(): Promise<

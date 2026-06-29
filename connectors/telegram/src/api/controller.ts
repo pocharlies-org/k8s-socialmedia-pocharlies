@@ -276,6 +276,52 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * POST /messages/callback - Click a Telegram inline callback button.
+   */
+  router.post('/messages/callback', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+        const { chatId, messageId, data, timeoutMs, fireAndForget } = req.body as {
+          chatId?: string;
+          messageId?: number | string;
+          data?: string;
+          timeoutMs?: number | string;
+          fireAndForget?: boolean;
+        };
+        if (!chatId || messageId === undefined || messageId === null || data === undefined) {
+          res.status(400).json({ error: 'Missing chatId, messageId or data' });
+          return;
+        }
+        const msgId = typeof messageId === 'string' ? Number(messageId) : messageId;
+        if (!Number.isInteger(msgId) || msgId <= 0) {
+          res.status(400).json({ error: 'messageId must be a positive integer' });
+          return;
+        }
+        const timeout =
+          timeoutMs !== undefined && timeoutMs !== null && timeoutMs !== ''
+            ? Number(timeoutMs)
+            : undefined;
+        if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0)) {
+          res.status(400).json({ error: 'timeoutMs must be a positive integer' });
+          return;
+        }
+        const answer = await client.clickCallbackButton(chatId, msgId, String(data), {
+          ...(timeout ? { timeoutMs: timeout } : {}),
+          fireAndForget: fireAndForget === true,
+        });
+        res.json({ clicked: true, answer });
+      } catch (e) {
+        logger.error(`Error clicking callback button: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
    * POST /messages/forward - Forward a message
    */
   router.post('/messages/forward', (req: Request, res: Response): void => {

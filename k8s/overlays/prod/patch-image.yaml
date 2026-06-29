@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:synapse-unread-cache-20260616-1@sha256:9688eb22a93a5bce04e6dc34bef3bc3d9d3cd04d24df989758bcde1ed89a21ef
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:taskflow-telegram-topics-20260629-amd64@sha256:d3eecbb5ccfe0c71d26d5b47d5bd6b9ec496fbf3cec2520ccf7e3fafa5df1288
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:coldsend-gate-fix-20260624@sha256:d9199b537327c71cf3b3042880a280d0d5b1f337dee47db6710c61a3e30a8012
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:taskflow-telegram-topics-20260629-amd64@sha256:c578ef007d33927c5bd12a9f3fdb7b20b4e59f3dc9092de74d403fb9bb9c395c
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -68,7 +68,7 @@ spec:
     spec:
       containers:
         - name: telegram-sync
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.38@sha256:37f5b886685b0682bdfa070df67d98cf76e2963e0c61406b634330e72d31bc06
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:taskflow-telegram-topics-20260629-amd64@sha256:6199e1cb067292e06fef76b3c70a27f889347a578c8ffaeb7cadca9b7f434e30
 ---
 apiVersion: apps/v1
 kind: Deployment

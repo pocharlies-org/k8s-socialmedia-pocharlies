@@ -16,15 +16,15 @@ images:
     newTag: cloud-api-20260604
     digest: sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: synapse-unread-cache-20260616-1
-    digest: sha256:9688eb22a93a5bce04e6dc34bef3bc3d9d3cd04d24df989758bcde1ed89a21ef
+    newTag: taskflow-telegram-topics-20260629-amd64
+    digest: sha256:d3eecbb5ccfe0c71d26d5b47d5bd6b9ec496fbf3cec2520ccf7e3fafa5df1288
   # telegram-sync v1.3.38 = SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session). The pre-branch v1.3.21 regressed back in when
   # deploy/prod lost the codex branch and crashloops (0/1 ready) — this pin
   # restores the working session-less sync.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.38
-    digest: sha256:37f5b886685b0682bdfa070df67d98cf76e2963e0c61406b634330e72d31bc06
+    newTag: taskflow-telegram-topics-20260629-amd64
+    digest: sha256:6199e1cb067292e06fef76b3c70a27f889347a578c8ffaeb7cadca9b7f434e30
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
@@ -32,8 +32,8 @@ images:
     newTag: auto-send-headful-xauth-20260604
     digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: streamable-session-reclaim-20260625-r2
-    digest: sha256:ce20fb6759881fbb42e3f72b8565deef4455c3e8ba5967c3a63f91f57a2d66bc
+    newTag: taskflow-telegram-topics-20260629-amd64
+    digest: sha256:c578ef007d33927c5bd12a9f3fdb7b20b4e59f3dc9092de74d403fb9bb9c395c
   # whatsapp-synapse-bridge (Phase F3b). Pinned to the E2E-validated build
   # (built + pushed 2026-06-23; identical source to feat/whatsapp-synapse-bridge).
   # A future manifest-release run can re-pin from CI; the digest is immutable.

@@ -77,6 +77,7 @@ async function main() {
       attachments: message.attachments,
       isForwarded: message.isForwarded,
       replyToMessageId: message.replyToMessageId,
+      topicId: message.topicId,
       isOutbound: message.isOutbound,
       chatType: message.chatType,
       chatTitle: message.chatTitle,

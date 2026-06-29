@@ -129,6 +129,7 @@ async def insert_message_ex(
     timestamp,
     is_forwarded: bool = False,
     reply_to_message_id: int | None = None,
+    topic_id: int | None = None,
     needs_transcription: bool = False,
 ) -> tuple[int | None, bool]:
     """Insert a message into the unified table.
@@ -150,6 +151,9 @@ async def insert_message_ex(
         "chat_type": chat_type,
         "sender_name": sender_name,
     }
+    if topic_id is not None:
+        metadata["topic_id"] = topic_id
+        metadata["thread_id"] = topic_id
     if needs_transcription:
         metadata["needs_transcription"] = True
         metadata["transcription_status"] = "pending"
@@ -188,13 +192,26 @@ async def insert_message(
     timestamp,
     is_forwarded: bool = False,
     reply_to_message_id: int | None = None,
+    topic_id: int | None = None,
     needs_transcription: bool = False,
 ) -> int | None:
     """Back-compat wrapper: returns the message id (new or existing), or None."""
     msg_id, _is_new = await insert_message_ex(
-        pool, telegram_message_id, chat_id, chat_title, chat_type,
-        sender_id, sender_name, content, message_type, direction, timestamp,
-        is_forwarded, reply_to_message_id, needs_transcription,
+        pool,
+        telegram_message_id,
+        chat_id,
+        chat_title,
+        chat_type,
+        sender_id,
+        sender_name,
+        content,
+        message_type,
+        direction,
+        timestamp,
+        is_forwarded=is_forwarded,
+        reply_to_message_id=reply_to_message_id,
+        topic_id=topic_id,
+        needs_transcription=needs_transcription,
     )
     return msg_id
 
