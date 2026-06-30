@@ -244,7 +244,9 @@ spec:
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
           ports: [{ name: http, containerPort: 3001 }]
           env:
-            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: ENABLE_SENDING, value: "true" }
@@ -313,7 +315,9 @@ spec:
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
           ports: [{ name: http, containerPort: 3001 }]
           env:
-            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: ENABLE_SENDING, value: "true" }
@@ -676,7 +680,9 @@ spec:
             # SSE_STREAMABLE_MAX_SESSIONS (100) default in code.
             - { name: SSE_STREAMABLE_IDLE_MS, value: "600000" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: TELEGRAM_CONNECTOR_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
