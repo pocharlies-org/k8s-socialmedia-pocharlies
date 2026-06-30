@@ -309,6 +309,7 @@ export class MCPServer {
     encryptionKey: string,
     _connectorSharedSecret: string,
     _connectorUrl: string,
+    redisUrl: string,
     llmBaseUrl?: string,
     llmModel?: string
   ) {
@@ -330,7 +331,7 @@ export class MCPServer {
     this.summarizationService = new SummarizationService(
       openaiApiKey,
       dbClient,
-      redisClient.options.host || 'localhost',
+      redisUrl,
       encryptionKey,
       llmBaseUrl,
       llmModel

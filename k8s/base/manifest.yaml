@@ -680,10 +680,9 @@ spec:
             # SSE_STREAMABLE_MAX_SESSIONS (100) default in code.
             - { name: SSE_STREAMABLE_IDLE_MS, value: "600000" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-            # Temporary rollback: MCPServer currently passes only redisClient.options.host
-            # into internal cache services, losing auth from REDIS_URL. Keep SSE on the
-            # legacy Redis until the mcp-server image is rebuilt with full URL handoff.
-            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: TELEGRAM_CONNECTOR_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
