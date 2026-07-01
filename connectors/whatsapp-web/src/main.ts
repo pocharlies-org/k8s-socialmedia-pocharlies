@@ -5,6 +5,18 @@ import { EventPublisher } from './events/publisher';
 import { createRouter } from './api/controller';
 import { join } from 'path';
 import { MessageReceivedEvent, EventType } from '@mcp-socialmedia/shared';
+import { scrubSignalSessionLogs } from './signal-log-scrub';
+
+// F0.8: redact libsignal SessionEntry console dumps (privKey/rootKey/chainKey
+// Buffers) BEFORE any Baileys socket can open/close a session. Display-only;
+// see signal-log-scrub.ts for the root cause. A failure to patch is loud but
+// non-fatal: the connector must keep delivering messages regardless.
+if (!scrubSignalSessionLogs()) {
+  console.error(
+    'signal-log-scrub: could not install SessionEntry inspect redaction — ' +
+      'libsignal shape changed; session logs may leak private keys'
+  );
+}
 
 const SESSION_PATH = process.env.SESSION_PATH || join(process.cwd(), 'session-data');
 const ENCRYPTION_KEY =
@@ -200,6 +212,12 @@ ${renewScript}
       isForwarded: message.isForwarded,
       replyToWaId: message.replyToWaId,
       pushName: message.pushName,
+      // F0.1/F0.5: real @lid sender phone (when Baileys surfaced it) and the
+      // ownership flag, both already computed in-memory by ingestMessage —
+      // never re-queried from the DB. JSON.stringify drops undefined keys, so
+      // absent values never appear on the wire.
+      senderPnE164: message.senderPnE164,
+      fromMe: message.fromMe,
     };
     eventPublisher.publishMessageReceived(event);
   });

@@ -26,6 +26,8 @@ const jsonCodec: Codec<MessageReceivedEvent> = JSONCodec();
 const metrics = {
   received: 0,
   forwarded: 0,
+  /** Subset of `forwarded` that were own-outbound team touches (F0.5). */
+  forwardedFromMe: 0,
   droppedByReason: new Map<string, number>(),
   gatewayDelivered: 0,
   gatewayDroppedAuth: 0,
@@ -130,9 +132,16 @@ class Bridge {
       return;
     }
 
-    const result = await this.gateway.forward(event, { waMessageId, account });
+    // F0.5: our own outbound (operator replying from the phone) is forwarded
+    // FLAGGED so downstream treats it as a team touch. Stamp the flag
+    // explicitly — the own-JID-derived case may lack it on the wire.
+    const outbound: MessageReceivedEvent =
+      decision.fromMe === true ? { ...event, fromMe: true } : event;
+
+    const result = await this.gateway.forward(outbound, { waMessageId, account });
     if (result.ok) {
       metrics.forwarded++;
+      if (decision.fromMe === true) metrics.forwardedFromMe++;
       metrics.gatewayDelivered++;
     } else if (result.outcome === 'dropped-auth') {
       metrics.gatewayDroppedAuth++;
@@ -198,6 +207,7 @@ function statusPayload(bridge: Bridge, meCache: MeCache, dedup: DedupCache): Rec
     metrics: {
       received: metrics.received,
       forwarded: metrics.forwarded,
+      forwardedFromMe: metrics.forwardedFromMe,
       gatewayDelivered: metrics.gatewayDelivered,
       gatewayDroppedAuth: metrics.gatewayDroppedAuth,
       gatewayDroppedBadRequest: metrics.gatewayDroppedBadRequest,

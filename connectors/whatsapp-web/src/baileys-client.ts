@@ -109,6 +109,15 @@ export interface WhatsAppMessage {
   replyToWaId?: string;
   /** Sender's WhatsApp display name (Baileys `pushName`). Optional. */
   pushName?: string;
+  /**
+   * Real sender phone in E.164 (with '+'), ONLY when the chat is @lid-addressed
+   * and Baileys surfaced the alternate PN jid (see pnFromLidMessage). Never an
+   * invented value; omitted otherwise. Same value persisted as
+   * `messages.metadata->>'senderPnE164'`.
+   */
+  senderPnE164?: string;
+  /** Baileys `key.fromMe`: true when this account sent the message (any device). */
+  fromMe?: boolean;
   attachments?: Array<{
     type: string;
     url: string;
@@ -1028,7 +1037,15 @@ export class BaileysClient extends EventEmitter {
     // never block or abort the message persist. The conversation PK stays the
     // LID (namespaced) — we do not re-key anything.
     const lidPn = pnFromLidMessage(msg);
+    // Ride the LID→PN mapping and the Baileys ownership flag on the in-memory
+    // message so the NATS event (main.ts) carries them WITHOUT re-querying the
+    // DB. `senderPnE164` is only set when real (never fabricated); `fromMe` is
+    // always an explicit boolean — it is the same signal that drives
+    // direction=OUTBOUND below and lets the synapse bridge forward operator
+    // replies flagged as team touches (F0.5) instead of guessing by JID.
+    waMessage.fromMe = !!msg.key.fromMe;
     if (lidPn) {
+      waMessage.senderPnE164 = lidPn.e164;
       // (b) wa_chat_id backfill — fire-and-forget; a failure here must never
       // drop the message (the metadata field is the load-bearing path).
       void setConversationWaChatId(waMessage.conversationId, lidPn.pnJid).catch(e =>

@@ -5,12 +5,26 @@ import { MessageReceivedEvent } from '@mcp-socialmedia/shared';
  *
  * This bridge is intentionally fail-CLOSED: when ANYTHING is uncertain we DROP.
  * We only forward a message when every gate explicitly passes.
+ *
+ * F0.5 exception (docs/48 in synapse): a message that is OUR OWN outbound on
+ * the professional account (operator replying from the linked phone) passes
+ * the same gates and is forwarded FLAGGED `fromMe: true` instead of dropped —
+ * synapse needs it as a "team touch". Uncertainty still drops (own JID
+ * unknown => drop everything).
  */
 
 export interface FilterResult {
   forward: boolean;
   /** Machine-readable reason; safe to log (never contains PII). */
   reason: string;
+  /**
+   * True when the forwarded message is the account's OWN outbound (operator
+   * replying from the linked phone) — a team touch, not customer inbound
+   * (F0.5). Only ever set on `forward: true` results; the caller must stamp
+   * `fromMe: true` on the outgoing event so downstream never has to re-derive
+   * ownership from JIDs.
+   */
+  fromMe?: boolean;
 }
 
 /**
@@ -107,29 +121,32 @@ export function shouldForward(
     return { forward: false, reason: 'missing-wa-message-id' };
   }
 
-  // 5. Own-JID guard: never forward our own outbound (reply-to-self loop).
-  //    Two independent signals — explicit fromMe (if the event ever carries it)
-  //    and sender == own JID — both fail-closed.
-  const eventWithFromMe = event as MessageReceivedEvent & { fromMe?: boolean };
-  if (eventWithFromMe.fromMe === true) {
-    return { forward: false, reason: 'from-me-flag' };
-  }
+  // 5. Own-message detection (F0.5: team touch). Two independent signals —
+  //    the explicit connector flag (`event.fromMe`) and sender == own JID.
+  //    Since F0.5 an own message on the professional account is FORWARDED
+  //    flagged `fromMe: true` (the operator answering from the phone is a
+  //    team touch synapse must see), no longer silently dropped. Detection
+  //    itself stays fail-closed: when the own JID is unknown we cannot rule
+  //    out a self-message, so we keep dropping EVERYTHING (pre-existing
+  //    degraded-mode behavior until the connector's /me succeeds).
   if (!ownJid) {
-    // Own JID unknown => we cannot rule out a self-message => drop everything.
     return { forward: false, reason: 'own-jid-unknown' };
   }
   const sender = normalizeJid(event.senderWaId);
   if (!sender) {
     return { forward: false, reason: 'missing-sender' };
   }
-  if (sender === normalizeJid(ownJid)) {
-    return { forward: false, reason: 'sender-is-self' };
-  }
+  const fromMe = event.fromMe === true || sender === normalizeJid(ownJid);
 
-  // 6. Dedup: already-seen waMessageId => drop.
+  // 6. Dedup: already-seen waMessageId => drop. Applies to fromMe messages
+  //    too (a re-published operator reply must not double-count as two team
+  //    touches downstream).
   if (dedup.has(waMessageId)) {
     return { forward: false, reason: 'duplicate' };
   }
 
+  if (fromMe) {
+    return { forward: true, reason: 'forward-from-me', fromMe: true };
+  }
   return { forward: true, reason: 'forward' };
 }

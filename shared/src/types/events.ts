@@ -37,6 +37,20 @@ export interface MessageReceivedEvent {
    * @lid privacy senders whose `senderWaId` is an opaque identifier.
    */
   pushName?: string;
+  /**
+   * Real sender phone in E.164 (with '+'), ONLY when the sender is an @lid
+   * privacy identity AND Baileys surfaced the alternate phone-number jid.
+   * Omitted entirely otherwise — never an invented value. PII; same trust
+   * class as `senderWaId`. Mirrors `messages.metadata->>'senderPnE164'`.
+   */
+  senderPnE164?: string;
+  /**
+   * True when the message was sent BY the owning account itself (Baileys
+   * `key.fromMe`, e.g. the operator replying from the linked phone).
+   * Downstream must treat these as team touches, never as customer inbound.
+   * Optional for backward-compat: absent on events from older connectors.
+   */
+  fromMe?: boolean;
 }
 
 export interface MessageUpdatedEvent {

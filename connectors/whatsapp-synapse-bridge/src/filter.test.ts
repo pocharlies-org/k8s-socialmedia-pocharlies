@@ -5,7 +5,7 @@ import { EventType, MessageReceivedEvent } from '@mcp-socialmedia/shared';
 
 const OWN_JID = '34600000000@c.us';
 
-function makeEvent(overrides: Partial<MessageReceivedEvent & { fromMe?: boolean }> = {}): MessageReceivedEvent {
+function makeEvent(overrides: Partial<MessageReceivedEvent> = {}): MessageReceivedEvent {
   return {
     eventType: EventType.MESSAGE_RECEIVED,
     conversationId: '34699999999@c.us',
@@ -40,6 +40,8 @@ interface Case {
   dedup?: { has(k: string): boolean };
   forward: boolean;
   reason: string;
+  /** Expected FilterResult.fromMe (undefined for drops and normal forwards). */
+  fromMe?: boolean;
 }
 
 const cases: Case[] = [
@@ -93,10 +95,16 @@ const cases: Case[] = [
     reason: 'missing-wa-message-id',
   },
   {
-    name: 'fromMe flag dropped',
-    event: makeEvent({ fromMe: true } as Partial<MessageReceivedEvent>),
+    name: 'fromMe on personal account still dropped (account gate first)',
+    event: makeEvent({ fromMe: true, account: 'personal' }),
     forward: false,
-    reason: 'from-me-flag',
+    reason: 'account-not-professional',
+  },
+  {
+    name: 'fromMe in a group still dropped (group gate before fromMe)',
+    event: makeEvent({ fromMe: true, conversationId: '120363000000000000@g.us' }),
+    forward: false,
+    reason: 'group-or-broadcast-or-newsletter',
   },
   {
     name: 'own-JID unknown => drop everything',
@@ -106,18 +114,11 @@ const cases: Case[] = [
     reason: 'own-jid-unknown',
   },
   {
-    name: 'sender == own JID dropped (normalization-safe, device suffix)',
-    event: makeEvent({ senderWaId: '34600000000:7@s.whatsapp.net' }),
-    ownJid: OWN_JID,
+    name: 'own-JID unknown => drop even explicit fromMe (degraded mode)',
+    event: makeEvent({ fromMe: true }),
+    ownJid: '',
     forward: false,
-    reason: 'sender-is-self',
-  },
-  {
-    name: 'sender == own JID dropped (raw @s.whatsapp.net own jid)',
-    event: makeEvent({ senderWaId: '34600000000@c.us' }),
-    ownJid: '34600000000@s.whatsapp.net',
-    forward: false,
-    reason: 'sender-is-self',
+    reason: 'own-jid-unknown',
   },
   {
     name: 'duplicate waMessageId dropped',
@@ -125,6 +126,43 @@ const cases: Case[] = [
     dedup: alwaysSeen,
     forward: false,
     reason: 'duplicate',
+  },
+  {
+    name: 'duplicate fromMe waMessageId dropped (dedup applies to team touches)',
+    event: makeEvent({ fromMe: true }),
+    dedup: alwaysSeen,
+    forward: false,
+    reason: 'duplicate',
+  },
+  // ── FROM-ME FORWARDS (F0.5: team touch, flagged not dropped) ───────────
+  {
+    name: 'explicit fromMe flag forwarded flagged',
+    event: makeEvent({ fromMe: true }),
+    forward: true,
+    reason: 'forward-from-me',
+    fromMe: true,
+  },
+  {
+    name: 'sender == own JID forwarded flagged (normalization-safe, device suffix)',
+    event: makeEvent({ senderWaId: '34600000000:7@s.whatsapp.net' }),
+    ownJid: OWN_JID,
+    forward: true,
+    reason: 'forward-from-me',
+    fromMe: true,
+  },
+  {
+    name: 'sender == own JID forwarded flagged (raw @s.whatsapp.net own jid)',
+    event: makeEvent({ senderWaId: '34600000000@c.us' }),
+    ownJid: '34600000000@s.whatsapp.net',
+    forward: true,
+    reason: 'forward-from-me',
+    fromMe: true,
+  },
+  {
+    name: 'explicit fromMe=false with third-party sender is a normal forward',
+    event: makeEvent({ fromMe: false }),
+    forward: true,
+    reason: 'forward',
   },
   // ── FORWARDS ───────────────────────────────────────────────────────────
   {
@@ -158,6 +196,7 @@ for (const c of cases) {
     const result = shouldForward(c.event, c.ownJid ?? OWN_JID, c.dedup ?? neverSeen);
     assert.equal(result.forward, c.forward, `forward mismatch for ${c.name}`);
     assert.equal(result.reason, c.reason, `reason mismatch for ${c.name}`);
+    assert.equal(result.fromMe, c.fromMe, `fromMe mismatch for ${c.name}`);
   });
 }
 
