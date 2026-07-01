@@ -14,7 +14,7 @@ imagePullSecrets:
 ---
 # WhatsApp MCP — multi-connector messaging platform
 # Connectors: whatsapp, instagram, telegram; MCP server + SSE bridge
-# Stateful: postgres (pgvector), redis, nats, minio
+# Stateful: postgres (pgvector), shared Valkey, nats, minio
 # Images: harbor.e-dani.com/homelab/whatsappmcp-* — built by GitHub Actions (ubuntu-latest) → push to harbor.e-dani.com
 
 apiVersion: external-secrets.io/v1
@@ -42,40 +42,6 @@ spec:
   accessModes: [ReadWriteOnce]
   resources: { requests: { storage: 20Gi } }
   storageClassName: longhorn
-
-# ── Redis ──────────────────────────────────────────────────────────────────────
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: whatsapp-mcp-redis
-  namespace: whatsapp-mcp
-spec:
-  replicas: 1
-  strategy: { type: Recreate }
-  selector: { matchLabels: { app: whatsapp-mcp-redis } }
-  template:
-    metadata: { labels: { app: whatsapp-mcp-redis } }
-    spec:
-      enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
-      containers:
-        - name: redis
-          image: redis:7-alpine
-          command: [redis-server, --appendonly, "yes"]
-          ports: [{ name: redis, containerPort: 6379 }]
-          resources:
-            requests: { cpu: 20m, memory: 32Mi }
-            limits:   { memory: 512Mi }
-          readinessProbe:
-            exec: { command: [redis-cli, ping] }
----
-apiVersion: v1
-kind: Service
-metadata: { name: whatsapp-mcp-redis, namespace: whatsapp-mcp }
-spec:
-  selector: { app: whatsapp-mcp-redis }
-  ports: [{ name: redis, port: 6379, targetPort: 6379 }]
 
 # ── NATS ───────────────────────────────────────────────────────────────────────
 ---

@@ -104,7 +104,6 @@ k8s_resource("telegram-sync", resource_deps=[])
 
 # ── Infrastructure (no builds, just show status) ──────────────────────────────
 k8s_resource("whatsapp-mcp-postgres", labels=["infra"])
-k8s_resource("whatsapp-mcp-redis",    labels=["infra"])
 k8s_resource("whatsapp-mcp-nats",     labels=["infra"])
 k8s_resource("whatsapp-mcp-minio",    labels=["infra"])
 
