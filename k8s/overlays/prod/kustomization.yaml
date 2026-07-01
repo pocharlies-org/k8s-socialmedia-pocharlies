@@ -24,8 +24,8 @@ images:
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: shared-valkey-auth-20260701
-    digest: sha256:c5cca5ad0f8ebdf6f4d669eacfa8e44e223bf5dd11bbf1fc421224b504287293
+    newTag: wa-group-jid-fix-20260701
+    digest: sha256:43b7b9a5fe338baab0769a8071c86a84226efbb5b2bd552448488eb20dbee96c
   # whatsapp-synapse-bridge (Phase F3b). Pinned to the E2E-validated build
   # (built + pushed 2026-06-23; identical source to feat/whatsapp-synapse-bridge).
   # A future manifest-release run can re-pin from CI; the digest is immutable.
