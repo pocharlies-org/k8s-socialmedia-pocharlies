@@ -26,21 +26,9 @@
 #    HTTP API, holds no Telethon session) → no IP binding → safe on the OVH edge node (amd64).
 #
 # MOVED to node-pool=ks5-nvme (no IP-bound session): instagram-connector (Graph API tokens),
-# mcp-server, mcp-sse, brain-ingest, and the nats/minio/redis backends. nats/minio carry RWO
+# mcp-server, mcp-sse, brain-ingest, and the nats/minio backends. nats/minio carry RWO
 # Longhorn PVCs but use strategy: Recreate, so the cross-node move is safe. topology:null
 # deletes the inherited topology=lan key; mcp-sse also drops its explicit hostname=ubuntu pin.
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: whatsapp-mcp-redis
-  namespace: whatsapp-mcp
-spec:
-  template:
-    spec:
-      nodeSelector:
-        topology: null
-        node-pool: ks5-nvme
 ---
 apiVersion: apps/v1
 kind: Deployment
