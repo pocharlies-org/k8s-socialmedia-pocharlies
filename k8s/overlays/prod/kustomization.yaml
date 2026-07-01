@@ -12,9 +12,6 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: v1.3.49
     digest: sha256:ef11130d821f0b3a4127e54d004100359bb436185482cd77499876ae7525dfba
-  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector
-    newTag: cloud-api-20260604
-    digest: sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: taskflow-telegram-topics-20260629-amd64
     digest: sha256:d3eecbb5ccfe0c71d26d5b47d5bd6b9ec496fbf3cec2520ccf7e3fafa5df1288
@@ -26,9 +23,6 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
-  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker
-    newTag: auto-send-headful-xauth-20260604
-    digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: shared-valkey-auth-20260701
     digest: sha256:c5cca5ad0f8ebdf6f4d669eacfa8e44e223bf5dd11bbf1fc421224b504287293
@@ -38,9 +32,3 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: whatsapp-ingress-20260623
     digest: sha256:d126b29aff8a28869fe397cc6ee522a74141c97a6ba8e8943aeddfcfb8bc63f6
-replicas:
-  # Baileys/Web auto-sender for the Business account stays offline (Cloud API
-  # covers outbound templates). whatsapp-connector-professional itself is BACK ON
-  # since the 2026-06-11 QR relink — do not zero it here.
-  - name: whatsapp-open-worker-professional
-    count: 0
