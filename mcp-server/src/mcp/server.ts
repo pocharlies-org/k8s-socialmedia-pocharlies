@@ -215,6 +215,24 @@ export function isLidJid(chatId: unknown): boolean {
 }
 
 /**
+ * True when the chatId points at a WhatsApp group (`@g.us`), regardless of any
+ * `personal:` / `professional:` account prefix. Read tools (get_chat,
+ * search_users, ...) return account-prefixed ids; those must be reduced to the
+ * bare jid before they reach the connector, which calls `sock.groupMetadata()`
+ * with the value verbatim — a prefixed group jid is malformed and WhatsApp
+ * silently drops the query, surfacing as "group metadata timeout".
+ */
+export function isGroupJid(chatId: unknown): boolean {
+  if (typeof chatId !== 'string') return false;
+  return stripAccount(chatId.trim()).id.endsWith('@g.us');
+}
+
+/** Reduce an account-prefixed WhatsApp id to the bare jid the connector expects. */
+export function bareWhatsAppJid(chatId: string): string {
+  return stripAccount(String(chatId).trim()).id;
+}
+
+/**
  * Resolve a professional WhatsApp direct-send chatId into the conversation key
  * to gate on and the jid to actually send to.
  *
@@ -2318,8 +2336,15 @@ export class MCPServer {
     }
 
     const account = normalizeAccount(args.account);
-    const conversationId =
-      account === 'professional'
+    // Group sends bypass the professional cold-send gate: membership in a group
+    // already implies established context (no unsolicited first-contact), and the
+    // gate only ever supported 1:1 targets. Both accounts must hand the connector
+    // the BARE `@g.us` jid — a `professional:`/`personal:` prefix reaches
+    // `sock.groupMetadata()` verbatim and times out. Non-group professional sends
+    // keep the inbound gate untouched.
+    const conversationId = isGroupJid(args.chatId)
+      ? bareWhatsAppJid(args.chatId)
+      : account === 'professional'
         ? await this.requireProfessionalInboundChat(args.chatId, {
             phone: args.phone,
             phoneE164: args.phoneE164,
@@ -3589,7 +3614,7 @@ export class MCPServer {
     const data = await this.connectorCall(
       this.waUrl(args.account),
       'GET',
-      `/api/v1/groups/${args.groupId}/info`
+      `/api/v1/groups/${bareWhatsAppJid(args.groupId)}/info`
     );
     return this.jsonResponse(data);
   }
@@ -3598,7 +3623,7 @@ export class MCPServer {
     const data = await this.connectorCall(
       this.waUrl(args.account),
       'GET',
-      `/api/v1/groups/${args.groupId}/participants`
+      `/api/v1/groups/${bareWhatsAppJid(args.groupId)}/participants`
     );
     return this.jsonResponse(data);
   }
@@ -3607,7 +3632,7 @@ export class MCPServer {
     const data = await this.connectorCall(
       this.waUrl(args.account),
       'POST',
-      `/api/v1/groups/${args.groupId}/session/repair`,
+      `/api/v1/groups/${bareWhatsAppJid(args.groupId)}/session/repair`,
       {},
       120000
     );
