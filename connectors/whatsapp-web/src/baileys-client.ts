@@ -74,7 +74,15 @@ import {
   WhatsAppContactSeedResult,
   WhatsAppCustomerTokenStatus,
 } from './contact-sync';
-import { uploadMedia, ensureMediaBucket, fetchMedia, uploadAvatar } from './media-storage';
+import {
+  uploadMedia,
+  ensureMediaBucket,
+  fetchMedia,
+  uploadAvatar,
+  presignMediaUrl,
+  presignExpirySeconds,
+} from './media-storage';
+import { buildAudioAttachmentsBeforeEmit, StoredMediaInfo } from './audio-attachments';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 
 // WhatsApp Web message status enum → human/dashboard strings.
@@ -466,6 +474,15 @@ export class BaileysClient extends EventEmitter {
   // import source; this flag lets Baileys fill whatever WhatsApp sends during
   // a fresh device link without treating those messages as live events.
   private readonly historySyncOnLogin = process.env.WA_HISTORY_SYNC_ON_LOGIN === 'true';
+  // F1.7 honest voice — OFF by default. Enabled (with S3_PUBLIC_ENDPOINT) only
+  // on the professional deployment: awaits the voice-note upload before the
+  // NATS emit so the event carries a presigned audio URL synapse can
+  // transcribe. Personal stays on the historical fire-and-forget path.
+  private readonly emitAudioAttachments = process.env.WA_EMIT_AUDIO_ATTACHMENTS === 'true';
+  private readonly audioPreEmitTimeoutMs = parseInt(
+    process.env.WA_AUDIO_PREEMIT_TIMEOUT_MS || '15000',
+    10
+  );
 
   // me — populated on `connection.update { connection: 'open' }`
   private meJid: string | null = null;
@@ -1130,11 +1147,30 @@ export class BaileysClient extends EventEmitter {
 
     this.logger.info(`Stored message ${waMessage.waMessageId} from ${waMessage.senderWaId}`);
 
-    if (
+    const isLiveMedia =
       (options.source || 'live') === 'live' &&
       waMessage.messageType !== 'TEXT' &&
-      waMessage.messageType !== 'REACTION'
-    ) {
+      waMessage.messageType !== 'REACTION';
+    if (isLiveMedia && waMessage.messageType === 'AUDIO' && this.emitAudioAttachments) {
+      // F1.7 honest voice: for voice notes the media upload historically ran
+      // fire-and-forget AFTER the event emit, so the NATS event never carried
+      // attachments and synapse's transcription raised "no downloadable audio
+      // attachment" for EVERY voice note (blind handoff). Await the upload
+      // (bounded) and ride a presigned out-of-cluster URL on the event. Any
+      // timeout/failure degrades to today's behavior: emit without
+      // attachments while the persist continues in the background. Only THIS
+      // message's emit waits; other upsert events are independent handlers.
+      waMessage.attachments = await buildAudioAttachmentsBeforeEmit({
+        store: () => this.downloadAndStoreMedia(msg, msgId, waMessage.messageType, undefined),
+        presign: key => presignMediaUrl(key),
+        timeoutMs: this.audioPreEmitTimeoutMs,
+        seconds: Number(msg.message?.audioMessage?.seconds || 0) || undefined,
+        presignExpirySeconds: presignExpirySeconds(),
+        logger: this.logger,
+        logRef: waMessage.waMessageId,
+      });
+    } else if (isLiveMedia) {
+      // Non-audio media (images/docs/stickers/video): unchanged fire-and-forget.
       this.downloadAndStoreMedia(
         msg,
         msgId,
@@ -1231,12 +1267,18 @@ export class BaileysClient extends EventEmitter {
     };
   }
 
+  /**
+   * Download media from WhatsApp, upload to MinIO and persist the attachment
+   * row. Returns the stored object info (F1.7: the audio pre-emit path rides
+   * it on the NATS event) or null when the download failed/was empty — the
+   * historical fire-and-forget callers simply ignore the return value.
+   */
   private async downloadAndStoreMedia(
     msg: WAMessage,
     messageId: bigint,
     messageType: string,
     caption?: string
-  ): Promise<void> {
+  ): Promise<StoredMediaInfo | null> {
     const timeoutMs = parseInt(process.env.WA_MEDIA_DOWNLOAD_TIMEOUT_MS || '30000', 10);
 
     let buffer: Buffer;
@@ -1254,11 +1296,11 @@ export class BaileysClient extends EventEmitter {
       ]);
     } catch (e: any) {
       this.logger.warn(`downloadMedia failed for ${msg.key?.id}: ${e?.message || e}`);
-      return;
+      return null;
     }
     if (!buffer || !buffer.length) {
       this.logger.warn(`downloadMedia returned empty for ${msg.key?.id}`);
-      return;
+      return null;
     }
 
     const { mimeType, fileName } = this.mediaMetaFromMessage(msg);
@@ -1275,6 +1317,7 @@ export class BaileysClient extends EventEmitter {
     });
 
     this.logger.info(`Stored media ${storageKey} (${fileSize} bytes) for msg ${messageId}`);
+    return { storageKey, fileSize, mimeType, fileName };
   }
 
   private mediaMetaFromMessage(msg: WAMessage): { mimeType?: string; fileName?: string } {
