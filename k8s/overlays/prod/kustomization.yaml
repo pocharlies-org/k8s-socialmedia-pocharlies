@@ -9,9 +9,13 @@ patches:
   - path: patch-renew-qr-pro.yaml
   - path: patch-nodepool.yaml
 images:
+  # F0 workstream A (synapse docs/48 F0.1/F0.8): senderPnE164 + fromMe on the
+  # NATS event, libsignal privKey log scrub. Built by Release Production run
+  # 28553944006 on tag f0-wa-fromme-pn-20260702 (commit 0986df0); digest
+  # cross-checked against Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: v1.3.49
-    digest: sha256:ef11130d821f0b3a4127e54d004100359bb436185482cd77499876ae7525dfba
+    newTag: f0-wa-fromme-pn-20260702
+    digest: sha256:ebf3ed1196328363ff6b4fc432000a452875f89d8dbeca90e1143d3a9f1cb96f
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: taskflow-telegram-topics-20260629-amd64
     digest: sha256:d3eecbb5ccfe0c71d26d5b47d5bd6b9ec496fbf3cec2520ccf7e3fafa5df1288
@@ -26,9 +30,11 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: wa-group-jid-fix-20260701
     digest: sha256:43b7b9a5fe338baab0769a8071c86a84226efbb5b2bd552448488eb20dbee96c
-  # whatsapp-synapse-bridge (Phase F3b). Pinned to the E2E-validated build
-  # (built + pushed 2026-06-23; identical source to feat/whatsapp-synapse-bridge).
-  # A future manifest-release run can re-pin from CI; the digest is immutable.
+  # whatsapp-synapse-bridge. F0 workstream A (synapse docs/48 F0.5): own
+  # outbound on the professional account forwarded flagged fromMe:true
+  # (team touch) instead of dropped; new forwardedFromMe /status counter.
+  # Built by Release Production run 28553944006 on tag
+  # f0-wa-fromme-pn-20260702 (commit 0986df0); digest cross-checked vs Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
-    newTag: whatsapp-ingress-20260623
-    digest: sha256:d126b29aff8a28869fe397cc6ee522a74141c97a6ba8e8943aeddfcfb8bc63f6
+    newTag: f0-wa-fromme-pn-20260702
+    digest: sha256:4b20a8a30b9a22615f4be25efa6a41507736cae2a8d52ff5f5fa80fcbe54b771
