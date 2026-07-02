@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node --import tsx src/main.ts",
     "lint": "eslint src --ext .ts",
-    "test": "tsx --test src/db-writer.test.ts src/read-paths.test.ts src/lid-pn.test.ts src/signal-log-scrub.test.ts"
+    "test": "tsx --test src/db-writer.test.ts src/read-paths.test.ts src/lid-pn.test.ts src/signal-log-scrub.test.ts src/events/publisher.test.ts"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
