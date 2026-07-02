@@ -3350,7 +3350,14 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
-    if (normalizeAccount(account) === 'professional') {
+    if (isGroupJid(body.conversationId)) {
+      // Group sends bypass the professional cold-send gate — parity with
+      // handleSendMessage: group membership already implies established
+      // context (no unsolicited first-contact), and the connector needs the
+      // BARE `@g.us` jid on both accounts (an account prefix reaches
+      // sock.groupMetadata() verbatim and times out).
+      body.conversationId = bareWhatsAppJid(body.conversationId);
+    } else if (normalizeAccount(account) === 'professional') {
       // Same cold-send guard as text sends: block first-contact media to a
       // professional chat with no prior inbound (Baileys account_restricted /
       // ban risk) and resolve the @lid-aware send jid. Mirrors handleSendMessage.
@@ -3375,7 +3382,12 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
-    if (normalizeAccount(account) === 'professional') {
+    if (isGroupJid(body.toChatId)) {
+      // Forwarding INTO a group bypasses the cold-send gate — same parity as
+      // handleSendMessage/handleSendFile: membership implies established
+      // context, and the connector needs the bare `@g.us` jid.
+      body.toChatId = bareWhatsAppJid(body.toChatId);
+    } else if (normalizeAccount(account) === 'professional') {
       // Gate the forward DESTINATION (toChatId) through the same inbound guard
       // as text/media sends — chatId is only the source we read from, so it
       // does not initiate contact. Resolves the @lid-aware send jid too.
