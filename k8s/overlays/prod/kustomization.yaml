@@ -28,14 +28,16 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
-  # Dead event-attachment persistence branch removed (db6e15b) so the F1.7
-  # audio events cannot activate it. This single entry rolls mcp-server AND
-  # mcp-sse (same image, same transformer match) plus the brain-ingest
-  # CronJob's next run. Built by Release Production run 28576092302 on tag
-  # f1-voice-nats-20260702 (commit 6e4867d); digest cross-checked vs Harbor.
+  # prof-group-media-20260702 (commit 68c04d6): professional send_file/forward
+  # to @g.us groups bypass the cold-send gate (parity with the text path,
+  # bare-jid to the connector); 1:1 sends keep the inbound guard. Supersedes
+  # f1-voice-nats-20260702 (built on top of it — F1.7 voice intact). This
+  # single entry rolls mcp-server AND mcp-sse (same image, same transformer
+  # match) plus the brain-ingest CronJob's next run. Manual buildx; digest =
+  # manifest-list index from imagetools inspect.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: f1-voice-nats-20260702
-    digest: sha256:ff3b42d409e2e9469552ab31db85ad0738c2be08caafc6eff37644674aabe0bd
+    newTag: prof-group-media-20260702
+    digest: sha256:4e4edd859938ce9c7f55ce82b72789d2eee73a2d1946f164638dae8e2f2ca84d
   # whatsapp-synapse-bridge. F0 workstream A (synapse docs/48 F0.5): own
   # outbound on the professional account forwarded flagged fromMe:true
   # (team touch) instead of dropped; new forwardedFromMe /status counter.
