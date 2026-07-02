@@ -9,13 +9,14 @@ patches:
   - path: patch-renew-qr-pro.yaml
   - path: patch-nodepool.yaml
 images:
-  # F0 workstream A (synapse docs/48 F0.1/F0.8): senderPnE164 + fromMe on the
-  # NATS event, libsignal privKey log scrub. Built by Release Production run
-  # 28553944006 on tag f0-wa-fromme-pn-20260702 (commit 0986df0); digest
-  # cross-checked against Harbor.
+  # F1.7 honest-voice (187ff1e): audio attachment events behind
+  # WA_EMIT_AUDIO_ATTACHMENTS (envs already staged on the professional
+  # Deployment) + NATS publisher initial-connect retry fix (edf1f31).
+  # Built by Release Production run 28576092302 on tag
+  # f1-voice-nats-20260702 (commit 6e4867d); digest cross-checked vs Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: f0-wa-fromme-pn-20260702
-    digest: sha256:ebf3ed1196328363ff6b4fc432000a452875f89d8dbeca90e1143d3a9f1cb96f
+    newTag: f1-voice-nats-20260702
+    digest: sha256:de16c618db857eb8a757d7f6bc7ffc9eb3662300d4885ebc6f87e71e4d710b4b
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
     newTag: taskflow-telegram-topics-20260629-amd64
     digest: sha256:d3eecbb5ccfe0c71d26d5b47d5bd6b9ec496fbf3cec2520ccf7e3fafa5df1288
@@ -27,9 +28,14 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
+  # Dead event-attachment persistence branch removed (db6e15b) so the F1.7
+  # audio events cannot activate it. This single entry rolls mcp-server AND
+  # mcp-sse (same image, same transformer match) plus the brain-ingest
+  # CronJob's next run. Built by Release Production run 28576092302 on tag
+  # f1-voice-nats-20260702 (commit 6e4867d); digest cross-checked vs Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: wa-group-jid-fix-20260701
-    digest: sha256:43b7b9a5fe338baab0769a8071c86a84226efbb5b2bd552448488eb20dbee96c
+    newTag: f1-voice-nats-20260702
+    digest: sha256:ff3b42d409e2e9469552ab31db85ad0738c2be08caafc6eff37644674aabe0bd
   # whatsapp-synapse-bridge. F0 workstream A (synapse docs/48 F0.5): own
   # outbound on the professional account forwarded flagged fromMe:true
   # (team touch) instead of dropped; new forwardedFromMe /status counter.
