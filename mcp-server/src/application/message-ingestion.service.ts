@@ -121,5 +121,4 @@ export class MessageIngestionService {
     };
     return mapping[type] || MessageType.TEXT;
   }
-
 }

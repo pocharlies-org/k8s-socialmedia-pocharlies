@@ -20,7 +20,13 @@ import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
 import { ConversationType } from '../domain/entities/conversation.entity';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
-import { ACCOUNTS, accountKey, normalizeAccount, stripAccount, type Account } from '../domain/account';
+import {
+  ACCOUNTS,
+  accountKey,
+  normalizeAccount,
+  stripAccount,
+  type Account,
+} from '../domain/account';
 import { createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
@@ -2385,7 +2391,9 @@ export class MCPServer {
         const fallbackUrl =
           errorPayload.fallback?.manualOpenUrl ||
           phoneEvidence?.manualOpenUrl ||
-          (phoneEvidence ? manualWhatsAppOpenUrlFromPhone(phoneEvidence.phoneE164, args.text) : undefined) ||
+          (phoneEvidence
+            ? manualWhatsAppOpenUrlFromPhone(phoneEvidence.phoneE164, args.text)
+            : undefined) ||
           manualWhatsAppOpenUrl(args.chatId, args.text);
         const fallback =
           errorPayload.failureClass === 'account_restricted' && fallbackUrl
@@ -3008,9 +3016,7 @@ export class MCPServer {
     if (bare) {
       candidates = [...new Set(ACCOUNTS.map(a => accountKey(a, bare)))];
     } else {
-      const resolved = await Promise.all(
-        ACCOUNTS.map(a => this.resolveTelegramChatId(chatId, a))
-      );
+      const resolved = await Promise.all(ACCOUNTS.map(a => this.resolveTelegramChatId(chatId, a)));
       candidates = [...new Set(resolved.filter((c): c is string => !!c))];
     }
     if (!candidates.length) return { account: requested, source: 'fallback', candidates };
@@ -3466,7 +3472,11 @@ export class MCPServer {
         8000
       );
       const chats = extractArrayPayload(data, ['chats', 'unreadChats', 'conversations', 'results']);
-      return { ...asObject(data), chats: chats.slice(0, limit), count: Math.min(chats.length, limit) };
+      return {
+        ...asObject(data),
+        chats: chats.slice(0, limit),
+        count: Math.min(chats.length, limit),
+      };
     } catch (e: any) {
       const reason = e?.name === 'TimeoutError' ? 'timeout after 8s' : e?.message || String(e);
       throw new McpError(
@@ -3553,9 +3563,10 @@ export class MCPServer {
             account,
             chatId,
             dbConversationId: accountKey(account, chatId),
-            name: pickString(chat, ['name', 'displayName', 'pushName', 'contactName', 'title']) || null,
+            name:
+              pickString(chat, ['name', 'displayName', 'pushName', 'contactName', 'title']) || null,
             unreadCount: pickNumber(chat, ['unreadCount', 'unread_count'], 0),
-            isGroup: Boolean((chat as any)?.isGroup) || /@g\.us$/i.test(chatId),
+            isGroup: Boolean(chat?.isGroup) || /@g\.us$/i.test(chatId),
             source: 'whatsapp-unread',
             metadata: isObject(chat) ? chat : {},
           });
@@ -3568,7 +3579,12 @@ export class MCPServer {
     if (platforms.includes('telegram')) {
       try {
         const payload = await this.getTelegramUnreadPayload(account, perPlatformLimit, true);
-        for (const dialog of extractArrayPayload(payload, ['dialogs', 'chats', 'results', 'unread'])) {
+        for (const dialog of extractArrayPayload(payload, [
+          'dialogs',
+          'chats',
+          'results',
+          'unread',
+        ])) {
           const rawId = pickString(dialog, ['id', 'chatId', 'dialogId', 'peerId']);
           if (!rawId) continue;
           const bareId = stripAccount(rawId).id;
@@ -3581,9 +3597,9 @@ export class MCPServer {
             name: pickString(dialog, ['name', 'title', 'displayName']) || null,
             unreadCount: pickNumber(dialog, ['unread_count', 'unreadCount'], 0),
             isGroup:
-              Boolean((dialog as any)?.is_group) ||
-              Boolean((dialog as any)?.isGroup) ||
-              String((dialog as any)?.type || '').includes('group'),
+              Boolean(dialog?.is_group) ||
+              Boolean(dialog?.isGroup) ||
+              String(dialog?.type || '').includes('group'),
             source: 'telegram-unread',
             metadata: isObject(dialog) ? dialog : {},
           });
