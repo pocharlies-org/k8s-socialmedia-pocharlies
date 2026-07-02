@@ -44,10 +44,7 @@ export function scrubSignalSessionLogs(): boolean {
     return false;
   }
   // createEntry() only allocates `{ _chains: {} }` — no I/O, no key material.
-  const proto = Object.getPrototypeOf(record.createEntry()) as Record<
-    PropertyKey,
-    unknown
-  >;
+  const proto = Object.getPrototypeOf(record.createEntry()) as Record<PropertyKey, unknown>;
   if (typeof proto[INSPECT_CUSTOM] === 'function') {
     return true; // already patched (or upstream fixed it)
   }
