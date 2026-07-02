@@ -1,12 +1,5 @@
 import { Pool } from 'pg';
-import {
-  ConversationType,
-  Message,
-  MessageDirection,
-  MessageType,
-  Attachment,
-  AttachmentType,
-} from '../domain/entities';
+import { ConversationType, Message, MessageDirection, MessageType } from '../domain/entities';
 import { DatabaseRepository } from '../infrastructure/database/repository';
 import {
   MessageReceivedEvent,
@@ -83,21 +76,15 @@ export class MessageIngestionService {
       // Save message with plaintext content (no encryption)
       await this.repository.saveMessage(message, event.content || '', null, account);
 
-      // Save attachments if any
-      if (event.attachments) {
-        for (const att of event.attachments) {
-          const attachmentType = this.mapAttachmentType(att.type);
-          const attachment = Attachment.create(
-            message.id,
-            attachmentType,
-            att.url,
-            0,
-            att.metadata.mimetype as string | null,
-            att.metadata.fileName as string | null
-          );
-          await this.repository.saveAttachment(attachment);
-        }
-      }
+      // Attachments are deliberately NOT persisted here. The connector is the
+      // single writer for `attachments` (durable s3:// storage key, bigint
+      // messages.id FK); `event.attachments` (F1.7) carries a PRESIGNED URL
+      // that expires (~1h) — a transport hint for real-time consumers (the
+      // synapse bridge), never a durable record. The historical branch here
+      // was dead (events never carried attachments) and broken against the
+      // live schema: it inserted this entity's random UUID into the bigint
+      // attachments.message_id, so it threw on first use and aborted the rest
+      // of the ingest.
 
       // Update conversation last message timestamp
       await this.repository.updateConversationLastMessage(
@@ -135,14 +122,4 @@ export class MessageIngestionService {
     return mapping[type] || MessageType.TEXT;
   }
 
-  private mapAttachmentType(type: string): AttachmentType {
-    const mapping: Record<string, AttachmentType> = {
-      IMAGE: AttachmentType.IMAGE,
-      VIDEO: AttachmentType.VIDEO,
-      AUDIO: AttachmentType.AUDIO,
-      DOCUMENT: AttachmentType.DOCUMENT,
-      VOICE: AttachmentType.VOICE,
-    };
-    return mapping[type] || AttachmentType.DOCUMENT;
-  }
 }
