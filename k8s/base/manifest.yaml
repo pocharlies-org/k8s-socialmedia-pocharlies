@@ -414,8 +414,8 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 30m, memory: 128Mi }
-            limits:   { memory: 512Mi }   # OOM audit 2026-07-03: live RSS ~200Mi left too little headroom at 256Mi.
+            requests: { cpu: 30m, memory: 64Mi }
+            limits:   { memory: 256Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -452,8 +452,8 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 30m, memory: 64Mi }
-            limits:   { memory: 256Mi }
+            requests: { cpu: 30m, memory: 128Mi }
+            limits:   { memory: 512Mi }   # OOM audit 2026-07-03: live RSS ~200Mi left too little headroom at 256Mi.
 ---
 apiVersion: v1
 kind: Service
