@@ -452,8 +452,8 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 30m, memory: 128Mi }
-            limits:   { memory: 512Mi }   # OOM audit 2026-07-03: live RSS ~200Mi left too little headroom at 256Mi.
+            requests: { cpu: 30m, memory: 256Mi }
+            limits:   { memory: 768Mi }   # OOM audit 2026-07-06: p95/max ~255/290Mi; 512Mi still OOMKilled once under burst.
 ---
 apiVersion: v1
 kind: Service
@@ -719,8 +719,8 @@ spec:
             - { name: MINIO_BUCKET, value: "socialmedia-media" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 100m, memory: 512Mi }
-            limits:   { memory: 2Gi }   # Whisper-small model needs ~1GB RAM
+            requests: { cpu: 100m, memory: 1Gi }
+            limits:   { memory: 3Gi }   # OOM audit 2026-07-06: p95/max ~1850/1929Mi, too close to 2Gi.
           readinessProbe:
             httpGet: { path: /health, port: 3080 }
             initialDelaySeconds: 10
@@ -771,8 +771,8 @@ spec:
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: TELEGRAM_SESSION_STRING_PROFESSIONAL } }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 30m, memory: 128Mi }
-            limits:   { memory: 512Mi }   # OOM audit 2026-07-03: live RSS ~200Mi left too little headroom at 256Mi.
+            requests: { cpu: 30m, memory: 256Mi }
+            limits:   { memory: 768Mi }   # OOM audit 2026-07-06: p95/max ~230Mi; keep headroom for reconnect/session bursts.
 ---
 apiVersion: v1
 kind: Service
@@ -823,8 +823,8 @@ spec:
             - { name: MINIO_BUCKET, value: "socialmedia-media" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 100m, memory: 512Mi }
-            limits:   { memory: 2Gi }
+            requests: { cpu: 100m, memory: 1Gi }
+            limits:   { memory: 3Gi }   # OOM audit 2026-07-06: personal sync reached ~1.9Gi; keep both profiles aligned.
           readinessProbe:
             httpGet: { path: /health, port: 3080 }
             initialDelaySeconds: 10
