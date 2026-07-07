@@ -134,6 +134,17 @@ const cases: Case[] = [
     forward: false,
     reason: 'duplicate',
   },
+  {
+    name: 'tracking opt-in control message dropped',
+    event: makeEvent({
+      conversationId: '122204754804976@lid',
+      senderWaId: '122204754804976@lid',
+      content:
+        'Hola Skirmshop, quiero recibir seguimiento por WhatsApp del pedido ORD18629. Enlace: https://track.skirmshop.es/labels/track/AVf5DGrrpc8gahvAXHMKSmZ_y78bMxIIJGvzGUMoi4CdCOYmBdPdjTRjV460_30Upv0qorNCmFFP1wYwZIs#pickup',
+    }),
+    forward: false,
+    reason: 'tracking-opt-in-control-message',
+  },
   // ── FROM-ME FORWARDS (F0.5: team touch, flagged not dropped) ───────────
   {
     name: 'explicit fromMe flag forwarded flagged',
@@ -185,6 +196,14 @@ const cases: Case[] = [
     event: makeEvent({
       conversationId: '174869610295503@lid',
       senderWaId: '174869610295503@lid',
+    }),
+    forward: true,
+    reason: 'forward',
+  },
+  {
+    name: 'normal order tracking question still forwarded',
+    event: makeEvent({
+      content: 'Hola, quiero recibir seguimiento del pedido ORD18629, este enlace no me carga.',
     }),
     forward: true,
     reason: 'forward',

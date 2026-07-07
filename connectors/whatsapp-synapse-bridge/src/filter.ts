@@ -39,6 +39,8 @@ const ALLOWED_1TO1_SUFFIXES = ['@s.whatsapp.net', '@c.us', '@lid'] as const;
 /** Multi-party / non-personal endpoints we always drop. */
 const GROUP_LIKE_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'] as const;
 const STATUS_BROADCAST = 'status@broadcast';
+const TRACKING_OPT_IN_PREFIX = 'hola skirmshop, quiero recibir seguimiento por whatsapp del pedido ';
+const TRACKING_OPT_IN_ORDER_RE = /\bord\d{3,}\b/i;
 
 /**
  * Normalize a WhatsApp JID for own-identity comparison.
@@ -69,6 +71,16 @@ export function normalizeJid(jid: string | null | undefined): string {
 
 function hasSuffix(jid: string, suffixes: readonly string[]): boolean {
   return suffixes.some(s => jid.endsWith(s));
+}
+
+function isTrackingOptInControlMessage(content: string | null | undefined): boolean {
+  if (!content || typeof content !== 'string') return false;
+  const text = content.trim().toLowerCase();
+  return (
+    text.startsWith(TRACKING_OPT_IN_PREFIX) &&
+    TRACKING_OPT_IN_ORDER_RE.test(text) &&
+    text.includes('https://track.skirmshop.es/labels/track/')
+  );
 }
 
 /**
@@ -143,6 +155,14 @@ export function shouldForward(
   //    touches downstream).
   if (dedup.has(waMessageId)) {
     return { forward: false, reason: 'duplicate' };
+  }
+
+  // 7. Tracking opt-in control messages are owned by skirmshop-labels'
+  //    whatsapp-optin-ingest worker. Forwarding them to the general Synapse
+  //    conversation assistant produces an extra customer reply on top of the
+  //    opt-in confirmation and catch-up tracking notification.
+  if (!fromMe && isTrackingOptInControlMessage(event.content)) {
+    return { forward: false, reason: 'tracking-opt-in-control-message' };
   }
 
   if (fromMe) {

@@ -38,11 +38,9 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: prof-group-media-20260702
     digest: sha256:4e4edd859938ce9c7f55ce82b72789d2eee73a2d1946f164638dae8e2f2ca84d
-  # whatsapp-synapse-bridge. F0 workstream A (synapse docs/48 F0.5): own
-  # outbound on the professional account forwarded flagged fromMe:true
-  # (team touch) instead of dropped; new forwardedFromMe /status counter.
-  # Built by Release Production run 28553944006 on tag
-  # f0-wa-fromme-pn-20260702 (commit 0986df0); digest cross-checked vs Harbor.
+  # whatsapp-synapse-bridge. Drops Skirmshop tracking opt-in control messages
+  # before the general Synapse assistant to prevent duplicate customer replies;
+  # keeps F0 professional fromMe team-touch forwarding.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
-    newTag: f0-wa-fromme-pn-20260702
-    digest: sha256:4b20a8a30b9a22615f4be25efa6a41507736cae2a8d52ff5f5fa80fcbe54b771
+    newTag: tracking-optin-filter-20260707
+    digest: sha256:e51ceb8a1dc245241a5ee2dd61eb368a1f0ad0ce8df1243fa1e46d9be745853c
