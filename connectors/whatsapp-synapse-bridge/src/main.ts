@@ -87,6 +87,7 @@ class Bridge {
     } catch (error) {
       logger.warn({ err: String(error) }, 'NATS unavailable; scheduling reconnect');
       this.connected = false;
+      this.connecting = false;
       this.scheduleReconnect();
     } finally {
       this.connecting = false;

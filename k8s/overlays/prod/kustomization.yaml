@@ -40,7 +40,8 @@ images:
     digest: sha256:4e4edd859938ce9c7f55ce82b72789d2eee73a2d1946f164638dae8e2f2ca84d
   # whatsapp-synapse-bridge. Drops Skirmshop tracking opt-in control messages
   # before the general Synapse assistant to prevent duplicate customer replies;
-  # keeps F0 professional fromMe team-touch forwarding.
+  # keeps F0 professional fromMe team-touch forwarding and fixes initial NATS
+  # reconnect scheduling.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
-    newTag: tracking-optin-filter-20260707
-    digest: sha256:e51ceb8a1dc245241a5ee2dd61eb368a1f0ad0ce8df1243fa1e46d9be745853c
+    newTag: tracking-optin-filter-reconnect-20260707
+    digest: sha256:08b72c15a21713fdebd1276c8bbf8127dd4b49c0963740b67d29d1dc3177fd3a
