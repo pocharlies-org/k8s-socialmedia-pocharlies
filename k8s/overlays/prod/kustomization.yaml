@@ -28,16 +28,13 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.12
     digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
-  # prof-group-media-20260702 (commit 68c04d6): professional send_file/forward
-  # to @g.us groups bypass the cold-send gate (parity with the text path,
-  # bare-jid to the connector); 1:1 sends keep the inbound guard. Supersedes
-  # f1-voice-nats-20260702 (built on top of it — F1.7 voice intact). This
-  # single entry rolls mcp-server AND mcp-sse (same image, same transformer
-  # match) plus the brain-ingest CronJob's next run. Manual buildx; digest =
-  # manifest-list index from imagetools inspect.
+  # mcp-status-accounts-20260707: keeps the prof-group-media behavior and makes
+  # messaging_status report WhatsApp/Telegram personal and professional health
+  # separately for OpenClaw/RHO audits. Manual buildx; digest = manifest-list
+  # index from Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: prof-group-media-20260702
-    digest: sha256:4e4edd859938ce9c7f55ce82b72789d2eee73a2d1946f164638dae8e2f2ca84d
+    newTag: mcp-status-accounts-20260707
+    digest: sha256:cc611393d069fc2ca145eb00745c52d931446618c7646675d0562f2076f029ce
   # whatsapp-synapse-bridge. Drops Skirmshop tracking opt-in control messages
   # before the general Synapse assistant to prevent duplicate customer replies;
   # keeps F0 professional fromMe team-touch forwarding and fixes initial NATS

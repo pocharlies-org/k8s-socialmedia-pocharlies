@@ -3683,28 +3683,38 @@ export class MCPServer {
 
   private async handleMessagingStatus() {
     const targets = [
-      ['whatsapp', this.connectorUrl, '/api/v1/health'],
-      ['telegram', this.telegramUrl, '/health'],
+      ['whatsapp', 'personal', this.waUrl('personal'), '/api/v1/health'],
+      ['whatsapp', 'professional', this.waUrl('professional'), '/api/v1/health'],
+      ['telegram', 'personal', this.tgUrl('personal'), '/health'],
+      ['telegram', 'professional', this.tgUrl('professional'), '/health'],
       [
         'instagram',
+        'default',
         process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003',
         '/health',
       ],
     ] as const;
     const checks = await Promise.all(
-      targets.map(async ([name, url, endpoint]) => {
+      targets.map(async ([kind, account, url, endpoint]) => {
         try {
           const resp = await fetch(`${url}${endpoint}`, { signal: AbortSignal.timeout(3000) });
           const body = await resp.json();
-          return [name, body] as const;
+          return [kind, account, body] as const;
         } catch (e: any) {
           const reason = e?.name === 'TimeoutError' ? 'timeout after 3s' : e?.message || String(e);
-          return [name, { status: 'unreachable', error: reason }] as const;
+          return [kind, account, { status: 'unreachable', error: reason }] as const;
         }
       })
     );
     const results: any = {};
-    for (const [name, body] of checks) results[name] = body;
+    for (const [kind, account, body] of checks) {
+      if (account === 'default') {
+        results[kind] = body;
+      } else {
+        results[kind] = results[kind] || {};
+        results[kind][account] = body;
+      }
+    }
     return this.jsonResponse(results);
   }
 
