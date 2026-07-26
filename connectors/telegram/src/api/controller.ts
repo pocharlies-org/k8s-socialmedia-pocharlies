@@ -160,6 +160,286 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * Parse a :topicId path param. Topic ids are the top message id, always positive.
+   */
+  function parseTopicId(raw: string): number | null {
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  }
+
+  /**
+   * POST /chats/:id/topics - Create a forum topic
+   */
+  router.post('/chats/:id/topics', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const { title, icon } = req.body;
+        if (typeof title !== 'string' || !title.trim()) {
+          res.status(400).json({ error: 'Missing title' });
+          return;
+        }
+        const parsedIcon = icon !== undefined && icon !== null ? Number(icon) : undefined;
+        if (parsedIcon !== undefined && !Number.isInteger(parsedIcon)) {
+          res.status(400).json({ error: 'icon must be an integer' });
+          return;
+        }
+
+        const topic = await client.createForumTopic(req.params.id, title, parsedIcon);
+        res.json(topic);
+      } catch (e) {
+        logger.error(`Error creating forum topic: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * PATCH /chats/:id/topics/:topicId - Edit a forum topic
+   */
+  router.patch('/chats/:id/topics/:topicId', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const topicId = parseTopicId(req.params.topicId);
+        if (topicId === null) {
+          res.status(400).json({ error: 'Invalid topicId' });
+          return;
+        }
+
+        const { title, closed, hidden, clearIcon } = req.body;
+        if (
+          title === undefined &&
+          closed === undefined &&
+          hidden === undefined &&
+          clearIcon === undefined
+        ) {
+          res.status(400).json({ error: 'Nothing to update' });
+          return;
+        }
+
+        const topic = await client.editForumTopic(req.params.id, topicId, {
+          title,
+          closed,
+          hidden,
+          clearIcon,
+        });
+        res.json(topic);
+      } catch (e) {
+        logger.error(`Error editing forum topic: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /chats/:id/topics/:topicId/closed - Open/close a forum topic
+   */
+  router.post('/chats/:id/topics/:topicId/closed', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const topicId = parseTopicId(req.params.topicId);
+        if (topicId === null) {
+          res.status(400).json({ error: 'Invalid topicId' });
+          return;
+        }
+        if (typeof req.body.closed !== 'boolean') {
+          res.status(400).json({ error: 'closed must be a boolean' });
+          return;
+        }
+
+        const topic = await client.toggleForumTopicClosed(req.params.id, topicId, req.body.closed);
+        res.json(topic);
+      } catch (e) {
+        logger.error(`Error toggling forum topic closed: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /chats/:id/topics/:topicId/pinned - Pin/unpin a forum topic
+   */
+  router.post('/chats/:id/topics/:topicId/pinned', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const topicId = parseTopicId(req.params.topicId);
+        if (topicId === null) {
+          res.status(400).json({ error: 'Invalid topicId' });
+          return;
+        }
+        if (typeof req.body.pinned !== 'boolean') {
+          res.status(400).json({ error: 'pinned must be a boolean' });
+          return;
+        }
+
+        const topic = await client.toggleForumTopicPinned(req.params.id, topicId, req.body.pinned);
+        res.json(topic);
+      } catch (e) {
+        logger.error(`Error toggling forum topic pinned: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * DELETE /chats/:id/topics/:topicId - Delete a forum topic and all its history
+   * NOTE: topicId is in the path because the MCP server sends no body on DELETE.
+   */
+  router.delete('/chats/:id/topics/:topicId', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const topicId = parseTopicId(req.params.topicId);
+        if (topicId === null) {
+          res.status(400).json({ error: 'Invalid topicId' });
+          return;
+        }
+
+        const result = await client.deleteForumTopic(req.params.id, topicId);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error deleting forum topic: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /chats/:id/forum-settings - Toggle forum mode for a supergroup (owner only)
+   */
+  router.post('/chats/:id/forum-settings', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const { isForum, threadsMode } = req.body;
+        if (typeof isForum !== 'boolean') {
+          res.status(400).json({ error: 'isForum must be a boolean' });
+          return;
+        }
+        if (threadsMode !== undefined && threadsMode !== 'list' && threadsMode !== 'tabs') {
+          res.status(400).json({ error: "threadsMode must be 'list' or 'tabs'" });
+          return;
+        }
+
+        const result = await client.updateForumSettings(req.params.id, isForum, threadsMode);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error updating forum settings: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * PATCH /chats/:id/title - Change the chat title
+   */
+  router.patch('/chats/:id/title', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const { title } = req.body;
+        if (typeof title !== 'string' || !title.trim()) {
+          res.status(400).json({ error: 'Missing title' });
+          return;
+        }
+
+        const result = await client.setChatTitle(req.params.id, title);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error setting chat title: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * PATCH /chats/:id/description - Change the chat description ('' clears it)
+   */
+  router.patch('/chats/:id/description', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const { description } = req.body;
+        if (typeof description !== 'string') {
+          res.status(400).json({ error: 'description must be a string' });
+          return;
+        }
+
+        const result = await client.setChatDescription(req.params.id, description);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error setting chat description: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * PATCH /chats/:id/photo - Change the chat photo/video
+   */
+  router.patch('/chats/:id/photo', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+
+        const { filePath, type } = req.body;
+        if (typeof filePath !== 'string' || !filePath.trim()) {
+          res.status(400).json({ error: 'Missing filePath' });
+          return;
+        }
+        if (type !== undefined && type !== 'photo' && type !== 'video') {
+          res.status(400).json({ error: "type must be 'photo' or 'video'" });
+          return;
+        }
+
+        const result = await client.setChatPhoto(req.params.id, filePath, type);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error setting chat photo: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
    * GET /messages/:chatId - Get messages for a chat
    */
   router.get('/messages/:chatId', (req: Request, res: Response): void => {

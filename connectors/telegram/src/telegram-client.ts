@@ -533,6 +533,128 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * Create a forum topic. Requires admin with `manageTopics` in the supergroup.
+   *
+   * `icon` is an RGB colour int chosen from the palette Telegram allows; the colour
+   * cannot be changed afterwards (only a custom-emoji icon can, via editForumTopic).
+   */
+  async createForumTopic(chatId: string, title: string, icon?: number): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const msg = await this.client.createForumTopic({
+      chatId: toMtcutePeer(chatId),
+      title,
+      ...(icon !== undefined ? { icon } : {}),
+    });
+    return { topicId: msg.id.toString(), title, chatId };
+  }
+
+  /**
+   * Modify a forum topic (title, closed/hidden state, or drop its custom-emoji icon).
+   * Requires admin with `manageTopics`.
+   */
+  async editForumTopic(
+    chatId: string,
+    topicId: number,
+    params: { title?: string; closed?: boolean; hidden?: boolean; clearIcon?: boolean }
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const msg = await this.client.editForumTopic({
+      chatId: toMtcutePeer(chatId),
+      topicId,
+      ...(params.title !== undefined ? { title: params.title } : {}),
+      ...(params.closed !== undefined ? { closed: params.closed } : {}),
+      ...(params.hidden !== undefined ? { hidden: params.hidden } : {}),
+      // mtcute takes `icon: tl.Long | null`; only the "remove icon" case is exposed
+      // over HTTP so we never have to carry a Long across the JSON boundary.
+      ...(params.clearIcon ? { icon: null } : {}),
+    });
+    return { topicId: topicId.toString(), chatId, serviceMessageId: msg.id.toString() };
+  }
+
+  /**
+   * Open or close a forum topic. Requires admin with `manageTopics`.
+   */
+  async toggleForumTopicClosed(chatId: string, topicId: number, closed: boolean): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const msg = await this.client.toggleForumTopicClosed({
+      chatId: toMtcutePeer(chatId),
+      topicId,
+      closed,
+    });
+    return { topicId: topicId.toString(), chatId, closed, serviceMessageId: msg.id.toString() };
+  }
+
+  /**
+   * Pin or unpin a forum topic. Requires admin with `manageTopics`.
+   */
+  async toggleForumTopicPinned(chatId: string, topicId: number, pinned: boolean): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.toggleForumTopicPinned({
+      chatId: toMtcutePeer(chatId),
+      topicId,
+      pinned,
+    });
+    return { topicId: topicId.toString(), chatId, pinned };
+  }
+
+  /**
+   * Delete a forum topic AND its entire history. Irreversible.
+   */
+  async deleteForumTopic(chatId: string, topicId: number): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.deleteForumTopicHistory(toMtcutePeer(chatId), topicId);
+    return { topicId: topicId.toString(), chatId, deleted: true };
+  }
+
+  /**
+   * Turn forum mode on/off for a supergroup. Owner only.
+   */
+  async updateForumSettings(
+    chatId: string,
+    isForum: boolean,
+    threadsMode: 'list' | 'tabs' = 'list'
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.updateForumSettings(
+      toMtcutePeer(chatId),
+      isForum ? { isForum: true, threadsMode } : null
+    );
+    return { chatId, isForum, ...(isForum ? { threadsMode } : {}) };
+  }
+
+  /**
+   * Change the chat title. Requires admin with the right permission.
+   */
+  async setChatTitle(chatId: string, title: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.setChatTitle(toMtcutePeer(chatId), title);
+    return { chatId, title };
+  }
+
+  /**
+   * Change the chat description ('' clears it). Requires admin.
+   */
+  async setChatDescription(chatId: string, description: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.setChatDescription(toMtcutePeer(chatId), description);
+    return { chatId, description };
+  }
+
+  /**
+   * Change the chat photo/video. Accepts a local path or an http(s) URL. Requires admin.
+   */
+  async setChatPhoto(
+    chatId: string,
+    filePath: string,
+    type: 'photo' | 'video' = 'photo'
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const media = await this.resolveMedia(filePath);
+    await this.client.setChatPhoto({ chatId: toMtcutePeer(chatId), type, media });
+    return { chatId, type };
+  }
+
+  /**
    * Chats with unread messages
    */
   async getUnreadChats(): Promise<any[]> {
@@ -732,6 +854,22 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * Resolve a media reference to something mtcute can upload.
+   *
+   * Fetch remote http(s) URLs connector-side and upload the bytes. Passing a URL
+   * straight to InputMedia makes Telegram fetch it from the public internet, which
+   * fails for cluster-internal URLs (WEBPAGE_MEDIA_EMPTY). Local paths pass through.
+   */
+  private async resolveMedia(filePath: string | Buffer): Promise<string | Buffer> {
+    if (typeof filePath === 'string' && /^https?:\/\//i.test(filePath)) {
+      const resp = await fetch(filePath);
+      if (!resp.ok) throw new Error(`fetch media failed: ${resp.status} ${filePath}`);
+      return Buffer.from(await resp.arrayBuffer());
+    }
+    return filePath;
+  }
+
+  /**
    * Send a file to a chat
    */
   async sendFile(
@@ -745,15 +883,7 @@ export class TelegramClientWrapper extends EventEmitter {
     }
   ): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    // Fetch remote http(s) URLs connector-side and upload the bytes. Passing a URL
-    // straight to InputMedia makes Telegram fetch it from the public internet, which
-    // fails for cluster-internal URLs (WEBPAGE_MEDIA_EMPTY).
-    let source: string | Buffer = filePath;
-    if (typeof filePath === 'string' && /^https?:\/\//i.test(filePath)) {
-      const resp = await fetch(filePath);
-      if (!resp.ok) throw new Error(`fetch media failed: ${resp.status} ${filePath}`);
-      source = Buffer.from(await resp.arrayBuffer());
-    }
+    const source = await this.resolveMedia(filePath);
     let media;
     if (options?.sticker) {
       // mtcute: stickers go as documents with the sticker MIME so Telegram renders

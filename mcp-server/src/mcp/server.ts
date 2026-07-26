@@ -1015,6 +1015,248 @@ export class MCPServer {
             },
           },
           {
+            name: 'telegram_get_topics',
+            description:
+              'List forum topics of a Telegram supergroup (id, title, closed/pinned state, unread counts, last message). Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
+                },
+                limit: { type: 'integer', default: 100, description: 'Max topics to return.' },
+                query: {
+                  type: 'string',
+                  description: 'Optional title search filter.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId'],
+            },
+          },
+          {
+            name: 'telegram_create_topic',
+            description:
+              'Create a forum topic in a Telegram supergroup. The account must be an admin with the manage-topics permission, otherwise Telegram returns CHAT_ADMIN_REQUIRED. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
+                },
+                title: { type: 'string', description: 'Topic title.' },
+                icon: {
+                  type: 'integer',
+                  description:
+                    'Optional icon colour as an RGB int. Cannot be changed after creation.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'title'],
+            },
+          },
+          {
+            name: 'telegram_edit_topic',
+            description:
+              'Rename a forum topic or change its closed/hidden state. At least one of title, closed, hidden or clearIcon is required. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
+                },
+                topicId: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
+                },
+                title: { type: 'string', description: 'New topic title.' },
+                closed: { type: 'boolean', description: 'Close (true) or reopen (false).' },
+                hidden: {
+                  type: 'boolean',
+                  description: 'Hide (true) or unhide (false). Only valid for the General topic.',
+                },
+                clearIcon: {
+                  type: 'boolean',
+                  description: 'Remove the custom-emoji icon and fall back to the static colour.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId'],
+            },
+          },
+          {
+            name: 'telegram_toggle_topic_closed',
+            description:
+              'Close or reopen a Telegram forum topic. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
+                },
+                topicId: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
+                },
+                closed: {
+                  type: 'boolean',
+                  description: 'true closes the topic, false reopens it.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'closed'],
+            },
+          },
+          {
+            name: 'telegram_toggle_topic_pinned',
+            description:
+              'Pin or unpin a Telegram forum topic. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
+                },
+                topicId: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
+                },
+                pinned: { type: 'boolean', description: 'true pins the topic, false unpins it.' },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'pinned'],
+            },
+          },
+          {
+            name: 'telegram_delete_topic',
+            description:
+              'DESTRUCTIVE: delete a Telegram forum topic and its entire message history. Irreversible. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
+                },
+                topicId: {
+                  type: ['integer', 'string'],
+                  description:
+                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId'],
+            },
+          },
+          {
+            name: 'telegram_update_forum_settings',
+            description:
+              'Turn forum (topics) mode on or off for a Telegram supergroup. Owner-only operation. Disabling it collapses every topic into the main chat. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
+                },
+                isForum: {
+                  type: 'boolean',
+                  description: 'true enables forum mode, false disables it.',
+                },
+                threadsMode: {
+                  type: 'string',
+                  enum: ['list', 'tabs'],
+                  default: 'list',
+                  description: 'How topics are presented when forum mode is enabled.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'isForum'],
+            },
+          },
+          {
+            name: 'telegram_set_chat_title',
+            description:
+              'Change the title of a Telegram group/supergroup/channel. The account must be an admin with the change-info permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
+                },
+                title: { type: 'string', description: 'New chat title, 1-255 characters.' },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'title'],
+            },
+          },
+          {
+            name: 'telegram_set_chat_description',
+            description:
+              'Change the description of a Telegram group/supergroup/channel; pass an empty string to clear it. The account must be an admin with the change-info permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
+                },
+                description: {
+                  type: 'string',
+                  description: 'New description. Empty string clears it.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'description'],
+            },
+          },
+          {
+            name: 'telegram_set_chat_photo',
+            description:
+              'Change the photo or video avatar of a Telegram group/supergroup/channel. The account must be an admin with the change-info permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                chatId: {
+                  type: 'string',
+                  description:
+                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
+                },
+                filePath: {
+                  type: 'string',
+                  description:
+                    'Local path or http(s) URL of the image/video. Remote URLs are fetched connector-side and uploaded.',
+                },
+                type: {
+                  type: 'string',
+                  enum: ['photo', 'video'],
+                  default: 'photo',
+                  description: 'Media kind.',
+                },
+                ...ACCOUNT_PROPERTY,
+              },
+              required: ['chatId', 'filePath'],
+            },
+          },
+          {
             name: 'telegram_send_message',
             description:
               'Send a text message in Telegram, including forum topics. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
@@ -1604,6 +1846,26 @@ export class MCPServer {
             return await this.handleTelegramChatInfo(args as any);
           case 'telegram_participants':
             return await this.handleTelegramParticipants(args as any);
+          case 'telegram_get_topics':
+            return await this.handleTelegramGetTopics(args as any);
+          case 'telegram_create_topic':
+            return await this.handleTelegramCreateTopic(args as any);
+          case 'telegram_edit_topic':
+            return await this.handleTelegramEditTopic(args as any);
+          case 'telegram_toggle_topic_closed':
+            return await this.handleTelegramToggleTopicClosed(args as any);
+          case 'telegram_toggle_topic_pinned':
+            return await this.handleTelegramToggleTopicPinned(args as any);
+          case 'telegram_delete_topic':
+            return await this.handleTelegramDeleteTopic(args as any);
+          case 'telegram_update_forum_settings':
+            return await this.handleTelegramUpdateForumSettings(args as any);
+          case 'telegram_set_chat_title':
+            return await this.handleTelegramSetChatTitle(args as any);
+          case 'telegram_set_chat_description':
+            return await this.handleTelegramSetChatDescription(args as any);
+          case 'telegram_set_chat_photo':
+            return await this.handleTelegramSetChatPhoto(args as any);
           case 'telegram_send_message':
             return await this.handleTelegramSendMessage(args as any);
           case 'telegram_click_button':
@@ -2876,6 +3138,232 @@ export class MCPServer {
         text: args.text,
         ...(target.topicId ? { topicId: target.topicId } : {}),
         ...(replyTo ? { replyTo } : {}),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /**
+   * Resolve the (chatId, topicId) pair for the forum-topic admin tools. Same shorthand
+   * rules as the message tools: tg_<chat>_<topic> works instead of a separate topicId.
+   */
+  private telegramTopicAdminTarget(
+    chatId: string,
+    explicitTopicId?: number | string
+  ): { chatId: string; topicId: number } {
+    const target = this.telegramTopicTarget(chatId, explicitTopicId);
+    if (!target.topicId) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'topicId is required (pass it directly or as the tg_<chat>_<topic> shorthand)'
+      );
+    }
+    return { chatId: target.chatId, topicId: target.topicId };
+  }
+
+  private async handleTelegramGetTopics(args: {
+    chatId: string;
+    limit?: number;
+    query?: string;
+    account?: string;
+  }) {
+    const target = this.telegramTopicTarget(args.chatId);
+    const limit = clampInteger(args.limit, 100, 1, 200);
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (args.query) params.set('query', args.query);
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'GET',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/topics?${params.toString()}`
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramCreateTopic(args: {
+    chatId: string;
+    title: string;
+    icon?: number;
+    account?: string;
+  }) {
+    const target = this.telegramTopicTarget(args.chatId);
+    if (typeof args.title !== 'string' || !args.title.trim()) {
+      throw new McpError(ErrorCode.InvalidParams, 'title is required');
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/topics`,
+      {
+        title: args.title,
+        ...(args.icon !== undefined ? { icon: args.icon } : {}),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramEditTopic(args: {
+    chatId: string;
+    topicId?: number | string;
+    title?: string;
+    closed?: boolean;
+    hidden?: boolean;
+    clearIcon?: boolean;
+    account?: string;
+  }) {
+    const target = this.telegramTopicAdminTarget(args.chatId, args.topicId);
+    if (
+      args.title === undefined &&
+      args.closed === undefined &&
+      args.hidden === undefined &&
+      args.clearIcon === undefined
+    ) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'at least one of title, closed, hidden or clearIcon is required'
+      );
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'PATCH',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/topics/${target.topicId}`,
+      {
+        ...(args.title !== undefined ? { title: args.title } : {}),
+        ...(args.closed !== undefined ? { closed: args.closed } : {}),
+        ...(args.hidden !== undefined ? { hidden: args.hidden } : {}),
+        ...(args.clearIcon !== undefined ? { clearIcon: args.clearIcon } : {}),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramToggleTopicClosed(args: {
+    chatId: string;
+    topicId?: number | string;
+    closed: boolean;
+    account?: string;
+  }) {
+    const target = this.telegramTopicAdminTarget(args.chatId, args.topicId);
+    if (typeof args.closed !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'closed must be a boolean');
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/topics/${target.topicId}/closed`,
+      { closed: args.closed }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramToggleTopicPinned(args: {
+    chatId: string;
+    topicId?: number | string;
+    pinned: boolean;
+    account?: string;
+  }) {
+    const target = this.telegramTopicAdminTarget(args.chatId, args.topicId);
+    if (typeof args.pinned !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'pinned must be a boolean');
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/topics/${target.topicId}/pinned`,
+      { pinned: args.pinned }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramDeleteTopic(args: {
+    chatId: string;
+    topicId?: number | string;
+    account?: string;
+  }) {
+    const target = this.telegramTopicAdminTarget(args.chatId, args.topicId);
+    // topicId travels in the path: connectorCall sends no body on DELETE.
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'DELETE',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/topics/${target.topicId}`
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramUpdateForumSettings(args: {
+    chatId: string;
+    isForum: boolean;
+    threadsMode?: 'list' | 'tabs';
+    account?: string;
+  }) {
+    const target = this.telegramTopicTarget(args.chatId);
+    if (typeof args.isForum !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'isForum must be a boolean');
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/forum-settings`,
+      {
+        isForum: args.isForum,
+        ...(args.threadsMode !== undefined ? { threadsMode: args.threadsMode } : {}),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramSetChatTitle(args: {
+    chatId: string;
+    title: string;
+    account?: string;
+  }) {
+    const target = this.telegramTopicTarget(args.chatId);
+    if (typeof args.title !== 'string' || !args.title.trim()) {
+      throw new McpError(ErrorCode.InvalidParams, 'title is required');
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'PATCH',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/title`,
+      { title: args.title }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramSetChatDescription(args: {
+    chatId: string;
+    description: string;
+    account?: string;
+  }) {
+    const target = this.telegramTopicTarget(args.chatId);
+    if (typeof args.description !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, 'description must be a string');
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'PATCH',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/description`,
+      { description: args.description }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramSetChatPhoto(args: {
+    chatId: string;
+    filePath: string;
+    type?: 'photo' | 'video';
+    account?: string;
+  }) {
+    const target = this.telegramTopicTarget(args.chatId);
+    if (typeof args.filePath !== 'string' || !args.filePath.trim()) {
+      throw new McpError(ErrorCode.InvalidParams, 'filePath is required');
+    }
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'PATCH',
+      `/api/v1/chats/${encodeURIComponent(target.chatId)}/photo`,
+      {
+        filePath: args.filePath,
+        ...(args.type !== undefined ? { type: args.type } : {}),
       }
     );
     return this.jsonResponse(data);
