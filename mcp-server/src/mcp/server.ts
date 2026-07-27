@@ -514,13 +514,9 @@ export class MCPServer {
 
     const payload = { ...args };
     delete payload.idempotencyKey;
-    const payloadHash = createHash('sha256')
-      .update(this.stableJson(payload))
-      .digest('hex');
+    const payloadHash = createHash('sha256').update(this.stableJson(payload)).digest('hex');
     const storageKey = `social:v2:idempotency:${createHash('sha256')
-      .update(
-        `${definition.name}\0${args.channel}\0${args.accountId}\0${idempotencyKey}`
-      )
+      .update(`${definition.name}\0${args.channel}\0${args.accountId}\0${idempotencyKey}`)
       .digest('hex')}`;
     const pending = JSON.stringify({
       payloadHash,
@@ -619,10 +615,7 @@ export class MCPServer {
     }
   }
 
-  private async dispatchCanonicalTool(
-    handler: string,
-    args: Record<string, any>
-  ): Promise<any> {
+  private async dispatchCanonicalTool(handler: string, args: Record<string, any>): Promise<any> {
     switch (handler) {
       case 'listAccounts':
         return this.canonicalListAccounts(args);
@@ -749,16 +742,9 @@ export class MCPServer {
         });
       case 'startDigest': {
         const platforms = [
-          ...new Set([
-            args.channel,
-            ...(Array.isArray(args.channels) ? args.channels : []),
-          ]),
+          ...new Set([args.channel, ...(Array.isArray(args.channels) ? args.channels : [])]),
         ];
-        if (
-          platforms.some(
-            (item: unknown) => item !== 'whatsapp' && item !== 'telegram'
-          )
-        ) {
+        if (platforms.some((item: unknown) => item !== 'whatsapp' && item !== 'telegram')) {
           throw this.canonicalError(
             'unsupported_capability',
             'Unread digests are only supported for WhatsApp and Telegram'
@@ -896,9 +882,7 @@ export class MCPServer {
     } else if (requested === 'index') {
       kind = 'localIndex';
     } else if (
-      ['searchMessages', 'summarize', 'listDrafts', 'getDigest'].includes(
-        definition.handler
-      )
+      ['searchMessages', 'summarize', 'listDrafts', 'getDigest'].includes(definition.handler)
     ) {
       kind = 'localIndex';
     } else if (definition.handler === 'listMessages') {
@@ -973,10 +957,7 @@ export class MCPServer {
     return this.string(args, 'target');
   }
 
-  private whatsAppProviderTarget(
-    args: Record<string, any>,
-    field = 'target'
-  ): string {
+  private whatsAppProviderTarget(args: Record<string, any>, field = 'target'): string {
     this.requireChannel(args, 'whatsapp');
     const accountIdValue = normalizeAccount(this.account(args));
     const raw = this.string(args, field);
@@ -997,7 +978,10 @@ export class MCPServer {
     return args[field].trim();
   }
 
-  private readSource(args: Record<string, any>, fallback: 'provider' | 'index'): 'provider' | 'index' {
+  private readSource(
+    args: Record<string, any>,
+    fallback: 'provider' | 'index'
+  ): 'provider' | 'index' {
     const value = String(args.readSource || 'auto');
     return value === 'auto' ? fallback : (value as 'provider' | 'index');
   }
@@ -1014,8 +998,7 @@ export class MCPServer {
 
   private async canonicalListAccounts(args: Record<string, any>): Promise<any> {
     const status = this.legacyResultData(await this.handleMessagingStatus());
-    const selectedChannel =
-      args.channel === undefined ? undefined : this.channel(args);
+    const selectedChannel = args.channel === undefined ? undefined : this.channel(args);
     const accounts = [
       {
         channel: 'whatsapp',
@@ -1103,8 +1086,7 @@ export class MCPServer {
         ...item,
         status:
           item.channel === 'instagram'
-            ? asObject(asObject(asObject(status).instagram).accounts)[item.accountId] ||
-              null
+            ? asObject(asObject(asObject(status).instagram).accounts)[item.accountId] || null
             : asObject(asObject(status)[item.channel])[item.accountId] || null,
       }));
     return this.jsonResponse({
@@ -1146,11 +1128,7 @@ export class MCPServer {
     const partialErrors: any[] = [];
     for (const account of accounts) {
       try {
-        const result = await this.listConversationsFor(
-          account.channel,
-          account.accountId,
-          args
-        );
+        const result = await this.listConversationsFor(account.channel, account.accountId, args);
         let providerSelfId = '';
         if (account.channel === 'instagram') {
           const profile = this.legacyResultData(
@@ -1198,9 +1176,7 @@ export class MCPServer {
           const conversation = {
             ...account,
             target: rawTarget,
-            sendTarget:
-              pickString(sendPeer, ['id']) ||
-              providerTarget,
+            sendTarget: pickString(sendPeer, ['id']) || providerTarget,
             name:
               pickString(sendPeer, ['username', 'name']) ||
               pickString(row, ['name', 'title', 'displayName']) ||
@@ -1217,15 +1193,12 @@ export class MCPServer {
               pickString(row, ['lastMessageAt', 'last_message_at', 'timestamp']) || null,
             raw: row,
           };
-          const query = String(args.query || '').trim().toLowerCase();
+          const query = String(args.query || '')
+            .trim()
+            .toLowerCase();
           if (
             !query ||
-            [
-              conversation.target,
-              conversation.sendTarget,
-              conversation.name,
-              conversation.handle,
-            ]
+            [conversation.target, conversation.sendTarget, conversation.name, conversation.handle]
               .join(' ')
               .toLowerCase()
               .includes(query)
@@ -1250,10 +1223,7 @@ export class MCPServer {
         data: { conversations, count: conversations.length },
         meta: {
           source: {
-            kind:
-              this.readSource(args, 'provider') === 'provider'
-                ? 'providerQuery'
-                : 'localIndex',
+            kind: this.readSource(args, 'provider') === 'provider' ? 'providerQuery' : 'localIndex',
             asOf: new Date().toISOString(),
             completeness: partialErrors.length ? 'partial' : 'complete',
           },
@@ -1283,10 +1253,7 @@ export class MCPServer {
     }
     if (channelName === 'telegram') {
       if (source === 'provider') {
-        const data = await this.providerGet(
-          this.tgUrl(accountIdValue),
-          '/api/public/dialogs'
-        );
+        const data = await this.providerGet(this.tgUrl(accountIdValue), '/api/public/dialogs');
         const dialogs = extractArrayPayload(data, ['dialogs']).slice(0, args.limit || 50);
         return this.jsonResponse({ ...asObject(data), dialogs, count: dialogs.length });
       }
@@ -1523,14 +1490,9 @@ export class MCPServer {
         const conversations = extractArrayPayload(user, ['conversations']);
         if (conversations.length) {
           return conversations.map(conversation => ({
-            target: bareWhatsAppJid(
-              pickString(conversation, ['waChatId', 'id'])
-            ),
+            target: bareWhatsAppJid(pickString(conversation, ['waChatId', 'id'])),
             name: pickString(user, ['displayName', 'name']) || null,
-            kind:
-              pickString(conversation, ['type']).toLowerCase() === 'group'
-                ? 'group'
-                : 'user',
+            kind: pickString(conversation, ['type']).toLowerCase() === 'group' ? 'group' : 'user',
             raw: { user, conversation },
           }));
         }
@@ -1564,12 +1526,7 @@ export class MCPServer {
       limit: Math.max(Number(args.limit || 10), 100),
     });
     const data = this.legacyResultData(listed);
-    const candidates = extractArrayPayload(data, [
-      'chats',
-      'dialogs',
-      'conversations',
-      'data',
-    ])
+    const candidates = extractArrayPayload(data, ['chats', 'dialogs', 'conversations', 'data'])
       .filter(item =>
         [
           pickString(item, ['id', 'chatId', 'peerId', 'conversationId']),
@@ -1600,10 +1557,9 @@ export class MCPServer {
       limit,
       readSource: 'provider',
     });
-    const conversations = extractArrayPayload(
-      asObject(asObject(listed).__canonicalResult).data,
-      ['conversations']
-    );
+    const conversations = extractArrayPayload(asObject(asObject(listed).__canonicalResult).data, [
+      'conversations',
+    ]);
     const targets = conversations
       .map(conversation => ({
         target: pickString(conversation, ['sendTarget']),
@@ -1719,10 +1675,7 @@ export class MCPServer {
     return this.handleInstagramGetProfile({ account: this.account(args) });
   }
 
-  private assertDigestSelector(
-    digest: Record<string, any>,
-    args: Record<string, any>
-  ): void {
+  private assertDigestSelector(digest: Record<string, any>, args: Record<string, any>): void {
     const accountIdValue = this.account(args);
     const channelName = this.channel(args);
     if (digest.account !== accountIdValue) {
@@ -1741,9 +1694,7 @@ export class MCPServer {
   }
 
   private async canonicalGetDigest(args: Record<string, any>): Promise<any> {
-    const digest = await this.unreadDigestService.status(
-      this.string(args, 'digestId')
-    );
+    const digest = await this.unreadDigestService.status(this.string(args, 'digestId'));
     this.assertDigestSelector(asObject(digest), args);
     return this.jsonResponse(digest);
   }
@@ -1753,10 +1704,7 @@ export class MCPServer {
     const before = await this.unreadDigestService.status(digestId);
     this.assertDigestSelector(asObject(before), args);
     return this.jsonResponse(
-      await this.unreadDigestService.continue(
-        digestId,
-        clampInteger(args.batchSize, 5, 1, 10)
-      )
+      await this.unreadDigestService.continue(digestId, clampInteger(args.batchSize, 5, 1, 10))
     );
   }
 
@@ -1847,9 +1795,7 @@ export class MCPServer {
     const channelName = this.channel(args);
     const accountIdValue = this.account(args);
     const destination =
-      channelName === 'whatsapp'
-        ? this.whatsAppProviderTarget(args)
-        : this.target(args);
+      channelName === 'whatsapp' ? this.whatsAppProviderTarget(args) : this.target(args);
     const message = typeof args.message === 'string' ? args.message : '';
     const attachments = Array.isArray(args.attachments) ? args.attachments : [];
 
@@ -1893,11 +1839,7 @@ export class MCPServer {
         message,
       });
     }
-    if (
-      channelName === 'whatsapp' &&
-      args.threadId !== null &&
-      args.threadId !== undefined
-    ) {
+    if (channelName === 'whatsapp' && args.threadId !== null && args.threadId !== undefined) {
       throw this.canonicalError(
         'unsupported_capability',
         'WhatsApp does not support Telegram threadId'
@@ -1967,13 +1909,7 @@ export class MCPServer {
 
     const providerMessageIds = operations
       .map(operation =>
-        pickString(operation, [
-          'providerMessageId',
-          'messageId',
-          'operationId',
-          'receiptId',
-          'id',
-        ])
+        pickString(operation, ['providerMessageId', 'messageId', 'operationId', 'receiptId', 'id'])
       )
       .filter(Boolean);
     return this.jsonResponse({
@@ -2066,10 +2002,7 @@ export class MCPServer {
           account: this.account(args),
         });
       default:
-        throw this.canonicalError(
-          'invalid_request',
-          "action must be 'renewQr' or 'repairGroup'"
-        );
+        throw this.canonicalError('invalid_request', "action must be 'renewQr' or 'repairGroup'");
     }
   }
 
@@ -2120,18 +2053,13 @@ export class MCPServer {
       case 'deleteTopic':
         return this.handleTelegramDeleteTopic(common);
       case 'createGroup':
-        return this.connectorCall(
-          this.tgUrl(common.account),
-          'POST',
-          '/api/v1/groups',
-          {
-            title: this.string(args, 'title'),
-            type: args.groupType || 'supergroup',
-            description: args.description,
-            forum: args.forum === true,
-            members: Array.isArray(args.members) ? args.members : [],
-          }
-        ).then(data => this.jsonResponse(data));
+        return this.connectorCall(this.tgUrl(common.account), 'POST', '/api/v1/groups', {
+          title: this.string(args, 'title'),
+          type: args.groupType || 'supergroup',
+          description: args.description,
+          forum: args.forum === true,
+          members: Array.isArray(args.members) ? args.members : [],
+        }).then(data => this.jsonResponse(data));
       case 'addMembers':
         if (!Array.isArray(args.members) || !args.members.length) {
           throw this.canonicalError(
@@ -2158,10 +2086,7 @@ export class MCPServer {
           }
         ).then(data => this.jsonResponse(data));
       default:
-        throw this.canonicalError(
-          'invalid_request',
-          `Unsupported forum action '${action}'`
-        );
+        throw this.canonicalError('invalid_request', `Unsupported forum action '${action}'`);
     }
   }
 
@@ -2191,10 +2116,7 @@ export class MCPServer {
           isForum: args.enabled,
         });
       default:
-        throw this.canonicalError(
-          'invalid_request',
-          `Unsupported chat action '${action}'`
-        );
+        throw this.canonicalError('invalid_request', `Unsupported chat action '${action}'`);
     }
   }
 
@@ -2229,10 +2151,7 @@ export class MCPServer {
         });
       case 'story':
         if (!args.imageUrl && !args.videoUrl) {
-          throw this.canonicalError(
-            'invalid_request',
-            'A story requires imageUrl or videoUrl'
-          );
+          throw this.canonicalError('invalid_request', 'A story requires imageUrl or videoUrl');
         }
         return this.handleInstagramPublishStory({
           account: accountIdValue,
@@ -2274,10 +2193,7 @@ export class MCPServer {
           commentId: commentTarget,
         });
       default:
-        throw this.canonicalError(
-          'invalid_request',
-          `Unsupported comment action '${args.action}'`
-        );
+        throw this.canonicalError('invalid_request', `Unsupported comment action '${args.action}'`);
     }
   }
 
@@ -2720,9 +2636,7 @@ export class MCPServer {
       new Date(args.date),
       args.scope || 'all',
       args.language || 'en',
-      args.account && args.platform
-        ? { account: args.account, platform: args.platform }
-        : undefined
+      args.account && args.platform ? { account: args.account, platform: args.platform } : undefined
     );
 
     return {
@@ -2746,9 +2660,7 @@ export class MCPServer {
       new Date(args.weekStartDate),
       args.scope || 'all',
       args.language || 'en',
-      args.account && args.platform
-        ? { account: args.account, platform: args.platform }
-        : undefined
+      args.account && args.platform ? { account: args.account, platform: args.platform } : undefined
     );
 
     return {
@@ -2827,10 +2739,7 @@ export class MCPServer {
     };
   }
 
-  private async requireDraftAccount(
-    draftId: string,
-    expectedAccount: Account
-  ): Promise<void> {
+  private async requireDraftAccount(draftId: string, expectedAccount: Account): Promise<void> {
     const draft = await this.draftService.getDraftById(draftId);
     if (!draft) {
       throw this.canonicalError('not_found', `Draft '${draftId}' was not found`);
@@ -4509,9 +4418,7 @@ export class MCPServer {
     const data = await this.connectorCall(
       this.waUrl(account),
       'POST',
-      `/api/v1/messages/read/${encodeURIComponent(
-        bareWhatsAppJid(args.chatId)
-      )}`
+      `/api/v1/messages/read/${encodeURIComponent(bareWhatsAppJid(args.chatId))}`
     );
     return this.jsonResponse(data);
   }
