@@ -85,7 +85,14 @@ export interface DigestResponse {
   processedChats: number;
   remainingChats: number;
   cursorCheckpoint: { digestId: string; nextIndex: number } | null;
-  continueTool: { name: 'unread_digest'; arguments: { action: 'continue'; digestId: string } } | null;
+  continueTool: {
+    name: 'social_continue_digest';
+    arguments: {
+      channel: MessagingPlatform;
+      accountId: Account;
+      digestId: string;
+    };
+  } | null;
   currentBatch: DigestPartial | null;
   partialSummary: string | null;
   partialSummaries: Array<{ batchNumber: number; summary: string }>;
@@ -279,10 +286,7 @@ export class UnreadDigestService {
     });
   }
 
-  private async getRecentMessages(
-    chat: UnreadDigestChat,
-    limit: number
-  ): Promise<DigestMessage[]> {
+  private async getRecentMessages(chat: UnreadDigestChat, limit: number): Promise<DigestMessage[]> {
     const result = await this.dbClient.query(
       `SELECT id, wa_message_id, sender_wa_id, wa_timestamp, direction,
               content, message_type
@@ -378,10 +382,7 @@ export class UnreadDigestService {
     }
   }
 
-  private fallbackBatchSummary(
-    chats: DigestChatResult[],
-    language: DigestLanguage
-  ): string {
+  private fallbackBatchSummary(chats: DigestChatResult[], language: DigestLanguage): string {
     if (!chats.length) {
       return language === 'es'
         ? 'No hay chats en esta tanda.'
@@ -439,11 +440,15 @@ export class UnreadDigestService {
     return normalizeSessionRow(result.rows[0]);
   }
 
-  private toResponse(session: DigestSessionRow, currentBatch: DigestPartial | null): DigestResponse {
+  private toResponse(
+    session: DigestSessionRow,
+    currentBatch: DigestPartial | null
+  ): DigestResponse {
     const totalChats = session.chat_queue.length;
     const processedChats = Math.min(session.next_index, totalChats);
     const remainingChats = Math.max(0, totalChats - processedChats);
-    const latest = currentBatch || session.partial_summaries[session.partial_summaries.length - 1] || null;
+    const latest =
+      currentBatch || session.partial_summaries[session.partial_summaries.length - 1] || null;
     const inProgress = session.status === 'in_progress';
     return {
       digestId: session.id,
@@ -455,7 +460,14 @@ export class UnreadDigestService {
       remainingChats,
       cursorCheckpoint: inProgress ? { digestId: session.id, nextIndex: session.next_index } : null,
       continueTool: inProgress
-        ? { name: 'unread_digest', arguments: { action: 'continue', digestId: session.id } }
+        ? {
+            name: 'social_continue_digest',
+            arguments: {
+              channel: session.platforms[0] || 'whatsapp',
+              accountId: session.account,
+              digestId: session.id,
+            },
+          }
         : null,
       currentBatch: latest,
       partialSummary: latest?.summary || null,

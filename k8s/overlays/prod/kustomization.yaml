@@ -9,40 +9,26 @@ patches:
   - path: patch-renew-qr-pro.yaml
   - path: patch-nodepool.yaml
 images:
+  # Atomic Socialmedia v2 cutover image set built and signed by Release
+  # Production run 30231910460 from c88dce161df3. Keep all deployed components
+  # on this one source revision.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: download-media-id-fix-20260624
-    digest: sha256:6d0ebd34f94746706055ff5d5fd7e53c9d646db8d9d996f4ac2df779556ac124
-  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector
-    newTag: cloud-api-20260604
-    digest: sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: synapse-unread-cache-20260616-1
-    digest: sha256:9688eb22a93a5bce04e6dc34bef3bc3d9d3cd04d24df989758bcde1ed89a21ef
-  # telegram-sync v1.3.38 = SESSION-LESS (ingests via the connector NATS+HTTP API,
-  # holds no Telethon session). The pre-branch v1.3.21 regressed back in when
-  # deploy/prod lost the codex branch and crashloops (0/1 ready) — this pin
-  # restores the working session-less sync.
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:6467b5dac43b30dec961b8484978b5692d00a74bf76b022df81cdf8fdcc4dac2
+  # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
+  # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.38
-    digest: sha256:37f5b886685b0682bdfa070df67d98cf76e2963e0c61406b634330e72d31bc06
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.12
-    digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
-  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker
-    newTag: auto-send-headful-xauth-20260604
-    digest: sha256:1654ab303f9fde29782d322d1d0d29e6c24177e626f4ff9867d7db02e54c1e40
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:c12e23221a93e8a42985abde0e9858e1fe17713105b076328487e24caa719030
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: streamable-session-reclaim-20260625-r2
-    digest: sha256:ce20fb6759881fbb42e3f72b8565deef4455c3e8ba5967c3a63f91f57a2d66bc
-  # whatsapp-synapse-bridge (Phase F3b). Pinned to the E2E-validated build
-  # (built + pushed 2026-06-23; identical source to feat/whatsapp-synapse-bridge).
-  # A future manifest-release run can re-pin from CI; the digest is immutable.
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:660119ecb97a5489921ed6285dce069176a160742bd0c9a9cb328b09ae799e12
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
-    newTag: whatsapp-ingress-20260623
-    digest: sha256:d126b29aff8a28869fe397cc6ee522a74141c97a6ba8e8943aeddfcfb8bc63f6
-replicas:
-  # Baileys/Web auto-sender for the Business account stays offline (Cloud API
-  # covers outbound templates). whatsapp-connector-professional itself is BACK ON
-  # since the 2026-06-11 QR relink — do not zero it here.
-  - name: whatsapp-open-worker-professional
-    count: 0
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

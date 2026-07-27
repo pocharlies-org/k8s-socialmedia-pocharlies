@@ -143,33 +143,28 @@ pnpm build
 claude mcp list
 ```
 
-## Available MCP Tools
+## Available MCP tools
 
-Once installed, you'll have access to these tools in Claude:
+The installation exposes the single canonical Socialmedia v2 catalog. It
+contains 19 read/compute operations and 15 mutations, all named `social_*`.
+Run `tools/list` or inspect [`MCP.md`](./MCP.md) and
+`contracts/socialmedia-tools.json` for the exact schemas.
 
-### Connection Management
+Common entry points:
 
-- `get_connection_status` - Check WhatsApp connection status
-- `renew_qr_code` - Generate a new QR code for authentication
+- `social_list_accounts` — configured transports and capabilities.
+- `social_list_conversations`, `social_list_messages`,
+  `social_search_messages` — retrieval with explicit provenance.
+- `social_resolve_target` — provider-native targets.
+- `social_send_message` — text, attachments, replies and threads.
+- `social_manage_session` — WhatsApp QR/session operations.
+- `social_get_forum`, `social_manage_forum`, `social_manage_chat` — Telegram
+  forums and group administration.
+- `social_publish_content`, `social_manage_comment` — Instagram publishing and
+  comments.
 
-### Message Search & Retrieval
-
-- `search_messages` - Search messages by keyword or semantic query
-- `get_chat` - Get conversation details and recent messages
-- `get_context` - Get message context with surrounding messages
-
-### Summarization
-
-- `summarize_chat` - Generate summary of a conversation
-- `summarize_day` - Summarize all conversations for a specific day
-- `summarize_week` - Summarize all conversations for a week
-
-### Draft Management
-
-- `draft_reply` - Draft a reply to a message or conversation
-- `list_drafts` - List draft replies for a conversation
-- `approve_draft` - Approve a draft reply and generate send token
-- `send_approved_reply` - Send an approved reply (requires feature flag)
+There are no legacy aliases. Always provide `channel` and `accountId` on a
+mutation, and keep `target` as a string.
 
 ## Authentication with WhatsApp
 

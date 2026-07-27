@@ -7,3 +7,36 @@ packages:
   - 'workers/*'
   - 'mcp-server'
   - 'shared'
+# Transitive packages pinned forward so the release scan finds no fixable
+# HIGH/CRITICAL. Each entry is a transitive dep we cannot bump via a direct
+# dependency; revisit when the parent package ships the fix itself.
+overrides:
+  # CVE-2026-14257 is only fixed on the 5.x line. 5.0.8 still publishes a
+  # CommonJS build and requires node 20 || >=22, so the consumers keep working.
+  brace-expansion: ^5.0.8
+  # Scoped to the 9.x line on purpose: eslint pulls minimatch 3.x, whose API
+  # differs, and 3.1.5 is already past the fixed 3.1.4.
+  minimatch@9: ^9.0.9
+  # Reaches us through @nestjs/platform-express, which still ships 2.0.2.
+  multer: ^2.2.0
+  # CVE-2026-43897 is fixed in 4.0.1. baileys 7.0.0-rc13 (the newest release)
+  # still declares a `^3.0.0` peer range, but it only ever calls
+  # `getLinkPreview(text, options?)`, whose name and signature are unchanged in
+  # 4.x — so the peer range is stale metadata, not a real incompatibility.
+  # Drop this override once baileys widens the range.
+  link-preview-js: ^4.0.1
+
+# pnpm >=10 blocks postinstall scripts unless listed here. Only the ones that
+# genuinely need to run are enabled, so the runtime images stay free of a native
+# toolchain.
+allowBuilds:
+  # esbuild is the native binary tsx runs on — every service starts through tsx.
+  esbuild: true
+  # baileys and protobufjs generate their protobuf bindings; whatsapp-web needs them.
+  '@whiskeysockets/baileys': true
+  protobufjs: true
+  # Root devDependency only: nothing under src/ or scripts/ imports it, so we skip
+  # the node-gyp build rather than ship a compiler in the image.
+  better-sqlite3: false
+  # Postinstall is just a funding notice.
+  '@nestjs/core': false

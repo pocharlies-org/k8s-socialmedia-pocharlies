@@ -52,6 +52,7 @@ async function main() {
       ENCRYPTION_KEY,
       CONNECTOR_SHARED_SECRET,
       CONNECTOR_URL,
+      REDIS_URL,
       LLM_BASE_URL || undefined,
       LLM_CHAT_MODEL || undefined
     );

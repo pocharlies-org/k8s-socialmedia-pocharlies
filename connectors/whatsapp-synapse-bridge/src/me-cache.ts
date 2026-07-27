@@ -15,11 +15,7 @@ import { withTimeout } from '@mcp-socialmedia/shared';
  */
 
 /** Connector HMAC: sha256=<hex> over `${timestamp}:${JSON.stringify(body)}`. */
-function signConnectorRequest(
-  body: unknown,
-  timestampSec: number,
-  sharedSecret: string
-): string {
+function signConnectorRequest(body: unknown, timestampSec: number, sharedSecret: string): string {
   const message = `${timestampSec}:${JSON.stringify(body)}`;
   const hex = createHmac('sha256', sharedSecret).update(message).digest('hex');
   return `sha256=${hex}`;

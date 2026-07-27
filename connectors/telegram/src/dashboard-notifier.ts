@@ -12,7 +12,10 @@ function sign(body: string): { ts: string; sig: string } {
   return { ts, sig: `sha256=${sig}` };
 }
 
-export async function notifyDashboard(path: string, payload: Record<string, unknown>): Promise<void> {
+export async function notifyDashboard(
+  path: string,
+  payload: Record<string, unknown>
+): Promise<void> {
   const body = JSON.stringify(payload);
   const { ts, sig } = sign(body);
   try {

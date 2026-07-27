@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - manifest.yaml
   - whatsapp-synapse-bridge.yaml
+  - networkpolicy.yaml

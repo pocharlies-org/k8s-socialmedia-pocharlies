@@ -74,7 +74,15 @@ import {
   WhatsAppContactSeedResult,
   WhatsAppCustomerTokenStatus,
 } from './contact-sync';
-import { uploadMedia, ensureMediaBucket, fetchMedia, uploadAvatar } from './media-storage';
+import {
+  uploadMedia,
+  ensureMediaBucket,
+  fetchMedia,
+  uploadAvatar,
+  presignMediaUrl,
+  presignExpirySeconds,
+} from './media-storage';
+import { buildAudioAttachmentsBeforeEmit, StoredMediaInfo } from './audio-attachments';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 
 // WhatsApp Web message status enum → human/dashboard strings.
@@ -109,6 +117,15 @@ export interface WhatsAppMessage {
   replyToWaId?: string;
   /** Sender's WhatsApp display name (Baileys `pushName`). Optional. */
   pushName?: string;
+  /**
+   * Real sender phone in E.164 (with '+'), ONLY when the chat is @lid-addressed
+   * and Baileys surfaced the alternate PN jid (see pnFromLidMessage). Never an
+   * invented value; omitted otherwise. Same value persisted as
+   * `messages.metadata->>'senderPnE164'`.
+   */
+  senderPnE164?: string;
+  /** Baileys `key.fromMe`: true when this account sent the message (any device). */
+  fromMe?: boolean;
   attachments?: Array<{
     type: string;
     url: string;
@@ -305,7 +322,7 @@ function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: b
     return 'The target phone/JID could not be resolved as a WhatsApp contact.';
   }
   if (failureClass === 'disconnected') {
-    return 'WhatsApp is disconnected. Check get_connection_status and re-authenticate with the QR flow if needed.';
+    return 'WhatsApp is disconnected. Check social_validate_account and use social_manage_session action=renewQr if needed.';
   }
   if (failureClass === 'auth') {
     return 'WhatsApp rejected the authenticated send path. Reconnect the WhatsApp session.';
@@ -457,6 +474,15 @@ export class BaileysClient extends EventEmitter {
   // import source; this flag lets Baileys fill whatever WhatsApp sends during
   // a fresh device link without treating those messages as live events.
   private readonly historySyncOnLogin = process.env.WA_HISTORY_SYNC_ON_LOGIN === 'true';
+  // F1.7 honest voice — OFF by default. Enabled (with S3_PUBLIC_ENDPOINT) only
+  // on the professional deployment: awaits the voice-note upload before the
+  // NATS emit so the event carries a presigned audio URL synapse can
+  // transcribe. Personal stays on the historical fire-and-forget path.
+  private readonly emitAudioAttachments = process.env.WA_EMIT_AUDIO_ATTACHMENTS === 'true';
+  private readonly audioPreEmitTimeoutMs = parseInt(
+    process.env.WA_AUDIO_PREEMIT_TIMEOUT_MS || '15000',
+    10
+  );
 
   // me — populated on `connection.update { connection: 'open' }`
   private meJid: string | null = null;
@@ -1028,7 +1054,15 @@ export class BaileysClient extends EventEmitter {
     // never block or abort the message persist. The conversation PK stays the
     // LID (namespaced) — we do not re-key anything.
     const lidPn = pnFromLidMessage(msg);
+    // Ride the LID→PN mapping and the Baileys ownership flag on the in-memory
+    // message so the NATS event (main.ts) carries them WITHOUT re-querying the
+    // DB. `senderPnE164` is only set when real (never fabricated); `fromMe` is
+    // always an explicit boolean — it is the same signal that drives
+    // direction=OUTBOUND below and lets the synapse bridge forward operator
+    // replies flagged as team touches (F0.5) instead of guessing by JID.
+    waMessage.fromMe = !!msg.key.fromMe;
     if (lidPn) {
+      waMessage.senderPnE164 = lidPn.e164;
       // (b) wa_chat_id backfill — fire-and-forget; a failure here must never
       // drop the message (the metadata field is the load-bearing path).
       void setConversationWaChatId(waMessage.conversationId, lidPn.pnJid).catch(e =>
@@ -1113,11 +1147,30 @@ export class BaileysClient extends EventEmitter {
 
     this.logger.info(`Stored message ${waMessage.waMessageId} from ${waMessage.senderWaId}`);
 
-    if (
+    const isLiveMedia =
       (options.source || 'live') === 'live' &&
       waMessage.messageType !== 'TEXT' &&
-      waMessage.messageType !== 'REACTION'
-    ) {
+      waMessage.messageType !== 'REACTION';
+    if (isLiveMedia && waMessage.messageType === 'AUDIO' && this.emitAudioAttachments) {
+      // F1.7 honest voice: for voice notes the media upload historically ran
+      // fire-and-forget AFTER the event emit, so the NATS event never carried
+      // attachments and synapse's transcription raised "no downloadable audio
+      // attachment" for EVERY voice note (blind handoff). Await the upload
+      // (bounded) and ride a presigned out-of-cluster URL on the event. Any
+      // timeout/failure degrades to today's behavior: emit without
+      // attachments while the persist continues in the background. Only THIS
+      // message's emit waits; other upsert events are independent handlers.
+      waMessage.attachments = await buildAudioAttachmentsBeforeEmit({
+        store: () => this.downloadAndStoreMedia(msg, msgId, waMessage.messageType, undefined),
+        presign: key => presignMediaUrl(key),
+        timeoutMs: this.audioPreEmitTimeoutMs,
+        seconds: Number(msg.message?.audioMessage?.seconds || 0) || undefined,
+        presignExpirySeconds: presignExpirySeconds(),
+        logger: this.logger,
+        logRef: waMessage.waMessageId,
+      });
+    } else if (isLiveMedia) {
+      // Non-audio media (images/docs/stickers/video): unchanged fire-and-forget.
       this.downloadAndStoreMedia(
         msg,
         msgId,
@@ -1214,12 +1267,18 @@ export class BaileysClient extends EventEmitter {
     };
   }
 
+  /**
+   * Download media from WhatsApp, upload to MinIO and persist the attachment
+   * row. Returns the stored object info (F1.7: the audio pre-emit path rides
+   * it on the NATS event) or null when the download failed/was empty — the
+   * historical fire-and-forget callers simply ignore the return value.
+   */
   private async downloadAndStoreMedia(
     msg: WAMessage,
     messageId: bigint,
     messageType: string,
     caption?: string
-  ): Promise<void> {
+  ): Promise<StoredMediaInfo | null> {
     const timeoutMs = parseInt(process.env.WA_MEDIA_DOWNLOAD_TIMEOUT_MS || '30000', 10);
 
     let buffer: Buffer;
@@ -1237,11 +1296,11 @@ export class BaileysClient extends EventEmitter {
       ]);
     } catch (e: any) {
       this.logger.warn(`downloadMedia failed for ${msg.key?.id}: ${e?.message || e}`);
-      return;
+      return null;
     }
     if (!buffer || !buffer.length) {
       this.logger.warn(`downloadMedia returned empty for ${msg.key?.id}`);
-      return;
+      return null;
     }
 
     const { mimeType, fileName } = this.mediaMetaFromMessage(msg);
@@ -1258,6 +1317,7 @@ export class BaileysClient extends EventEmitter {
     });
 
     this.logger.info(`Stored media ${storageKey} (${fileSize} bytes) for msg ${messageId}`);
+    return { storageKey, fileSize, mimeType, fileName };
   }
 
   private mediaMetaFromMessage(msg: WAMessage): { mimeType?: string; fileName?: string } {
@@ -1291,7 +1351,7 @@ export class BaileysClient extends EventEmitter {
   private async buildQuotedFromId(
     replyToMessageId: string | undefined,
     chatJid: string
-  ): Promise<proto.IWebMessageInfo | undefined> {
+  ): Promise<WAMessage | undefined> {
     if (!replyToMessageId) return undefined;
     const cachedKey = this.keyCache.get(replyToMessageId);
     const messageProto =
@@ -1305,7 +1365,7 @@ export class BaileysClient extends EventEmitter {
     return {
       key: { ...cachedKey.key, id: replyToMessageId, remoteJid: chatJid },
       message: messageProto,
-    } as proto.IWebMessageInfo;
+    } as WAMessage;
   }
 
   async sendMessage(
@@ -1531,7 +1591,7 @@ export class BaileysClient extends EventEmitter {
     chatId: string,
     fileUrl: string,
     caption?: string,
-    options?: { asSticker?: boolean }
+    options?: { asSticker?: boolean; replyToMessageId?: string }
   ): Promise<void> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
@@ -1564,7 +1624,8 @@ export class BaileysClient extends EventEmitter {
         caption,
       };
 
-    const sent = await this.sock.sendMessage(raw, payload);
+    const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
+    const sent = await this.sock.sendMessage(raw, payload, quoted ? { quoted } : undefined);
     if (sent?.key?.id) {
       this.rememberKey(sent.key.id, sent.key, raw);
       this.rememberMessageForRetry(sent.key, sent.message);
@@ -2142,7 +2203,7 @@ export class BaileysClient extends EventEmitter {
     try {
       const pool = getPool();
       // The caller may hand us either the WhatsApp message id or the numeric
-      // messages.id (whatsapp_get_messages exposes both as `waMessageId` and `id`).
+      // messages.id (social_list_messages exposes both `waMessageId` and `id`).
       // messages.wa_message_id is stored namespaced, so namespace the wa id ($1) or
       // professional finds no attachment row; messages.id is the global numeric PK
       // and is never namespaced, so match it raw ($2). Mirrors the dual lookup the
@@ -2415,7 +2476,7 @@ export class BaileysClient extends EventEmitter {
     options?: {
       useCachedGroupMetadata?: boolean;
       useUserDevicesCache?: boolean;
-      quoted?: proto.IWebMessageInfo;
+      quoted?: WAMessage;
     }
   ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');

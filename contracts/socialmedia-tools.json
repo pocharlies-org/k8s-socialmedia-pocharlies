@@ -1,0 +1,6639 @@
+{
+  "schemaVersion": "2.0",
+  "service": "socialmedia",
+  "digestAlgorithm": "sha256",
+  "digest": "sha256:2eb2860fb6cc00bfe3db17ab449ec07addade602774ddfbd96db9cd704daaae4",
+  "tools": [
+    {
+      "name": "social_approve_draft",
+      "title": "Approve draft",
+      "description": "Approve a persisted draft and issue its send token.",
+      "effect": "internalWrite",
+      "authScope": "social.write",
+      "capability": "drafts.approve",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "draftId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "draftId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_click_interaction",
+      "title": "Click interaction",
+      "description": "Press a Telegram message button.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "interactions.click",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "messageId": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "data": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact Telegram callback payload from the selected inline button."
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "messageId",
+          "data"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_continue_digest",
+      "title": "Continue unread digest",
+      "description": "Advance an existing unread digest checkpoint.",
+      "effect": "internalWrite",
+      "authScope": "social.read",
+      "capability": "digests.continue",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "digestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "batchSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "digestId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_create_draft",
+      "title": "Create draft",
+      "description": "Create a persisted AI-assisted reply draft.",
+      "effect": "internalWrite",
+      "authScope": "social.write",
+      "capability": "drafts.create",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "lastN": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "professional",
+              "casual",
+              "friendly",
+              "formal"
+            ]
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ]
+          },
+          "constraints": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_delete_message",
+      "title": "Delete message",
+      "description": "Delete a provider message where supported.",
+      "effect": "destructive",
+      "authScope": "social.write",
+      "capability": "messages.delete",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "messageId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "messageId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_discover_business",
+      "title": "Discover Instagram business",
+      "description": "Discover an Instagram business or hashtag and its media.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "business.discover",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "business",
+              "hashtag",
+              "hashtagMedia"
+            ],
+            "default": "business"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "query"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_forward_message",
+      "title": "Forward message",
+      "description": "Forward one provider message to a target on the same channel/account.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "messages.forward",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "messageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fromTarget": {
+            "type": "string",
+            "minLength": 1
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "fromTarget",
+          "messageId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_get_conversation",
+      "title": "Get conversation",
+      "description": "Get one provider conversation and its current metadata.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "conversations.get",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_get_digest",
+      "title": "Get unread digest",
+      "description": "Read the current state and result of an unread digest.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "digests.get",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "digestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "digestId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_get_forum",
+      "title": "Get Telegram forum",
+      "description": "List Telegram forum topics and their state.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "forums.get",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "query": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 100
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_get_insights",
+      "title": "Get insights",
+      "description": "Get Instagram account or media insights and publishing limits.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "insights.get",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "account",
+              "media",
+              "publishingLimit"
+            ],
+            "default": "account"
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "period": {
+            "type": "string"
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "media"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target"
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_get_media",
+      "title": "Get message media",
+      "description": "Retrieve media attached to a provider message.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "media.get",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "messageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "messageId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_get_profile",
+      "title": "Get account profile",
+      "description": "Get the selected provider account profile.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "profiles.get",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_list_accounts",
+      "title": "List social accounts",
+      "description": "List configured provider accounts, transports and capabilities actually deployed.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "accounts.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_list_comments",
+      "title": "List comments",
+      "description": "List comments for Instagram media.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "comments.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_list_content",
+      "title": "List published content",
+      "description": "List Instagram media or stories for an account.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "content.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "media",
+              "stories"
+            ],
+            "default": "media"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_list_conversations",
+      "title": "List conversations",
+      "description": "List conversations from one channel/account or aggregate explicitly reported partial results.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "conversations.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "query": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 50
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_list_drafts",
+      "title": "List drafts",
+      "description": "List persisted reply drafts for a conversation.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "drafts.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "APPROVED",
+              "SENT"
+            ]
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_list_mentions",
+      "title": "List mentions",
+      "description": "List recent Instagram mentions.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "mentions.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_list_messages",
+      "title": "List messages",
+      "description": "List messages in a conversation with explicit provider/index provenance.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "messages.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 50
+          },
+          "before": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "after": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_list_participants",
+      "title": "List participants",
+      "description": "List participants of a group or conversation when supported by the selected provider.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "participants.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 100
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_manage_chat",
+      "title": "Manage Telegram chat",
+      "description": "Change Telegram title, description, photo or forum mode.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "chats.manage",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "setTitle",
+              "setDescription",
+              "setPhoto",
+              "setForumEnabled"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "mediaUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "action"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "setTitle"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "title"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "setDescription"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "description"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "setPhoto"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "mediaUrl"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "setForumEnabled"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "enabled"
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_manage_comment",
+      "title": "Manage Instagram comment",
+      "description": "Create, reply to, hide, unhide or delete an Instagram comment.",
+      "effect": "destructive",
+      "authScope": "social.write",
+      "capability": "comments.manage",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "reply",
+              "hide",
+              "unhide",
+              "delete"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "action"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "create",
+                    "reply"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "message"
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_manage_forum",
+      "title": "Manage Telegram forum",
+      "description": "Create, edit, close, pin or delete a Telegram topic, or manage group membership and permissions.",
+      "effect": "destructive",
+      "authScope": "social.write",
+      "capability": "forums.manage",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "createTopic",
+              "editTopic",
+              "closeTopic",
+              "reopenTopic",
+              "pinTopic",
+              "unpinTopic",
+              "deleteTopic",
+              "createGroup",
+              "addMembers",
+              "setAdminPermissions"
+            ]
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "icon": {
+            "type": "integer"
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "clearIcon": {
+            "type": "boolean"
+          },
+          "groupType": {
+            "type": "string",
+            "enum": [
+              "group",
+              "supergroup",
+              "channel"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "forum": {
+            "type": "boolean"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "integer"
+              ]
+            }
+          },
+          "forwardCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "userId": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "rights": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "rank": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "action"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "createTopic"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target",
+                "title"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "editTopic"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target",
+                "threadId"
+              ],
+              "anyOf": [
+                {
+                  "required": [
+                    "title"
+                  ]
+                },
+                {
+                  "required": [
+                    "icon"
+                  ]
+                },
+                {
+                  "required": [
+                    "hidden"
+                  ]
+                },
+                {
+                  "required": [
+                    "clearIcon"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "closeTopic",
+                    "reopenTopic",
+                    "pinTopic",
+                    "unpinTopic",
+                    "deleteTopic"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target",
+                "threadId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "createGroup"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "title"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "addMembers"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target",
+                "members"
+              ],
+              "properties": {
+                "members": {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ]
+                  },
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "setAdminPermissions"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target",
+                "userId",
+                "rights"
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_manage_session",
+      "title": "Manage provider session",
+      "description": "Renew a WhatsApp QR session or repair a WhatsApp group encryption session.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "sessions.manage",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "renewQr",
+              "repairGroup"
+            ]
+          },
+          "confirmDisconnect": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "action"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "renewQr"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "confirmDisconnect"
+              ],
+              "properties": {
+                "confirmDisconnect": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "repairGroup"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target"
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_mark_read",
+      "title": "Mark conversation read",
+      "description": "Advance read state for a provider conversation or message.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "messages.markRead",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "messageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_publish_content",
+      "title": "Publish Instagram content",
+      "description": "Publish an Instagram image, carousel, reel or story.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "content.publish",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "image",
+              "carousel",
+              "reel",
+              "story"
+            ]
+          },
+          "caption": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "videoUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "minItems": 2
+          },
+          "shareToFeed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "kind"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "image"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "imageUrl"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "carousel"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "items"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "reel"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "videoUrl"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "story"
+                }
+              }
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "required": [
+                    "imageUrl"
+                  ]
+                },
+                {
+                  "required": [
+                    "videoUrl"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_resolve_target",
+      "title": "Resolve target",
+      "description": "Resolve a name, username or address to provider-native targets usable by send operations.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "targets.resolve",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "query"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_search_messages",
+      "title": "Search messages",
+      "description": "Search indexed or provider messages without inferring a channel from target shape.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "messages.search",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sender": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "channel"
+              ]
+            },
+            "then": {
+              "required": [
+                "accountId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "accountId"
+              ]
+            },
+            "then": {
+              "required": [
+                "channel"
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_send_draft",
+      "title": "Send approved draft",
+      "description": "Send a previously approved persisted draft.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "drafts.send",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "sendToken": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "sendToken"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_send_message",
+      "title": "Send message",
+      "description": "Send text, attachments, a reply, a Telegram thread message or Instagram DM.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "messages.send",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "mimeType": {
+                  "type": "string"
+                },
+                "caption": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            },
+            "default": []
+          },
+          "replyTo": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "template": {
+            "type": "object",
+            "description": "Provider template payload; unsupported on deployed Baileys WhatsApp accounts."
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "message"
+            ]
+          },
+          {
+            "required": [
+              "attachments"
+            ],
+            "properties": {
+              "attachments": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "template"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_start_digest",
+      "title": "Start unread digest",
+      "description": "Create an unread digest checkpoint and process its first batch.",
+      "effect": "internalWrite",
+      "authScope": "social.read",
+      "capability": "digests.start",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "whatsapp",
+                "telegram",
+                "instagram"
+              ],
+              "description": "Provider channel. Numeric targets never imply a channel."
+            },
+            "minItems": 1
+          },
+          "batchSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "maxChats": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "messageLimit": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 100,
+            "default": 30
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "default": "es"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_summarize",
+      "title": "Summarize conversation",
+      "description": "Compute a conversation, day, week or context summary from indexed messages.",
+      "effect": "compute",
+      "authScope": "social.read",
+      "capability": "conversations.summarize",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "conversation",
+              "context",
+              "day",
+              "week"
+            ],
+            "default": "conversation"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "weekStart": {
+            "type": "string",
+            "format": "date"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "lastN": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ]
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "range"
+              ],
+              "properties": {
+                "range": {
+                  "const": "context"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target",
+                "messageId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "range"
+              ],
+              "properties": {
+                "range": {
+                  "const": "day"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "date"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "range"
+              ],
+              "properties": {
+                "range": {
+                  "const": "week"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "weekStart"
+              ]
+            }
+          },
+          {
+            "if": {
+              "anyOf": [
+                {
+                  "not": {
+                    "required": [
+                      "range"
+                    ]
+                  }
+                },
+                {
+                  "properties": {
+                    "range": {
+                      "const": "conversation"
+                    }
+                  }
+                }
+              ]
+            },
+            "then": {
+              "required": [
+                "target"
+              ]
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_validate_account",
+      "title": "Validate account",
+      "description": "Validate provider credentials and report the account connection state.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "accounts.validate",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal' or 'professional'."
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal' or 'professional'."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ]
+}

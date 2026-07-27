@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
+import type { Account } from '../domain/account';
 
 export type SummaryStyle = 'brief' | 'detailed' | 'bullet';
 export type SummaryLanguage = 'en' | 'es';
@@ -14,6 +15,11 @@ export interface SummaryOptions {
     from?: Date;
     to?: Date;
   };
+}
+
+export interface SummaryFilter {
+  account: Account;
+  platform: 'whatsapp' | 'telegram';
 }
 
 export class SummarizationService {
@@ -164,7 +170,8 @@ export class SummarizationService {
   async summarizeDay(
     date: Date,
     _scope: 'all' | 'important' = 'all',
-    language: SummaryLanguage = 'en'
+    language: SummaryLanguage = 'en',
+    filter?: SummaryFilter
   ): Promise<string> {
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
@@ -172,14 +179,16 @@ export class SummarizationService {
     endOfDay.setHours(23, 59, 59, 999);
 
     // conversations.id IS the wa_chat_id
+    const filterSql = filter ? ` AND c.account = $3 AND m.platform = $4` : '';
     const result = await this.dbClient.query(
       `SELECT DISTINCT c.id, c.name
        FROM conversations c
        JOIN messages m ON m.conversation_id = c.id
        WHERE m.wa_timestamp >= $1 AND m.wa_timestamp <= $2
          AND (m.is_deleted IS NULL OR m.is_deleted = false)
+         ${filterSql}
        ORDER BY c.name`,
-      [startOfDay, endOfDay]
+      filter ? [startOfDay, endOfDay, filter.account, filter.platform] : [startOfDay, endOfDay]
     );
 
     if (result.rows.length === 0) {
@@ -215,7 +224,8 @@ export class SummarizationService {
   async summarizeWeek(
     weekStartDate: Date,
     _scope: 'all' | 'important' = 'all',
-    language: SummaryLanguage = 'en'
+    language: SummaryLanguage = 'en',
+    filter?: SummaryFilter
   ): Promise<string> {
     const startOfWeek = new Date(weekStartDate);
     startOfWeek.setHours(0, 0, 0, 0);
@@ -223,14 +233,16 @@ export class SummarizationService {
     endOfWeek.setDate(endOfWeek.getDate() + 7);
     endOfWeek.setHours(23, 59, 59, 999);
 
+    const filterSql = filter ? ` AND c.account = $3 AND m.platform = $4` : '';
     const result = await this.dbClient.query(
       `SELECT DISTINCT c.id, c.name
        FROM conversations c
        JOIN messages m ON m.conversation_id = c.id
        WHERE m.wa_timestamp >= $1 AND m.wa_timestamp <= $2
          AND (m.is_deleted IS NULL OR m.is_deleted = false)
+         ${filterSql}
        ORDER BY c.name`,
-      [startOfWeek, endOfWeek]
+      filter ? [startOfWeek, endOfWeek, filter.account, filter.platform] : [startOfWeek, endOfWeek]
     );
 
     if (result.rows.length === 0) {

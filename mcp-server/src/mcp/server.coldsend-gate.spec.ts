@@ -85,27 +85,45 @@ describe('handleSendFile cold-send gate (professional)', () => {
     );
   });
 
-  it('with a prior inbound, sends a @lid conversation verbatim (opaque Baileys identity)', async () => {
+  it('blocks a @lid media send without trusted phone evidence, even when an inbound exists', async () => {
     const { sendFile, connectorCall, query } = serverWith(hasInbound);
+    await expect(
+      sendFile({
+        conversationId: '198517716955152@lid',
+        fileUrl: 'http://f/x.jpg',
+        account: 'professional',
+      })
+    ).rejects.toThrow(/require trusted phone evidence/);
+    expect(query).not.toHaveBeenCalled();
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('lets a professional media send to a GROUP bypass the gate — bare jid, no DB touch (parity with text)', async () => {
+    const { sendFile, connectorCall, query } = serverWith(noInbound);
     await sendFile({
-      conversationId: '198517716955152@lid',
+      conversationId: 'professional:123456789-987654321@g.us',
       fileUrl: 'http://f/x.jpg',
+      caption: 'informe',
       account: 'professional',
     });
-    expect(query).toHaveBeenCalledWith(expect.any(String), ['professional:198517716955152@lid']);
+    expect(query).not.toHaveBeenCalled();
     expect(connectorCall).toHaveBeenCalledWith(
       'http://wa-professional',
       'POST',
       '/api/v1/messages/media/send',
-      expect.objectContaining({ conversationId: '198517716955152@lid' })
+      {
+        conversationId: '123456789-987654321@g.us',
+        fileUrl: 'http://f/x.jpg',
+        caption: 'informe',
+      }
     );
   });
 
-  it('blocks a professional media send to a group/unusable id before touching the DB (parity with text)', async () => {
+  it('still blocks a professional media send to an unusable (non-phone, non-group) id before touching the DB', async () => {
     const { sendFile, connectorCall, query } = serverWith(noInbound);
     await expect(
       sendFile({
-        conversationId: '123456789-987654321@g.us',
+        conversationId: 'not-a-jid',
         fileUrl: 'http://f/x.jpg',
         account: 'professional',
       })
@@ -211,30 +229,48 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
     );
   });
 
-  it('forwards to a @lid destination verbatim (opaque Baileys identity)', async () => {
+  it('blocks a @lid forward destination without trusted phone evidence', async () => {
     const { forward, connectorCall, query } = serverWith(hasInbound);
+    await expect(
+      forward({
+        chatId: 'professional:source@s.whatsapp.net',
+        messageId: 'm1',
+        toChatId: '198517716955152@lid',
+        account: 'professional',
+      })
+    ).rejects.toThrow(/require trusted phone evidence/);
+    expect(query).not.toHaveBeenCalled();
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('lets a professional forward INTO a group bypass the gate — bare destination jid, source untouched', async () => {
+    const { forward, connectorCall, query } = serverWith(noInbound);
     await forward({
       chatId: 'professional:source@s.whatsapp.net',
       messageId: 'm1',
-      toChatId: '198517716955152@lid',
+      toChatId: 'professional:123456789-987654321@g.us',
       account: 'professional',
     });
-    expect(query).toHaveBeenCalledWith(expect.any(String), ['professional:198517716955152@lid']);
+    expect(query).not.toHaveBeenCalled();
     expect(connectorCall).toHaveBeenCalledWith(
       'http://wa-professional',
       'POST',
       '/api/v1/messages/forward',
-      expect.objectContaining({ toChatId: '198517716955152@lid' })
+      {
+        chatId: 'professional:source@s.whatsapp.net',
+        messageId: 'm1',
+        toChatId: '123456789-987654321@g.us',
+      }
     );
   });
 
-  it('blocks a professional forward to a group/unusable destination before touching the DB', async () => {
+  it('still blocks a professional forward to an unusable (non-phone, non-group) destination before touching the DB', async () => {
     const { forward, connectorCall, query } = serverWith(noInbound);
     await expect(
       forward({
         chatId: 'professional:source@s.whatsapp.net',
         messageId: 'm1',
-        toChatId: '123456789-987654321@g.us',
+        toChatId: 'not-a-jid',
         account: 'professional',
       })
     ).rejects.toThrow(/valid individual phone or WhatsApp chat ID/);
@@ -258,23 +294,17 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
     );
   });
 
-  it('treats odd-cased/padded account strings as personal (ungated) — matches waUrl routing', async () => {
+  it('rejects unknown account spellings instead of silently routing them to personal', async () => {
     const { forward, connectorCall, query } = serverWith(noInbound);
-    // normalizeAccount and waUrl both reduce to a strict === 'professional'
-    // check, so 'PROFESSIONAL' / 'professional ' route to the personal
-    // connector AND skip the gate together — no split-brain bypass.
-    await forward({
-      chatId: 'source@s.whatsapp.net',
-      messageId: 'm1',
-      toChatId: '34660242739',
-      account: 'PROFESSIONAL',
-    });
+    await expect(
+      forward({
+        chatId: 'source@s.whatsapp.net',
+        messageId: 'm1',
+        toChatId: '34660242739',
+        account: 'PROFESSIONAL',
+      })
+    ).rejects.toThrow("WhatsApp account 'PROFESSIONAL' is not configured");
     expect(query).not.toHaveBeenCalled();
-    expect(connectorCall).toHaveBeenCalledWith(
-      'http://wa-personal',
-      'POST',
-      '/api/v1/messages/forward',
-      { chatId: 'source@s.whatsapp.net', messageId: 'm1', toChatId: '34660242739' }
-    );
+    expect(connectorCall).not.toHaveBeenCalled();
   });
 });

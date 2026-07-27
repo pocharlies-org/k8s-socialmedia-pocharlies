@@ -926,13 +926,21 @@ export function createRouter(
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
-        const { conversationId, fileUrl, caption, asSticker, kind } = req.body;
+        const { conversationId, fileUrl, caption, asSticker, kind, replyTo } = req.body as {
+          conversationId?: string;
+          fileUrl?: string;
+          caption?: string;
+          asSticker?: boolean;
+          kind?: string;
+          replyTo?: string;
+        };
         if (!conversationId || !fileUrl) {
           res.status(400).json({ error: 'Missing conversationId or fileUrl' });
           return;
         }
         await client.sendFile(conversationId, fileUrl, caption, {
           asSticker: !!asSticker || kind === 'sticker',
+          replyToMessageId: optionalString(replyTo),
         });
         res.json({ sent: true, sentAt: new Date().toISOString() });
       } catch (e) {

@@ -1,4 +1,13 @@
-import { TelegramClient, MemoryStorage, InputMedia, Message, Peer, User, Chat } from '@mtcute/node';
+import {
+  TelegramClient,
+  MemoryStorage,
+  InputMedia,
+  Message,
+  Peer,
+  User,
+  Chat,
+} from '@mtcute/node';
+import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
 import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
@@ -58,7 +67,7 @@ function mapChatType(peer: Peer | undefined | null): TelegramMessage['chatType']
   if (!peer) return 'private';
   if (peer.type === 'user') return 'private';
   // Chat with chatType: 'group' | 'supergroup' | 'channel' | 'gigagroup' | 'monoforum'
-  const ct = (peer as Chat).chatType;
+  const ct = peer.chatType;
   if (ct === 'group') return 'group';
   if (ct === 'channel') return 'channel';
   // supergroup, gigagroup, monoforum, forum all map to 'supergroup'
@@ -67,8 +76,8 @@ function mapChatType(peer: Peer | undefined | null): TelegramMessage['chatType']
 
 function chatTitleOf(peer: Peer | undefined | null): string | undefined {
   if (!peer) return undefined;
-  if (peer.type === 'chat') return (peer as Chat).title || undefined;
-  const u = peer as User;
+  if (peer.type === 'chat') return peer.title || undefined;
+  const u = peer;
   return u.displayName || u.firstName || u.username || undefined;
 }
 
@@ -268,7 +277,7 @@ export class TelegramClientWrapper extends EventEmitter {
 
       const senderId = sender ? sender.id.toString() : '';
       const isOutbound = message.isOutgoing;
-      const senderUser = sender && sender.type === 'user' ? (sender as User) : undefined;
+      const senderUser = sender && sender.type === 'user' ? sender : undefined;
 
       return {
         conversationId: chat.id.toString(),
@@ -328,6 +337,40 @@ export class TelegramClientWrapper extends EventEmitter {
       this.logger.error(`Failed to send message: ${e}`);
       throw e;
     }
+  }
+
+  /**
+   * Click a real inline callback button on a Telegram message.
+   */
+  async clickCallbackButton(
+    chatId: string,
+    messageId: number,
+    data: string,
+    options?: { timeoutMs?: number; fireAndForget?: boolean }
+  ): Promise<{
+    alert: boolean;
+    hasUrl: boolean;
+    nativeUi: boolean;
+    message: string | null;
+    url: string | null;
+    cacheTime: number;
+  }> {
+    if (!this.connected) throw new Error('Not connected to Telegram');
+    const answer = await this.client.getCallbackAnswer({
+      chatId: toMtcutePeer(chatId),
+      message: messageId,
+      data,
+      ...(options?.timeoutMs ? { timeout: options.timeoutMs } : {}),
+      ...(options?.fireAndForget ? { fireAndForget: true } : {}),
+    });
+    return {
+      alert: !!answer.alert,
+      hasUrl: !!answer.hasUrl,
+      nativeUi: !!answer.nativeUi,
+      message: answer.message || null,
+      url: answer.url || null,
+      cacheTime: answer.cacheTime ?? 0,
+    };
   }
 
   /**
@@ -425,7 +468,7 @@ export class TelegramClientWrapper extends EventEmitter {
     if (!this.connected) throw new Error('Not connected');
     const peer = await this.client.getPeer(toMtcutePeer(chatId));
     if (peer.type === 'user') {
-      const u = peer as User;
+      const u = peer;
       return {
         id: u.id.toString(),
         type: 'private',
@@ -435,7 +478,7 @@ export class TelegramClientWrapper extends EventEmitter {
         phone: u.phoneNumber || null,
       };
     }
-    const c = peer as Chat;
+    const c = peer;
     return {
       id: c.id.toString(),
       type: mapChatType(c),
@@ -496,6 +539,216 @@ export class TelegramClientWrapper extends EventEmitter {
         lastMessage,
       };
     });
+  }
+
+  /**
+   * Create a forum topic. Requires admin with `manageTopics` in the supergroup.
+   *
+   * `icon` is an RGB colour int chosen from the palette Telegram allows; the colour
+   * cannot be changed afterwards (only a custom-emoji icon can, via editForumTopic).
+   */
+  async createForumTopic(chatId: string, title: string, icon?: number): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const msg = await this.client.createForumTopic({
+      chatId: toMtcutePeer(chatId),
+      title,
+      ...(icon !== undefined ? { icon } : {}),
+    });
+    return { topicId: msg.id.toString(), title, chatId };
+  }
+
+  /**
+   * Modify a forum topic (title, closed/hidden state, or drop its custom-emoji icon).
+   * Requires admin with `manageTopics`.
+   */
+  async editForumTopic(
+    chatId: string,
+    topicId: number,
+    params: { title?: string; closed?: boolean; hidden?: boolean; clearIcon?: boolean }
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const msg = await this.client.editForumTopic({
+      chatId: toMtcutePeer(chatId),
+      topicId,
+      ...(params.title !== undefined ? { title: params.title } : {}),
+      ...(params.closed !== undefined ? { closed: params.closed } : {}),
+      ...(params.hidden !== undefined ? { hidden: params.hidden } : {}),
+      // mtcute takes `icon: tl.Long | null`; only the "remove icon" case is exposed
+      // over HTTP so we never have to carry a Long across the JSON boundary.
+      ...(params.clearIcon ? { icon: null } : {}),
+    });
+    return { topicId: topicId.toString(), chatId, serviceMessageId: msg.id.toString() };
+  }
+
+  /**
+   * Open or close a forum topic. Requires admin with `manageTopics`.
+   */
+  async toggleForumTopicClosed(chatId: string, topicId: number, closed: boolean): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const msg = await this.client.toggleForumTopicClosed({
+      chatId: toMtcutePeer(chatId),
+      topicId,
+      closed,
+    });
+    return { topicId: topicId.toString(), chatId, closed, serviceMessageId: msg.id.toString() };
+  }
+
+  /**
+   * Pin or unpin a forum topic. Requires admin with `manageTopics`.
+   */
+  async toggleForumTopicPinned(chatId: string, topicId: number, pinned: boolean): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.toggleForumTopicPinned({
+      chatId: toMtcutePeer(chatId),
+      topicId,
+      pinned,
+    });
+    return { topicId: topicId.toString(), chatId, pinned };
+  }
+
+  /**
+   * Delete a forum topic AND its entire history. Irreversible.
+   */
+  async deleteForumTopic(chatId: string, topicId: number): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.deleteForumTopicHistory(toMtcutePeer(chatId), topicId);
+    return { topicId: topicId.toString(), chatId, deleted: true };
+  }
+
+  /**
+   * Turn forum mode on/off for a supergroup. Owner only.
+   */
+  async updateForumSettings(
+    chatId: string,
+    isForum: boolean,
+    threadsMode: 'list' | 'tabs' = 'list'
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.updateForumSettings(
+      toMtcutePeer(chatId),
+      isForum ? { isForum: true, threadsMode } : null
+    );
+    return { chatId, isForum, ...(isForum ? { threadsMode } : {}) };
+  }
+
+  /**
+   * Change the chat title. Requires admin with the right permission.
+   */
+  async setChatTitle(chatId: string, title: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.setChatTitle(toMtcutePeer(chatId), title);
+    return { chatId, title };
+  }
+
+  /**
+   * Change the chat description ('' clears it). Requires admin.
+   */
+  async setChatDescription(chatId: string, description: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.setChatDescription(toMtcutePeer(chatId), description);
+    return { chatId, description };
+  }
+
+  /**
+   * Change the chat photo/video. Accepts a local path or an http(s) URL. Requires admin.
+   */
+  async setChatPhoto(
+    chatId: string,
+    filePath: string,
+    type: 'photo' | 'video' = 'photo'
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const media = await this.resolveMedia(filePath);
+    await this.client.setChatPhoto({ chatId: toMtcutePeer(chatId), type, media });
+    return { chatId, type };
+  }
+
+  /**
+   * Create a Telegram group, supergroup/forum, or broadcast channel.
+   * Members are added at creation for legacy groups and immediately afterwards
+   * for supergroups/channels.
+   */
+  async createManagedGroup(params: {
+    title: string;
+    type: 'group' | 'supergroup' | 'channel';
+    description?: string;
+    forum?: boolean;
+    members?: Array<string | number>;
+  }): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const members = params.members || [];
+    let chat: Chat;
+    let missing: any[] = [];
+
+    if (params.type === 'group') {
+      if (!members.length) {
+        throw new Error('A legacy group requires at least one member');
+      }
+      const created = await this.client.createGroup({
+        title: params.title,
+        users: members,
+      });
+      chat = created.chat;
+      missing = created.missing || [];
+    } else if (params.type === 'channel') {
+      chat = await this.client.createChannel({
+        title: params.title,
+        description: params.description,
+      });
+      if (members.length) {
+        missing = await this.client.addChatMembers(chat.id, members, { forwardCount: 0 });
+      }
+    } else {
+      chat = await this.client.createSupergroup({
+        title: params.title,
+        description: params.description,
+        forum: params.forum === true,
+      });
+      if (members.length) {
+        missing = await this.client.addChatMembers(chat.id, members, { forwardCount: 0 });
+      }
+    }
+
+    return {
+      chat: {
+        id: chat.id.toString(),
+        title: chat.title,
+        type: mapChatType(chat),
+      },
+      missing,
+    };
+  }
+
+  /** Add one or more members to an existing Telegram chat. */
+  async addManagedChatMembers(
+    chatId: string,
+    members: Array<string | number>,
+    forwardCount: number = 0
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const missing = await this.client.addChatMembers(
+      toMtcutePeer(chatId),
+      members,
+      { forwardCount }
+    );
+    return { chatId, membersRequested: members.length, missing };
+  }
+
+  /** Grant, update, or revoke a member's Telegram admin permissions. */
+  async setManagedChatAdmin(
+    chatId: string,
+    userId: string,
+    rights: Record<string, boolean>,
+    rank?: string
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.editAdminRights({
+      chatId: toMtcutePeer(chatId),
+      userId: toMtcutePeer(userId),
+      rights: rights as any,
+      ...(rank !== undefined ? { rank } : {}),
+    });
+    return { chatId, userId, rights, rank: rank || null };
   }
 
   /**
@@ -581,12 +834,18 @@ export class TelegramClientWrapper extends EventEmitter {
   /**
    * Forward a message between chats
    */
-  async forwardMessage(fromChatId: string, messageId: number, toChatId: string): Promise<void> {
+  async forwardMessage(
+    fromChatId: string,
+    messageId: number,
+    toChatId: string,
+    toThreadId?: number
+  ): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
     await this.client.forwardMessagesById({
       toChatId: toMtcutePeer(toChatId),
       fromChatId: toMtcutePeer(fromChatId),
       messages: [messageId],
+      ...(toThreadId !== undefined ? { toThreadId } : {}),
     });
   }
 
@@ -626,7 +885,12 @@ export class TelegramClientWrapper extends EventEmitter {
     chatId: string,
     messageId: number,
     limit = 100
-  ): Promise<Array<{ emoji: string; userId: number; displayName: string | null; mine: boolean }> | null> {
+  ): Promise<Array<{
+    emoji: string;
+    userId: number;
+    displayName: string | null;
+    mine: boolean;
+  }> | null> {
     if (!this.connected) throw new Error('Not connected');
     try {
       const peer = toMtcutePeer(chatId);
@@ -635,9 +899,14 @@ export class TelegramClientWrapper extends EventEmitter {
         message: messageId,
         limit,
       });
-      const raw = Array.isArray(result) ? result : (result?.items || []);
+      const raw = Array.isArray(result) ? result : result?.items || [];
       const meId = this.selfId ? Number(this.selfId) : null;
-      const out: Array<{ emoji: string; userId: number; displayName: string | null; mine: boolean }> = [];
+      const out: Array<{
+        emoji: string;
+        userId: number;
+        displayName: string | null;
+        mine: boolean;
+      }> = [];
       for (const pr of raw) {
         const emoji = typeof pr.emoji === 'string' ? pr.emoji : String(pr.emoji);
         const peerObj: any = pr.peer;
@@ -649,7 +918,9 @@ export class TelegramClientWrapper extends EventEmitter {
       }
       return out;
     } catch (e) {
-      this.logger.warn(`getReactionUsers failed for ${chatId}/${messageId}: ${(e as Error).message}`);
+      this.logger.warn(
+        `getReactionUsers failed for ${chatId}/${messageId}: ${(e as Error).message}`
+      );
       return null;
     }
   }
@@ -680,7 +951,7 @@ export class TelegramClientWrapper extends EventEmitter {
     } catch (e) {
       return null;
     }
-    const photo: any = (peer as any).photo;
+    const photo: any = peer.photo;
     if (!photo) return null;
     // mtcute exposes a downloadable file id under photo.big (full) or photo.small (thumb).
     // Different mtcute builds use slightly different shapes — try a few.
@@ -698,6 +969,22 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * Resolve a media reference to something mtcute can upload.
+   *
+   * Fetch remote http(s) URLs connector-side and upload the bytes. Passing a URL
+   * straight to InputMedia makes Telegram fetch it from the public internet, which
+   * fails for cluster-internal URLs (WEBPAGE_MEDIA_EMPTY). Local paths pass through.
+   */
+  private async resolveMedia(filePath: string | Buffer): Promise<string | Buffer> {
+    if (typeof filePath === 'string' && /^https?:\/\//i.test(filePath)) {
+      const resp = await fetch(filePath);
+      if (!resp.ok) throw new Error(`fetch media failed: ${resp.status} ${filePath}`);
+      return Buffer.from(await resp.arrayBuffer());
+    }
+    return filePath;
+  }
+
+  /**
    * Send a file to a chat
    */
   async sendFile(
@@ -708,18 +995,12 @@ export class TelegramClientWrapper extends EventEmitter {
       voiceNote?: boolean;
       videoNote?: boolean;
       sticker?: boolean;
+      replyTo?: number;
+      threadId?: number;
     }
   ): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    // Fetch remote http(s) URLs connector-side and upload the bytes. Passing a URL
-    // straight to InputMedia makes Telegram fetch it from the public internet, which
-    // fails for cluster-internal URLs (WEBPAGE_MEDIA_EMPTY).
-    let source: string | Buffer = filePath;
-    if (typeof filePath === 'string' && /^https?:\/\//i.test(filePath)) {
-      const resp = await fetch(filePath);
-      if (!resp.ok) throw new Error(`fetch media failed: ${resp.status} ${filePath}`);
-      source = Buffer.from(await resp.arrayBuffer());
-    }
+    const source = await this.resolveMedia(filePath);
     let media;
     if (options?.sticker) {
       // mtcute: stickers go as documents with the sticker MIME so Telegram renders
@@ -744,7 +1025,10 @@ export class TelegramClientWrapper extends EventEmitter {
         options?.caption ? { caption: options.caption } : undefined
       );
     }
-    await this.client.sendMedia(toMtcutePeer(chatId), media);
+    const effectiveReplyTo = options?.replyTo ?? options?.threadId;
+    const sendParams: CommonSendParams | undefined =
+      effectiveReplyTo !== undefined ? { replyTo: effectiveReplyTo } : undefined;
+    await this.client.sendMedia(toMtcutePeer(chatId), media, sendParams);
   }
 
   /**

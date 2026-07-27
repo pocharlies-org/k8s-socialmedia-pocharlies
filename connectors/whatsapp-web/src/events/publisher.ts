@@ -62,6 +62,13 @@ export class EventPublisher {
     } catch (error) {
       this.logger.warn(`NATS unavailable, running without event publishing: ${String(error)}`);
       this.connected = false;
+      // Clear the in-flight guard BEFORE scheduling: scheduleReconnect()
+      // no-ops while `connecting` is true, and `finally` runs only after this
+      // catch — leaving the guard set here silently cancelled the retry, so a
+      // failed INITIAL connect meant "running without event publishing"
+      // forever (observed in prod 2026-07-02: rollout raced a transient NATS
+      // refusal and both connectors never published again until restarted).
+      this.connecting = false;
       this.scheduleReconnect();
     } finally {
       this.connecting = false;

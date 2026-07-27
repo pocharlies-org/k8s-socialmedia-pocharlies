@@ -1,16 +1,8 @@
 export type WhatsAppCustomerAllowlistStatus =
-  | 'ready'
-  | 'seeded_missing_token'
-  | 'not_on_whatsapp'
-  | 'invalid_phone'
-  | 'probe_failed';
+  'ready' | 'seeded_missing_token' | 'not_on_whatsapp' | 'invalid_phone' | 'probe_failed';
 
 export type WhatsAppCustomerTokenStatus =
-  | 'unknown'
-  | 'has_token'
-  | 'missing_token'
-  | 'not_on_whatsapp'
-  | 'error';
+  'unknown' | 'has_token' | 'missing_token' | 'not_on_whatsapp' | 'error';
 
 export interface NormalizedWhatsAppPhone {
   phoneE164: string;

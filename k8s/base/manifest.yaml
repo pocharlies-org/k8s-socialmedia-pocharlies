@@ -210,7 +210,9 @@ spec:
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
           ports: [{ name: http, containerPort: 3001 }]
           env:
-            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: ENABLE_SENDING, value: "true" }
@@ -279,7 +281,9 @@ spec:
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
           ports: [{ name: http, containerPort: 3001 }]
           env:
-            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: ENABLE_SENDING, value: "true" }
@@ -287,6 +291,16 @@ spec:
             # professional account → published events carry account=professional
             - { name: CONNECTOR_ACCOUNT, value: "professional" }
             - { name: WA_QR_PUBLIC_URL, value: "https://whatsapp-pro.lan.e-dani.com/qr/page" }
+            # F1.7 honest voice (professional ONLY): upload voice notes to S3
+            # BEFORE the NATS emit and ride a presigned URL on the event so the
+            # synapse conversation adapter (on sauvage, outside the cluster) can
+            # transcribe them. S3_PUBLIC_ENDPOINT is the Traefik LAN
+            # IngressRoute for skirmshop-drive-s3 (LAN/Tailscale/pod CIDRs) —
+            # presigned URLs embed the signed host, so the in-cluster svc host
+            # would be unreachable from sauvage. Old images ignore these envs.
+            - { name: WA_EMIT_AUDIO_ATTACHMENTS, value: "true" }
+            - { name: S3_PUBLIC_ENDPOINT, value: "https://skirmshop-s3.lan.e-dani.com" }
+            - { name: S3_PRESIGN_EXPIRY_SECONDS, value: "3600" }
             - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
@@ -329,110 +343,6 @@ spec:
   ports: [{ name: http, port: 3001, targetPort: 3001 }]
 ---
 # ── WhatsApp professional Cloud API connector ─────────────────────────────────
-# Official WhatsApp Business Platform transport. Direct text sends are enabled,
-# but the MCP only permits them after an inbound customer message.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: whatsapp-cloud-connector
-  namespace: whatsapp-mcp
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: whatsapp-cloud-connector } }
-  template:
-    metadata: { labels: { app: whatsapp-cloud-connector } }
-    spec:
-      enableServiceLinks: false
-      nodeSelector: { kubernetes.io/hostname: sauvage, kubernetes.io/arch: amd64 }
-      # sauvage lleva taint role=edge:NoSchedule — sin esta toleration el pod es
-      # imposible de programar (selector y toleration deben viajar juntos).
-      tolerations:
-        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
-      containers:
-        - name: whatsapp-cloud-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:latest
-          ports: [{ name: http, containerPort: 3004 }]
-          env:
-            - { name: PORT, value: "3004" }
-            - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
-            - { name: CONNECTOR_ACCOUNT, value: "professional" }
-            - { name: WHATSAPP_GRAPH_API_VERSION, value: "v25.0" }
-            - { name: ENABLE_SENDING, value: "true" }
-            - { name: EMERGENCY_DISABLE_SENDING, value: "false" }
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
-          resources:
-            requests: { cpu: 30m, memory: 64Mi }
-            limits:   { memory: 256Mi }
-          readinessProbe:
-            httpGet: { path: /status, port: 3004 }
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 3
-          livenessProbe:
-            httpGet: { path: /status, port: 3004 }
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            timeoutSeconds: 3
----
-apiVersion: v1
-kind: Service
-metadata: { name: whatsapp-cloud-connector, namespace: whatsapp-mcp }
-spec:
-  selector: { app: whatsapp-cloud-connector }
-  ports: [{ name: http, port: 3004, targetPort: 3004 }]
----
-# Playwright worker that consumes first-contact fallback rows and presses send
-# in the official WhatsApp Web UI. It uses its own persistent browser profile;
-# scan the QR once at https://whatsapp-open.lan.e-dani.com/ when required.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: whatsapp-open-worker-professional
-  namespace: whatsapp-mcp
-spec:
-  replicas: 1
-  strategy: { type: Recreate }
-  selector: { matchLabels: { app: whatsapp-open-worker-professional } }
-  template:
-    metadata: { labels: { app: whatsapp-open-worker-professional } }
-    spec:
-      enableServiceLinks: false
-      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
-      containers:
-        - name: whatsapp-open-worker-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-open-worker:latest
-          ports: [{ name: http, containerPort: 3005 }]
-          env:
-            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-            - { name: CONNECTOR_ACCOUNT, value: "professional" }
-            - { name: WA_OPEN_WORKER_PROFILE_DIR, value: "/app/browser-profile" }
-            - { name: PLAYWRIGHT_BROWSERS_PATH, value: "/app/browser-profile/ms-playwright" }
-            - { name: WA_OPEN_WORKER_HEADLESS, value: "false" }
-            - { name: WA_OPEN_WORKER_POLL_INTERVAL_MS, value: "5000" }
-            - { name: WA_OPEN_WORKER_LOGIN_RETRY_MS, value: "60000" }
-            - { name: WA_OPEN_WORKER_SEND_SETTLE_MS, value: "5000" }
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
-          resources:
-            requests: { cpu: 200m, memory: 512Mi }
-            limits:   { memory: 2Gi }
-          readinessProbe:
-            httpGet: { path: /status, port: 3005 }
-            initialDelaySeconds: 15
-            timeoutSeconds: 3
-          volumeMounts:
-            - name: browser-profile
-              mountPath: /app/browser-profile
-      volumes:
-        - name: browser-profile
-          persistentVolumeClaim: { claimName: whatsapp-open-worker-profile-professional }
----
-apiVersion: v1
-kind: Service
-metadata: { name: whatsapp-open-worker-professional, namespace: whatsapp-mcp }
-spec:
-  selector: { app: whatsapp-open-worker-professional }
-  ports: [{ name: http, port: 3005, targetPort: 3005 }]
----
 # Brain ingestion: push WhatsApp/Telegram messages into SkirmBrain RAG, one
 # instance per account (personal -> personal, professional -> skirmshop).
 # Runs the mcp-server image (has pg + tsx + the messages schema). Idempotent:
@@ -542,8 +452,8 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 30m, memory: 64Mi }
-            limits:   { memory: 256Mi }
+            requests: { cpu: 30m, memory: 256Mi }
+            limits:   { memory: 768Mi }   # OOM audit 2026-07-06: p95/max ~255/290Mi; 512Mi still OOMKilled once under burst.
 ---
 apiVersion: v1
 kind: Service
@@ -562,7 +472,10 @@ spec:
   replicas: 1
   selector: { matchLabels: { app: mcp-server } }
   template:
-    metadata: { labels: { app: mcp-server } }
+    metadata:
+      labels: { app: mcp-server }
+      annotations:
+        contracts.e-dani.com/socialmedia-digest: "sha256:2eb2860fb6cc00bfe3db17ab449ec07addade602774ddfbd96db9cd704daaae4"
     spec:
       enableServiceLinks: false
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
@@ -622,7 +535,10 @@ spec:
   strategy: { type: Recreate }
   selector: { matchLabels: { app: mcp-sse } }
   template:
-    metadata: { labels: { app: mcp-sse } }
+    metadata:
+      labels: { app: mcp-sse }
+      annotations:
+        contracts.e-dani.com/socialmedia-digest: "sha256:2eb2860fb6cc00bfe3db17ab449ec07addade602774ddfbd96db9cd704daaae4"
     spec:
       enableServiceLinks: false
       nodeSelector:
@@ -642,7 +558,9 @@ spec:
             # SSE_STREAMABLE_MAX_SESSIONS (100) default in code.
             - { name: SSE_STREAMABLE_IDLE_MS, value: "600000" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-            - { name: REDIS_URL, value: "redis://whatsapp-mcp-redis.whatsapp-mcp.svc.cluster.local:6379" }
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: TELEGRAM_CONNECTOR_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
@@ -687,27 +605,6 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: whatsapp-cloud-public
-  namespace: whatsapp-mcp
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: whatsapp-cloud.e-dani.com
-    external-dns.alpha.kubernetes.io/target: "57.129.17.172"
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
-spec:
-  entryPoints: [websecure]
-  ingressClassName: traefik-edge
-  routes:
-    - match: Host(`whatsapp-cloud.e-dani.com`)
-      kind: Rule
-      services:
-        - name: whatsapp-cloud-connector
-          port: 3004
-  tls:
-    store: { name: default, namespace: traefik-edge }
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
   name: whatsapp-public
   namespace: whatsapp-mcp
   annotations:
@@ -723,31 +620,6 @@ spec:
       services:
         - name: whatsapp-connector
           port: 3001
-  tls:
-    store: { name: default, namespace: traefik-edge }
----
-# Public temporary access for the Playwright WhatsApp Web sender panel. This
-# avoids LAN-only DNS/networking for browsers that run outside the home network.
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: whatsapp-open-public
-  namespace: whatsapp-mcp
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: whatsapp-open.e-dani.com
-    external-dns.alpha.kubernetes.io/target: "57.129.17.172"
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
-spec:
-  entryPoints: [websecure]
-  ingressClassName: traefik-edge
-  routes:
-    - match: Host(`whatsapp-open.e-dani.com`)
-      kind: Rule
-      middlewares:
-        - { name: sso-chain, namespace: keycloak }
-      services:
-        - name: whatsapp-open-worker-professional
-          port: 3005
   tls:
     store: { name: default, namespace: traefik-edge }
 ---
@@ -771,23 +643,6 @@ spec:
   tls:
     store: { name: default, namespace: traefik-lan }
 ---
-# LAN-only IngressRoute for the WhatsApp Cloud connector status/API.
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: whatsapp-cloud-lan
-  namespace: whatsapp-mcp
-spec:
-  entryPoints: [websecure]
-  routes:
-    - match: Host(`whatsapp-cloud.lan.e-dani.com`)
-      kind: Rule
-      services:
-        - name: whatsapp-cloud-connector
-          port: 3004
-  tls:
-    store: { name: default, namespace: traefik-lan }
----
 # LAN-only IngressRoute for the professional (business) Baileys connector — used
 # only for QR/session inspection if we deliberately re-enable Baileys later.
 apiVersion: traefik.io/v1alpha1
@@ -805,48 +660,6 @@ spec:
           port: 3001
   tls:
     store: { name: default, namespace: traefik-lan }
----
-# LAN-only status/screenshot page for the Playwright WhatsApp Web sender.
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: whatsapp-open-worker-lan
-  namespace: whatsapp-mcp
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: whatsapp-open.lan.e-dani.com
-    external-dns.alpha.kubernetes.io/target: "192.168.50.240"
-spec:
-  entryPoints: [websecure]
-  routes:
-    - match: Host(`whatsapp-open.lan.e-dani.com`)
-      kind: Rule
-      services:
-        - name: whatsapp-open-worker-professional
-          port: 3005
-  tls:
-    store: { name: default, namespace: traefik-lan }
----
-# LAN alias on *.e-dani.com for browsers that bypass the internal
-# *.lan.e-dani.com DNS rewrite.
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: whatsapp-open-worker-lan-alias
-  namespace: traefik-lan
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: whatsapp-open-lan.e-dani.com
-    external-dns.alpha.kubernetes.io/target: "192.168.50.240"
-spec:
-  entryPoints: [websecure]
-  routes:
-    - match: Host(`whatsapp-open-lan.e-dani.com`)
-      kind: Rule
-      services:
-        - name: whatsapp-open-worker-professional
-          namespace: whatsapp-mcp
-          port: 3005
-  tls:
-    secretName: wildcard-edani-tls
 ---
 # LAN-only IngressRoute for the MCP SSE server (port 3010) — so Claude/Codex
 # clients on any LAN/Tailscale host (pc, mac, dgx, dgx2, x86, sauvage) can
@@ -912,8 +725,8 @@ spec:
             - { name: MINIO_BUCKET, value: "socialmedia-media" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 100m, memory: 512Mi }
-            limits:   { memory: 2Gi }   # Whisper-small model needs ~1GB RAM
+            requests: { cpu: 100m, memory: 1Gi }
+            limits:   { memory: 3Gi }   # OOM audit 2026-07-06: p95/max ~1850/1929Mi, too close to 2Gi.
           readinessProbe:
             httpGet: { path: /health, port: 3080 }
             initialDelaySeconds: 10
@@ -964,8 +777,8 @@ spec:
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: TELEGRAM_SESSION_STRING_PROFESSIONAL } }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 30m, memory: 64Mi }
-            limits:   { memory: 256Mi }
+            requests: { cpu: 30m, memory: 256Mi }
+            limits:   { memory: 768Mi }   # OOM audit 2026-07-06: p95/max ~230Mi; keep headroom for reconnect/session bursts.
 ---
 apiVersion: v1
 kind: Service
@@ -1016,8 +829,8 @@ spec:
             - { name: MINIO_BUCKET, value: "socialmedia-media" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
-            requests: { cpu: 100m, memory: 512Mi }
-            limits:   { memory: 2Gi }
+            requests: { cpu: 100m, memory: 1Gi }
+            limits:   { memory: 3Gi }   # OOM audit 2026-07-06: personal sync reached ~1.9Gi; keep both profiles aligned.
           readinessProbe:
             httpGet: { path: /health, port: 3080 }
             initialDelaySeconds: 10

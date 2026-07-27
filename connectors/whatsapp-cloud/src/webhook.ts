@@ -43,7 +43,7 @@ export function createWebhookRouter(
 
     res.sendStatus(200);
 
-    const body = req.body as any;
+    const body = req.body;
     if (body?.object !== 'whatsapp_business_account') {
       logger.warn({ object: body?.object }, 'Ignoring non-WhatsApp webhook');
       return;
@@ -122,7 +122,8 @@ function toMessageReceivedEvent(message: any): MessageReceivedEvent | null {
 
 function extractContent(message: any): string {
   if (message.type === 'text') return String(message.text?.body || '');
-  if (message.type === 'button') return String(message.button?.text || message.button?.payload || '');
+  if (message.type === 'button')
+    return String(message.button?.text || message.button?.payload || '');
   if (message.type === 'interactive') {
     return (
       message.interactive?.button_reply?.title ||

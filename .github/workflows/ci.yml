@@ -45,14 +45,14 @@ jobs:
           exit 1
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Matches the images and the root engines field. Node 20 went EOL in
+          # April 2026 and cannot run the pinned pnpm.
+          node-version: "22"
+      # corepack picks up packageManager (pnpm@11.17.0) from package.json.
       - run: corepack enable
-      - name: Install native build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential python3-setuptools
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @mcp-socialmedia/server test -- --runInBand
+      - run: pnpm contract:check
+      - run: pnpm --filter @mcp-socialmedia/server test --runInBand
 
   standard:
     needs: [s3-tests]
@@ -60,6 +60,8 @@ jobs:
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@main
     with:
       runner: arc-k8s
+      node_version: "22"
+      pnpm_version: "11.17.0"
       docker_build_timeout: 12m
       kustomize_paths: k8s/overlays/stg k8s/overlays/prod
       images: |

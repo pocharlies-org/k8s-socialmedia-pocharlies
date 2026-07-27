@@ -31,6 +31,13 @@ const LEGACY_MINIO_USE_SSL =
   'true';
 const LEGACY_BUCKET =
   process.env.LEGACY_MINIO_BUCKET || process.env.MINIO_BUCKET || 'socialmedia-media';
+// Out-of-cluster S3 endpoint (e.g. the Traefik LAN IngressRoute
+// https://skirmshop-s3.lan.e-dani.com). Used ONLY to presign GET URLs that
+// consumers outside the cluster (synapse adapters on sauvage) can fetch —
+// presigned URLs embed the signed host, so the in-cluster svc endpoint would
+// produce URLs that never resolve out there. Unset ⇒ presigning disabled.
+const S3_PUBLIC_ENDPOINT = process.env.S3_PUBLIC_ENDPOINT || '';
+const S3_PRESIGN_EXPIRY_SECONDS = parseInt(process.env.S3_PRESIGN_EXPIRY_SECONDS || '3600', 10);
 
 function endpointParts(
   endpoint: string,
@@ -75,6 +82,10 @@ const legacyClient = clientFor(
   LEGACY_MINIO_SECRET_KEY,
   LEGACY_MINIO_USE_SSL
 );
+// Same credentials as `client`, different (publicly reachable) signed host.
+const publicClient = S3_PUBLIC_ENDPOINT
+  ? clientFor(S3_PUBLIC_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_USE_SSL)
+  : null;
 
 function withPrefix(key: string): string {
   const clean = key.replace(/^\/+/, '');
@@ -143,6 +154,30 @@ export async function uploadMedia(
   if (fileName) meta['x-amz-meta-filename'] = fileName;
   await client.putObject(BUCKET, storageKey, data, data.length, meta);
   return { storageKey: s3Uri(storageKey), fileSize: data.length };
+}
+
+/** Configured presign expiry (seconds); ridden as attachment metadata. */
+export function presignExpirySeconds(): number {
+  return S3_PRESIGN_EXPIRY_SECONDS;
+}
+
+/**
+ * Presigned GET URL for a stored object, signed against S3_PUBLIC_ENDPOINT so
+ * consumers OUTSIDE the cluster (synapse adapters on sauvage) can fetch it
+ * without credentials or headers (auth rides in the query string).
+ *
+ * Returns null when presigning is unavailable: no public endpoint configured,
+ * or the ref points at the legacy MinIO (which has no out-of-cluster
+ * exposure). Presigning is a local signature computation — no network call.
+ */
+export async function presignMediaUrl(
+  storageKey: string,
+  expirySeconds: number = S3_PRESIGN_EXPIRY_SECONDS
+): Promise<string | null> {
+  if (!publicClient) return null;
+  const ref = parseStorageRef(storageKey);
+  if (ref.legacy) return null;
+  return publicClient.presignedGetObject(ref.bucket, ref.key, expirySeconds);
 }
 
 /** Fetch a stored object from MinIO by its storage key, as a Buffer. */

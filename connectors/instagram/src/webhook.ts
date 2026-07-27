@@ -78,7 +78,10 @@ export function createWebhookRouter(
     res.sendStatus(200);
 
     // TEMP: log everything to diagnose
-    logger.info({ object: body.object, body: JSON.stringify(body).substring(0, 1500) }, 'Webhook POST received');
+    logger.info(
+      { object: body.object, body: JSON.stringify(body).substring(0, 1500) },
+      'Webhook POST received'
+    );
 
     if (body.object !== 'instagram') {
       logger.warn({ object: body.object }, 'Ignoring non-instagram webhook');
@@ -103,10 +106,14 @@ export function createWebhookRouter(
           };
 
           if (messaging.message.attachments) {
-            event.text = event.text || `[${messaging.message.attachments[0]?.type || 'attachment'}]`;
+            event.text =
+              event.text || `[${messaging.message.attachments[0]?.type || 'attachment'}]`;
           }
 
-          logger.info({ account, senderId: event.senderId, text: event.text?.substring(0, 50) }, 'DM received');
+          logger.info(
+            { account, senderId: event.senderId, text: event.text?.substring(0, 50) },
+            'DM received'
+          );
           onEvent(account, event);
         }
       }
@@ -116,7 +123,8 @@ export function createWebhookRouter(
         // DMs come through `changes` with field=messages in the Business Login API
         if (change.field === 'messages') {
           const value = change.value || {};
-          const tsNum = typeof value.timestamp === 'string' ? parseInt(value.timestamp, 10) : value.timestamp;
+          const tsNum =
+            typeof value.timestamp === 'string' ? parseInt(value.timestamp, 10) : value.timestamp;
           const event: WebhookEvent = {
             type: 'dm',
             senderId: value.sender?.id || '',
@@ -129,7 +137,10 @@ export function createWebhookRouter(
           if (value.message?.attachments) {
             event.text = event.text || `[${value.message.attachments[0]?.type || 'attachment'}]`;
           }
-          logger.info({ account, senderId: event.senderId, text: event.text?.substring(0, 50) }, 'DM received (changes)');
+          logger.info(
+            { account, senderId: event.senderId, text: event.text?.substring(0, 50) },
+            'DM received (changes)'
+          );
           onEvent(account, event);
           continue;
         }
@@ -145,7 +156,10 @@ export function createWebhookRouter(
             timestamp: new Date().toISOString(),
             raw: change.value,
           };
-          logger.info({ account, username: event.senderUsername, text: event.text?.substring(0, 50) }, 'Comment received');
+          logger.info(
+            { account, username: event.senderUsername, text: event.text?.substring(0, 50) },
+            'Comment received'
+          );
           onEvent(account, event);
         }
 

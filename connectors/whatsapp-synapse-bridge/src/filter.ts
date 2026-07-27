@@ -3,15 +3,28 @@ import { MessageReceivedEvent } from '@mcp-socialmedia/shared';
 /**
  * FAIL-CLOSED forwarding filter for the WhatsApp -> synapse bridge.
  *
- * The existing auto-reply-worker is fail-OPEN (when unsure, it acts). This
- * bridge does the OPPOSITE: when ANYTHING is uncertain we DROP. We only forward
- * a message when every gate explicitly passes.
+ * This bridge is intentionally fail-CLOSED: when ANYTHING is uncertain we DROP.
+ * We only forward a message when every gate explicitly passes.
+ *
+ * F0.5 exception (docs/48 in synapse): a message that is OUR OWN outbound on
+ * the professional account (operator replying from the linked phone) passes
+ * the same gates and is forwarded FLAGGED `fromMe: true` instead of dropped —
+ * synapse needs it as a "team touch". Uncertainty still drops (own JID
+ * unknown => drop everything).
  */
 
 export interface FilterResult {
   forward: boolean;
   /** Machine-readable reason; safe to log (never contains PII). */
   reason: string;
+  /**
+   * True when the forwarded message is the account's OWN outbound (operator
+   * replying from the linked phone) — a team touch, not customer inbound
+   * (F0.5). Only ever set on `forward: true` results; the caller must stamp
+   * `fromMe: true` on the outgoing event so downstream never has to re-derive
+   * ownership from JIDs.
+   */
+  fromMe?: boolean;
 }
 
 /**
@@ -26,6 +39,9 @@ const ALLOWED_1TO1_SUFFIXES = ['@s.whatsapp.net', '@c.us', '@lid'] as const;
 /** Multi-party / non-personal endpoints we always drop. */
 const GROUP_LIKE_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'] as const;
 const STATUS_BROADCAST = 'status@broadcast';
+const TRACKING_OPT_IN_PREFIX =
+  'hola skirmshop, quiero recibir seguimiento por whatsapp del pedido ';
+const TRACKING_OPT_IN_ORDER_RE = /\bord\d{3,}\b/i;
 
 /**
  * Normalize a WhatsApp JID for own-identity comparison.
@@ -56,6 +72,16 @@ export function normalizeJid(jid: string | null | undefined): string {
 
 function hasSuffix(jid: string, suffixes: readonly string[]): boolean {
   return suffixes.some(s => jid.endsWith(s));
+}
+
+function isTrackingOptInControlMessage(content: string | null | undefined): boolean {
+  if (!content || typeof content !== 'string') return false;
+  const text = content.trim().toLowerCase();
+  return (
+    text.startsWith(TRACKING_OPT_IN_PREFIX) &&
+    TRACKING_OPT_IN_ORDER_RE.test(text) &&
+    text.includes('https://track.skirmshop.es/labels/track/')
+  );
 }
 
 /**
@@ -108,29 +134,40 @@ export function shouldForward(
     return { forward: false, reason: 'missing-wa-message-id' };
   }
 
-  // 5. Own-JID guard: never forward our own outbound (reply-to-self loop).
-  //    Two independent signals — explicit fromMe (if the event ever carries it)
-  //    and sender == own JID — both fail-closed.
-  const eventWithFromMe = event as MessageReceivedEvent & { fromMe?: boolean };
-  if (eventWithFromMe.fromMe === true) {
-    return { forward: false, reason: 'from-me-flag' };
-  }
+  // 5. Own-message detection (F0.5: team touch). Two independent signals —
+  //    the explicit connector flag (`event.fromMe`) and sender == own JID.
+  //    Since F0.5 an own message on the professional account is FORWARDED
+  //    flagged `fromMe: true` (the operator answering from the phone is a
+  //    team touch synapse must see), no longer silently dropped. Detection
+  //    itself stays fail-closed: when the own JID is unknown we cannot rule
+  //    out a self-message, so we keep dropping EVERYTHING (pre-existing
+  //    degraded-mode behavior until the connector's /me succeeds).
   if (!ownJid) {
-    // Own JID unknown => we cannot rule out a self-message => drop everything.
     return { forward: false, reason: 'own-jid-unknown' };
   }
   const sender = normalizeJid(event.senderWaId);
   if (!sender) {
     return { forward: false, reason: 'missing-sender' };
   }
-  if (sender === normalizeJid(ownJid)) {
-    return { forward: false, reason: 'sender-is-self' };
-  }
+  const fromMe = event.fromMe === true || sender === normalizeJid(ownJid);
 
-  // 6. Dedup: already-seen waMessageId => drop.
+  // 6. Dedup: already-seen waMessageId => drop. Applies to fromMe messages
+  //    too (a re-published operator reply must not double-count as two team
+  //    touches downstream).
   if (dedup.has(waMessageId)) {
     return { forward: false, reason: 'duplicate' };
   }
 
+  // 7. Tracking opt-in control messages are owned by skirmshop-labels'
+  //    whatsapp-optin-ingest worker. Forwarding them to the general Synapse
+  //    conversation assistant produces an extra customer reply on top of the
+  //    opt-in confirmation and catch-up tracking notification.
+  if (!fromMe && isTrackingOptInControlMessage(event.content)) {
+    return { forward: false, reason: 'tracking-opt-in-control-message' };
+  }
+
+  if (fromMe) {
+    return { forward: true, reason: 'forward-from-me', fromMe: true };
+  }
   return { forward: true, reason: 'forward' };
 }

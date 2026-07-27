@@ -26,6 +26,7 @@ export interface TelegramMessageReceivedEvent {
   }>;
   isForwarded: boolean;
   replyToMessageId?: string;
+  topicId?: string;
   isOutbound: boolean;
   chatType: string;
   chatTitle?: string;

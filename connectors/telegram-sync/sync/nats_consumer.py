@@ -95,21 +95,6 @@ async def _handle_event(event: dict, pool: asyncpg.Pool, connector: ConnectorCli
             )
         )
 
-    # Auto-reply webhook for inbound text only.
-    if kwargs["direction"] == "inbound" and mt == "text" and kwargs["content"]:
-        from sync.bridge import notify_autoreply
-        asyncio.create_task(notify_autoreply(
-            chat_id=chat_id,
-            chat_title=kwargs["chat_title"],
-            sender_id=kwargs["sender_id"],
-            sender_name=kwargs["sender_name"],
-            content=kwargs["content"],
-            message_type="text",
-            telegram_message_id=kwargs["telegram_message_id"],
-            timestamp=kwargs["timestamp"].isoformat(),
-            account=account,
-        ))
-
 
 async def run(pool: asyncpg.Pool, connector: ConnectorClient, account: str) -> None:
     """Connect to NATS and stream realtime events until cancelled. nats-py

@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch(err => {
   console.error('Login failed:', err);
   process.exit(1);
 });

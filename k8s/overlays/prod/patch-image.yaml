@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:download-media-id-fix-20260624@sha256:6d0ebd34f94746706055ff5d5fd7e53c9d646db8d9d996f4ac2df779556ac124
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:socialmedia-v2-c88dce16@sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:download-media-id-fix-20260624@sha256:6d0ebd34f94746706055ff5d5fd7e53c9d646db8d9d996f4ac2df779556ac124
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:socialmedia-v2-c88dce16@sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -32,7 +32,7 @@ spec:
     spec:
       containers:
         - name: instagram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:v1.3.12@sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
+          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:socialmedia-v2-c88dce16@sha256:c12e23221a93e8a42985abde0e9858e1fe17713105b076328487e24caa719030
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:synapse-unread-cache-20260616-1@sha256:9688eb22a93a5bce04e6dc34bef3bc3d9d3cd04d24df989758bcde1ed89a21ef
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:socialmedia-v2-c88dce16@sha256:6467b5dac43b30dec961b8484978b5692d00a74bf76b022df81cdf8fdcc4dac2
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:coldsend-gate-fix-20260624@sha256:d9199b537327c71cf3b3042880a280d0d5b1f337dee47db6710c61a3e30a8012
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:socialmedia-v2-c88dce16@sha256:660119ecb97a5489921ed6285dce069176a160742bd0c9a9cb328b09ae799e12
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -68,19 +68,7 @@ spec:
     spec:
       containers:
         - name: telegram-sync
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.38@sha256:37f5b886685b0682bdfa070df67d98cf76e2963e0c61406b634330e72d31bc06
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: whatsapp-cloud-connector
-  namespace: whatsapp-mcp
-spec:
-  template:
-    spec:
-      containers:
-        - name: whatsapp-cloud-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-cloud-connector:cloud-api-20260604@sha256:017e016d89c1b22dc62ba13c41599f2c12a0d6a08fe85ad57a5acb1bd61c7fa0
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:socialmedia-v2-c88dce16@sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -92,4 +80,4 @@ spec:
     spec:
       containers:
         - name: whatsapp-synapse-bridge
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge:whatsapp-ingress-20260623@sha256:d126b29aff8a28869fe397cc6ee522a74141c97a6ba8e8943aeddfcfb8bc63f6
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge:socialmedia-v2-c88dce16@sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

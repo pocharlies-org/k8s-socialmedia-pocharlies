@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import OpenAI from 'openai';
 import pino from 'pino';
-import { accountKey, normalizeAccount } from '../domain/account';
+import { accountKey, type Account } from '../domain/account';
 
 export interface SearchResult {
   messageId: string;
@@ -11,6 +11,8 @@ export interface SearchResult {
   waTimestamp: Date;
   similarity?: number;
   rank?: number;
+  platform: string;
+  account: string;
 }
 
 export interface SearchOptions {
@@ -20,7 +22,8 @@ export interface SearchOptions {
   sender?: string;
   limit?: number;
   /** Account scope (personal|professional). Defaults to personal. */
-  account?: string;
+  account?: Account;
+  platform?: 'whatsapp' | 'telegram';
 }
 
 export class SearchService {
@@ -56,6 +59,8 @@ export class SearchService {
         m.content,
         m.sender_wa_id,
         m.wa_timestamp,
+        m.platform,
+        m.account,
         ts_rank(to_tsvector('english', m.content), plainto_tsquery('english', $1)) as rank
       FROM messages m
       WHERE to_tsvector('english', m.content) @@ plainto_tsquery('english', $1)
@@ -66,9 +71,13 @@ export class SearchService {
     let paramIndex = 2;
 
     if (chatId) {
-      // conversations.id IS the wa_chat_id
-      sql += ` AND m.conversation_id = $${paramIndex}`;
-      params.push(accountKey(normalizeAccount(options.account), chatId));
+      if (options.account) {
+        sql += ` AND m.conversation_id = $${paramIndex}`;
+        params.push(accountKey(options.account, chatId));
+      } else {
+        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
+        params.push([chatId, accountKey('professional', chatId)]);
+      }
       paramIndex++;
     }
 
@@ -85,14 +94,26 @@ export class SearchService {
     }
 
     if (sender) {
-      sql += ` AND m.sender_wa_id = $${paramIndex}`;
-      params.push(accountKey(normalizeAccount(options.account), sender));
+      if (options.account) {
+        sql += ` AND m.sender_wa_id = $${paramIndex}`;
+        params.push(accountKey(options.account, sender));
+      } else {
+        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
+        params.push([sender, accountKey('professional', sender)]);
+      }
       paramIndex++;
     }
 
-    sql += ` AND m.account = $${paramIndex}`;
-    params.push(normalizeAccount(options.account));
-    paramIndex++;
+    if (options.account) {
+      sql += ` AND m.account = $${paramIndex}`;
+      params.push(options.account);
+      paramIndex++;
+    }
+    if (options.platform) {
+      sql += ` AND m.platform = $${paramIndex}`;
+      params.push(options.platform);
+      paramIndex++;
+    }
 
     sql += ` ORDER BY rank DESC, m.wa_timestamp DESC LIMIT $${paramIndex}`;
     params.push(limit);
@@ -106,6 +127,8 @@ export class SearchService {
       senderWaId: row.sender_wa_id,
       waTimestamp: row.wa_timestamp,
       rank: parseFloat(row.rank),
+      platform: row.platform,
+      account: row.account,
     }));
   }
 
@@ -131,6 +154,8 @@ export class SearchService {
         m.content,
         m.sender_wa_id,
         m.wa_timestamp,
+        m.platform,
+        m.account,
         1 - (me.embedding <=> $1::vector) as similarity
       FROM messages m
       JOIN message_embeddings me ON m.id = me.message_id
@@ -142,8 +167,13 @@ export class SearchService {
     let paramIndex = 2;
 
     if (chatId) {
-      sql += ` AND m.conversation_id = $${paramIndex}`;
-      params.push(accountKey(normalizeAccount(options.account), chatId));
+      if (options.account) {
+        sql += ` AND m.conversation_id = $${paramIndex}`;
+        params.push(accountKey(options.account, chatId));
+      } else {
+        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
+        params.push([chatId, accountKey('professional', chatId)]);
+      }
       paramIndex++;
     }
 
@@ -160,14 +190,26 @@ export class SearchService {
     }
 
     if (sender) {
-      sql += ` AND m.sender_wa_id = $${paramIndex}`;
-      params.push(accountKey(normalizeAccount(options.account), sender));
+      if (options.account) {
+        sql += ` AND m.sender_wa_id = $${paramIndex}`;
+        params.push(accountKey(options.account, sender));
+      } else {
+        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
+        params.push([sender, accountKey('professional', sender)]);
+      }
       paramIndex++;
     }
 
-    sql += ` AND m.account = $${paramIndex}`;
-    params.push(normalizeAccount(options.account));
-    paramIndex++;
+    if (options.account) {
+      sql += ` AND m.account = $${paramIndex}`;
+      params.push(options.account);
+      paramIndex++;
+    }
+    if (options.platform) {
+      sql += ` AND m.platform = $${paramIndex}`;
+      params.push(options.platform);
+      paramIndex++;
+    }
 
     sql += ` ORDER BY similarity DESC, m.wa_timestamp DESC LIMIT $${paramIndex}`;
     params.push(limit);
@@ -181,6 +223,8 @@ export class SearchService {
       senderWaId: row.sender_wa_id,
       waTimestamp: row.wa_timestamp,
       similarity: parseFloat(row.similarity),
+      platform: row.platform,
+      account: row.account,
     }));
   }
 
