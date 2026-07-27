@@ -60,6 +60,8 @@ jobs:
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@main
     with:
       runner: arc-k8s
+      node_version: "22"
+      pnpm_version: "11.17.0"
       docker_build_timeout: 12m
       kustomize_paths: k8s/overlays/stg k8s/overlays/prod
       images: |
