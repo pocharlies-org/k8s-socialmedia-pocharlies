@@ -926,14 +926,7 @@ export function createRouter(
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
-        const {
-          conversationId,
-          fileUrl,
-          caption,
-          asSticker,
-          kind,
-          replyTo,
-        } = req.body as {
+        const { conversationId, fileUrl, caption, asSticker, kind, replyTo } = req.body as {
           conversationId?: string;
           fileUrl?: string;
           caption?: string;

@@ -182,8 +182,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
           res.status(400).json({ error: 'members must contain at least one peer' });
           return;
         }
-        const parsedForwardCount =
-          forwardCount === undefined ? 0 : Number(forwardCount);
+        const parsedForwardCount = forwardCount === undefined ? 0 : Number(forwardCount);
         if (
           !Number.isInteger(parsedForwardCount) ||
           parsedForwardCount < 0 ||

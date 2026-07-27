@@ -179,9 +179,7 @@ export class SummarizationService {
     endOfDay.setHours(23, 59, 59, 999);
 
     // conversations.id IS the wa_chat_id
-    const filterSql = filter
-      ? ` AND c.account = $3 AND m.platform = $4`
-      : '';
+    const filterSql = filter ? ` AND c.account = $3 AND m.platform = $4` : '';
     const result = await this.dbClient.query(
       `SELECT DISTINCT c.id, c.name
        FROM conversations c
@@ -190,9 +188,7 @@ export class SummarizationService {
          AND (m.is_deleted IS NULL OR m.is_deleted = false)
          ${filterSql}
        ORDER BY c.name`,
-      filter
-        ? [startOfDay, endOfDay, filter.account, filter.platform]
-        : [startOfDay, endOfDay]
+      filter ? [startOfDay, endOfDay, filter.account, filter.platform] : [startOfDay, endOfDay]
     );
 
     if (result.rows.length === 0) {
@@ -237,9 +233,7 @@ export class SummarizationService {
     endOfWeek.setDate(endOfWeek.getDate() + 7);
     endOfWeek.setHours(23, 59, 59, 999);
 
-    const filterSql = filter
-      ? ` AND c.account = $3 AND m.platform = $4`
-      : '';
+    const filterSql = filter ? ` AND c.account = $3 AND m.platform = $4` : '';
     const result = await this.dbClient.query(
       `SELECT DISTINCT c.id, c.name
        FROM conversations c
@@ -248,9 +242,7 @@ export class SummarizationService {
          AND (m.is_deleted IS NULL OR m.is_deleted = false)
          ${filterSql}
        ORDER BY c.name`,
-      filter
-        ? [startOfWeek, endOfWeek, filter.account, filter.platform]
-        : [startOfWeek, endOfWeek]
+      filter ? [startOfWeek, endOfWeek, filter.account, filter.platform] : [startOfWeek, endOfWeek]
     );
 
     if (result.rows.length === 0) {

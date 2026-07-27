@@ -9,36 +9,26 @@ patches:
   - path: patch-renew-qr-pro.yaml
   - path: patch-nodepool.yaml
 images:
-  # F1.7 honest-voice (187ff1e): audio attachment events behind
-  # WA_EMIT_AUDIO_ATTACHMENTS (envs already staged on the professional
-  # Deployment) + NATS publisher initial-connect retry fix (edf1f31).
-  # Built by Release Production run 28576092302 on tag
-  # f1-voice-nats-20260702 (commit 6e4867d); digest cross-checked vs Harbor.
+  # Atomic Socialmedia v2 cutover image set built and signed by Release
+  # Production run 30231910460 from c88dce161df3. Keep all deployed components
+  # on this one source revision.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: f1-voice-nats-20260702
-    digest: sha256:de16c618db857eb8a757d7f6bc7ffc9eb3662300d4885ebc6f87e71e4d710b4b
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: taskflow-telegram-topics-20260629-amd64
-    digest: sha256:d3eecbb5ccfe0c71d26d5b47d5bd6b9ec496fbf3cec2520ccf7e3fafa5df1288
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:6467b5dac43b30dec961b8484978b5692d00a74bf76b022df81cdf8fdcc4dac2
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: retire-autoreply-20260629-amd64
-    digest: sha256:e64a86bfd05e0d8b9874b30fc29011be55e88e13ee8fda8507f6131226c04b82
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.12
-    digest: sha256:33d980dc270af8a6942a762c122428712250714e35003f7435e7f47d2f91aa07
-  # mcp-status-accounts-20260707: keeps the prof-group-media behavior and makes
-  # social_list_accounts reports WhatsApp/Telegram personal and professional health
-  # separately for OpenClaw/RHO audits. Manual buildx; digest = manifest-list
-  # index from Harbor.
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:c12e23221a93e8a42985abde0e9858e1fe17713105b076328487e24caa719030
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: mcp-status-accounts-20260707
-    digest: sha256:cc611393d069fc2ca145eb00745c52d931446618c7646675d0562f2076f029ce
-  # whatsapp-synapse-bridge. Drops Skirmshop tracking opt-in control messages
-  # before the general Synapse assistant to prevent duplicate customer replies;
-  # keeps F0 professional fromMe team-touch forwarding and fixes initial NATS
-  # reconnect scheduling.
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:660119ecb97a5489921ed6285dce069176a160742bd0c9a9cb328b09ae799e12
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
-    newTag: tracking-optin-filter-reconnect-20260707
-    digest: sha256:08b72c15a21713fdebd1276c8bbf8127dd4b49c0963740b67d29d1dc3177fd3a
+    newTag: socialmedia-v2-c88dce16
+    digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
