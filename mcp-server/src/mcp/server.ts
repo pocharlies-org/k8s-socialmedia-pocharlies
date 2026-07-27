@@ -6,6 +6,8 @@ import {
   ErrorCode,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
+import Ajv, { type ValidateFunction } from 'ajv';
+import addFormats from 'ajv-formats';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { SearchService } from '../application/search.service';
@@ -18,7 +20,6 @@ import {
 } from '../application/unread-digest.service';
 import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
-import { ConversationType } from '../domain/entities/conversation.entity';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import {
   ACCOUNTS,
@@ -27,24 +28,16 @@ import {
   stripAccount,
   type Account,
 } from '../domain/account';
-import { createHmac } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
-
-const ACCOUNT_DESCRIPTION =
-  "Account to route this call to. 'personal' (default) = WhatsApp web (Baileys, personal number) + Telegram paxanguero. " +
-  "'professional' = Skirmshop WhatsApp web/Baileys connector + Telegram sauvageadminbot. " +
-  'Choose based on the destination chat: skirmshop/business chats → professional; family/personal chats → personal. ' +
-  'When the destination is ambiguous, prefer "professional" for Claude/Codex agents.';
-
-const ACCOUNT_PROPERTY = {
-  account: {
-    type: 'string',
-    enum: ['personal', 'professional'],
-    description: ACCOUNT_DESCRIPTION,
-    default: 'personal',
-  },
-} as const;
+import {
+  SOCIAL_TOOL_REGISTRY,
+  publicToolDefinition,
+  type SocialChannel,
+  type SocialToolDefinition,
+} from './tool-registry';
+import { SOCIALMEDIA_CONTRACT_DIGEST } from './contract.generated';
 
 function isObject(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -116,6 +109,17 @@ function normalizeDigestPlatforms(value: unknown): MessagingPlatform[] {
     (item): item is MessagingPlatform => item === 'whatsapp' || item === 'telegram'
   );
   return platforms.length ? [...new Set(platforms)] : ['whatsapp', 'telegram'];
+}
+
+function compileInputValidators(): Map<string, ValidateFunction> {
+  const schemaValidator = new Ajv({ allErrors: true, strict: false });
+  addFormats(schemaValidator);
+  return new Map(
+    SOCIAL_TOOL_REGISTRY.map(definition => [
+      definition.name,
+      schemaValidator.compile(definition.inputSchema),
+    ])
+  );
 }
 
 function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
@@ -222,8 +226,9 @@ export function isLidJid(chatId: unknown): boolean {
 
 /**
  * True when the chatId points at a WhatsApp group (`@g.us`), regardless of any
- * `personal:` / `professional:` account prefix. Read tools (get_chat,
- * search_users, ...) return account-prefixed ids; those must be reduced to the
+ * `personal:` / `professional:` account prefix. Canonical reads
+ * (`social_get_conversation`, `social_resolve_target`, ...) return
+ * account-prefixed ids; those must be reduced to the
  * bare jid before they reach the connector, which calls `sock.groupMetadata()`
  * with the value verbatim — a prefixed group jid is malformed and WhatsApp
  * silently drops the query, surfacing as "group metadata timeout".
@@ -314,6 +319,7 @@ export class MCPServer {
   private draftService: DraftService;
   private repository: DatabaseRepository;
   private dbClient: Pool;
+  private redisClient: Redis;
   private logger: pino.Logger;
   private connectorUrl: string;
   private telegramUrl: string;
@@ -325,6 +331,7 @@ export class MCPServer {
   private waUrls!: Record<string, string>;
   private tgUrls!: Record<string, string>;
   private tgBridgeUrls!: Record<string, string>;
+  private inputValidators?: Map<string, ValidateFunction>;
 
   constructor(
     dbClient: Pool,
@@ -339,8 +346,8 @@ export class MCPServer {
   ) {
     this.server = new Server(
       {
-        name: 'messaging-mcp-server',
-        version: '1.0.0',
+        name: 'socialmedia-mcp-server',
+        version: '2.0.0',
       },
       {
         capabilities: {
@@ -348,8 +355,10 @@ export class MCPServer {
         },
       }
     );
+    this.inputValidators = compileInputValidators();
 
     this.dbClient = dbClient;
+    this.redisClient = redisClient;
     this.repository = new DatabaseRepository(dbClient);
     this.searchService = new SearchService(openaiApiKey, dbClient, encryptionKey, llmBaseUrl);
     this.summarizationService = new SummarizationService(
@@ -413,1545 +422,1863 @@ export class MCPServer {
 
   /** WhatsApp connector URL for an account (both are Baileys/WhatsApp Web). */
   private waUrl(account?: string): string {
-    return this.waUrls[account === 'professional' ? 'professional' : 'personal'];
+    if (account === undefined) return this.waUrls.personal;
+    const url = this.waUrls[account];
+    if (!url) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `WhatsApp account '${account}' is not configured`
+      );
+    }
+    return url;
   }
 
   /** Telegram connector URL for an account (separate instance per account). */
   private tgUrl(account?: string): string {
-    return this.tgUrls[account === 'professional' ? 'professional' : 'personal'];
+    if (account === undefined) return this.tgUrls.personal;
+    const url = this.tgUrls[account];
+    if (!url) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Telegram account '${account}' is not configured`
+      );
+    }
+    return url;
   }
 
   /** Telegram-sync (Telethon) bridge URL for an account — used by live unread. */
   private tgBridgeUrl(account?: string): string {
-    return this.tgBridgeUrls[account === 'professional' ? 'professional' : 'personal'];
+    if (account === undefined) return this.tgBridgeUrls.personal;
+    const url = this.tgBridgeUrls[account];
+    if (!url) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Telegram bridge account '${account}' is not configured`
+      );
+    }
+    return url;
   }
 
   private setupHandlers(): void {
-    // List tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools: [
-          {
-            name: 'search_messages',
-            description:
-              'Search messages by keyword or semantic query, scoped to the selected account.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                query: { type: 'string', description: 'Search query (keyword or semantic)' },
-                chatId: { type: 'string', description: 'Optional: filter by conversation ID' },
-                from: { type: 'string', format: 'date-time', description: 'Start date' },
-                to: { type: 'string', format: 'date-time', description: 'End date' },
-                sender: { type: 'string', description: 'Filter by sender WhatsApp ID' },
-                limit: { type: 'integer', default: 20, maximum: 100 },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['query'],
-            },
-          },
-          {
-            name: 'get_chat',
-            description: 'Get conversation details and recent messages.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Conversation ID' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'whatsapp_get_messages',
-            description:
-              'Get paginated WhatsApp messages for a conversation, including old imported history',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Conversation ID' },
-                limit: { type: 'integer', default: 100, maximum: 500 },
-                before: {
-                  type: 'string',
-                  description: 'Return messages before this ISO timestamp or message id',
-                },
-                after: {
-                  type: 'string',
-                  description: 'Return messages after this ISO timestamp or message id',
-                },
-                order: { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
-                includeMetadata: { type: 'boolean', default: false },
-                includeAttachments: { type: 'boolean', default: true },
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'whatsapp_history_status',
-            description: 'Show WhatsApp history import and Baileys backfill status',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Optional conversation ID' },
-                limit: { type: 'integer', default: 100, maximum: 500 },
-              },
-            },
-          },
-          {
-            name: 'get_context',
-            description: 'Get message context with surrounding messages',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string' },
-                messageId: { type: 'string' },
-                windowBefore: { type: 'integer', default: 5 },
-                windowAfter: { type: 'integer', default: 5 },
-              },
-              required: ['chatId', 'messageId'],
-            },
-          },
-          {
-            name: 'summarize_chat',
-            description: 'Generate summary of a conversation',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string' },
-                range: {
-                  type: 'object',
-                  properties: {
-                    from: { type: 'string', format: 'date-time' },
-                    to: { type: 'string', format: 'date-time' },
-                  },
-                },
-                style: { type: 'string', enum: ['brief', 'detailed', 'bullet'], default: 'brief' },
-                language: { type: 'string', enum: ['en', 'es'], default: 'en' },
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'summarize_day',
-            description: 'Summarize all conversations for a specific day',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                date: { type: 'string', format: 'date' },
-                scope: { type: 'string', enum: ['all', 'important'], default: 'all' },
-                language: { type: 'string', enum: ['en', 'es'], default: 'en' },
-              },
-              required: ['date'],
-            },
-          },
-          {
-            name: 'summarize_week',
-            description: 'Summarize all conversations for a week',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                weekStartDate: { type: 'string', format: 'date' },
-                scope: { type: 'string', enum: ['all', 'important'], default: 'all' },
-                language: { type: 'string', enum: ['en', 'es'], default: 'en' },
-              },
-              required: ['weekStartDate'],
-            },
-          },
-          {
-            name: 'draft_reply',
-            description: 'Draft a reply to a message or conversation',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string' },
-                messageId: { type: 'string', description: 'Reply to specific message' },
-                lastN: { type: 'integer', description: 'Or reply to last N messages' },
-                tone: {
-                  type: 'string',
-                  enum: ['professional', 'casual', 'friendly', 'formal'],
-                  default: 'casual',
-                },
-                language: { type: 'string', enum: ['en', 'es'], default: 'en' },
-                constraints: {
-                  type: 'object',
-                  properties: {
-                    maxLength: { type: 'integer' },
-                    requiredTopics: { type: 'array', items: { type: 'string' } },
-                    avoidTopics: { type: 'array', items: { type: 'string' } },
-                  },
-                },
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'list_drafts',
-            description: 'List draft replies for a conversation',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string' },
-                status: {
-                  type: 'string',
-                  enum: ['DRAFT', 'APPROVED', 'SENT'],
-                  description: 'Filter by status',
-                },
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'approve_draft',
-            description: 'Approve a draft reply and generate send token',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                draftId: { type: 'string' },
-              },
-              required: ['draftId'],
-            },
-          },
-          {
-            name: 'send_approved_reply',
-            description: 'Send an approved reply (requires feature flag)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                sendToken: { type: 'string' },
-              },
-              required: ['sendToken'],
-            },
-          },
-          {
-            name: 'whatsapp_send_message',
-            description:
-              'Send a WhatsApp message directly (no draft flow). Routes by `account`: personal = WhatsApp web (Baileys, personal number), professional = Skirmshop WhatsApp web/Baileys connector.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat/conversation ID' },
-                text: { type: 'string', description: 'Message text to send' },
-                phone: {
-                  type: 'string',
-                  description:
-                    'Trusted destination phone evidence for professional @lid sends. Use only when it comes from customer/order context or an explicit operator-provided fallback.',
-                },
-                phoneE164: {
-                  type: 'string',
-                  description:
-                    'Trusted E.164 destination phone evidence for professional @lid sends, e.g. +35796658668.',
-                },
-                manualOpenUrl: {
-                  type: 'string',
-                  description:
-                    'Trusted wa.me/manual fallback URL generated for this recipient; used to recover the phone while preserving cold-send guards.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'text'],
-            },
-          },
-          {
-            name: 'whatsapp_send_template',
-            description:
-              'Send an approved WhatsApp Business Cloud API template through the professional account. Use this for first contact or conversations outside the 24-hour customer service window.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description: 'Recipient phone or WhatsApp conversation ID',
-                },
-                templateName: { type: 'string', description: 'Approved Meta template name' },
-                languageCode: {
-                  type: 'string',
-                  default: 'es',
-                  description: 'Template language code',
-                },
-                components: {
-                  type: 'array',
-                  description: 'Optional WhatsApp template components array',
-                  items: { type: 'object' },
-                },
-                account: {
-                  type: 'string',
-                  enum: ['professional'],
-                  default: 'professional',
-                  description:
-                    'Templates are only supported on the WhatsApp Business Cloud API account.',
-                },
-              },
-              required: ['chatId', 'templateName'],
-            },
-          },
-          {
-            name: 'renew_qr_code',
-            description: 'Disconnect WhatsApp and generate a new QR code for re-authentication.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                confirmDisconnect: {
-                  type: 'boolean',
-                  description: 'Must be true to confirm disconnection',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['confirmDisconnect'],
-            },
-          },
-          {
-            name: 'get_connection_status',
-            description: 'Get WhatsApp connection status and QR code availability.',
-            inputSchema: {
-              type: 'object',
-              properties: { ...ACCOUNT_PROPERTY },
-            },
-          },
-          {
-            name: 'search_users',
-            description: 'Buscar usuarios de WhatsApp por nombre o teléfono.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                query: { type: 'string', description: 'Nombre o número de teléfono a buscar' },
-                limit: {
-                  type: 'integer',
-                  default: 20,
-                  maximum: 100,
-                  description: 'Número máximo de resultados',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['query'],
-            },
-          },
-          {
-            name: 'list_conversations',
-            description: 'Listar conversaciones con filtros opcionales.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                type: {
-                  type: 'string',
-                  enum: ['INDIVIDUAL', 'GROUP'],
-                  description: 'Filtrar por tipo de conversación',
-                },
-                query: {
-                  type: 'string',
-                  description: 'Buscar por nombre de conversación o participante',
-                },
-                limit: {
-                  type: 'integer',
-                  default: 20,
-                  maximum: 100,
-                  description: 'Número máximo de resultados',
-                },
-                includeParticipants: {
-                  type: 'boolean',
-                  default: true,
-                  description: 'Incluir lista de participantes',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-            },
-          },
-          {
-            name: 'get_user_messages',
-            description: 'Obtener mensajes de un usuario específico.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                waUserId: {
-                  type: 'string',
-                  description: 'WhatsApp ID del usuario (ej: 34612345678@s.whatsapp.net)',
-                },
-                conversationId: {
-                  type: 'string',
-                  description: 'Filtrar por ID de conversación (opcional)',
-                },
-                from: {
-                  type: 'string',
-                  format: 'date-time',
-                  description: 'Fecha de inicio (opcional)',
-                },
-                to: { type: 'string', format: 'date-time', description: 'Fecha de fin (opcional)' },
-                limit: {
-                  type: 'integer',
-                  default: 50,
-                  maximum: 200,
-                  description: 'Número máximo de mensajes',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['waUserId'],
-            },
-          },
-          {
-            name: 'download_media',
-            description: 'Download media (photo/video/doc) from a WhatsApp message.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat/conversation ID' },
-                messageId: { type: 'string', description: 'Message ID containing media' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'messageId'],
-            },
-          },
-          {
-            name: 'send_file',
-            description: 'Send a file/image/video via WhatsApp from a URL.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                conversationId: { type: 'string', description: 'Chat/conversation ID' },
-                fileUrl: { type: 'string', description: 'URL of file to send' },
-                caption: { type: 'string', description: 'Optional caption' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['conversationId', 'fileUrl'],
-            },
-          },
-          {
-            name: 'forward_message',
-            description: 'Forward a WhatsApp message to another chat.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Source chat ID' },
-                messageId: { type: 'string', description: 'Message to forward' },
-                toChatId: { type: 'string', description: 'Destination chat ID' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'messageId', 'toChatId'],
-            },
-          },
-          {
-            name: 'delete_message',
-            description: 'Delete a WhatsApp message (own messages only).',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat ID' },
-                messageId: { type: 'string', description: 'Message ID to delete' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'messageId'],
-            },
-          },
-          {
-            name: 'get_me',
-            description: 'Get authenticated WhatsApp account info.',
-            inputSchema: { type: 'object', properties: { ...ACCOUNT_PROPERTY } },
-          },
-          {
-            name: 'get_unread_chats',
-            description: 'Get WhatsApp chats with unread messages.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                limit: {
-                  type: 'integer',
-                  default: 50,
-                  maximum: 200,
-                  description: 'Max unread chats to return after connector listing',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-            },
-          },
-          {
-            name: 'unread_digest',
-            description:
-              'Guardrail for long unread-message tasks. Starts or continues a persisted batch digest across WhatsApp/Telegram for personal/professional. Processes only 1-10 chats per call, returns a partial summary and cursor checkpoint, and returns a global summary when completed.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                action: {
-                  type: 'string',
-                  enum: ['start', 'continue', 'status'],
-                  default: 'start',
-                  description:
-                    'start creates a checkpoint and processes the first batch; continue processes the next batch; status reads checkpoint without processing.',
-                },
-                digestId: {
-                  type: 'string',
-                  description: 'Required for continue/status. Returned by start.',
-                },
-                platforms: {
-                  type: 'array',
-                  items: { type: 'string', enum: ['whatsapp', 'telegram'] },
-                  description: 'Default: both whatsapp and telegram.',
-                },
-                batchSize: {
-                  type: 'integer',
-                  default: 5,
-                  minimum: 1,
-                  maximum: 10,
-                  description: 'Chats to process in this call. Use 5-10 for long tasks.',
-                },
-                maxChats: {
-                  type: 'integer',
-                  default: 50,
-                  minimum: 1,
-                  maximum: 100,
-                  description: 'Maximum unread chats to checkpoint on start.',
-                },
-                messageLimit: {
-                  type: 'integer',
-                  default: 30,
-                  minimum: 5,
-                  maximum: 100,
-                  description: 'Recent indexed messages per chat used for the digest.',
-                },
-                language: { type: 'string', enum: ['es', 'en'], default: 'es' },
-                ...ACCOUNT_PROPERTY,
-              },
-            },
-          },
-          {
-            name: 'get_group_info',
-            description: 'Get WhatsApp group details (name, description, participant count).',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                groupId: { type: 'string', description: 'Group chat ID' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['groupId'],
-            },
-          },
-          {
-            name: 'get_group_participants',
-            description: 'Get WhatsApp group member list with admin status.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                groupId: { type: 'string', description: 'Group chat ID' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['groupId'],
-            },
-          },
-          {
-            name: 'whatsapp_repair_group_session',
-            description:
-              'Refresh WhatsApp group metadata and Signal session state before sending to a group.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                groupId: { type: 'string', description: 'Group chat ID ending in @g.us' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['groupId'],
-            },
-          },
-          {
-            name: 'mark_as_read',
-            description:
-              'Mark a WhatsApp chat as read by chatId (both accounts are Baileys/WhatsApp Web).',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat ID to mark as read' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'messaging_status',
-            description:
-              'Check health status of all messaging connectors (WhatsApp, Telegram, Instagram)',
-            inputSchema: { type: 'object', properties: {} },
-          },
-          {
-            name: 'telegram_search',
-            description:
-              'Search Telegram messages globally, within a chat, or within a forum topic, scoped to the selected account.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                query: { type: 'string', description: 'Search query' },
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Optional: restrict to a chat. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic>.',
-                },
-                topicId: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Optional Telegram forum topic/thread id. Can also be embedded in chatId as tg_<chat>_<topic>.',
-                },
-                limit: { type: 'integer', default: 20 },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['query'],
-            },
-          },
-          {
-            name: 'telegram_chat_info',
-            description: 'Get Telegram chat/channel details.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat ID or @username' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'telegram_participants',
-            description: 'Get Telegram group/channel members.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat ID' },
-                limit: { type: 'integer', default: 100 },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'telegram_get_topics',
-            description:
-              'List forum topics of a Telegram supergroup (id, title, closed/pinned state, unread counts, last message). Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
-                },
-                limit: { type: 'integer', default: 100, description: 'Max topics to return.' },
-                query: {
-                  type: 'string',
-                  description: 'Optional title search filter.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'telegram_create_topic',
-            description:
-              'Create a forum topic in a Telegram supergroup. The account must be an admin with the manage-topics permission, otherwise Telegram returns CHAT_ADMIN_REQUIRED. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
-                },
-                title: { type: 'string', description: 'Topic title.' },
-                icon: {
-                  type: 'integer',
-                  description:
-                    'Optional icon colour as an RGB int. Cannot be changed after creation.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'title'],
-            },
-          },
-          {
-            name: 'telegram_edit_topic',
-            description:
-              'Rename a forum topic or change its closed/hidden state. At least one of title, closed, hidden or clearIcon is required. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
-                },
-                topicId: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
-                },
-                title: { type: 'string', description: 'New topic title.' },
-                closed: { type: 'boolean', description: 'Close (true) or reopen (false).' },
-                hidden: {
-                  type: 'boolean',
-                  description: 'Hide (true) or unhide (false). Only valid for the General topic.',
-                },
-                clearIcon: {
-                  type: 'boolean',
-                  description: 'Remove the custom-emoji icon and fall back to the static colour.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'telegram_toggle_topic_closed',
-            description:
-              'Close or reopen a Telegram forum topic. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
-                },
-                topicId: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
-                },
-                closed: {
-                  type: 'boolean',
-                  description: 'true closes the topic, false reopens it.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'closed'],
-            },
-          },
-          {
-            name: 'telegram_toggle_topic_pinned',
-            description:
-              'Pin or unpin a Telegram forum topic. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
-                },
-                topicId: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
-                },
-                pinned: { type: 'boolean', description: 'true pins the topic, false unpins it.' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'pinned'],
-            },
-          },
-          {
-            name: 'telegram_delete_topic',
-            description:
-              'DESTRUCTIVE: delete a Telegram forum topic and its entire message history. Irreversible. The account must be an admin with the manage-topics permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
-                },
-                topicId: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Forum topic id. Required unless embedded in chatId as tg_<chat>_<topic>.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'telegram_update_forum_settings',
-            description:
-              'Turn forum (topics) mode on or off for a Telegram supergroup. Owner-only operation. Disabling it collapses every topic into the main chat. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram supergroup ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
-                },
-                isForum: {
-                  type: 'boolean',
-                  description: 'true enables forum mode, false disables it.',
-                },
-                threadsMode: {
-                  type: 'string',
-                  enum: ['list', 'tabs'],
-                  default: 'list',
-                  description: 'How topics are presented when forum mode is enabled.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'isForum'],
-            },
-          },
-          {
-            name: 'telegram_set_chat_title',
-            description:
-              'Change the title of a Telegram group/supergroup/channel. The account must be an admin with the change-info permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
-                },
-                title: { type: 'string', description: 'New chat title, 1-255 characters.' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'title'],
-            },
-          },
-          {
-            name: 'telegram_set_chat_description',
-            description:
-              'Change the description of a Telegram group/supergroup/channel; pass an empty string to clear it. The account must be an admin with the change-info permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
-                },
-                description: {
-                  type: 'string',
-                  description: 'New description. Empty string clears it.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'description'],
-            },
-          },
-          {
-            name: 'telegram_set_chat_photo',
-            description:
-              'Change the photo or video avatar of a Telegram group/supergroup/channel. The account must be an admin with the change-info permission. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand (the topic part is ignored).',
-                },
-                filePath: {
-                  type: 'string',
-                  description:
-                    'Local path or http(s) URL of the image/video. Remote URLs are fetched connector-side and uploaded.',
-                },
-                type: {
-                  type: 'string',
-                  enum: ['photo', 'video'],
-                  default: 'photo',
-                  description: 'Media kind.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'filePath'],
-            },
-          },
-          {
-            name: 'telegram_send_message',
-            description:
-              'Send a text message in Telegram, including forum topics. Routes by `account`: personal = paxanguero session, professional = sauvageadminbot (skirmshop) session.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
-                },
-                topicId: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Optional forum topic/thread id. Required for sending into a topic unless embedded in chatId.',
-                },
-                replyTo: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Optional Telegram message id to quote while keeping topicId as the forum thread.',
-                },
-                text: { type: 'string', description: 'Message text' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'text'],
-            },
-          },
-          {
-            name: 'telegram_click_button',
-            description:
-              'Click a real Telegram inline callback button by chat, message id, and callback data.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram chat ID containing the inline keyboard. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic>.',
-                },
-                messageId: {
-                  type: ['integer', 'string'],
-                  description: 'Telegram message id that contains the inline keyboard.',
-                },
-                data: {
-                  type: 'string',
-                  description: 'Callback data stored in the inline button.',
-                },
-                timeoutMs: {
-                  type: 'integer',
-                  default: 10000,
-                  description: 'Callback answer timeout in milliseconds.',
-                },
-                fireAndForget: {
-                  type: 'boolean',
-                  default: false,
-                  description:
-                    'Return as soon as Telegram accepts the callback request; useful for bots that never answer callbacks.',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'messageId', 'data'],
-            },
-          },
-          {
-            name: 'telegram_send_file',
-            description: 'Send a file/photo/video in Telegram.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Telegram chat ID' },
-                filePath: { type: 'string', description: 'URL or path of the file to send' },
-                caption: { type: 'string', description: 'Optional caption' },
-                voiceNote: { type: 'boolean', description: 'Send as voice note', default: false },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'filePath'],
-            },
-          },
-          {
-            name: 'telegram_get_messages',
-            description: 'Get messages from a Telegram chat, optionally filtered to a forum topic.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: {
-                  type: 'string',
-                  description:
-                    'Telegram chat ID. Accepts numeric id, tg_<chat>, or tg_<chat>_<topic> shorthand.',
-                },
-                topicId: {
-                  type: ['integer', 'string'],
-                  description:
-                    'Optional Telegram forum topic/thread id. Can also be embedded in chatId as tg_<chat>_<topic>.',
-                },
-                limit: { type: 'integer', default: 50, maximum: 200 },
-                offsetId: { type: 'integer', description: 'Message ID to start from' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'telegram_forward_message',
-            description: 'Forward a Telegram message to another chat.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                fromChatId: { type: 'string', description: 'Source chat ID' },
-                messageId: { type: 'string', description: 'Message ID to forward' },
-                toChatId: { type: 'string', description: 'Destination chat ID' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['fromChatId', 'messageId', 'toChatId'],
-            },
-          },
-          {
-            name: 'telegram_delete_message',
-            description: 'Delete a Telegram message.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat ID' },
-                messageId: { type: 'string', description: 'Message ID to delete' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'messageId'],
-            },
-          },
-          {
-            name: 'telegram_mark_as_read',
-            description: 'Mark a Telegram chat as read.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat ID to mark as read' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId'],
-            },
-          },
-          {
-            name: 'telegram_get_dialogs',
-            description: 'List all Telegram chats/dialogs for the selected account.',
-            inputSchema: {
-              type: 'object',
-              properties: { ...ACCOUNT_PROPERTY },
-            },
-          },
-          {
-            name: 'telegram_get_unread',
-            description:
-              'Get Telegram chats with unread messages (live state via Telethon bridge) for the selected account.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                limit: {
-                  type: 'integer',
-                  default: 200,
-                  description: 'Max dialogs to scan (1-500)',
-                },
-                only_with_unread: {
-                  type: 'boolean',
-                  default: true,
-                  description: 'If false, also return read dialogs (with unread_count=0)',
-                },
-                ...ACCOUNT_PROPERTY,
-              },
-            },
-          },
-          {
-            name: 'telegram_download_media',
-            description: 'Download media from a Telegram message.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                chatId: { type: 'string', description: 'Chat ID' },
-                messageId: { type: 'string', description: 'Message ID containing media' },
-                ...ACCOUNT_PROPERTY,
-              },
-              required: ['chatId', 'messageId'],
-            },
-          },
-          {
-            name: 'telegram_get_status',
-            description: 'Get Telegram connection status for the selected account.',
-            inputSchema: { type: 'object', properties: { ...ACCOUNT_PROPERTY } },
-          },
-          {
-            name: 'telegram_get_me',
-            description: 'Get authenticated Telegram account info for the selected account.',
-            inputSchema: { type: 'object', properties: { ...ACCOUNT_PROPERTY } },
-          },
-          {
-            name: 'instagram_get_profile',
-            description:
-              'Get Instagram account profile (followers, bio, media count). Available accounts: skirmshop, barbelpapis',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: {
-                  type: 'string',
-                  description: 'Account name: skirmshop or barbelpapis',
-                  enum: ['skirmshop', 'barbelpapis'],
-                },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_get_media',
-            description: 'Get recent Instagram posts with likes and comments count',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                limit: { type: 'integer', default: 25, maximum: 100 },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_get_comments',
-            description: 'Get comments on a specific Instagram post',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                mediaId: { type: 'string', description: 'Media/post ID' },
-              },
-              required: ['account', 'mediaId'],
-            },
-          },
-          {
-            name: 'instagram_reply_comment',
-            description: 'Reply to a comment on an Instagram post',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                commentId: { type: 'string', description: 'Comment ID to reply to' },
-                message: { type: 'string', description: 'Reply text' },
-              },
-              required: ['account', 'commentId', 'message'],
-            },
-          },
-          {
-            name: 'instagram_get_conversations',
-            description: 'Get Instagram DM conversations with recent messages',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                limit: { type: 'integer', default: 20 },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_send_dm',
-            description: 'Send a direct message on Instagram',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                recipientId: { type: 'string', description: 'Instagram user ID of the recipient' },
-                message: { type: 'string', description: 'Message text' },
-              },
-              required: ['account', 'recipientId', 'message'],
-            },
-          },
-          {
-            name: 'instagram_get_stories',
-            description: 'Get active Instagram stories',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_publish',
-            description: 'Publish an image or reel to Instagram',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                imageUrl: { type: 'string', description: 'Public URL of the image/video' },
-                caption: { type: 'string', description: 'Post caption' },
-                mediaType: { type: 'string', enum: ['IMAGE', 'VIDEO'], default: 'IMAGE' },
-              },
-              required: ['account', 'imageUrl', 'caption'],
-            },
-          },
-          {
-            name: 'instagram_media_insights',
-            description:
-              'Get insights/metrics for an Instagram post (impressions, reach, engagement)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                mediaId: { type: 'string', description: 'Media/post ID' },
-              },
-              required: ['account', 'mediaId'],
-            },
-          },
-          {
-            name: 'instagram_publish_carousel',
-            description: 'Publish an Instagram carousel post (2-10 images/videos)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                items: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Public URLs of media (2-10). MP4/MOV detected as video.',
-                },
-                caption: { type: 'string' },
-              },
-              required: ['account', 'items'],
-            },
-          },
-          {
-            name: 'instagram_publish_reel',
-            description: 'Publish an Instagram reel (vertical short video)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                videoUrl: { type: 'string', description: 'Public URL of video (MP4)' },
-                caption: { type: 'string' },
-                shareToFeed: { type: 'boolean', default: true },
-              },
-              required: ['account', 'videoUrl'],
-            },
-          },
-          {
-            name: 'instagram_publish_story',
-            description: 'Publish an Instagram story (image or video)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                imageUrl: { type: 'string' },
-                videoUrl: { type: 'string' },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_post_comment',
-            description: 'Post a top-level comment on an Instagram media',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                mediaId: { type: 'string' },
-                message: { type: 'string' },
-              },
-              required: ['account', 'mediaId', 'message'],
-            },
-          },
-          {
-            name: 'instagram_hide_comment',
-            description: 'Hide or unhide an Instagram comment',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                commentId: { type: 'string' },
-                hide: { type: 'boolean', default: true },
-              },
-              required: ['account', 'commentId'],
-            },
-          },
-          {
-            name: 'instagram_delete_comment',
-            description: 'Delete an Instagram comment',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                commentId: { type: 'string' },
-              },
-              required: ['account', 'commentId'],
-            },
-          },
-          {
-            name: 'instagram_get_account_insights',
-            description:
-              'Get account-level Instagram insights (reach, profile_views, website_clicks, etc.)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                metrics: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Metric names; defaults to reach,profile_views,website_clicks',
-                },
-                period: { type: 'string', enum: ['day', 'week', 'days_28'], default: 'day' },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_get_account_pages',
-            description:
-              'List Facebook pages with linked IG Business accounts (requires Facebook Login EAA token)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_get_content_publishing_limit',
-            description: 'Check the current Instagram content publishing quota usage / limit',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_get_hashtag_media',
-            description:
-              'Get top or recent media for an Instagram hashtag id (use instagram_search_hashtag first to resolve the id)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                hashtagId: { type: 'string' },
-                mediaType: { type: 'string', enum: ['top', 'recent'], default: 'top' },
-                limit: { type: 'integer', default: 25 },
-              },
-              required: ['account', 'hashtagId'],
-            },
-          },
-          {
-            name: 'instagram_search_hashtag',
-            description: 'Resolve an Instagram hashtag name (with or without #) to its id',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                hashtag: {
-                  type: 'string',
-                  description: 'Hashtag name e.g. "airsoft" or "#airsoft"',
-                },
-              },
-              required: ['account', 'hashtag'],
-            },
-          },
-          {
-            name: 'instagram_business_discovery',
-            description:
-              'Look up public profile info for another IG business account by username (requires Facebook Login EAA token)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                username: { type: 'string' },
-              },
-              required: ['account', 'username'],
-            },
-          },
-          {
-            name: 'instagram_get_mentions',
-            description:
-              'Get media where the configured Instagram account has been tagged/mentioned',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                limit: { type: 'integer', default: 25 },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_validate_access_token',
-            description: 'Verify whether the configured Instagram access token is still valid',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-              },
-              required: ['account'],
-            },
-          },
-          {
-            name: 'instagram_get_conversation_messages',
-            description: 'List messages within an Instagram DM conversation',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                account: { type: 'string', enum: ['skirmshop', 'barbelpapis'] },
-                conversationId: { type: 'string' },
-                limit: { type: 'integer', default: 25 },
-              },
-              required: ['account', 'conversationId'],
-            },
-          },
-        ],
-      };
-    });
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: SOCIAL_TOOL_REGISTRY.map(publicToolDefinition),
+      _meta: { 'socialmedia/contractDigest': SOCIALMEDIA_CONTRACT_DIGEST },
+    }));
 
-    // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async request => {
-      const { name, arguments: args } = request.params;
+      const { name, arguments: rawArguments } = request.params;
+      const definition = SOCIAL_TOOL_REGISTRY.find(candidate => candidate.name === name);
+      if (!definition) {
+        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+      }
 
       try {
-        switch (name) {
-          case 'search_messages':
-            return await this.handleSearchMessages(args as any);
-          case 'get_chat':
-            return await this.handleGetChat(args as any);
-          case 'whatsapp_get_messages':
-            return await this.handleWhatsAppGetMessages(args as any);
-          case 'whatsapp_history_status':
-            return await this.handleWhatsAppHistoryStatus(args as any);
-          case 'get_context':
-            return await this.handleGetContext(args as any);
-          case 'summarize_chat':
-            return await this.handleSummarizeChat(args as any);
-          case 'summarize_day':
-            return await this.handleSummarizeDay(args as any);
-          case 'summarize_week':
-            return await this.handleSummarizeWeek(args as any);
-          case 'draft_reply':
-            return await this.handleDraftReply(args as any);
-          case 'list_drafts':
-            return await this.handleListDrafts(args as any);
-          case 'approve_draft':
-            return await this.handleApproveDraft(args as any);
-          case 'send_approved_reply':
-            return await this.handleSendApprovedReply(args as any);
-          case 'whatsapp_send_message':
-            return await this.handleSendMessage(args as any);
-          case 'whatsapp_send_template':
-            return await this.handleSendTemplate(args as any);
-          case 'renew_qr_code':
-            return await this.handleRenewQRCode(args as any);
-          case 'get_connection_status':
-            return await this.handleGetConnectionStatus(args as any);
-          case 'search_users':
-            return await this.handleSearchUsers(args as any);
-          case 'list_conversations':
-            return await this.handleListConversations(args as any);
-          case 'get_user_messages':
-            return await this.handleGetUserMessages(args as any);
-          case 'download_media':
-            return await this.handleDownloadMedia(args as any);
-          case 'send_file':
-            return await this.handleSendFile(args as any);
-          case 'forward_message':
-            return await this.handleForwardMessage(args as any);
-          case 'delete_message':
-            return await this.handleDeleteMessage(args as any);
-          case 'get_me':
-            return await this.handleGetMe(args as any);
-          case 'get_unread_chats':
-            return await this.handleGetUnreadChats(args as any);
-          case 'unread_digest':
-            return await this.handleUnreadDigest(args as any);
-          case 'get_group_info':
-            return await this.handleGetGroupInfo(args as any);
-          case 'get_group_participants':
-            return await this.handleGetGroupParticipants(args as any);
-          case 'whatsapp_repair_group_session':
-            return await this.handleRepairGroupSession(args as any);
-          case 'mark_as_read':
-            return await this.handleMarkAsRead(args as any);
-          case 'messaging_status':
-            return await this.handleMessagingStatus();
-          case 'telegram_search':
-            return await this.handleTelegramSearch(args as any);
-          case 'telegram_chat_info':
-            return await this.handleTelegramChatInfo(args as any);
-          case 'telegram_participants':
-            return await this.handleTelegramParticipants(args as any);
-          case 'telegram_get_topics':
-            return await this.handleTelegramGetTopics(args as any);
-          case 'telegram_create_topic':
-            return await this.handleTelegramCreateTopic(args as any);
-          case 'telegram_edit_topic':
-            return await this.handleTelegramEditTopic(args as any);
-          case 'telegram_toggle_topic_closed':
-            return await this.handleTelegramToggleTopicClosed(args as any);
-          case 'telegram_toggle_topic_pinned':
-            return await this.handleTelegramToggleTopicPinned(args as any);
-          case 'telegram_delete_topic':
-            return await this.handleTelegramDeleteTopic(args as any);
-          case 'telegram_update_forum_settings':
-            return await this.handleTelegramUpdateForumSettings(args as any);
-          case 'telegram_set_chat_title':
-            return await this.handleTelegramSetChatTitle(args as any);
-          case 'telegram_set_chat_description':
-            return await this.handleTelegramSetChatDescription(args as any);
-          case 'telegram_set_chat_photo':
-            return await this.handleTelegramSetChatPhoto(args as any);
-          case 'telegram_send_message':
-            return await this.handleTelegramSendMessage(args as any);
-          case 'telegram_click_button':
-            return await this.handleTelegramClickButton(args as any);
-          case 'telegram_send_file':
-            return await this.handleTelegramSendFile(args as any);
-          case 'telegram_get_messages':
-            return await this.handleTelegramGetMessages(args as any);
-          case 'telegram_forward_message':
-            return await this.handleTelegramForwardMessage(args as any);
-          case 'telegram_delete_message':
-            return await this.handleTelegramDeleteMessage(args as any);
-          case 'telegram_mark_as_read':
-            return await this.handleTelegramMarkAsRead(args as any);
-          case 'telegram_get_dialogs':
-            return await this.handleTelegramGetDialogs(args as any);
-          case 'telegram_get_unread':
-            return await this.handleTelegramGetUnread(args as any);
-          case 'telegram_download_media':
-            return await this.handleTelegramDownloadMedia(args as any);
-          case 'telegram_get_status':
-            return await this.handleTelegramGetStatus(args as any);
-          case 'telegram_get_me':
-            return await this.handleTelegramGetMe(args as any);
-          case 'instagram_get_profile':
-            return await this.handleInstagramGetProfile(args as any);
-          case 'instagram_get_media':
-            return await this.handleInstagramGetMedia(args as any);
-          case 'instagram_get_comments':
-            return await this.handleInstagramGetComments(args as any);
-          case 'instagram_reply_comment':
-            return await this.handleInstagramReplyComment(args as any);
-          case 'instagram_get_conversations':
-            return await this.handleInstagramGetConversations(args as any);
-          case 'instagram_send_dm':
-            return await this.handleInstagramSendDm(args as any);
-          case 'instagram_get_stories':
-            return await this.handleInstagramGetStories(args as any);
-          case 'instagram_publish':
-            return await this.handleInstagramPublish(args as any);
-          case 'instagram_media_insights':
-            return await this.handleInstagramMediaInsights(args as any);
-          case 'instagram_publish_carousel':
-            return await this.handleInstagramPublishCarousel(args as any);
-          case 'instagram_publish_reel':
-            return await this.handleInstagramPublishReel(args as any);
-          case 'instagram_publish_story':
-            return await this.handleInstagramPublishStory(args as any);
-          case 'instagram_post_comment':
-            return await this.handleInstagramPostComment(args as any);
-          case 'instagram_hide_comment':
-            return await this.handleInstagramHideComment(args as any);
-          case 'instagram_delete_comment':
-            return await this.handleInstagramDeleteComment(args as any);
-          case 'instagram_get_account_insights':
-            return await this.handleInstagramGetAccountInsights(args as any);
-          case 'instagram_get_account_pages':
-            return await this.handleInstagramGetAccountPages(args as any);
-          case 'instagram_get_content_publishing_limit':
-            return await this.handleInstagramGetContentPublishingLimit(args as any);
-          case 'instagram_get_hashtag_media':
-            return await this.handleInstagramGetHashtagMedia(args as any);
-          case 'instagram_search_hashtag':
-            return await this.handleInstagramSearchHashtag(args as any);
-          case 'instagram_business_discovery':
-            return await this.handleInstagramBusinessDiscovery(args as any);
-          case 'instagram_get_mentions':
-            return await this.handleInstagramGetMentions(args as any);
-          case 'instagram_validate_access_token':
-            return await this.handleInstagramValidateAccessToken(args as any);
-          case 'instagram_get_conversation_messages':
-            return await this.handleInstagramGetConversationMessages(args as any);
-          default:
-            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-        }
+        return await this.executeCanonicalTool(definition, asObject(rawArguments));
       } catch (error) {
-        this.logger.error(`Error handling tool ${name}: ${error}`);
-        if (error instanceof McpError) {
-          throw error;
-        }
-        throw new McpError(
-          ErrorCode.InternalError,
-          `Error executing tool: ${error instanceof Error ? error.message : String(error)}`
-        );
+        this.logger.error({ tool: name, error: safeError(error) }, 'Canonical tool failed');
+        return this.errorResponse(this.errorCode(error), safeError(error), error);
       }
     });
+  }
+
+  private async executeCanonicalTool(
+    definition: SocialToolDefinition,
+    args: Record<string, any>
+  ): Promise<any> {
+    this.validateCanonicalArguments(definition, args);
+
+    const execute = async () => {
+      try {
+        const legacyResult = await this.dispatchCanonicalTool(definition.handler, args);
+        const canonical = isObject(legacyResult?.__canonicalResult)
+          ? legacyResult.__canonicalResult
+          : null;
+        const data = canonical ? canonical.data : this.legacyResultData(legacyResult);
+        const status =
+          definition.effect === 'externalWrite' || definition.effect === 'destructive'
+            ? 'accepted'
+            : 'completed';
+        return this.successResponse(data, status, {
+          ...this.canonicalMeta(definition, args),
+          ...(canonical ? asObject(canonical.meta) : {}),
+        });
+      } catch (error) {
+        return this.errorResponse(this.errorCode(error), safeError(error), error);
+      }
+    };
+
+    const idempotencyKey =
+      typeof args.idempotencyKey === 'string' ? args.idempotencyKey.trim() : '';
+    const mutates = definition.effect !== 'read' && definition.effect !== 'compute';
+    if (!idempotencyKey || !mutates) return execute();
+
+    const payload = { ...args };
+    delete payload.idempotencyKey;
+    const payloadHash = createHash('sha256')
+      .update(this.stableJson(payload))
+      .digest('hex');
+    const storageKey = `social:v2:idempotency:${createHash('sha256')
+      .update(
+        `${definition.name}\0${args.channel}\0${args.accountId}\0${idempotencyKey}`
+      )
+      .digest('hex')}`;
+    const pending = JSON.stringify({
+      payloadHash,
+      state: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+    const claimed = await this.redisClient.set(storageKey, pending, 'EX', 86400, 'NX');
+
+    if (!claimed) {
+      const previousRaw = await this.redisClient.get(storageKey);
+      const previous = previousRaw ? JSON.parse(previousRaw) : null;
+      if (!previous || previous.payloadHash !== payloadHash) {
+        return this.errorResponse(
+          'conflict',
+          'idempotencyKey was already used with a different payload'
+        );
+      }
+      if (previous.response) {
+        return this.withReplayMetadata(previous.response);
+      }
+      return this.errorResponse(
+        'outcome_unknown',
+        'An operation with this idempotencyKey is still pending; its outcome is unknown'
+      );
+    }
+
+    const response = await execute();
+    try {
+      await this.redisClient.set(
+        storageKey,
+        JSON.stringify({
+          payloadHash,
+          state: response.isError ? 'failed' : 'completed',
+          response,
+          completedAt: new Date().toISOString(),
+        }),
+        'EX',
+        86400
+      );
+    } catch (error) {
+      this.logger.error(
+        { tool: definition.name, error: safeError(error) },
+        'Could not persist canonical idempotency result'
+      );
+      if (!response.isError) {
+        return this.errorResponse(
+          'outcome_unknown',
+          'The operation returned success but its idempotency result could not be persisted; do not retry automatically',
+          { acceptedResponse: response.structuredContent }
+        );
+      }
+    }
+    return response;
+  }
+
+  private validateCanonicalArguments(
+    definition: SocialToolDefinition,
+    args: Record<string, any>
+  ): void {
+    this.inputValidators ??= compileInputValidators();
+    const validator = this.inputValidators.get(definition.name);
+    if (!validator || !validator(args)) {
+      throw this.canonicalError(
+        'invalid_request',
+        `Arguments do not match ${definition.name}.inputSchema: ${
+          validator?.errors
+            ?.map(error => `${error.instancePath || '/'} ${error.message || 'is invalid'}`)
+            .join('; ') || 'validation failed'
+        }`
+      );
+    }
+    const mutates = definition.effect !== 'read' && definition.effect !== 'compute';
+    if (mutates) {
+      if (typeof args.channel !== 'string' || !args.channel.trim()) {
+        throw this.canonicalError('invalid_request', 'channel is required for every write');
+      }
+      if (typeof args.accountId !== 'string' || !args.accountId.trim()) {
+        throw this.canonicalError('invalid_request', 'accountId is required for every write');
+      }
+    }
+    if (args.channel !== undefined) this.channel(args);
+    if (args.target !== undefined && typeof args.target !== 'string') {
+      throw this.canonicalError(
+        'invalid_request',
+        'target must be a string; numeric targets never infer a channel'
+      );
+    }
+    if (
+      args.readSource !== undefined &&
+      !['auto', 'provider', 'index'].includes(String(args.readSource))
+    ) {
+      throw this.canonicalError(
+        'invalid_request',
+        "readSource must be 'auto', 'provider' or 'index'"
+      );
+    }
+  }
+
+  private async dispatchCanonicalTool(
+    handler: string,
+    args: Record<string, any>
+  ): Promise<any> {
+    switch (handler) {
+      case 'listAccounts':
+        return this.canonicalListAccounts(args);
+      case 'listConversations':
+        return this.canonicalListConversations(args);
+      case 'getConversation':
+        return this.canonicalGetConversation(args);
+      case 'listParticipants':
+        return this.canonicalListParticipants(args);
+      case 'listMessages':
+        return this.canonicalListMessages(args);
+      case 'searchMessages':
+        return this.canonicalSearchMessages(args);
+      case 'resolveTarget':
+        return this.canonicalResolveTarget(args);
+      case 'getMedia':
+        return this.canonicalGetMedia(args);
+      case 'summarize':
+        return this.canonicalSummarize(args);
+      case 'listDrafts':
+        if (this.readSource(args, 'index') === 'provider') {
+          throw this.canonicalError(
+            'unsupported_capability',
+            'Drafts only exist in the local index'
+          );
+        }
+        this.requireChannel(args, 'whatsapp');
+        return this.handleListDrafts({
+          chatId: accountKey(
+            normalizeAccount(this.account(args)),
+            bareWhatsAppJid(this.target(args))
+          ),
+          status: args.status,
+        });
+      case 'getDigest':
+        if (this.readSource(args, 'index') === 'provider') {
+          throw this.canonicalError(
+            'unsupported_capability',
+            'Digest checkpoints only exist in the local index'
+          );
+        }
+        return this.canonicalGetDigest(args);
+      case 'getProfile':
+        return this.canonicalGetProfile(args);
+      case 'listContent':
+        return this.canonicalListContent(args);
+      case 'listComments':
+        this.requireChannel(args, 'instagram');
+        if (this.readSource(args, 'provider') === 'index') {
+          throw this.canonicalError(
+            'unsupported_capability',
+            'Instagram comments are not available from the local index'
+          );
+        }
+        return this.handleInstagramGetComments({
+          account: this.instagramAccount(args),
+          mediaId: this.target(args),
+        });
+      case 'getInsights':
+        return this.canonicalGetInsights(args);
+      case 'discoverBusiness':
+        return this.canonicalDiscoverBusiness(args);
+      case 'listMentions':
+        this.requireChannel(args, 'instagram');
+        if (this.readSource(args, 'provider') === 'index') {
+          throw this.canonicalError(
+            'unsupported_capability',
+            'Instagram mentions are not available from the local index'
+          );
+        }
+        return this.handleInstagramGetMentions({
+          account: this.instagramAccount(args),
+          limit: args.limit,
+        });
+      case 'validateAccount':
+        return this.canonicalValidateAccount(args);
+      case 'getForum':
+        this.requireChannel(args, 'telegram');
+        if (this.readSource(args, 'provider') === 'index') {
+          throw this.canonicalError(
+            'unsupported_capability',
+            'Telegram forum topics are only available from the provider'
+          );
+        }
+        return this.handleTelegramGetTopics({
+          chatId: this.target(args),
+          account: this.account(args),
+          query: args.query,
+          limit: args.limit,
+        });
+      case 'sendMessage':
+        return this.canonicalSendMessage(args);
+      case 'forwardMessage':
+        return this.canonicalForwardMessage(args);
+      case 'deleteMessage':
+        return this.canonicalDeleteMessage(args);
+      case 'markRead':
+        return this.canonicalMarkRead(args);
+      case 'createDraft':
+        this.requireChannel(args, 'whatsapp');
+        return this.handleDraftReply({
+          chatId: accountKey(
+            normalizeAccount(this.account(args)),
+            bareWhatsAppJid(this.target(args))
+          ),
+          messageId: args.messageId,
+          lastN: args.lastN,
+          tone: args.tone,
+          language: args.language,
+          constraints: args.constraints,
+        });
+      case 'approveDraft':
+        this.requireChannel(args, 'whatsapp');
+        await this.requireDraftAccount(
+          this.string(args, 'draftId'),
+          normalizeAccount(this.account(args))
+        );
+        return this.handleApproveDraft({ draftId: this.string(args, 'draftId') });
+      case 'sendDraft':
+        this.requireChannel(args, 'whatsapp');
+        return this.handleSendApprovedReply({
+          sendToken: this.string(args, 'sendToken'),
+          account: this.account(args),
+        });
+      case 'startDigest': {
+        const platforms = [
+          ...new Set([
+            args.channel,
+            ...(Array.isArray(args.channels) ? args.channels : []),
+          ]),
+        ];
+        if (
+          platforms.some(
+            (item: unknown) => item !== 'whatsapp' && item !== 'telegram'
+          )
+        ) {
+          throw this.canonicalError(
+            'unsupported_capability',
+            'Unread digests are only supported for WhatsApp and Telegram'
+          );
+        }
+        return this.handleUnreadDigest({
+          action: 'start',
+          account: this.account(args),
+          platforms,
+          batchSize: args.batchSize,
+          maxChats: args.maxChats,
+          messageLimit: args.messageLimit,
+          language: args.language,
+        });
+      }
+      case 'continueDigest':
+        return this.canonicalContinueDigest(args);
+      case 'manageSession':
+        return this.canonicalManageSession(args);
+      case 'clickInteraction':
+        return this.canonicalClickInteraction(args);
+      case 'manageForum':
+        return this.canonicalManageForum(args);
+      case 'manageChat':
+        return this.canonicalManageChat(args);
+      case 'publishContent':
+        return this.canonicalPublishContent(args);
+      case 'manageComment':
+        return this.canonicalManageComment(args);
+      default:
+        throw this.canonicalError(
+          'unsupported_capability',
+          `No canonical handler is registered for capability '${handler}'`
+        );
+    }
+  }
+
+  private canonicalError(code: string, message: string): Error {
+    const error = new Error(message) as Error & { canonicalCode?: string };
+    error.canonicalCode = code;
+    return error;
+  }
+
+  private errorCode(error: unknown): string {
+    const candidate = error as { canonicalCode?: string; code?: number; name?: string };
+    if (candidate?.canonicalCode) return candidate.canonicalCode;
+    const message = safeError(error).toLowerCase();
+    if (
+      candidate?.name === 'TimeoutError' ||
+      candidate?.name === 'AbortError' ||
+      message.includes('timeout') ||
+      message.includes('timed out')
+    ) {
+      return 'outcome_unknown';
+    }
+    if (
+      error instanceof McpError &&
+      (error.code === ErrorCode.InvalidParams || error.code === ErrorCode.InvalidRequest)
+    ) {
+      return 'invalid_request';
+    }
+    return 'provider_error';
+  }
+
+  private successResponse(
+    data: unknown,
+    status: 'completed' | 'accepted' | 'delivered' | 'read',
+    meta: Record<string, unknown> = {}
+  ): any {
+    const structuredContent = { ok: true, status, data, meta };
+    return {
+      structuredContent,
+      content: [{ type: 'text' as const, text: JSON.stringify(structuredContent, null, 2) }],
+    };
+  }
+
+  private errorResponse(code: string, message: string, details?: unknown): any {
+    const status =
+      code === 'conflict' ? 'conflict' : code === 'outcome_unknown' ? 'outcome_unknown' : 'failed';
+    const structuredContent = {
+      ok: false,
+      status,
+      data: null,
+      meta: {},
+      error: {
+        code,
+        message,
+        ...(details && !(details instanceof Error) ? { details } : {}),
+      },
+    };
+    return {
+      isError: true,
+      structuredContent,
+      content: [{ type: 'text' as const, text: JSON.stringify(structuredContent, null, 2) }],
+    };
+  }
+
+  private withReplayMetadata(response: any): any {
+    const structuredContent = {
+      ...asObject(response?.structuredContent),
+      meta: { ...asObject(response?.structuredContent?.meta), replayed: true },
+    };
+    return {
+      ...response,
+      structuredContent,
+      content: [{ type: 'text' as const, text: JSON.stringify(structuredContent, null, 2) }],
+    };
+  }
+
+  private legacyResultData(result: any): unknown {
+    if (result?.structuredContent !== undefined) return result.structuredContent;
+    const content = Array.isArray(result?.content) ? result.content : [];
+    const textItems = content
+      .filter((item: any) => item?.type === 'text' && typeof item.text === 'string')
+      .map((item: any) => item.text);
+    if (textItems.length === 1) {
+      try {
+        return JSON.parse(textItems[0]);
+      } catch {
+        return textItems[0];
+      }
+    }
+    return content.length ? content : result;
+  }
+
+  private canonicalMeta(
+    definition: SocialToolDefinition,
+    args: Record<string, any>
+  ): Record<string, unknown> {
+    if (definition.effect !== 'read' && definition.effect !== 'compute') return {};
+    const requested = String(args.readSource || 'auto');
+    let kind: 'providerQuery' | 'providerSync' | 'localIndex';
+    if (requested === 'provider') {
+      kind = 'providerQuery';
+    } else if (requested === 'index') {
+      kind = 'localIndex';
+    } else if (
+      ['searchMessages', 'summarize', 'listDrafts', 'getDigest'].includes(
+        definition.handler
+      )
+    ) {
+      kind = 'localIndex';
+    } else if (definition.handler === 'listMessages') {
+      kind = args.channel === 'instagram' ? 'providerQuery' : 'providerSync';
+    } else if (definition.handler === 'resolveTarget') {
+      kind = args.channel === 'whatsapp' ? 'providerSync' : 'providerQuery';
+    } else {
+      kind = 'providerQuery';
+    }
+    return {
+      source: {
+        kind,
+        asOf: new Date().toISOString(),
+        completeness: 'complete',
+      },
+    };
+  }
+
+  private stableJson(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(item => this.stableJson(item)).join(',')}]`;
+    if (isObject(value)) {
+      return `{${Object.keys(value)
+        .sort()
+        .map(key => `${JSON.stringify(key)}:${this.stableJson(value[key])}`)
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
+  }
+
+  private channel(args: Record<string, any>): SocialChannel {
+    if (!['whatsapp', 'telegram', 'instagram'].includes(String(args.channel))) {
+      throw this.canonicalError(
+        'invalid_request',
+        "channel must be 'whatsapp', 'telegram' or 'instagram'"
+      );
+    }
+    return args.channel as SocialChannel;
+  }
+
+  private requireChannel(args: Record<string, any>, expected: SocialChannel): void {
+    const actual = this.channel(args);
+    if (actual !== expected) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `This operation is not supported for channel '${actual}'`
+      );
+    }
+  }
+
+  private account(args: Record<string, any>): string {
+    const accountIdValue = this.string(args, 'accountId');
+    const channelName = this.channel(args);
+    if (
+      !this.configuredAccounts(channelName).some(
+        configured => configured.accountId === accountIdValue
+      )
+    ) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Account '${accountIdValue}' is not configured for channel '${channelName}'`
+      );
+    }
+    return accountIdValue;
+  }
+
+  private instagramAccount(args: Record<string, any>): string {
+    this.requireChannel(args, 'instagram');
+    return this.account(args);
+  }
+
+  private target(args: Record<string, any>): string {
+    return this.string(args, 'target');
+  }
+
+  private whatsAppProviderTarget(
+    args: Record<string, any>,
+    field = 'target'
+  ): string {
+    this.requireChannel(args, 'whatsapp');
+    const accountIdValue = normalizeAccount(this.account(args));
+    const raw = this.string(args, field);
+    const parsed = stripAccount(raw);
+    if (raw.startsWith('professional:') && accountIdValue !== 'professional') {
+      throw this.canonicalError(
+        'invalid_request',
+        `${field} belongs to the professional WhatsApp namespace but accountId is '${accountIdValue}'`
+      );
+    }
+    return parsed.id;
+  }
+
+  private string(args: Record<string, any>, field: string): string {
+    if (typeof args[field] !== 'string' || !args[field].trim()) {
+      throw this.canonicalError('invalid_request', `${field} is required and must be a string`);
+    }
+    return args[field].trim();
+  }
+
+  private readSource(args: Record<string, any>, fallback: 'provider' | 'index'): 'provider' | 'index' {
+    const value = String(args.readSource || 'auto');
+    return value === 'auto' ? fallback : (value as 'provider' | 'index');
+  }
+
+  private async providerGet(baseUrl: string, path: string, timeoutMs = 30000): Promise<any> {
+    const response = await fetch(`${baseUrl}${path}`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      throw new Error(`Provider query failed (${response.status}): ${await response.text()}`);
+    }
+    return response.json();
+  }
+
+  private async canonicalListAccounts(args: Record<string, any>): Promise<any> {
+    const status = this.legacyResultData(await this.handleMessagingStatus());
+    const selectedChannel =
+      args.channel === undefined ? undefined : this.channel(args);
+    const accounts = [
+      {
+        channel: 'whatsapp',
+        accountId: 'personal',
+        transport: 'baileys',
+        capabilities: {
+          conversations: true,
+          messages: true,
+          media: true,
+          send: true,
+          templates: false,
+          groups: true,
+        },
+      },
+      {
+        channel: 'whatsapp',
+        accountId: 'professional',
+        transport: 'baileys',
+        capabilities: {
+          conversations: true,
+          messages: true,
+          media: true,
+          send: true,
+          templates: false,
+          groups: true,
+        },
+      },
+      {
+        channel: 'telegram',
+        accountId: 'personal',
+        transport: 'mtcute',
+        capabilities: {
+          conversations: true,
+          messages: true,
+          media: true,
+          send: true,
+          forums: true,
+          interactions: true,
+        },
+      },
+      {
+        channel: 'telegram',
+        accountId: 'professional',
+        transport: 'mtcute',
+        capabilities: {
+          conversations: true,
+          messages: true,
+          media: true,
+          send: true,
+          forums: true,
+          interactions: true,
+        },
+      },
+      {
+        channel: 'instagram',
+        accountId: 'skirmshop',
+        transport: 'instagram-graph-api',
+        capabilities: {
+          conversations: true,
+          messages: true,
+          media: true,
+          send: true,
+          publish: true,
+          comments: true,
+          insights: true,
+        },
+      },
+      {
+        channel: 'instagram',
+        accountId: 'barbelpapis',
+        transport: 'instagram-graph-api',
+        capabilities: {
+          conversations: true,
+          messages: true,
+          media: true,
+          send: true,
+          publish: true,
+          comments: true,
+          insights: true,
+        },
+      },
+    ]
+      .filter(item => !selectedChannel || item.channel === selectedChannel)
+      .map(item => ({
+        ...item,
+        status:
+          item.channel === 'instagram'
+            ? asObject(asObject(asObject(status).instagram).accounts)[item.accountId] ||
+              null
+            : asObject(asObject(status)[item.channel])[item.accountId] || null,
+      }));
+    return this.jsonResponse({
+      contractDigest: SOCIALMEDIA_CONTRACT_DIGEST,
+      accounts,
+    });
+  }
+
+  private configuredAccounts(channel?: SocialChannel): Array<{
+    channel: SocialChannel;
+    accountId: string;
+  }> {
+    const all: Array<{ channel: SocialChannel; accountId: string }> = [
+      { channel: 'whatsapp', accountId: 'personal' },
+      { channel: 'whatsapp', accountId: 'professional' },
+      { channel: 'telegram', accountId: 'personal' },
+      { channel: 'telegram', accountId: 'professional' },
+      { channel: 'instagram', accountId: 'skirmshop' },
+      { channel: 'instagram', accountId: 'barbelpapis' },
+    ];
+    return channel ? all.filter(item => item.channel === channel) : all;
+  }
+
+  private async canonicalListConversations(args: Record<string, any>): Promise<any> {
+    const selectedChannel = args.channel === undefined ? undefined : this.channel(args);
+    const selectedAccount =
+      args.accountId === undefined ? undefined : this.string(args, 'accountId');
+    const accounts = this.configuredAccounts(selectedChannel).filter(
+      item => !selectedAccount || item.accountId === selectedAccount
+    );
+    if (!accounts.length) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `No configured account matches channel=${selectedChannel || '*'} accountId=${selectedAccount || '*'}`
+      );
+    }
+
+    const conversations: any[] = [];
+    const partialErrors: any[] = [];
+    for (const account of accounts) {
+      try {
+        const result = await this.listConversationsFor(
+          account.channel,
+          account.accountId,
+          args
+        );
+        let providerSelfId = '';
+        if (account.channel === 'instagram') {
+          const profile = this.legacyResultData(
+            await this.handleInstagramGetProfile({ account: account.accountId })
+          );
+          providerSelfId = pickString(profile, ['id']);
+          if (!providerSelfId) {
+            throw this.canonicalError(
+              'provider_error',
+              `Instagram profile '${account.accountId}' did not return its provider id`
+            );
+          }
+        }
+        const data = this.legacyResultData(result);
+        for (const row of extractArrayPayload(data, [
+          'conversations',
+          'chats',
+          'dialogs',
+          'data',
+        ])) {
+          const participants = extractArrayPayload(asObject(row).participants, ['data']);
+          const sendPeer =
+            account.channel === 'instagram'
+              ? participants.find(
+                  participant =>
+                    pickString(participant, ['id']) &&
+                    pickString(participant, ['id']) !== providerSelfId
+                )
+              : null;
+          const rawType = pickString(row, ['kind', 'type', 'chatType']).toLowerCase();
+          const rawTarget = pickString(row, [
+            'target',
+            'conversationId',
+            'chatId',
+            'id',
+            'waChatId',
+            'username',
+          ]);
+          const providerTarget =
+            account.channel === 'whatsapp'
+              ? bareWhatsAppJid(rawTarget)
+              : account.channel === 'telegram'
+                ? stripAccount(rawTarget).id.replace(/^tg_/, '')
+                : rawTarget;
+          const conversation = {
+            ...account,
+            target: rawTarget,
+            sendTarget:
+              pickString(sendPeer, ['id']) ||
+              providerTarget,
+            name:
+              pickString(sendPeer, ['username', 'name']) ||
+              pickString(row, ['name', 'title', 'displayName']) ||
+              null,
+            handle: pickString(sendPeer, ['username']) || null,
+            kind:
+              rawType.includes('group') || Boolean(row?.isGroup) || Boolean(row?.is_group)
+                ? 'group'
+                : rawType.includes('channel')
+                  ? 'channel'
+                  : 'user',
+            unreadCount: pickNumber(row, ['unreadCount', 'unread_count'], 0),
+            lastMessageAt:
+              pickString(row, ['lastMessageAt', 'last_message_at', 'timestamp']) || null,
+            raw: row,
+          };
+          const query = String(args.query || '').trim().toLowerCase();
+          if (
+            !query ||
+            [
+              conversation.target,
+              conversation.sendTarget,
+              conversation.name,
+              conversation.handle,
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(query)
+          ) {
+            conversations.push(conversation);
+          }
+        }
+      } catch (error) {
+        partialErrors.push({
+          ...account,
+          code: this.errorCode(error),
+          message: safeError(error),
+        });
+      }
+    }
+    if (!conversations.length && partialErrors.length === accounts.length) {
+      const first = partialErrors[0];
+      throw this.canonicalError(first.code, first.message);
+    }
+    return {
+      __canonicalResult: {
+        data: { conversations, count: conversations.length },
+        meta: {
+          source: {
+            kind:
+              this.readSource(args, 'provider') === 'provider'
+                ? 'providerQuery'
+                : 'localIndex',
+            asOf: new Date().toISOString(),
+            completeness: partialErrors.length ? 'partial' : 'complete',
+          },
+          ...(partialErrors.length ? { partialErrors } : {}),
+        },
+      },
+    };
+  }
+
+  private async listConversationsFor(
+    channelName: SocialChannel,
+    accountIdValue: string,
+    args: Record<string, any>
+  ): Promise<any> {
+    const source = this.readSource(args, 'provider');
+    if (channelName === 'whatsapp') {
+      if (source === 'provider') {
+        return this.jsonResponse(
+          await this.providerGet(this.waUrl(accountIdValue), '/api/public/chats')
+        );
+      }
+      return this.handleListConversations({
+        account: accountIdValue,
+        query: args.query,
+        limit: args.limit,
+      });
+    }
+    if (channelName === 'telegram') {
+      if (source === 'provider') {
+        const data = await this.providerGet(
+          this.tgUrl(accountIdValue),
+          '/api/public/dialogs'
+        );
+        const dialogs = extractArrayPayload(data, ['dialogs']).slice(0, args.limit || 50);
+        return this.jsonResponse({ ...asObject(data), dialogs, count: dialogs.length });
+      }
+      return this.handleTelegramGetDialogs({ account: accountIdValue });
+    }
+    if (source === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram conversations are not available from the local index'
+      );
+    }
+    return this.handleInstagramGetConversations({
+      account: accountIdValue,
+      limit: args.limit,
+    });
+  }
+
+  private async canonicalGetConversation(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    const source = this.readSource(args, 'provider');
+    const accountIdValue = this.account(args);
+    const conversationTarget = this.target(args);
+    if (channelName === 'whatsapp') {
+      if (source === 'index') {
+        return this.handleGetChat({ chatId: conversationTarget, account: accountIdValue });
+      }
+      const data = await this.providerGet(this.waUrl(accountIdValue), '/api/public/chats');
+      const conversations = extractArrayPayload(data, ['chats']);
+      const conversation = conversations.find(
+        item => pickString(item, ['id', 'chatId']) === conversationTarget
+      );
+      if (!conversation) {
+        throw this.canonicalError(
+          'not_found',
+          `WhatsApp conversation '${conversationTarget}' was not returned by the provider`
+        );
+      }
+      return this.jsonResponse(conversation);
+    }
+    if (channelName === 'telegram') {
+      if (source === 'index') {
+        return this.handleTelegramChatInfo({
+          chatId: conversationTarget,
+          account: accountIdValue,
+        });
+      }
+      const data = await this.providerGet(this.tgUrl(accountIdValue), '/api/public/dialogs');
+      const conversation = extractArrayPayload(data, ['dialogs']).find(item => {
+        const id = pickString(item, ['id', 'chatId', 'peerId']);
+        return id === conversationTarget || `tg_${id}` === conversationTarget;
+      });
+      if (!conversation) {
+        throw this.canonicalError(
+          'not_found',
+          `Telegram conversation '${conversationTarget}' was not returned by the provider`
+        );
+      }
+      return this.jsonResponse(conversation);
+    }
+    if (source === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram conversations are not available from the local index'
+      );
+    }
+    const result = await this.handleInstagramGetConversations({
+      account: accountIdValue,
+      limit: 100,
+    });
+    const data = this.legacyResultData(result);
+    const conversation = extractArrayPayload(data, ['conversations', 'data']).find(
+      item => pickString(item, ['id', 'conversationId']) === conversationTarget
+    );
+    if (!conversation) {
+      throw this.canonicalError(
+        'not_found',
+        `Instagram conversation '${conversationTarget}' was not returned by the provider`
+      );
+    }
+    return this.jsonResponse(conversation);
+  }
+
+  private async canonicalListParticipants(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    const accountIdValue = this.account(args);
+    if (channelName === 'whatsapp') {
+      if (this.readSource(args, 'provider') === 'index') {
+        throw this.canonicalError(
+          'unsupported_capability',
+          'WhatsApp group participants are only available from the provider'
+        );
+      }
+      return this.handleGetGroupParticipants({
+        groupId: this.target(args),
+        account: accountIdValue,
+      });
+    }
+    if (channelName === 'telegram') {
+      if (this.readSource(args, 'provider') === 'provider') {
+        return this.jsonResponse(
+          await this.connectorCall(
+            this.tgUrl(accountIdValue),
+            'GET',
+            `/api/v1/chats/${encodeURIComponent(this.target(args))}/participants?limit=${
+              args.limit || 100
+            }`
+          )
+        );
+      }
+      return this.handleTelegramParticipants({
+        chatId: this.target(args),
+        account: accountIdValue,
+        limit: args.limit,
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      'Instagram participant listing is not supported by the deployed connector'
+    );
+  }
+
+  private async canonicalListMessages(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    const accountIdValue = this.account(args);
+    const conversationTarget = this.target(args);
+    const source = this.readSource(args, channelName === 'instagram' ? 'provider' : 'index');
+    if (channelName === 'whatsapp') {
+      if (source === 'provider') {
+        return this.jsonResponse(
+          await this.providerGet(
+            this.waUrl(accountIdValue),
+            `/api/public/history/${encodeURIComponent(conversationTarget)}?limit=${
+              args.limit || 50
+            }`,
+            45000
+          )
+        );
+      }
+      return this.handleWhatsAppGetMessages({
+        chatId: conversationTarget,
+        account: accountIdValue,
+        limit: args.limit,
+        before: args.before === undefined ? undefined : String(args.before),
+        after: args.after === undefined ? undefined : String(args.after),
+      });
+    }
+    if (channelName === 'telegram') {
+      if (source === 'provider') {
+        return this.jsonResponse(
+          await this.providerGet(
+            this.tgUrl(accountIdValue),
+            `/api/public/messages/${encodeURIComponent(conversationTarget)}?limit=${
+              args.limit || 50
+            }`
+          )
+        );
+      }
+      return this.handleTelegramGetMessages({
+        chatId: conversationTarget,
+        topicId: args.threadId,
+        account: accountIdValue,
+        limit: args.limit,
+        offsetId: args.before === undefined ? undefined : Number(args.before),
+      });
+    }
+    if (source === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram messages are not available from the local index'
+      );
+    }
+    return this.handleInstagramGetConversationMessages({
+      account: accountIdValue,
+      conversationId: conversationTarget,
+      limit: args.limit,
+    });
+  }
+
+  private async canonicalSearchMessages(args: Record<string, any>): Promise<any> {
+    if (this.readSource(args, 'index') === 'provider') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Provider-side message search is not supported; use readSource=index'
+      );
+    }
+    if (args.channel === 'instagram') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram messages are not ingested into the searchable local index'
+      );
+    }
+    if (args.channel === 'telegram') {
+      return this.handleTelegramSearch({
+        query: this.string(args, 'query'),
+        chatId: args.target,
+        topicId: args.threadId,
+        account: this.account(args),
+        limit: args.limit,
+      });
+    }
+    const account =
+      args.accountId === undefined
+        ? undefined
+        : normalizeAccount(
+            this.account({
+              ...args,
+              channel: args.channel || 'whatsapp',
+            })
+          );
+    return this.handleSearchMessages({
+      query: this.string(args, 'query'),
+      chatId: args.target,
+      account,
+      platform: args.channel === 'whatsapp' ? 'whatsapp' : undefined,
+      from: args.from,
+      to: args.to,
+      sender: args.sender,
+      limit: args.limit,
+    });
+  }
+
+  private async canonicalResolveTarget(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    const accountIdValue = this.account(args);
+    const query = this.string(args, 'query').toLowerCase();
+    if (channelName === 'whatsapp' && this.readSource(args, 'index') === 'index') {
+      const result = await this.handleSearchUsers({
+        query: this.string(args, 'query'),
+        account: accountIdValue,
+        limit: args.limit,
+      });
+      const data = this.legacyResultData(result);
+      const targets = extractArrayPayload(data, ['users']).flatMap(user => {
+        const conversations = extractArrayPayload(user, ['conversations']);
+        if (conversations.length) {
+          return conversations.map(conversation => ({
+            target: bareWhatsAppJid(
+              pickString(conversation, ['waChatId', 'id'])
+            ),
+            name: pickString(user, ['displayName', 'name']) || null,
+            kind:
+              pickString(conversation, ['type']).toLowerCase() === 'group'
+                ? 'group'
+                : 'user',
+            raw: { user, conversation },
+          }));
+        }
+        return [
+          {
+            target: pickString(user, ['waUserId', 'id']),
+            name: pickString(user, ['displayName', 'name']) || null,
+            kind: 'user',
+            raw: user,
+          },
+        ];
+      });
+      return this.jsonResponse({ query: args.query, targets });
+    }
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `${channelName} target resolution is only available from the provider`
+      );
+    }
+    if (channelName === 'instagram') {
+      return this.canonicalResolveInstagramTarget(
+        accountIdValue,
+        this.string(args, 'query'),
+        Number(args.limit || 10)
+      );
+    }
+    const listed = await this.listConversationsFor(channelName, accountIdValue, {
+      ...args,
+      readSource: 'provider',
+      limit: Math.max(Number(args.limit || 10), 100),
+    });
+    const data = this.legacyResultData(listed);
+    const candidates = extractArrayPayload(data, [
+      'chats',
+      'dialogs',
+      'conversations',
+      'data',
+    ])
+      .filter(item =>
+        [
+          pickString(item, ['id', 'chatId', 'peerId', 'conversationId']),
+          pickString(item, ['name', 'title', 'username', 'displayName']),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(query)
+      )
+      .slice(0, args.limit || 10)
+      .map(item => ({
+        target: pickString(item, ['id', 'chatId', 'peerId', 'conversationId']),
+        name: pickString(item, ['name', 'title', 'username', 'displayName']) || null,
+        raw: item,
+      }));
+    return this.jsonResponse({ query: args.query, targets: candidates });
+  }
+
+  private async canonicalResolveInstagramTarget(
+    accountIdValue: string,
+    query: string,
+    limit: number
+  ): Promise<any> {
+    const listed = await this.canonicalListConversations({
+      channel: 'instagram',
+      accountId: accountIdValue,
+      query,
+      limit,
+      readSource: 'provider',
+    });
+    const conversations = extractArrayPayload(
+      asObject(asObject(listed).__canonicalResult).data,
+      ['conversations']
+    );
+    const targets = conversations
+      .map(conversation => ({
+        target: pickString(conversation, ['sendTarget']),
+        name: pickString(conversation, ['name']) || null,
+        handle: pickString(conversation, ['handle']) || null,
+        kind: 'user',
+        conversationId: pickString(conversation, ['target']) || null,
+        raw: conversation,
+      }))
+      .filter(candidate => candidate.target)
+      .slice(0, limit);
+    return this.jsonResponse({ query, targets });
+  }
+
+  private async canonicalGetMedia(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Media bytes are only available from providers'
+      );
+    }
+    if (channelName === 'whatsapp') {
+      return this.handleDownloadMedia({
+        chatId: this.whatsAppProviderTarget(args),
+        messageId: this.string(args, 'messageId'),
+        account: this.account(args),
+      });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramDownloadMedia({
+        chatId: this.target(args),
+        messageId: this.string(args, 'messageId'),
+        account: this.account(args),
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      'Instagram message-media retrieval is not implemented by the deployed connector; use social_list_content for published media'
+    );
+  }
+
+  private async canonicalSummarize(args: Record<string, any>): Promise<any> {
+    if (this.readSource(args, 'index') === 'provider') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Provider-side summarization is not supported; use readSource=index'
+      );
+    }
+    const channelName = this.channel(args);
+    if (channelName === 'instagram') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram messages are not ingested into the local summary index'
+      );
+    }
+    const account = normalizeAccount(this.account(args));
+    switch (args.range || 'conversation') {
+      case 'day':
+        return this.handleSummarizeDay({
+          date: this.string(args, 'date'),
+          language: args.language,
+          account,
+          platform: channelName,
+        });
+      case 'week':
+        return this.handleSummarizeWeek({
+          weekStartDate: this.string(args, 'weekStart'),
+          language: args.language,
+          account,
+          platform: channelName,
+        });
+    }
+    const rawTarget = this.target(args);
+    const chatId =
+      channelName === 'whatsapp'
+        ? accountKey(account, bareWhatsAppJid(rawTarget))
+        : await this.resolveTelegramChatId(rawTarget, account);
+    if (!chatId) {
+      throw this.canonicalError(
+        'not_found',
+        `Conversation '${rawTarget}' was not found in the ${channelName} index for account '${account}'`
+      );
+    }
+    if (args.range === 'context') {
+      return this.handleGetContext({
+        chatId,
+        messageId: this.string(args, 'messageId'),
+        windowBefore: args.lastN,
+        windowAfter: args.lastN,
+      });
+    }
+    return this.handleSummarizeChat({
+      chatId,
+      language: args.language,
+    });
+  }
+
+  private async canonicalGetProfile(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Provider profiles are not available from the local index'
+      );
+    }
+    if (channelName === 'whatsapp') {
+      return this.handleGetMe({ account: this.account(args) });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramGetMe({ account: this.account(args) });
+    }
+    return this.handleInstagramGetProfile({ account: this.account(args) });
+  }
+
+  private assertDigestSelector(
+    digest: Record<string, any>,
+    args: Record<string, any>
+  ): void {
+    const accountIdValue = this.account(args);
+    const channelName = this.channel(args);
+    if (digest.account !== accountIdValue) {
+      throw this.canonicalError(
+        'not_found',
+        `Digest '${this.string(args, 'digestId')}' does not belong to account '${accountIdValue}'`
+      );
+    }
+    const platforms = Array.isArray(digest.platforms) ? digest.platforms : [];
+    if (!platforms.includes(channelName)) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Digest '${this.string(args, 'digestId')}' does not include channel '${channelName}'`
+      );
+    }
+  }
+
+  private async canonicalGetDigest(args: Record<string, any>): Promise<any> {
+    const digest = await this.unreadDigestService.status(
+      this.string(args, 'digestId')
+    );
+    this.assertDigestSelector(asObject(digest), args);
+    return this.jsonResponse(digest);
+  }
+
+  private async canonicalContinueDigest(args: Record<string, any>): Promise<any> {
+    const digestId = this.string(args, 'digestId');
+    const before = await this.unreadDigestService.status(digestId);
+    this.assertDigestSelector(asObject(before), args);
+    return this.jsonResponse(
+      await this.unreadDigestService.continue(
+        digestId,
+        clampInteger(args.batchSize, 5, 1, 10)
+      )
+    );
+  }
+
+  private async canonicalListContent(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'instagram');
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram content is not available from the local index'
+      );
+    }
+    return args.kind === 'stories'
+      ? this.handleInstagramGetStories({ account: this.account(args) })
+      : this.handleInstagramGetMedia({ account: this.account(args), limit: args.limit });
+  }
+
+  private async canonicalGetInsights(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'instagram');
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram insights are not available from the local index'
+      );
+    }
+    if (args.kind === 'publishingLimit') {
+      return this.handleInstagramGetContentPublishingLimit({
+        account: this.account(args),
+      });
+    }
+    if (args.kind === 'media') {
+      return this.handleInstagramMediaInsights({
+        account: this.account(args),
+        mediaId: this.target(args),
+      });
+    }
+    return this.handleInstagramGetAccountInsights({
+      account: this.account(args),
+      metrics: args.metrics,
+      period: args.period,
+    });
+  }
+
+  private async canonicalDiscoverBusiness(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'instagram');
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Instagram discovery is not available from the local index'
+      );
+    }
+    if (args.kind === 'hashtag') {
+      return this.handleInstagramSearchHashtag({
+        account: this.account(args),
+        hashtag: this.string(args, 'query'),
+      });
+    }
+    if (args.kind === 'hashtagMedia') {
+      return this.handleInstagramGetHashtagMedia({
+        account: this.account(args),
+        hashtagId: this.string(args, 'query'),
+        limit: args.limit,
+      });
+    }
+    return this.handleInstagramBusinessDiscovery({
+      account: this.account(args),
+      username: this.string(args, 'query'),
+    });
+  }
+
+  private async canonicalValidateAccount(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Account validation requires a provider query'
+      );
+    }
+    if (channelName === 'whatsapp') {
+      return this.handleGetConnectionStatus({ account: this.account(args) });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramGetStatus({ account: this.account(args) });
+    }
+    return this.handleInstagramValidateAccessToken({ account: this.account(args) });
+  }
+
+  private async canonicalSendMessage(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    const accountIdValue = this.account(args);
+    const destination =
+      channelName === 'whatsapp'
+        ? this.whatsAppProviderTarget(args)
+        : this.target(args);
+    const message = typeof args.message === 'string' ? args.message : '';
+    const attachments = Array.isArray(args.attachments) ? args.attachments : [];
+
+    if (args.template) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        channelName === 'whatsapp'
+          ? 'WhatsApp templates are not supported by the deployed Baileys connectors'
+          : `Templates are not supported for channel '${channelName}'`
+      );
+    }
+    if (!message && !attachments.length) {
+      throw this.canonicalError(
+        'invalid_request',
+        'message or at least one attachment is required'
+      );
+    }
+
+    if (channelName === 'instagram') {
+      if (attachments.length) {
+        throw this.canonicalError(
+          'unsupported_capability',
+          'Instagram DM attachments are not supported by the deployed connector'
+        );
+      }
+      if (args.replyTo !== null && args.replyTo !== undefined) {
+        throw this.canonicalError(
+          'unsupported_capability',
+          'Instagram DM replies are not supported by the deployed connector'
+        );
+      }
+      if (args.threadId !== null && args.threadId !== undefined) {
+        throw this.canonicalError(
+          'unsupported_capability',
+          'Instagram DM threads are not supported by the deployed connector'
+        );
+      }
+      return this.handleInstagramSendDm({
+        account: accountIdValue,
+        recipientId: destination,
+        message,
+      });
+    }
+    if (
+      channelName === 'whatsapp' &&
+      args.threadId !== null &&
+      args.threadId !== undefined
+    ) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'WhatsApp does not support Telegram threadId'
+      );
+    }
+
+    const operations: unknown[] = [];
+    try {
+      if (message) {
+        const sent =
+          channelName === 'whatsapp'
+            ? await this.handleSendMessage({
+                chatId: destination,
+                text: message,
+                account: accountIdValue,
+                replyTo:
+                  args.replyTo === null || args.replyTo === undefined
+                    ? undefined
+                    : String(args.replyTo),
+              })
+            : await this.handleTelegramSendMessage({
+                chatId: destination,
+                text: message,
+                account: accountIdValue,
+                topicId: args.threadId ?? undefined,
+                replyTo: args.replyTo ?? undefined,
+              });
+        operations.push(this.legacyResultData(sent));
+      }
+
+      for (const item of attachments) {
+        const attachmentValue = asObject(item);
+        const location = pickString(attachmentValue, ['url']);
+        const sent =
+          channelName === 'whatsapp'
+            ? await this.handleSendFile({
+                conversationId: destination,
+                fileUrl: location,
+                caption: pickString(attachmentValue, ['caption']) || undefined,
+                account: accountIdValue,
+                replyTo:
+                  args.replyTo === null || args.replyTo === undefined
+                    ? undefined
+                    : String(args.replyTo),
+              })
+            : await this.handleTelegramSendFile({
+                chatId: destination,
+                filePath: location,
+                caption: pickString(attachmentValue, ['caption']) || undefined,
+                account: accountIdValue,
+                replyTo: args.replyTo ?? undefined,
+                threadId: args.threadId ?? undefined,
+              });
+        operations.push(this.legacyResultData(sent));
+      }
+    } catch (error) {
+      if (operations.length) {
+        throw this.canonicalError(
+          'outcome_unknown',
+          `Provider accepted ${operations.length} sub-operation(s) before a later send failed: ${safeError(
+            error
+          )}`
+        );
+      }
+      throw error;
+    }
+
+    const providerMessageIds = operations
+      .map(operation =>
+        pickString(operation, [
+          'providerMessageId',
+          'messageId',
+          'operationId',
+          'receiptId',
+          'id',
+        ])
+      )
+      .filter(Boolean);
+    return this.jsonResponse({
+      accepted: true,
+      providerMessageId: providerMessageIds[0] || null,
+      providerMessageIds,
+      operations,
+    });
+  }
+
+  private async canonicalForwardMessage(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') {
+      return this.handleForwardMessage({
+        chatId: this.whatsAppProviderTarget(args, 'fromTarget'),
+        messageId: this.string(args, 'messageId'),
+        toChatId: this.whatsAppProviderTarget(args),
+        account: this.account(args),
+      });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramForwardMessage({
+        fromChatId: this.string(args, 'fromTarget'),
+        messageId: this.string(args, 'messageId'),
+        toChatId: this.target(args),
+        account: this.account(args),
+        threadId: args.threadId ?? undefined,
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      'Instagram DM forwarding is not supported by the deployed connector'
+    );
+  }
+
+  private async canonicalDeleteMessage(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') {
+      return this.handleDeleteMessage({
+        chatId: this.whatsAppProviderTarget(args),
+        messageId: this.string(args, 'messageId'),
+        account: this.account(args),
+      });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramDeleteMessage({
+        chatId: this.target(args),
+        messageId: this.string(args, 'messageId'),
+        account: this.account(args),
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      'Instagram DM deletion is not supported by the deployed connector'
+    );
+  }
+
+  private async canonicalMarkRead(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') {
+      return this.handleMarkAsRead({
+        chatId: this.whatsAppProviderTarget(args),
+        messageId: args.messageId,
+        account: this.account(args),
+      });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramMarkAsRead({
+        chatId: this.target(args),
+        account: this.account(args),
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      'Instagram read-state mutation is not supported by the deployed connector'
+    );
+  }
+
+  private async canonicalManageSession(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    switch (this.string(args, 'action')) {
+      case 'renewQr':
+        return this.handleRenewQRCode({
+          account: this.account(args),
+          confirmDisconnect: args.confirmDisconnect,
+        });
+      case 'repairGroup':
+        return this.handleRepairGroupSession({
+          groupId: this.target(args),
+          account: this.account(args),
+        });
+      default:
+        throw this.canonicalError(
+          'invalid_request',
+          "action must be 'renewQr' or 'repairGroup'"
+        );
+    }
+  }
+
+  private async canonicalClickInteraction(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'telegram');
+    return this.handleTelegramClickButton({
+      chatId: this.target(args),
+      messageId: args.messageId,
+      data: this.string(args, 'data'),
+      account: this.account(args),
+    });
+  }
+
+  private async canonicalManageForum(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'telegram');
+    const action = this.string(args, 'action');
+    const common = {
+      chatId: typeof args.target === 'string' ? args.target : '',
+      account: this.account(args),
+      topicId: args.threadId,
+    };
+    switch (action) {
+      case 'createTopic':
+        return this.handleTelegramCreateTopic({
+          ...common,
+          title: this.string(args, 'title'),
+          icon: args.icon,
+        });
+      case 'editTopic':
+        return this.handleTelegramEditTopic({
+          ...common,
+          title: args.title,
+          hidden: args.hidden,
+          clearIcon: args.clearIcon,
+        });
+      case 'closeTopic':
+      case 'reopenTopic':
+        return this.handleTelegramToggleTopicClosed({
+          ...common,
+          closed: action === 'closeTopic',
+        });
+      case 'pinTopic':
+      case 'unpinTopic':
+        return this.handleTelegramToggleTopicPinned({
+          ...common,
+          pinned: action === 'pinTopic',
+        });
+      case 'deleteTopic':
+        return this.handleTelegramDeleteTopic(common);
+      case 'createGroup':
+        return this.connectorCall(
+          this.tgUrl(common.account),
+          'POST',
+          '/api/v1/groups',
+          {
+            title: this.string(args, 'title'),
+            type: args.groupType || 'supergroup',
+            description: args.description,
+            forum: args.forum === true,
+            members: Array.isArray(args.members) ? args.members : [],
+          }
+        ).then(data => this.jsonResponse(data));
+      case 'addMembers':
+        if (!Array.isArray(args.members) || !args.members.length) {
+          throw this.canonicalError(
+            'invalid_request',
+            'members must contain at least one Telegram peer'
+          );
+        }
+        return this.connectorCall(
+          this.tgUrl(common.account),
+          'POST',
+          `/api/v1/chats/${encodeURIComponent(this.target(args))}/members`,
+          { members: args.members, forwardCount: args.forwardCount }
+        ).then(data => this.jsonResponse(data));
+      case 'setAdminPermissions':
+        return this.connectorCall(
+          this.tgUrl(common.account),
+          'PUT',
+          `/api/v1/chats/${encodeURIComponent(this.target(args))}/admins/${encodeURIComponent(
+            String(args.userId)
+          )}`,
+          {
+            rights: isObject(args.rights) ? args.rights : {},
+            rank: args.rank,
+          }
+        ).then(data => this.jsonResponse(data));
+      default:
+        throw this.canonicalError(
+          'invalid_request',
+          `Unsupported forum action '${action}'`
+        );
+    }
+  }
+
+  private async canonicalManageChat(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'telegram');
+    const action = this.string(args, 'action');
+    const common = { chatId: this.target(args), account: this.account(args) };
+    switch (action) {
+      case 'setTitle':
+        return this.handleTelegramSetChatTitle({
+          ...common,
+          title: this.string(args, 'title'),
+        });
+      case 'setDescription':
+        return this.handleTelegramSetChatDescription({
+          ...common,
+          description: String(args.description),
+        });
+      case 'setPhoto':
+        return this.handleTelegramSetChatPhoto({
+          ...common,
+          filePath: this.string(args, 'mediaUrl'),
+        });
+      case 'setForumEnabled':
+        return this.handleTelegramUpdateForumSettings({
+          ...common,
+          isForum: args.enabled,
+        });
+      default:
+        throw this.canonicalError(
+          'invalid_request',
+          `Unsupported chat action '${action}'`
+        );
+    }
+  }
+
+  private async canonicalPublishContent(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'instagram');
+    const accountIdValue = this.account(args);
+    switch (this.string(args, 'kind')) {
+      case 'image':
+        return this.handleInstagramPublish({
+          account: accountIdValue,
+          imageUrl: this.string(args, 'imageUrl'),
+          caption: typeof args.caption === 'string' ? args.caption : '',
+        });
+      case 'carousel':
+        if (!Array.isArray(args.items) || args.items.length < 2) {
+          throw this.canonicalError(
+            'invalid_request',
+            'A carousel requires at least two item URLs'
+          );
+        }
+        return this.handleInstagramPublishCarousel({
+          account: accountIdValue,
+          items: args.items,
+          caption: args.caption,
+        });
+      case 'reel':
+        return this.handleInstagramPublishReel({
+          account: accountIdValue,
+          videoUrl: this.string(args, 'videoUrl'),
+          caption: args.caption,
+          shareToFeed: args.shareToFeed,
+        });
+      case 'story':
+        if (!args.imageUrl && !args.videoUrl) {
+          throw this.canonicalError(
+            'invalid_request',
+            'A story requires imageUrl or videoUrl'
+          );
+        }
+        return this.handleInstagramPublishStory({
+          account: accountIdValue,
+          imageUrl: args.imageUrl,
+          videoUrl: args.videoUrl,
+        });
+      default:
+        throw this.canonicalError('invalid_request', `Unsupported content kind '${args.kind}'`);
+    }
+  }
+
+  private async canonicalManageComment(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'instagram');
+    const accountIdValue = this.account(args);
+    const commentTarget = this.target(args);
+    switch (this.string(args, 'action')) {
+      case 'create':
+        return this.handleInstagramPostComment({
+          account: accountIdValue,
+          mediaId: commentTarget,
+          message: this.string(args, 'message'),
+        });
+      case 'reply':
+        return this.handleInstagramReplyComment({
+          account: accountIdValue,
+          commentId: commentTarget,
+          message: this.string(args, 'message'),
+        });
+      case 'hide':
+      case 'unhide':
+        return this.handleInstagramHideComment({
+          account: accountIdValue,
+          commentId: commentTarget,
+          hide: args.action === 'hide',
+        });
+      case 'delete':
+        return this.handleInstagramDeleteComment({
+          account: accountIdValue,
+          commentId: commentTarget,
+        });
+      default:
+        throw this.canonicalError(
+          'invalid_request',
+          `Unsupported comment action '${args.action}'`
+        );
+    }
   }
 
   private async handleSearchMessages(args: {
@@ -1961,7 +2288,8 @@ export class MCPServer {
     to?: string;
     sender?: string;
     limit?: number;
-    account?: string;
+    account?: Account;
+    platform?: 'whatsapp' | 'telegram';
   }) {
     const results = await this.searchService.search(args.query, {
       chatId: args.chatId,
@@ -1970,6 +2298,7 @@ export class MCPServer {
       sender: args.sender,
       limit: args.limit || 20,
       account: args.account,
+      platform: args.platform,
     });
 
     return {
@@ -1984,6 +2313,8 @@ export class MCPServer {
                 content: r.content,
                 sender: r.senderWaId,
                 timestamp: r.waTimestamp.toISOString(),
+                channel: r.platform,
+                accountId: r.account,
                 similarity: r.similarity,
                 rank: r.rank,
               })),
@@ -2004,32 +2335,19 @@ export class MCPServer {
       chatId,
     ]);
 
-    let conversation;
-    if (convResult.rows.length > 0) {
-      const row = convResult.rows[0];
-      conversation = {
-        id: row.id,
-        waChatId: row.wa_chat_id || row.id,
-        type: row.type || (row.is_group ? 'GROUP' : 'INDIVIDUAL'),
-        name: row.name,
-      };
-    } else {
-      // Create if not found
-      const conv = await this.repository.findOrCreateConversation(
-        chatId,
-        args.chatId.includes('@g.us') ? ConversationType.GROUP : ConversationType.INDIVIDUAL,
-        null,
-        null,
-        account,
-        args.chatId
+    if (convResult.rows.length === 0) {
+      throw this.canonicalError(
+        'not_found',
+        `Conversation '${args.chatId}' was not found in the WhatsApp index for account '${account}'`
       );
-      conversation = {
-        id: conv.id,
-        waChatId: conv.waChatId,
-        type: conv.type,
-        name: conv.name,
-      };
     }
+    const row = convResult.rows[0];
+    const conversation = {
+      id: row.id,
+      waChatId: row.wa_chat_id || stripAccount(row.id).id,
+      type: row.type || (row.is_group ? 'GROUP' : 'INDIVIDUAL'),
+      name: row.name,
+    };
 
     const messages = await this.dbClient.query(
       `SELECT * FROM messages
@@ -2309,13 +2627,19 @@ export class MCPServer {
     const windowBefore = args.windowBefore || 5;
     const windowAfter = args.windowAfter || 5;
 
-    const message = await this.dbClient.query(`SELECT * FROM messages WHERE id = $1`, [
-      args.messageId,
-    ]);
+    const message = await this.dbClient.query(
+      `SELECT id, wa_timestamp
+         FROM messages
+        WHERE conversation_id = $1
+          AND (id::text = $2 OR wa_message_id = $2)
+        LIMIT 1`,
+      [args.chatId, args.messageId]
+    );
 
     if (message.rows.length === 0) {
       throw new McpError(ErrorCode.InvalidRequest, t('errors.MESSAGE_NOT_FOUND'));
     }
+    const databaseMessageId = message.rows[0].id;
 
     // conversations.id IS the chatId directly
     const context = await this.dbClient.query(
@@ -2325,7 +2649,7 @@ export class MCPServer {
         ORDER BY wa_timestamp DESC
         LIMIT $3)
        UNION ALL
-       (SELECT * FROM messages WHERE id = $2)
+       (SELECT * FROM messages WHERE conversation_id = $1 AND id = $2)
        UNION ALL
        (SELECT * FROM messages
         WHERE conversation_id = $1
@@ -2333,7 +2657,7 @@ export class MCPServer {
         ORDER BY wa_timestamp ASC
         LIMIT $4)
        ORDER BY wa_timestamp ASC`,
-      [args.chatId, args.messageId, windowBefore, windowAfter]
+      [args.chatId, databaseMessageId, windowBefore, windowAfter]
     );
 
     return {
@@ -2389,11 +2713,16 @@ export class MCPServer {
     date: string;
     scope?: 'all' | 'important';
     language?: 'en' | 'es';
+    account?: Account;
+    platform?: 'whatsapp' | 'telegram';
   }) {
     const summary = await this.summarizationService.summarizeDay(
       new Date(args.date),
       args.scope || 'all',
-      args.language || 'en'
+      args.language || 'en',
+      args.account && args.platform
+        ? { account: args.account, platform: args.platform }
+        : undefined
     );
 
     return {
@@ -2410,11 +2739,16 @@ export class MCPServer {
     weekStartDate: string;
     scope?: 'all' | 'important';
     language?: 'es' | 'en';
+    account?: Account;
+    platform?: 'whatsapp' | 'telegram';
   }) {
     const summary = await this.summarizationService.summarizeWeek(
       new Date(args.weekStartDate),
       args.scope || 'all',
-      args.language || 'en'
+      args.language || 'en',
+      args.account && args.platform
+        ? { account: args.account, platform: args.platform }
+        : undefined
     );
 
     return {
@@ -2493,6 +2827,23 @@ export class MCPServer {
     };
   }
 
+  private async requireDraftAccount(
+    draftId: string,
+    expectedAccount: Account
+  ): Promise<void> {
+    const draft = await this.draftService.getDraftById(draftId);
+    if (!draft) {
+      throw this.canonicalError('not_found', `Draft '${draftId}' was not found`);
+    }
+    const actualAccount = stripAccount(draft.conversationId).account;
+    if (actualAccount !== expectedAccount) {
+      throw this.canonicalError(
+        'not_found',
+        `Draft '${draftId}' does not belong to account '${expectedAccount}'`
+      );
+    }
+  }
+
   private async handleApproveDraft(args: { draftId: string }) {
     const sendToken = await this.draftService.approveDraft(args.draftId);
 
@@ -2513,7 +2864,7 @@ export class MCPServer {
     };
   }
 
-  private async handleSendApprovedReply(args: { sendToken: string }) {
+  private async handleSendApprovedReply(args: { sendToken: string; account?: string }) {
     if (process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, t('errors.SENDING_DISABLED'));
     }
@@ -2522,9 +2873,14 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, t('errors.SENDING_DISABLED'));
     }
 
-    // Extract draft ID from send token (format: send-{id}-{timestamp})
-    const parts = args.sendToken.split('-');
-    const draftId = parts[1];
+    // Extract draft ID from send token (format: send-{id}-{timestamp}).
+    const tokenMatch = args.sendToken.match(/^send-(.+)-(\d+)$/);
+    if (!tokenMatch) {
+      throw new McpError(ErrorCode.InvalidRequest, t('errors.INVALID_SEND_TOKEN'));
+    }
+    const draftId = tokenMatch[1];
+    const expectedAccount = normalizeAccount(args.account);
+    await this.requireDraftAccount(draftId, expectedAccount);
 
     const draft = await this.draftService.getDraftById(draftId);
     if (!draft) {
@@ -2535,11 +2891,12 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, t('errors.DRAFT_NOT_FOUND'));
     }
 
-    // conversations.id IS the wa_chat_id
-    const conversationId = draft.conversationId;
+    // Draft ownership uses the account-namespaced DB key. The provider must
+    // receive the bare WhatsApp JID, never `professional:<jid>`.
+    const conversationId = bareWhatsAppJid(draft.conversationId);
 
     // Call connector API to send message
-    const connectorUrl = process.env.CONNECTOR_URL || 'http://whatsapp-connector:3001';
+    const connectorUrl = this.waUrl(expectedAccount);
     const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
     const timestamp = Math.floor(Date.now() / 1000);
     const body = {
@@ -2592,6 +2949,7 @@ export class MCPServer {
     chatId: string;
     text: string;
     account?: string;
+    replyTo?: string;
     phone?: string;
     phoneE164?: string;
     manualOpenUrl?: string;
@@ -2626,6 +2984,7 @@ export class MCPServer {
       sendToken: `direct-${Date.now()}`,
       conversationId,
       content: args.text,
+      ...(args.replyTo ? { replyToMessageId: args.replyTo } : {}),
     };
 
     const signature = generateHMACSignature(body, timestamp, sharedSecret);
@@ -2937,7 +3296,7 @@ export class MCPServer {
                   ? 'WhatsApp is connected'
                   : data.qrAvailable
                     ? 'QR code is available for scanning'
-                    : 'WhatsApp is disconnected. Use renew_qr_code to generate a new QR.',
+                    : 'WhatsApp is disconnected. Use social_manage_session with action=renewQr.',
                 qrUrl: 'https://whatsapp.e-dani.com/',
               },
               null,
@@ -3400,6 +3759,8 @@ export class MCPServer {
     filePath: string;
     caption?: string;
     voiceNote?: boolean;
+    replyTo?: number | string;
+    threadId?: number | string;
     account?: string;
   }) {
     const data = await this.connectorCall(
@@ -3411,6 +3772,8 @@ export class MCPServer {
         filePath: args.filePath,
         caption: args.caption,
         voiceNote: args.voiceNote || false,
+        replyTo: args.replyTo,
+        threadId: args.threadId,
       }
     );
     return this.jsonResponse(data);
@@ -3611,6 +3974,7 @@ export class MCPServer {
     fromChatId: string;
     messageId: string;
     toChatId: string;
+    threadId?: number | string;
     account?: string;
   }) {
     const data = await this.connectorCall(
@@ -3621,6 +3985,7 @@ export class MCPServer {
         fromChatId: args.fromChatId,
         messageId: args.messageId,
         toChatId: args.toChatId,
+        threadId: args.threadId,
       }
     );
     return this.jsonResponse(data);
@@ -3745,31 +4110,10 @@ export class MCPServer {
     account?: string;
   }) {
     const requested = normalizeAccount(args.account);
-    const resolution = await this.resolveTelegramMediaAccount(
-      args.chatId,
-      String(args.messageId),
-      requested
-    );
-    const logCtx = {
-      tool: 'telegram_download_media',
-      chatId: args.chatId,
-      messageId: String(args.messageId),
-      requestedAccount: requested,
-      resolvedAccount: resolution.account,
-      source: resolution.source,
-    };
-    if (resolution.account !== requested) {
-      this.logger.warn(
-        logCtx,
-        'telegram_download_media: routing account overridden from DB evidence'
-      );
-    } else {
-      this.logger.debug(logCtx, 'telegram_download_media: routing account confirmed');
-    }
     const path = `/api/v1/messages/media/${encodeURIComponent(args.chatId)}/${encodeURIComponent(
       String(args.messageId)
     )}`;
-    const data = await this.connectorCall(this.tgUrl(resolution.account), 'GET', path);
+    const data = await this.connectorCall(this.tgUrl(requested), 'GET', path);
     return this.jsonResponse(data);
   }
 
@@ -3819,7 +4163,9 @@ export class MCPServer {
     const data = await this.connectorCall(
       this.waUrl(args.account),
       'GET',
-      `/api/v1/messages/media/${args.chatId}/${args.messageId}`
+      `/api/v1/messages/media/${encodeURIComponent(
+        bareWhatsAppJid(args.chatId)
+      )}/${encodeURIComponent(args.messageId)}`
     );
     return this.jsonResponse(data);
   }
@@ -3828,6 +4174,7 @@ export class MCPServer {
     conversationId: string;
     fileUrl: string;
     caption?: string;
+    replyTo?: string;
     account?: string;
   }) {
     if (process.env.ENABLE_SENDING !== 'true') {
@@ -3890,7 +4237,9 @@ export class MCPServer {
     const data = await this.connectorCall(
       this.waUrl(args.account),
       'DELETE',
-      `/api/v1/messages/${args.chatId}/${args.messageId}`
+      `/api/v1/messages/${encodeURIComponent(
+        bareWhatsAppJid(args.chatId)
+      )}/${encodeURIComponent(args.messageId)}`
     );
     return this.jsonResponse(data);
   }
@@ -3952,13 +4301,13 @@ export class MCPServer {
   }
 
   // Live-connector unread enumeration. Retained as the data source for
-  // unread_digest (collectUnreadDigestChats); the get_unread_chats tool itself
+  // social_start_digest (collectUnreadDigestChats); canonical conversation reads
   // now prefers persisted db counters via handleGetUnreadChats above.
   private async getWhatsAppUnreadPayload(account: Account, limit: number): Promise<any> {
     // The whatsapp-web.js connector enumerates every chat to compute unread —
     // can be slow on accounts with hundreds of chats. Cap at 8s so we don't
     // hang the SSE client; surface a clear error if the connector is too slow
-    // (the user can fall back to list_conversations / get_user_messages).
+    // (the user can fall back to social_list_conversations / social_list_messages).
     try {
       const data = await this.connectorCall(
         this.waUrl(account),
@@ -3977,7 +4326,7 @@ export class MCPServer {
       const reason = e?.name === 'TimeoutError' ? 'timeout after 8s' : e?.message || String(e);
       throw new McpError(
         ErrorCode.InternalError,
-        `get_unread_chats failed (${reason}). The whatsapp connector enumerates every chat — try list_conversations(limit=20) or get_user_messages for specific contacts instead.`
+        `WhatsApp unread query failed (${reason}). Try social_list_conversations(limit=20) or social_list_messages for specific contacts instead.`
       );
     }
   }
@@ -4155,12 +4504,14 @@ export class MCPServer {
     const account = normalizeAccount(args.account);
     // Both accounts are Baileys (WhatsApp Web): mark the whole chat read by chatId.
     if (!args.chatId) {
-      throw new McpError(ErrorCode.InvalidParams, 'mark_as_read requires a chatId.');
+      throw new McpError(ErrorCode.InvalidParams, 'social_mark_read requires target.');
     }
     const data = await this.connectorCall(
       this.waUrl(account),
       'POST',
-      `/api/v1/messages/read/${args.chatId}`
+      `/api/v1/messages/read/${encodeURIComponent(
+        bareWhatsAppJid(args.chatId)
+      )}`
     );
     return this.jsonResponse(data);
   }
@@ -4603,7 +4954,7 @@ export class MCPServer {
   createSessionServer(): Server {
     const prev = this.server;
     const fresh = new Server(
-      { name: 'messaging-mcp-server', version: '1.0.0' },
+      { name: 'socialmedia-mcp-server', version: '2.0.0' },
       { capabilities: { tools: {} } }
     );
     this.server = fresh;

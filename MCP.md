@@ -1,192 +1,123 @@
-# Messaging MCP Server
+# Socialmedia MCP contract v2
 
-Multi-platform messaging MCP server for WhatsApp, Telegram, and Instagram. Exposes tools for searching, summarizing, and sending messages across all platforms.
+Socialmedia exposes one provider-neutral MCP contract for WhatsApp, Telegram,
+and Instagram. The canonical registry lives in
+`mcp-server/src/mcp/tool-registry.ts`; `contracts/socialmedia-tools.json` is its
+deterministic, SHA-256-addressed projection for AgentGateway, OpenClaw,
+documentation, and deployment checks.
 
-**Server**: Kubernetes `whatsapp-mcp/mcp-sse` via `https://mcp-socialmedia.lan.e-dani.com`.
+There is no legacy catalog, alias layer, `_live` variant, or `/v2` endpoint.
+Unknown historical names return `method not found`.
 
-- SSE transport: `https://mcp-socialmedia.lan.e-dani.com/sse`
-- Streamable HTTP transport: `https://mcp-socialmedia.lan.e-dani.com/mcp`
-- In-cluster service: `http://mcp-sse.whatsapp-mcp.svc.cluster.local:3010`
-- Current OpenClaw-on-sauvage shortcut may also use the stable Service ClusterIP, but do not hard-code old node IPs such as `192.168.50.142:3010`.
+## Endpoint
 
-## Setup
+- Streamable HTTP: `https://mcp-socialmedia.lan.e-dani.com/mcp`
+- SSE: `https://mcp-socialmedia.lan.e-dani.com/sse`
+- In-cluster: `http://mcp-sse.whatsapp-mcp.svc.cluster.local:3010/mcp`
 
-### Claude Code (`~/.claude/settings.json`)
+AgentGateway exposes the authorized route at `/social`. Its rules and the MCP
+catalog must carry the same contract digest before deployment.
+
+## Common contract
+
+- `channel`: `whatsapp`, `telegram`, or `instagram`.
+- `accountId`: the configured provider account.
+- `target`: always a string containing the provider-native peer, group,
+  conversation, message, media, or comment target expected by that operation.
+- Every mutation requires explicit `channel` and `accountId`.
+- A numeric-looking target never selects a channel.
+- Reads accept `readSource: auto | provider | index`.
+- Unsupported source/provider combinations return
+  `unsupported_capability`; they never masquerade as an empty list.
+
+Read results include:
 
 ```json
 {
-  "mcpServers": {
-    "messaging": {
-      "type": "sse",
-      "url": "https://mcp-socialmedia.lan.e-dani.com/sse",
-      "headers": {
-        "Authorization": "Bearer <MCP_SSE_AUTH_TOKEN>"
-      }
-    }
+  "source": {
+    "kind": "providerQuery",
+    "asOf": "2026-07-27T12:00:00.000Z",
+    "completeness": "complete"
   }
 }
 ```
 
-### MCPorter (`~/.mcporter/mcporter.json`)
+Aggregated reads may return `completeness: partial` and `partialErrors` per
+channel/account.
+
+Tool results use `structuredContent`:
 
 ```json
 {
-  "messaging": {
-    "transport": "sse",
-    "url": "https://mcp-socialmedia.lan.e-dani.com/sse",
-    "headers": {
-      "Authorization": "Bearer <MCP_SSE_AUTH_TOKEN>"
-    }
-  }
+  "ok": true,
+  "status": "accepted",
+  "data": {},
+  "meta": {}
 }
 ```
 
-## Tools
+Provider failures set MCP `isError` and include a structured `error`. A timeout
+after a provider may have accepted a mutation returns `outcome_unknown`.
 
-### WhatsApp — Send
+## Canonical tools
 
-| Tool | Description | Required params |
-|------|-------------|-----------------|
-| `whatsapp_send_message` | Send text message directly | `chatId`, `text` |
-| `send_file` | Send file/image/video from URL | `conversationId`, `fileUrl` |
-| `forward_message` | Forward message to another chat | `chatId`, `messageId`, `toChatId` |
-| `delete_message` | Delete own message | `chatId`, `messageId` |
+The exact catalog table is generated at
+`contracts/socialmedia-tools.md`. The machine-readable manifest and test
+fixture is `contracts/socialmedia-tools.json`; it contains every input/output
+schema, effect, scope, annotation and capability. Both files are regenerated
+from the same typed registry and checked by CI.
 
-### WhatsApp — Read
+## Sending
 
-| Tool | Description | Required params |
-|------|-------------|-----------------|
-| `list_conversations` | List chats with optional search | (optional: `type`, `query`, `limit`) |
-| `search_messages` | Search by keyword or semantic query | `query` |
-| `get_chat` | Chat details + recent messages | `chatId` |
-| `get_context` | Messages around a specific message | `chatId`, `messageId` |
-| `get_user_messages` | Messages from a specific user | `waUserId` |
-| `search_users` | Search users by name/phone | `query` |
-| `get_unread_chats` | Chats with unread messages | (none) |
-| `get_group_info` | Group metadata | `chatId` |
-| `get_group_participants` | Group members | `chatId` |
-| `download_media` | Download photo/video/doc | `chatId`, `messageId` |
-| `mark_as_read` | Mark chat as read | `chatId` |
+```json
+{
+  "channel": "telegram",
+  "accountId": "personal",
+  "target": "-100123456",
+  "message": "Texto",
+  "attachments": [],
+  "replyTo": null,
+  "threadId": null,
+  "idempotencyKey": "optional"
+}
+```
 
-### WhatsApp — AI (LiteLLM)
+`replyTo` and `threadId` are independent. Reusing an `idempotencyKey` with the
+same payload replays the stored result; changing the payload returns
+`conflict`.
 
-| Tool | Description | Required params |
-|------|-------------|-----------------|
-| `summarize_chat` | AI conversation summary | `chatId` |
-| `summarize_day` | Summary of all chats for a day | `date` |
-| `summarize_week` | Weekly summary | `weekStartDate` |
-| `draft_reply` | Generate draft reply with AI | `chatId` |
+The deployed WhatsApp accounts use Baileys. They advertise
+`templates: false`; official Cloud API templates are not claimed until that
+transport is actually deployed.
 
-### WhatsApp — Draft Flow
+## Telegram administration
 
-| Tool | Description | Required params |
-|------|-------------|-----------------|
-| `list_drafts` | List drafts for a chat | `chatId` |
-| `approve_draft` | Approve draft for sending | `draftId` |
-| `send_approved_reply` | Send approved draft | `sendToken` |
+`social_manage_forum` supports:
 
-### WhatsApp — System
+- `createTopic`, `editTopic`, `closeTopic`, `reopenTopic`, `pinTopic`,
+  `unpinTopic`, `deleteTopic`
+- `createGroup` (`group`, `supergroup`, `channel`; optional forum)
+- `addMembers`
+- `setAdminPermissions`
 
-| Tool | Description |
-|------|-------------|
-| `get_me` | Authenticated WA account info |
-| `get_connection_status` | WA connection status + QR |
-| `whatsapp_repair_group_session` | Refresh group metadata/session state before sending |
-| `renew_qr_code` | Disconnect and generate new QR |
-| `messaging_status` | Health of all connectors |
+`social_manage_chat` supports `setTitle`, `setDescription`, `setPhoto`, and
+`setForumEnabled`.
 
-### WhatsApp — Manual Send Verification
+## OpenClaw
 
-After deploy, verify direct and group sends through the MCP tool path:
+OpenClaw registers channel adapters named `socialmedia-whatsapp`,
+`socialmedia-telegram`, and `socialmedia-instagram`. Sending, attachments,
+replies, and deletion use OpenClaw's shared `message` tool. The plugin does not
+register another set of Socialmedia tool wrappers.
+
+Other canonical operations arrive from this MCP contract through Tool Search.
+
+## Regeneration and validation
 
 ```bash
-whatsapp_send_message chatId='31617840208@c.us' text='MCP send smoke test'
-whatsapp_repair_group_session groupId='120363043522933099@g.us'
-whatsapp_send_message chatId='120363043522933099@g.us' text='MCP group send smoke test'
-whatsapp_repair_group_session groupId='31611848681-1598895615@g.us'
-whatsapp_send_message chatId='31611848681-1598895615@g.us' text='MCP group send smoke test'
+pnpm contract:generate
+pnpm contract:check
 ```
 
-Connector logs should show `failureClass=timeout`, `failureClass=missing_session`, `failureClass=disabled_sending`, or `failureClass=disconnected` instead of a generic send failure.
-
-### WhatsApp — New 1:1 Conversations
-
-Both WhatsApp accounts use Baileys as linked WhatsApp Web devices, not the official WhatsApp Business Platform. For a new direct 1:1 chat, WhatsApp may require a trusted-contact token (`tctoken`). If Baileys cannot obtain it, the professional connector returns `403 account_restricted` instead of reporting a false "sent".
-
-Use one of these paths:
-
-- Existing/inbound chat: have the customer message the business first, then `whatsapp_send_message` can reply normally.
-- Manual handoff: the connector now queues a `whatsapp_manual_open_requests`
-  row when a direct send fails with `account_restricted`. Open
-  `https://whatsapp-pro.lan.e-dani.com/manual-open`, paste the admin token,
-  click the `wa.me` compose link, press send in WhatsApp, then mark the row as
-  `sent`. The raw connector response also includes `fallback.manualOpenUrl` and
-  `fallback.manualRequest.id`.
-- Automated first contact: use the official WhatsApp Business Platform/Cloud API with approved message templates. Do not bypass by disabling `WA_DIRECT_PRIVACY_PREFLIGHT`; that only restores the old false-positive behavior where WhatsApp later rejects the message with `463`.
-
-### Telegram — Send
-
-| Tool | Description | Required params |
-|------|-------------|-----------------|
-| `telegram_send_message` | Send text message | `chatId`, `text` |
-| `telegram_send_file` | Send file/photo/video | `chatId`, `filePath` |
-| `telegram_forward_message` | Forward message | `fromChatId`, `messageId`, `toChatId` |
-| `telegram_delete_message` | Delete message | `chatId`, `messageId` |
-| `telegram_mark_as_read` | Mark chat as read | `chatId` |
-
-### Telegram — Read
-
-| Tool | Description | Required params |
-|------|-------------|-----------------|
-| `telegram_search` | Search messages | `query` |
-| `telegram_get_messages` | Get messages from a chat | `chatId` |
-| `telegram_chat_info` | Chat metadata | `chatId` |
-| `telegram_participants` | Group members | `chatId` |
-| `telegram_get_dialogs` | List all chats | (none) |
-| `telegram_get_unread` | Chats with unread messages | (none) |
-| `telegram_download_media` | Download media | `chatId`, `messageId` |
-
-### Telegram — System
-
-| Tool | Description |
-|------|-------------|
-| `telegram_get_status` | Connection status |
-| `telegram_get_me` | Authenticated account info |
-
-### Instagram
-
-| Tool | Description | Required params |
-|------|-------------|-----------------|
-| `instagram_get_profile` | Account profile | `account` |
-| `instagram_get_media` | Published posts/reels | `account` |
-| `instagram_get_comments` | Post comments | `account`, `mediaId` |
-| `instagram_reply_comment` | Reply to comment | `account`, `commentId`, `message` |
-| `instagram_get_conversations` | DM conversations | `account` |
-| `instagram_send_dm` | Send DM | `account`, `recipientId`, `message` |
-| `instagram_get_stories` | Active stories | `account` |
-| `instagram_publish` | Publish to Instagram | `account`, `imageUrl`, `caption` |
-| `instagram_media_insights` | Post metrics | `account`, `mediaId` |
-
-## LLM Configuration
-
-AI tools (summarize, draft) use a configurable LLM backend:
-
-```
-LLM_BASE_URL=http://192.168.50.142:4000/v1   # LiteLLM proxy
-LLM_CHAT_MODEL=litellm/tooling               # Qwen3.5-35B
-```
-
-Falls back to OpenAI `gpt-4o-mini` if not set.
-
-## Architecture
-
-```
-Client (Claude Code / MCPorter)
-  └─ SSE ──► MCP Server (:3010)
-                ├─ WhatsApp Connector (:3001)
-                ├─ Telegram Connector (:3002)
-                ├─ Instagram Connector (:3003)
-                ├─ PostgreSQL (pgvector)
-                ├─ Redis (caching)
-                └─ LiteLLM Proxy (:4000)
-```
+CI rejects a stale manifest or mismatched catalog/digest. AgentGateway and
+OpenClaw vendor the generated manifest and validate the same digest.

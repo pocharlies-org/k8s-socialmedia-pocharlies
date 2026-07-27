@@ -294,23 +294,17 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
     );
   });
 
-  it('treats odd-cased/padded account strings as personal (ungated) — matches waUrl routing', async () => {
+  it('rejects unknown account spellings instead of silently routing them to personal', async () => {
     const { forward, connectorCall, query } = serverWith(noInbound);
-    // normalizeAccount and waUrl both reduce to a strict === 'professional'
-    // check, so 'PROFESSIONAL' / 'professional ' route to the personal
-    // connector AND skip the gate together — no split-brain bypass.
-    await forward({
-      chatId: 'source@s.whatsapp.net',
-      messageId: 'm1',
-      toChatId: '34660242739',
-      account: 'PROFESSIONAL',
-    });
+    await expect(
+      forward({
+        chatId: 'source@s.whatsapp.net',
+        messageId: 'm1',
+        toChatId: '34660242739',
+        account: 'PROFESSIONAL',
+      })
+    ).rejects.toThrow("WhatsApp account 'PROFESSIONAL' is not configured");
     expect(query).not.toHaveBeenCalled();
-    expect(connectorCall).toHaveBeenCalledWith(
-      'http://wa-personal',
-      'POST',
-      '/api/v1/messages/forward',
-      { chatId: 'source@s.whatsapp.net', messageId: 'm1', toChatId: '34660242739' }
-    );
+    expect(connectorCall).not.toHaveBeenCalled();
   });
 });

@@ -25,7 +25,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  contract:
+    runs-on: arc-k8s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Verify canonical Socialmedia contract artifacts
+        run: pnpm contract:check
+
   release:
+    needs: [contract]
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@main
     with:
       runner: arc-k8s

@@ -86,8 +86,12 @@ export interface DigestResponse {
   remainingChats: number;
   cursorCheckpoint: { digestId: string; nextIndex: number } | null;
   continueTool: {
-    name: 'unread_digest';
-    arguments: { action: 'continue'; digestId: string };
+    name: 'social_continue_digest';
+    arguments: {
+      channel: MessagingPlatform;
+      accountId: Account;
+      digestId: string;
+    };
   } | null;
   currentBatch: DigestPartial | null;
   partialSummary: string | null;
@@ -456,7 +460,14 @@ export class UnreadDigestService {
       remainingChats,
       cursorCheckpoint: inProgress ? { digestId: session.id, nextIndex: session.next_index } : null,
       continueTool: inProgress
-        ? { name: 'unread_digest', arguments: { action: 'continue', digestId: session.id } }
+        ? {
+            name: 'social_continue_digest',
+            arguments: {
+              channel: session.platforms[0] || 'whatsapp',
+              accountId: session.account,
+              digestId: session.id,
+            },
+          }
         : null,
       currentBatch: latest,
       partialSummary: latest?.summary || null,
