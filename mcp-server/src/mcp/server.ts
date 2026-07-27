@@ -3492,11 +3492,7 @@ export class MCPServer {
   ): Promise<{
     account: Account;
     source:
-      | 'message'
-      | 'message-ambiguous'
-      | 'conversation'
-      | 'conversation-ambiguous'
-      | 'fallback';
+      'message' | 'message-ambiguous' | 'conversation' | 'conversation-ambiguous' | 'fallback';
     candidates: string[];
   }> {
     const bare = this.bareTelegramTgId(chatId);

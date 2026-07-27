@@ -152,10 +152,7 @@ export function cloudError(
   return error;
 }
 
-function classifyMetaError(
-  status: number,
-  metaError?: Record<string, unknown>
-): CloudFailureClass {
+function classifyMetaError(status: number, metaError?: Record<string, unknown>): CloudFailureClass {
   const code = Number(metaError?.code || 0);
   if (status === 401 || status === 403 || code === 190) return 'auth';
   if (status === 429 || code === 4 || code === 17 || code === 80007) return 'rate_limited';

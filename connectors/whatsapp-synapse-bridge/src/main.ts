@@ -1,13 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import * as fs from 'fs';
-import {
-  connect,
-  NatsConnection,
-  JSONCodec,
-  Codec,
-  ConnectionOptions,
-  Subscription,
-} from 'nats';
+import { connect, NatsConnection, JSONCodec, Codec, ConnectionOptions, Subscription } from 'nats';
 import pino from 'pino';
 import { MessageReceivedEvent } from '@mcp-socialmedia/shared';
 import { loadConfig, BridgeConfig, ConfigError } from './config';
@@ -198,7 +191,11 @@ class Bridge {
   }
 }
 
-function statusPayload(bridge: Bridge, meCache: MeCache, dedup: DedupCache): Record<string, unknown> {
+function statusPayload(
+  bridge: Bridge,
+  meCache: MeCache,
+  dedup: DedupCache
+): Record<string, unknown> {
   return {
     status: bridge.isConnected() && meCache.isReady() ? 'ok' : 'degraded',
     service: 'whatsapp-synapse-bridge',

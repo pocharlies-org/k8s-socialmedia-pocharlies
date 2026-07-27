@@ -61,7 +61,10 @@ function loadAccounts(): Map<string, AccountEntry> {
         fbAccessToken: process.env[`${prefix}FB_ACCESS_TOKEN`] || undefined,
       };
       accounts.set(name, { name, api: new InstagramAPI(config), config });
-      logger.info({ account: name, businessAccountId, hasFbToken: !!config.fbAccessToken }, 'Loaded account');
+      logger.info(
+        { account: name, businessAccountId, hasFbToken: !!config.fbAccessToken },
+        'Loaded account'
+      );
     }
   } else {
     // Legacy single-account mode
@@ -79,7 +82,10 @@ function loadAccounts(): Map<string, AccountEntry> {
       fbAccessToken: process.env.INSTAGRAM_FB_ACCESS_TOKEN || undefined,
     };
     accounts.set('default', { name: 'default', api: new InstagramAPI(config), config });
-    logger.info({ businessAccountId, hasFbToken: !!config.fbAccessToken }, 'Loaded single account (legacy mode)');
+    logger.info(
+      { businessAccountId, hasFbToken: !!config.fbAccessToken },
+      'Loaded single account (legacy mode)'
+    );
   }
 
   if (accounts.size === 0) {
@@ -114,7 +120,10 @@ async function main(): Promise<void> {
         // endpoints (hashtag/business_discovery) require it instead of the
         // legacy `businessAccountId`.
         if (data.user_id) entry.api.setInstagramUserId(data.user_id);
-        logger.info({ account: name, id: data.id, user_id: data.user_id }, 'Registered Instagram IDs for routing');
+        logger.info(
+          { account: name, id: data.id, user_id: data.user_id },
+          'Registered Instagram IDs for routing'
+        );
       } else {
         logger.warn({ account: name, status: res.status }, 'Failed to fetch IG IDs from /me');
       }
@@ -123,16 +132,22 @@ async function main(): Promise<void> {
     }
   }
 
-  const publisher = new InstagramEventPublisher(NATS_URL, NATS_CA_CERT !== 'none' ? NATS_CA_CERT : undefined);
+  const publisher = new InstagramEventPublisher(
+    NATS_URL,
+    NATS_CA_CERT !== 'none' ? NATS_CA_CERT : undefined
+  );
   await publisher.connect();
 
   const app = express();
   app.use(express.json());
 
   // Webhook routes — shared endpoint, routes by business account ID in payload
-  app.use('/', createWebhookRouter(WEBHOOK_VERIFY_TOKEN, bizIdToAccount, (account, event) => {
-    publisher.publish(account, event);
-  }));
+  app.use(
+    '/',
+    createWebhookRouter(WEBHOOK_VERIFY_TOKEN, bizIdToAccount, (account, event) => {
+      publisher.publish(account, event);
+    })
+  );
 
   // Health check — all accounts
   app.get('/health', async (_req, res) => {
@@ -163,7 +178,10 @@ async function main(): Promise<void> {
 
   // Helper to resolve account from route param
   function getAccount(name: string): AccountEntry | undefined {
-    return accounts.get(name.toLowerCase()) || (accounts.size === 1 ? accounts.values().next().value : undefined);
+    return (
+      accounts.get(name.toLowerCase()) ||
+      (accounts.size === 1 ? accounts.values().next().value : undefined)
+    );
   }
 
   // === Per-account API routes ===
@@ -247,7 +265,11 @@ async function main(): Promise<void> {
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
     try {
       const { image_url, caption, media_type } = req.body;
-      const container = await entry.api.createMediaContainer(image_url, caption, media_type || 'IMAGE');
+      const container = await entry.api.createMediaContainer(
+        image_url,
+        caption,
+        media_type || 'IMAGE'
+      );
       const published = await entry.api.publishMedia(container.id);
       res.json({ container_id: container.id, media_id: published.id });
     } catch (error) {
@@ -271,7 +293,8 @@ async function main(): Promise<void> {
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
     try {
       const { items, caption } = req.body as { items: string[]; caption?: string };
-      if (!Array.isArray(items)) return res.status(400).json({ error: '`items` must be an array of URLs' });
+      if (!Array.isArray(items))
+        return res.status(400).json({ error: '`items` must be an array of URLs' });
       res.json(await entry.api.publishCarousel(items, caption));
     } catch (error) {
       res.status(500).json({ error: String(error) });
@@ -282,7 +305,11 @@ async function main(): Promise<void> {
     const entry = getAccount(req.params.account);
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
     try {
-      const { video_url, caption, share_to_feed } = req.body as { video_url: string; caption?: string; share_to_feed?: boolean };
+      const { video_url, caption, share_to_feed } = req.body as {
+        video_url: string;
+        caption?: string;
+        share_to_feed?: boolean;
+      };
       if (!video_url) return res.status(400).json({ error: '`video_url` is required' });
       res.json(await entry.api.publishReel(video_url, caption, share_to_feed ?? true));
     } catch (error) {
@@ -295,7 +322,8 @@ async function main(): Promise<void> {
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
     try {
       const { image_url, video_url } = req.body as { image_url?: string; video_url?: string };
-      if (!image_url && !video_url) return res.status(400).json({ error: 'Either `image_url` or `video_url` is required' });
+      if (!image_url && !video_url)
+        return res.status(400).json({ error: 'Either `image_url` or `video_url` is required' });
       res.json(await entry.api.publishStory({ imageUrl: image_url, videoUrl: video_url }));
     } catch (error) {
       res.status(500).json({ error: String(error) });

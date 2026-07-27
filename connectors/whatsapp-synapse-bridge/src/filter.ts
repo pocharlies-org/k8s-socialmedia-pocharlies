@@ -39,7 +39,8 @@ const ALLOWED_1TO1_SUFFIXES = ['@s.whatsapp.net', '@c.us', '@lid'] as const;
 /** Multi-party / non-personal endpoints we always drop. */
 const GROUP_LIKE_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'] as const;
 const STATUS_BROADCAST = 'status@broadcast';
-const TRACKING_OPT_IN_PREFIX = 'hola skirmshop, quiero recibir seguimiento por whatsapp del pedido ';
+const TRACKING_OPT_IN_PREFIX =
+  'hola skirmshop, quiero recibir seguimiento por whatsapp del pedido ';
 const TRACKING_OPT_IN_ORDER_RE = /\bord\d{3,}\b/i;
 
 /**

@@ -1,4 +1,4 @@
-import { TelegramClient, MemoryStorage, InputMedia, Message, Peer, User, Chat } from '@mtcute/node';
+import { TelegramClient, MemoryStorage, InputMedia, Message, Peer } from '@mtcute/node';
 import { EventEmitter } from 'events';
 import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
@@ -58,7 +58,7 @@ function mapChatType(peer: Peer | undefined | null): TelegramMessage['chatType']
   if (!peer) return 'private';
   if (peer.type === 'user') return 'private';
   // Chat with chatType: 'group' | 'supergroup' | 'channel' | 'gigagroup' | 'monoforum'
-  const ct = (peer as Chat).chatType;
+  const ct = peer.chatType;
   if (ct === 'group') return 'group';
   if (ct === 'channel') return 'channel';
   // supergroup, gigagroup, monoforum, forum all map to 'supergroup'
@@ -67,8 +67,8 @@ function mapChatType(peer: Peer | undefined | null): TelegramMessage['chatType']
 
 function chatTitleOf(peer: Peer | undefined | null): string | undefined {
   if (!peer) return undefined;
-  if (peer.type === 'chat') return (peer as Chat).title || undefined;
-  const u = peer as User;
+  if (peer.type === 'chat') return peer.title || undefined;
+  const u = peer;
   return u.displayName || u.firstName || u.username || undefined;
 }
 
@@ -268,7 +268,7 @@ export class TelegramClientWrapper extends EventEmitter {
 
       const senderId = sender ? sender.id.toString() : '';
       const isOutbound = message.isOutgoing;
-      const senderUser = sender && sender.type === 'user' ? (sender as User) : undefined;
+      const senderUser = sender && sender.type === 'user' ? sender : undefined;
 
       return {
         conversationId: chat.id.toString(),
@@ -459,7 +459,7 @@ export class TelegramClientWrapper extends EventEmitter {
     if (!this.connected) throw new Error('Not connected');
     const peer = await this.client.getPeer(toMtcutePeer(chatId));
     if (peer.type === 'user') {
-      const u = peer as User;
+      const u = peer;
       return {
         id: u.id.toString(),
         type: 'private',
@@ -469,7 +469,7 @@ export class TelegramClientWrapper extends EventEmitter {
         phone: u.phoneNumber || null,
       };
     }
-    const c = peer as Chat;
+    const c = peer;
     return {
       id: c.id.toString(),
       type: mapChatType(c),
@@ -782,7 +782,12 @@ export class TelegramClientWrapper extends EventEmitter {
     chatId: string,
     messageId: number,
     limit = 100
-  ): Promise<Array<{ emoji: string; userId: number; displayName: string | null; mine: boolean }> | null> {
+  ): Promise<Array<{
+    emoji: string;
+    userId: number;
+    displayName: string | null;
+    mine: boolean;
+  }> | null> {
     if (!this.connected) throw new Error('Not connected');
     try {
       const peer = toMtcutePeer(chatId);
@@ -791,9 +796,14 @@ export class TelegramClientWrapper extends EventEmitter {
         message: messageId,
         limit,
       });
-      const raw = Array.isArray(result) ? result : (result?.items || []);
+      const raw = Array.isArray(result) ? result : result?.items || [];
       const meId = this.selfId ? Number(this.selfId) : null;
-      const out: Array<{ emoji: string; userId: number; displayName: string | null; mine: boolean }> = [];
+      const out: Array<{
+        emoji: string;
+        userId: number;
+        displayName: string | null;
+        mine: boolean;
+      }> = [];
       for (const pr of raw) {
         const emoji = typeof pr.emoji === 'string' ? pr.emoji : String(pr.emoji);
         const peerObj: any = pr.peer;
@@ -805,7 +815,9 @@ export class TelegramClientWrapper extends EventEmitter {
       }
       return out;
     } catch (e) {
-      this.logger.warn(`getReactionUsers failed for ${chatId}/${messageId}: ${(e as Error).message}`);
+      this.logger.warn(
+        `getReactionUsers failed for ${chatId}/${messageId}: ${(e as Error).message}`
+      );
       return null;
     }
   }
@@ -836,7 +848,7 @@ export class TelegramClientWrapper extends EventEmitter {
     } catch (e) {
       return null;
     }
-    const photo: any = (peer as any).photo;
+    const photo: any = peer.photo;
     if (!photo) return null;
     // mtcute exposes a downloadable file id under photo.big (full) or photo.small (thumb).
     // Different mtcute builds use slightly different shapes — try a few.

@@ -63,9 +63,7 @@ export class InstagramEventPublisher {
           }
         });
     } catch (error) {
-      logger.warn(
-        `NATS unavailable, will retry event publishing connection: ${String(error)}`
-      );
+      logger.warn(`NATS unavailable, will retry event publishing connection: ${String(error)}`);
       this.connected = false;
       this.scheduleReconnect();
     } finally {
@@ -82,18 +80,21 @@ export class InstagramEventPublisher {
 
     const subject = `instagram.${account}.${event.type}.received`;
     try {
-      this.nc.publish(subject, jsonCodec.encode({
-        platform: 'instagram',
-        account,
-        eventType: event.type,
-        senderId: event.senderId,
-        senderUsername: event.senderUsername,
-        conversationId: event.conversationId,
-        messageId: event.messageId,
-        text: event.text,
-        mediaId: event.mediaId,
-        timestamp: event.timestamp,
-      }));
+      this.nc.publish(
+        subject,
+        jsonCodec.encode({
+          platform: 'instagram',
+          account,
+          eventType: event.type,
+          senderId: event.senderId,
+          senderUsername: event.senderUsername,
+          conversationId: event.conversationId,
+          messageId: event.messageId,
+          text: event.text,
+          mediaId: event.mediaId,
+          timestamp: event.timestamp,
+        })
+      );
       logger.debug({ subject, account }, 'Event published to NATS');
     } catch (error) {
       logger.error(`Failed to publish to NATS: ${String(error)}`);

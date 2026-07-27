@@ -131,12 +131,7 @@ export interface WhatsAppCustomerAllowlistData {
 }
 
 export type WhatsAppManualOpenStatus =
-  | 'pending'
-  | 'processing'
-  | 'opened'
-  | 'sent'
-  | 'cancelled'
-  | 'failed';
+  'pending' | 'processing' | 'opened' | 'sent' | 'cancelled' | 'failed';
 
 export interface WhatsAppManualOpenRequestInput {
   phoneE164: string;

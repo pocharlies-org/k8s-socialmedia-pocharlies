@@ -238,9 +238,7 @@ ${renewScript}
         eventType: EventType.CHAT_UPDATED,
         waChatId: update.waChatId,
         updateType: update.updateType as
-          | 'NAME_CHANGED'
-          | 'PARTICIPANT_ADDED'
-          | 'PARTICIPANT_REMOVED',
+          'NAME_CHANGED' | 'PARTICIPANT_ADDED' | 'PARTICIPANT_REMOVED',
         metadata: update.metadata || {},
       });
     }

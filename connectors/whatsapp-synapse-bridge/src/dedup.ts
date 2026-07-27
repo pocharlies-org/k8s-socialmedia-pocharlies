@@ -56,7 +56,7 @@ export class DedupCache {
     this.entries.set(key, t);
     if (this.entries.size > this.maxEntries) {
       // Map preserves insertion order: drop the oldest key.
-      const oldest = this.entries.keys().next().value as string | undefined;
+      const oldest = this.entries.keys().next().value;
       if (oldest !== undefined) this.entries.delete(oldest);
     }
   }
