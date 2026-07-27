@@ -138,6 +138,129 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * POST /groups - Create a group, supergroup/forum, or channel.
+   */
+  router.post('/groups', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const { title, type, description, forum, members } = req.body;
+        if (typeof title !== 'string' || !title.trim()) {
+          res.status(400).json({ error: 'Missing title' });
+          return;
+        }
+        if (type !== 'group' && type !== 'supergroup' && type !== 'channel') {
+          res.status(400).json({ error: "type must be 'group', 'supergroup' or 'channel'" });
+          return;
+        }
+        if (members !== undefined && !Array.isArray(members)) {
+          res.status(400).json({ error: 'members must be an array' });
+          return;
+        }
+        const result = await client.createManagedGroup({
+          title,
+          type,
+          description: typeof description === 'string' ? description : undefined,
+          forum: forum === true,
+          members,
+        });
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error creating Telegram group: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /chats/:id/members - Add members to a group, supergroup, or channel.
+   */
+  router.post('/chats/:id/members', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const { members, forwardCount } = req.body;
+        if (!Array.isArray(members) || !members.length) {
+          res.status(400).json({ error: 'members must contain at least one peer' });
+          return;
+        }
+        const parsedForwardCount =
+          forwardCount === undefined ? 0 : Number(forwardCount);
+        if (
+          !Number.isInteger(parsedForwardCount) ||
+          parsedForwardCount < 0 ||
+          parsedForwardCount > 100
+        ) {
+          res.status(400).json({ error: 'forwardCount must be an integer from 0 to 100' });
+          return;
+        }
+        const result = await client.addManagedChatMembers(
+          req.params.id,
+          members,
+          parsedForwardCount
+        );
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error adding Telegram chat members: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * PUT /chats/:id/admins/:userId - Set or revoke Telegram admin permissions.
+   */
+  router.put('/chats/:id/admins/:userId', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const { rights, rank } = req.body;
+        if (!rights || typeof rights !== 'object' || Array.isArray(rights)) {
+          res.status(400).json({ error: 'rights must be an object of boolean permissions' });
+          return;
+        }
+        const allowedRights = new Set([
+          'changeInfo',
+          'postMessages',
+          'editMessages',
+          'deleteMessages',
+          'banUsers',
+          'inviteUsers',
+          'pinMessages',
+          'addAdmins',
+          'anonymous',
+          'manageCall',
+          'other',
+          'manageTopics',
+          'postStories',
+          'editStories',
+          'deleteStories',
+          'manageDirectMessages',
+        ]);
+        if (
+          Object.entries(rights).some(
+            ([name, value]) => !allowedRights.has(name) || typeof value !== 'boolean'
+          )
+        ) {
+          res.status(400).json({ error: 'rights contains an unknown or non-boolean permission' });
+          return;
+        }
+        if (rank !== undefined && typeof rank !== 'string') {
+          res.status(400).json({ error: 'rank must be a string' });
+          return;
+        }
+        const result = await client.setManagedChatAdmin(
+          req.params.id,
+          req.params.userId,
+          rights,
+          rank
+        );
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error setting Telegram admin permissions: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
    * GET /chats/:id/topics - List forum topics for a supergroup
    */
   router.get('/chats/:id/topics', (req: Request, res: Response): void => {
@@ -162,7 +285,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * Parse a :topicId path param. Topic ids are the top message id, always positive.
    */
-  function parseTopicId(raw: string): number | null {
+  function parseTopicId(raw: unknown): number | null {
     const n = Number(raw);
     return Number.isInteger(n) && n > 0 ? n : null;
   }
@@ -607,12 +730,28 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   router.post('/messages/forward', (req: Request, res: Response): void => {
     void (async () => {
       try {
-        const { fromChatId, messageId, toChatId } = req.body;
+        const { fromChatId, messageId, toChatId, threadId } = req.body as {
+          fromChatId?: string;
+          messageId?: string | number;
+          toChatId?: string;
+          threadId?: string | number;
+        };
         if (!fromChatId || !messageId || !toChatId) {
           res.status(400).json({ error: 'Missing fields' });
           return;
         }
-        await client.forwardMessage(fromChatId, parseInt(messageId), toChatId);
+        const toThreadId =
+          threadId !== undefined && threadId !== null ? parseTopicId(threadId) : undefined;
+        if (threadId !== undefined && threadId !== null && toThreadId === null) {
+          res.status(400).json({ error: 'threadId must be a positive integer' });
+          return;
+        }
+        await client.forwardMessage(
+          fromChatId,
+          Number(messageId),
+          toChatId,
+          toThreadId ?? undefined
+        );
         res.json({ forwarded: true });
       } catch (e) {
         res.status(500).json({ error: String(e) });
@@ -626,12 +765,41 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   router.post('/messages/media/send', (req: Request, res: Response): void => {
     void (async () => {
       try {
-        const { chatId, filePath, caption, voiceNote, videoNote, sticker } = req.body;
+        const { chatId, filePath, caption, voiceNote, videoNote, sticker, replyTo, threadId } =
+          req.body as {
+            chatId?: string;
+            filePath?: string;
+            caption?: string;
+            voiceNote?: boolean;
+            videoNote?: boolean;
+            sticker?: boolean;
+            replyTo?: string | number;
+            threadId?: string | number;
+          };
         if (!chatId || !filePath) {
           res.status(400).json({ error: 'Missing chatId or filePath' });
           return;
         }
-        await client.sendFile(chatId, filePath, { caption, voiceNote, videoNote, sticker });
+        const parsedReplyTo =
+          replyTo !== undefined && replyTo !== null ? parseTopicId(replyTo) : undefined;
+        if (replyTo !== undefined && replyTo !== null && parsedReplyTo === null) {
+          res.status(400).json({ error: 'replyTo must be a positive integer' });
+          return;
+        }
+        const parsedThreadId =
+          threadId !== undefined && threadId !== null ? parseTopicId(threadId) : undefined;
+        if (threadId !== undefined && threadId !== null && parsedThreadId === null) {
+          res.status(400).json({ error: 'threadId must be a positive integer' });
+          return;
+        }
+        await client.sendFile(chatId, filePath, {
+          caption,
+          voiceNote,
+          videoNote,
+          sticker,
+          replyTo: parsedReplyTo ?? undefined,
+          threadId: parsedThreadId ?? undefined,
+        });
         res.json({ sent: true });
       } catch (e) {
         res.status(500).json({ error: String(e) });

@@ -322,7 +322,7 @@ function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: b
     return 'The target phone/JID could not be resolved as a WhatsApp contact.';
   }
   if (failureClass === 'disconnected') {
-    return 'WhatsApp is disconnected. Check get_connection_status and re-authenticate with the QR flow if needed.';
+    return 'WhatsApp is disconnected. Check social_validate_account and use social_manage_session action=renewQr if needed.';
   }
   if (failureClass === 'auth') {
     return 'WhatsApp rejected the authenticated send path. Reconnect the WhatsApp session.';
@@ -1351,7 +1351,7 @@ export class BaileysClient extends EventEmitter {
   private async buildQuotedFromId(
     replyToMessageId: string | undefined,
     chatJid: string
-  ): Promise<proto.IWebMessageInfo | undefined> {
+  ): Promise<WAMessage | undefined> {
     if (!replyToMessageId) return undefined;
     const cachedKey = this.keyCache.get(replyToMessageId);
     const messageProto =
@@ -1365,7 +1365,7 @@ export class BaileysClient extends EventEmitter {
     return {
       key: { ...cachedKey.key, id: replyToMessageId, remoteJid: chatJid },
       message: messageProto,
-    } as proto.IWebMessageInfo;
+    } as WAMessage;
   }
 
   async sendMessage(
@@ -1591,7 +1591,7 @@ export class BaileysClient extends EventEmitter {
     chatId: string,
     fileUrl: string,
     caption?: string,
-    options?: { asSticker?: boolean }
+    options?: { asSticker?: boolean; replyToMessageId?: string }
   ): Promise<void> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
@@ -1624,7 +1624,8 @@ export class BaileysClient extends EventEmitter {
         caption,
       };
 
-    const sent = await this.sock.sendMessage(raw, payload);
+    const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
+    const sent = await this.sock.sendMessage(raw, payload, quoted ? { quoted } : undefined);
     if (sent?.key?.id) {
       this.rememberKey(sent.key.id, sent.key, raw);
       this.rememberMessageForRetry(sent.key, sent.message);
@@ -2202,7 +2203,7 @@ export class BaileysClient extends EventEmitter {
     try {
       const pool = getPool();
       // The caller may hand us either the WhatsApp message id or the numeric
-      // messages.id (whatsapp_get_messages exposes both as `waMessageId` and `id`).
+      // messages.id (social_list_messages exposes both `waMessageId` and `id`).
       // messages.wa_message_id is stored namespaced, so namespace the wa id ($1) or
       // professional finds no attachment row; messages.id is the global numeric PK
       // and is never namespaced, so match it raw ($2). Mirrors the dual lookup the
@@ -2475,7 +2476,7 @@ export class BaileysClient extends EventEmitter {
     options?: {
       useCachedGroupMetadata?: boolean;
       useUserDevicesCache?: boolean;
-      quoted?: proto.IWebMessageInfo;
+      quoted?: WAMessage;
     }
   ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');

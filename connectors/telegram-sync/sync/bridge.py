@@ -156,7 +156,7 @@ async def handle_unread(request: Request) -> JSONResponse:
     """POST /unread — list Telegram dialogs with unread messages.
 
     Reads live state from the running Telethon session via get_dialogs().
-    Used by mcp-server to back the telegram_get_unread tool — gramJS in
+    Used by mcp-server to back social_start_digest — gramJS in
     the Node connector cannot serve this against current Telegram MTProto.
     """
     body = await request.body()
@@ -204,7 +204,7 @@ async def handle_unread(request: Request) -> JSONResponse:
     except Exception as e:
         # Live-unread is best-effort: during a connector reconnect (503/conn error)
         # return an empty list with degraded=true rather than failing mcp-server's
-        # telegram_get_unread tool with a 500.
+        # canonical digest flow with a 500.
         logger.warning(f"Unread query failed (returning empty/degraded): {e}")
         return JSONResponse({
             "source": "connector",

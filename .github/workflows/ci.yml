@@ -51,7 +51,8 @@ jobs:
       # corepack picks up packageManager (pnpm@11.17.0) from package.json.
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @mcp-socialmedia/server test -- --runInBand
+      - run: pnpm contract:check
+      - run: pnpm --filter @mcp-socialmedia/server test --runInBand
 
   standard:
     needs: [s3-tests]

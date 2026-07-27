@@ -154,7 +154,7 @@ ${renewScript}
 
   // Manual QR renew (LAN-only pages; gated by ALLOW_WEB_RENEW). Lets a human force
   // a fresh QR when the socket is wedged/INITIALIZING instead of waiting for the
-  // watchdog. Same effect as MCP renew_qr_code but without the HMAC secret, so it
+  // watchdog. Same effect as MCP social_manage_session(action=renewQr) but without the HMAC secret, so it
   // MUST stay disabled on the internet-exposed personal connector.
   app.post('/qr/renew', async (_req, res) => {
     if (!ALLOW_WEB_RENEW) {

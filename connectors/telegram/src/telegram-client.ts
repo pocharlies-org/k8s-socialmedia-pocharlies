@@ -1,4 +1,13 @@
-import { TelegramClient, MemoryStorage, InputMedia, Message, Peer } from '@mtcute/node';
+import {
+  TelegramClient,
+  MemoryStorage,
+  InputMedia,
+  Message,
+  Peer,
+  User,
+  Chat,
+} from '@mtcute/node';
+import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
 import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
@@ -655,6 +664,94 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * Create a Telegram group, supergroup/forum, or broadcast channel.
+   * Members are added at creation for legacy groups and immediately afterwards
+   * for supergroups/channels.
+   */
+  async createManagedGroup(params: {
+    title: string;
+    type: 'group' | 'supergroup' | 'channel';
+    description?: string;
+    forum?: boolean;
+    members?: Array<string | number>;
+  }): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const members = params.members || [];
+    let chat: Chat;
+    let missing: any[] = [];
+
+    if (params.type === 'group') {
+      if (!members.length) {
+        throw new Error('A legacy group requires at least one member');
+      }
+      const created = await this.client.createGroup({
+        title: params.title,
+        users: members,
+      });
+      chat = created.chat;
+      missing = created.missing || [];
+    } else if (params.type === 'channel') {
+      chat = await this.client.createChannel({
+        title: params.title,
+        description: params.description,
+      });
+      if (members.length) {
+        missing = await this.client.addChatMembers(chat.id, members, { forwardCount: 0 });
+      }
+    } else {
+      chat = await this.client.createSupergroup({
+        title: params.title,
+        description: params.description,
+        forum: params.forum === true,
+      });
+      if (members.length) {
+        missing = await this.client.addChatMembers(chat.id, members, { forwardCount: 0 });
+      }
+    }
+
+    return {
+      chat: {
+        id: chat.id.toString(),
+        title: chat.title,
+        type: mapChatType(chat),
+      },
+      missing,
+    };
+  }
+
+  /** Add one or more members to an existing Telegram chat. */
+  async addManagedChatMembers(
+    chatId: string,
+    members: Array<string | number>,
+    forwardCount: number = 0
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    const missing = await this.client.addChatMembers(
+      toMtcutePeer(chatId),
+      members,
+      { forwardCount }
+    );
+    return { chatId, membersRequested: members.length, missing };
+  }
+
+  /** Grant, update, or revoke a member's Telegram admin permissions. */
+  async setManagedChatAdmin(
+    chatId: string,
+    userId: string,
+    rights: Record<string, boolean>,
+    rank?: string
+  ): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.editAdminRights({
+      chatId: toMtcutePeer(chatId),
+      userId: toMtcutePeer(userId),
+      rights: rights as any,
+      ...(rank !== undefined ? { rank } : {}),
+    });
+    return { chatId, userId, rights, rank: rank || null };
+  }
+
+  /**
    * Chats with unread messages
    */
   async getUnreadChats(): Promise<any[]> {
@@ -737,12 +834,18 @@ export class TelegramClientWrapper extends EventEmitter {
   /**
    * Forward a message between chats
    */
-  async forwardMessage(fromChatId: string, messageId: number, toChatId: string): Promise<void> {
+  async forwardMessage(
+    fromChatId: string,
+    messageId: number,
+    toChatId: string,
+    toThreadId?: number
+  ): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
     await this.client.forwardMessagesById({
       toChatId: toMtcutePeer(toChatId),
       fromChatId: toMtcutePeer(fromChatId),
       messages: [messageId],
+      ...(toThreadId !== undefined ? { toThreadId } : {}),
     });
   }
 
@@ -892,6 +995,8 @@ export class TelegramClientWrapper extends EventEmitter {
       voiceNote?: boolean;
       videoNote?: boolean;
       sticker?: boolean;
+      replyTo?: number;
+      threadId?: number;
     }
   ): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
@@ -920,7 +1025,10 @@ export class TelegramClientWrapper extends EventEmitter {
         options?.caption ? { caption: options.caption } : undefined
       );
     }
-    await this.client.sendMedia(toMtcutePeer(chatId), media);
+    const effectiveReplyTo = options?.replyTo ?? options?.threadId;
+    const sendParams: CommonSendParams | undefined =
+      effectiveReplyTo !== undefined ? { replyTo: effectiveReplyTo } : undefined;
+    await this.client.sendMedia(toMtcutePeer(chatId), media, sendParams);
   }
 
   /**
