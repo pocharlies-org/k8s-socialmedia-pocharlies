@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: instagram-synapse-bridge
+  namespace: whatsapp-mcp
+spec:
+  # Activated only after the matching Synapse route and immutable image are live.
+  replicas: 0
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app: instagram-synapse-bridge }
+  template:
+    metadata:
+      labels: { app: instagram-synapse-bridge }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: instagram-synapse-bridge
+          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-synapse-bridge:build-required
+          ports: [{ name: http, containerPort: 3007 }]
+          env:
+            - { name: PORT, value: "3007" }
+            - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
+            - { name: SYNAPSE_INSTAGRAM_WEBHOOK_URL, value: "https://synapse.e-dani.com/webhooks/instagram" }
+            - { name: INSTAGRAM_DM_DURABLE, value: "synapse-instagram-skirmshop-v1" }
+            - { name: INSTAGRAM_DM_ACK_WAIT_MS, value: "30000" }
+            - { name: INSTAGRAM_DM_RETRY_DELAY_MS, value: "5000" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 6
+          resources:
+            requests: { cpu: 20m, memory: 48Mi }
+            limits: { memory: 192Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: instagram-synapse-bridge, namespace: whatsapp-mcp }
+spec:
+  selector: { app: instagram-synapse-bridge }
+  ports: [{ name: http, port: 3007, targetPort: http }]
