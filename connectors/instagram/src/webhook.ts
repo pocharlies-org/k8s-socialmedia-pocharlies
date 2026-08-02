@@ -27,6 +27,37 @@ export interface WebhookEvent {
 
 type EventCallback = (account: string, event: WebhookEvent) => Promise<boolean>;
 
+const META_MILLISECONDS_THRESHOLD = 1_000_000_000_000;
+const MIN_META_EVENT_TIMESTAMP_MS = Date.UTC(2000, 0, 1);
+const MAX_META_FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Meta webhook examples use epoch milliseconds, while older Messenger
+ * integrations sometimes send epoch seconds. Normalize both without ever
+ * allowing malformed or missing input to throw an Invalid Date RangeError.
+ */
+export function normalizeMetaTimestamp(value: unknown, fallbackMs = Date.now()): string {
+  const safeFallbackMs = Number.isFinite(fallbackMs) ? fallbackMs : Date.now();
+  const fallback = new Date(safeFallbackMs).toISOString();
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+
+  const epochMs = numeric >= META_MILLISECONDS_THRESHOLD ? numeric : numeric * 1000;
+  if (
+    !Number.isFinite(epochMs) ||
+    epochMs < MIN_META_EVENT_TIMESTAMP_MS ||
+    epochMs > Date.now() + MAX_META_FUTURE_SKEW_MS
+  ) {
+    return fallback;
+  }
+  return new Date(Math.trunc(epochMs)).toISOString();
+}
+
 export function createWebhookRouter(
   verifyToken: string,
   appSecret: string,
@@ -76,6 +107,7 @@ export function createWebhookRouter(
   // Incoming webhook events (POST)
   router.post('/webhook', async (req: Request, res: Response) => {
     const body = req.body;
+    const receivedAtMs = Date.now();
 
     if (!isValidSignature(req, appSecret)) {
       logger.warn('Webhook signature validation failed');
@@ -92,7 +124,10 @@ export function createWebhookRouter(
     for (const entry of body.entry || []) {
       const account = resolveAccount(entry);
       if (account !== 'skirmshop') {
-        logger.warn({ entryId: entry.id }, 'Rejecting webhook for unknown or non-Skirmshop account');
+        logger.warn(
+          { entryId: entry.id },
+          'Rejecting webhook for unknown or non-Skirmshop account'
+        );
         res.sendStatus(403);
         return;
       }
@@ -106,7 +141,7 @@ export function createWebhookRouter(
             conversationId: `${messaging.sender?.id}-${messaging.recipient?.id}`,
             messageId: messaging.message.mid,
             text: messaging.message.text,
-            timestamp: new Date(messaging.timestamp * 1000).toISOString(),
+            timestamp: normalizeMetaTimestamp(messaging.timestamp, receivedAtMs),
             raw: messaging,
           };
 
@@ -128,15 +163,13 @@ export function createWebhookRouter(
         // DMs come through `changes` with field=messages in the Business Login API
         if (change.field === 'messages' && isInboundDm(change.value || {})) {
           const value = change.value || {};
-          const tsNum =
-            typeof value.timestamp === 'string' ? parseInt(value.timestamp, 10) : value.timestamp;
           const event: WebhookEvent = {
             type: 'dm',
             senderId: value.sender?.id || '',
             conversationId: `${value.sender?.id}-${value.recipient?.id}`,
             messageId: value.message?.mid,
             text: value.message?.text,
-            timestamp: new Date((tsNum || Date.now() / 1000) * 1000).toISOString(),
+            timestamp: normalizeMetaTimestamp(value.timestamp, receivedAtMs),
             raw: value,
           };
           if (value.message?.attachments) {
@@ -173,6 +206,11 @@ export function isInboundDm(value: any): boolean {
   const recipientId = value.recipient?.id;
   const message = value.message;
   return Boolean(
-    senderId && recipientId && senderId !== recipientId && message && !message.is_echo && !message.isEcho
+    senderId &&
+    recipientId &&
+    senderId !== recipientId &&
+    message &&
+    !message.is_echo &&
+    !message.isEcho
   );
 }

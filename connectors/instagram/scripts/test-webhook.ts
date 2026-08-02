@@ -6,6 +6,7 @@ import {
   createWebhookRouter,
   isInboundDm,
   isValidSignature,
+  normalizeMetaTimestamp,
   WebhookEvent,
 } from '../src/webhook';
 import { publishWithAcknowledgement } from '../src/publisher-ack';
@@ -19,13 +20,16 @@ const signature = `sha256=${createHmac('sha256', secret).update(raw).digest('hex
 const request = (value = signature) =>
   ({
     rawBody: raw,
-    get: (header: string) =>
-      header.toLowerCase() === 'x-hub-signature-256' ? value : undefined,
+    get: (header: string) => (header.toLowerCase() === 'x-hub-signature-256' ? value : undefined),
   }) as unknown as Request;
 
 assert.equal(isValidSignature(request(), secret), true);
 assert.equal(isValidSignature(request('sha256=00'), secret), false);
 assert.equal(isValidSignature(request(), ''), false);
+assert.equal(normalizeMetaTimestamp(1510609444865), '2017-11-13T21:44:04.865Z');
+assert.equal(normalizeMetaTimestamp('1510609444865'), '2017-11-13T21:44:04.865Z');
+assert.equal(normalizeMetaTimestamp(1510609444), '2017-11-13T21:44:04.000Z');
+assert.equal(normalizeMetaTimestamp(undefined, 1510609444865), '2017-11-13T21:44:04.865Z');
 assert.equal(
   isInboundDm({
     sender: { id: 'customer' },
@@ -50,10 +54,7 @@ assert.equal(
   }),
   false
 );
-assert.equal(
-  isInboundDm({ sender: { id: 'customer' }, recipient: { id: 'skirmshop' } }),
-  false
-);
+assert.equal(isInboundDm({ sender: { id: 'customer' }, recipient: { id: 'skirmshop' } }), false);
 
 async function testPublisherAcknowledgements(): Promise<void> {
   const published: Array<{ subject: string; messageId: string }> = [];
@@ -141,9 +142,7 @@ async function main(): Promise<void> {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(signatureValue === undefined
-          ? {}
-          : { 'x-hub-signature-256': signatureValue }),
+        ...(signatureValue === undefined ? {} : { 'x-hub-signature-256': signatureValue }),
       },
       body: payload,
     });
@@ -162,7 +161,7 @@ async function main(): Promise<void> {
           {
             sender: { id: 'customer' },
             recipient: { id: 'ig-skirmshop' },
-            timestamp: 1,
+            timestamp: 1510609444865,
             message: { mid: 'dm-1', text: 'Need help' },
           },
         ],
@@ -198,6 +197,46 @@ async function main(): Promise<void> {
     assert.equal((await post(dm, signed(dm))).status, 200);
     assert.equal((await post(dm, signed(dm))).status, 200);
     assert.equal(published.filter(event => event.messageId === 'dm-1').length, 2);
+    assert.equal(
+      published.find(event => event.messageId === 'dm-1')?.timestamp,
+      '2017-11-13T21:44:04.865Z'
+    );
+
+    const changesDm = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-skirmshop',
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                sender: { id: 'customer-changes' },
+                recipient: { id: 'ig-skirmshop' },
+                timestamp: '1510609444865',
+                message: { mid: 'dm-changes', text: 'Changes payload' },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    assert.equal((await post(changesDm, signed(changesDm))).status, 200);
+    assert.equal(
+      published.find(event => event.messageId === 'dm-changes')?.timestamp,
+      '2017-11-13T21:44:04.865Z'
+    );
+
+    const missingTimestamp = structuredClone(dm);
+    delete (missingTimestamp.entry[0].messaging[0] as { timestamp?: number }).timestamp;
+    missingTimestamp.entry[0].messaging[0].message.mid = 'dm-missing-timestamp';
+    const beforeMissingTimestamp = Date.now();
+    assert.equal((await post(missingTimestamp, signed(missingTimestamp))).status, 200);
+    const normalizedMissingTimestamp = Date.parse(
+      published.find(event => event.messageId === 'dm-missing-timestamp')?.timestamp || ''
+    );
+    assert.ok(normalizedMissingTimestamp >= beforeMissingTimestamp);
+    assert.ok(normalizedMissingTimestamp <= Date.now());
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) =>
