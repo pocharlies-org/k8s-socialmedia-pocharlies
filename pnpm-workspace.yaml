@@ -4,6 +4,7 @@ packages:
   - 'connectors/whatsapp-synapse-bridge'
   - 'connectors/telegram'
   - 'connectors/instagram'
+  - 'connectors/instagram-synapse-bridge'
   - 'workers/*'
   - 'mcp-server'
   - 'shared'
