@@ -28,6 +28,13 @@ export interface InstagramConfig {
   instagramUserId?: string;
 }
 
+interface FacebookPageRecord {
+  id?: string;
+  name?: string;
+  access_token?: string;
+  instagram_business_account?: { id?: string; username?: string };
+}
+
 export interface MediaItem {
   id: string;
   caption: string;
@@ -55,6 +62,8 @@ export interface Conversation {
 
 export class InstagramAPI {
   private config: InstagramConfig;
+  private facebookPageId?: string;
+  private facebookPageAccessToken?: string;
 
   constructor(config: InstagramConfig) {
     this.config = config;
@@ -65,19 +74,68 @@ export class InstagramAPI {
     this.config.instagramUserId = id;
   }
 
+  /**
+   * Resolve and retain the Page token in memory only. Meta's Instagram
+   * Messaging API is addressed through the Facebook Page ID, while profile,
+   * media and publishing use the linked Instagram business-account ID.
+   */
+  async configureFacebookPageContext(): Promise<{
+    pageId: string;
+    instagramUserId: string;
+    username?: string;
+  } | null> {
+    if (!this.config.fbAccessToken) return null;
+    const result = await this.fbRequest<{ data?: FacebookPageRecord[] }>('/me/accounts', {
+      fields: 'id,name,access_token,instagram_business_account{id,username}',
+    });
+    const candidates = (result.data ?? []).filter(
+      page => page.id && page.access_token && page.instagram_business_account?.id
+    );
+    const exact = candidates.find(page => {
+      const instagramId = page.instagram_business_account?.id;
+      return (
+        instagramId === this.config.businessAccountId ||
+        instagramId === this.config.instagramUserId ||
+        page.id === this.config.businessAccountId
+      );
+    });
+    const selected = exact ?? (candidates.length === 1 ? candidates[0] : undefined);
+    const pageId = selected?.id;
+    const pageAccessToken = selected?.access_token;
+    const instagramUserId = selected?.instagram_business_account?.id;
+    if (!pageId || !pageAccessToken || !instagramUserId) return null;
+    this.facebookPageId = pageId;
+    this.facebookPageAccessToken = pageAccessToken;
+    this.config.instagramUserId = instagramUserId;
+    return {
+      pageId,
+      instagramUserId,
+      username: selected.instagram_business_account?.username,
+    };
+  }
+
   /** ID to pass to graph.facebook.com endpoints — IG User ID if known, else fallback. */
   private fbUserId(): string {
     return this.config.instagramUserId || this.config.businessAccountId;
   }
 
+  private instagramAccountId(): string {
+    return this.config.instagramUserId || this.config.businessAccountId;
+  }
+
+  private messagingAccountId(): string {
+    return this.facebookPageId || this.config.businessAccountId;
+  }
+
   private async request<T>(
     endpoint: string,
     params: Record<string, string> = {},
-    method: 'GET' | 'POST' = 'GET',
-    body?: Record<string, string>
+    method: 'GET' | 'POST' | 'DELETE' = 'GET',
+    body?: Record<string, unknown>
   ): Promise<T> {
-    const url = new URL(`${GRAPH_API_BASE}${endpoint}`);
-    url.searchParams.set('access_token', this.config.accessToken);
+    const useFacebookPage = !!this.facebookPageAccessToken;
+    const url = new URL(`${useFacebookPage ? FB_GRAPH_API_BASE : GRAPH_API_BASE}${endpoint}`);
+    url.searchParams.set('access_token', this.facebookPageAccessToken || this.config.accessToken);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
     }
@@ -91,7 +149,9 @@ export class InstagramAPI {
     const response = await fetch(url.toString(), options);
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Instagram API error (${response.status}): ${error}`);
+      throw new Error(
+        `${useFacebookPage ? 'Facebook' : 'Instagram'} API error (${response.status}): ${error}`
+      );
     }
     return response.json() as Promise<T>;
   }
@@ -140,14 +200,14 @@ export class InstagramAPI {
       followers_count: number;
       follows_count: number;
       media_count: number;
-    }>(`/${this.config.businessAccountId}`, {
+    }>(`/${this.instagramAccountId()}`, {
       fields:
         'id,name,username,biography,followers_count,follows_count,media_count,profile_picture_url,website',
     });
   }
 
   async getRecentMedia(limit = 25) {
-    return this.request<{ data: MediaItem[] }>(`/${this.config.businessAccountId}/media`, {
+    return this.request<{ data: MediaItem[] }>(`/${this.instagramAccountId()}/media`, {
       fields: 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
       limit: String(limit),
     });
@@ -164,24 +224,21 @@ export class InstagramAPI {
   }
 
   async getConversations(limit = 20) {
-    return this.request<{ data: Conversation[] }>(
-      `/${this.config.businessAccountId}/conversations`,
-      {
-        fields: 'id,participants,messages{id,message,from,created_time},updated_time',
-        platform: 'instagram',
-        limit: String(limit),
-      }
-    );
+    return this.request<{ data: Conversation[] }>(`/${this.messagingAccountId()}/conversations`, {
+      fields: 'id,participants,messages{id,message,from,created_time},updated_time',
+      platform: 'instagram',
+      limit: String(limit),
+    });
   }
 
   async sendMessage(recipientId: string, messageText: string) {
     return this.request<{ recipient_id: string; message_id: string }>(
-      `/${this.config.businessAccountId}/messages`,
+      `/${this.messagingAccountId()}/messages`,
       {},
       'POST',
       {
-        recipient: JSON.stringify({ id: recipientId }),
-        message: JSON.stringify({ text: messageText }),
+        recipient: { id: recipientId },
+        message: { text: messageText },
       }
     );
   }
@@ -209,19 +266,19 @@ export class InstagramAPI {
       params.video_url = imageUrl;
       params.media_type = 'REELS';
     }
-    return this.request<{ id: string }>(`/${this.config.businessAccountId}/media`, params, 'POST');
+    return this.request<{ id: string }>(`/${this.instagramAccountId()}/media`, params, 'POST');
   }
 
   async publishMedia(containerId: string) {
     return this.request<{ id: string }>(
-      `/${this.config.businessAccountId}/media_publish`,
+      `/${this.instagramAccountId()}/media_publish`,
       { creation_id: containerId },
       'POST'
     );
   }
 
   async getStories() {
-    return this.request<{ data: MediaItem[] }>(`/${this.config.businessAccountId}/stories`, {
+    return this.request<{ data: MediaItem[] }>(`/${this.instagramAccountId()}/stories`, {
       fields: 'id,caption,media_type,media_url,permalink,timestamp',
     });
   }
@@ -235,15 +292,20 @@ export class InstagramAPI {
 
   async refreshToken() {
     if (!this.config.appSecret) throw new Error('App secret required for token refresh');
-    return this.request<{ access_token: string; token_type: string; expires_in: number }>(
-      `/oauth/access_token`,
-      {
-        grant_type: 'fb_exchange_token',
-        client_id: this.config.appId ?? '',
-        client_secret: this.config.appSecret,
-        fb_exchange_token: this.config.accessToken,
-      }
-    );
+    const url = new URL(`${FB_GRAPH_API_BASE}/oauth/access_token`);
+    url.searchParams.set('grant_type', 'fb_exchange_token');
+    url.searchParams.set('client_id', this.config.appId ?? '');
+    url.searchParams.set('client_secret', this.config.appSecret);
+    url.searchParams.set('fb_exchange_token', this.config.fbAccessToken || this.config.accessToken);
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      throw new Error(`Facebook API error (${response.status}): ${await response.text()}`);
+    }
+    return response.json() as Promise<{
+      access_token: string;
+      token_type: string;
+      expires_in: number;
+    }>;
   }
 
   // ── Publishing: carousel / reel / story ────────────────────────────────
@@ -262,7 +324,7 @@ export class InstagramAPI {
         body.image_url = url;
       }
       const child = await this.request<{ id: string }>(
-        `/${this.config.businessAccountId}/media`,
+        `/${this.instagramAccountId()}/media`,
         {},
         'POST',
         body
@@ -275,7 +337,7 @@ export class InstagramAPI {
     };
     if (caption) carouselBody.caption = caption;
     const carousel = await this.request<{ id: string }>(
-      `/${this.config.businessAccountId}/media`,
+      `/${this.instagramAccountId()}/media`,
       {},
       'POST',
       carouselBody
@@ -292,7 +354,7 @@ export class InstagramAPI {
     };
     if (caption) body.caption = caption;
     const container = await this.request<{ id: string }>(
-      `/${this.config.businessAccountId}/media`,
+      `/${this.instagramAccountId()}/media`,
       {},
       'POST',
       body
@@ -307,7 +369,7 @@ export class InstagramAPI {
     else if (opts.videoUrl) body.video_url = opts.videoUrl;
     else throw new Error('Either imageUrl or videoUrl is required');
     const container = await this.request<{ id: string }>(
-      `/${this.config.businessAccountId}/media`,
+      `/${this.instagramAccountId()}/media`,
       {},
       'POST',
       body
@@ -331,12 +393,7 @@ export class InstagramAPI {
   }
 
   async deleteComment(commentId: string) {
-    const url = new URL(`${GRAPH_API_BASE}/${commentId}`);
-    url.searchParams.set('access_token', this.config.accessToken);
-    const response = await fetch(url.toString(), { method: 'DELETE' });
-    if (!response.ok) {
-      throw new Error(`Instagram API error (${response.status}): ${await response.text()}`);
-    }
+    await this.request<unknown>(`/${commentId}`, {}, 'DELETE');
     return { id: commentId, deleted: true };
   }
 
@@ -351,7 +408,7 @@ export class InstagramAPI {
         values: Array<{ value: number }>;
         total_value?: { value: number };
       }>;
-    }>(`/${this.config.businessAccountId}/insights`, {
+    }>(`/${this.instagramAccountId()}/insights`, {
       metric: m.join(','),
       period,
       metric_type: 'total_value',
@@ -370,7 +427,7 @@ export class InstagramAPI {
         quota_usage?: number;
         config?: { quota_total: number; quota_duration: number };
       }>;
-    }>(`/${this.config.businessAccountId}/content_publishing_limit`, {
+    }>(`/${this.instagramAccountId()}/content_publishing_limit`, {
       fields: 'quota_usage,config,quota_duration',
     });
     return data.data?.[0] ?? {};
@@ -419,7 +476,7 @@ export class InstagramAPI {
         timestamp: string;
         username?: string;
       }>;
-    }>(`/${this.config.businessAccountId}/tags`, {
+    }>(`/${this.instagramAccountId()}/tags`, {
       fields: 'id,media_type,media_url,permalink,caption,timestamp,username',
       limit: String(Math.min(limit, 100)),
     });
