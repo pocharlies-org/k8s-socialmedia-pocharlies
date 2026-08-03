@@ -25,6 +25,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Verify contract, focused tests and builds
         run: |
+          pnpm security:dependency-contract
           pnpm contract:check
           pnpm --filter @mcp-socialmedia/instagram-connector test
           pnpm --filter @mcp-socialmedia/instagram-synapse-bridge test
