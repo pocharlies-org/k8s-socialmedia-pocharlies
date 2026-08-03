@@ -39,7 +39,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@e411d6a0f0ba9a9a0b4818836f3cf3a80db0102e
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@6ddafbfffb31d78f9733d765036bf54d916659b5
     with:
       runner: arc-k8s
       version: ${{ github.event.inputs.image_tag || github.ref_name }}
@@ -62,7 +62,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-release.yml@e411d6a0f0ba9a9a0b4818836f3cf3a80db0102e
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-release.yml@6ddafbfffb31d78f9733d765036bf54d916659b5
     with:
       runner: arc-k8s
       source_path: k8s/overlays/prod
