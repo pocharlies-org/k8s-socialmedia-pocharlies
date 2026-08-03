@@ -110,7 +110,29 @@ async function main(): Promise<void> {
     if (entry.config.businessAccountId) {
       bizIdToAccount.set(entry.config.businessAccountId, name);
     }
-    // Fetch the Instagram User ID (user_id) from /me and register it too
+    // Prefer the durable Facebook user token: resolve the linked Page access
+    // token and both stable IDs without ever persisting or logging that token.
+    try {
+      const facebookContext = await entry.api.configureFacebookPageContext();
+      if (facebookContext) {
+        bizIdToAccount.set(facebookContext.pageId, name);
+        bizIdToAccount.set(facebookContext.instagramUserId, name);
+        logger.info(
+          {
+            account: name,
+            page_id: facebookContext.pageId,
+            instagram_user_id: facebookContext.instagramUserId,
+            username: facebookContext.username,
+          },
+          'Registered Facebook Page and Instagram IDs for routing'
+        );
+        continue;
+      }
+    } catch (err) {
+      logger.warn({ account: name, err: String(err) }, 'Failed to resolve Facebook Page context');
+    }
+
+    // Fallback for accounts that only have an Instagram Login token.
     try {
       const meUrl = `https://graph.instagram.com/v21.0/me?fields=id,user_id&access_token=${entry.config.accessToken}`;
       const res = await fetch(meUrl);
