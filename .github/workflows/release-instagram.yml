@@ -1,6 +1,9 @@
 name: Release Instagram Images
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/release-instagram.yml
   workflow_dispatch: {}
 
 permissions:
@@ -13,7 +16,7 @@ concurrency:
 jobs:
   gate:
     name: Instagram release gate
-    if: ${{ github.ref == 'refs/heads/deploy/prod' }}
+    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/deploy/prod' }}
     runs-on: arc-k8s
     timeout-minutes: 20
     steps:
@@ -34,10 +37,11 @@ jobs:
 
   release:
     needs: [gate]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/deploy/prod' }}
     permissions:
       contents: read
       id-token: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@70b31777bcc7e51874f897931426bb8c7b657f4f
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@181738e531a0a2a34f01f623533d691abc83e148
     with:
       runner: arc-k8s
       # Source-bound tag: dispatch cannot select or overwrite another release.

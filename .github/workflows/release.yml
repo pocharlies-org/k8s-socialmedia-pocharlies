@@ -1,6 +1,9 @@
 name: Release Production
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
   push:
     tags: ["*"]
   workflow_dispatch:
@@ -11,14 +14,7 @@ on:
         type: string
 
 permissions:
-  # contents: write is for the manifest job, which promotes the deploy branch.
-  contents: write
-  pull-requests: write
-  # The shared reusable release requests id-token: write for keyless Sigstore
-  # signing (gitops a75678a, 2026-07-14). A called workflow cannot exceed the
-  # caller's permissions, so without this the run dies at startup
-  # (startup_failure, 0s, no log).
-  id-token: write
+  contents: read
 
 concurrency:
   group: release-prod-${{ github.repository }}
@@ -39,7 +35,11 @@ jobs:
 
   release:
     needs: [contract]
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@main
+    if: ${{ github.event_name != 'pull_request' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@181738e531a0a2a34f01f623533d691abc83e148
     with:
       runner: arc-k8s
       version: ${{ github.event.inputs.image_tag || github.ref_name }}
@@ -59,7 +59,10 @@ jobs:
 
   manifests:
     needs: [release]
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-release.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-release.yml@181738e531a0a2a34f01f623533d691abc83e148
     with:
       runner: arc-k8s
       source_path: k8s/overlays/prod
