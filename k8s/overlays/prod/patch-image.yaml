@@ -49,6 +49,18 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: instagram-synapse-bridge
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: instagram-synapse-bridge
+          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-synapse-bridge:build-required
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: mcp-server
   namespace: whatsapp-mcp
 spec:

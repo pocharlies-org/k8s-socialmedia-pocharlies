@@ -26,6 +26,8 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: socialmedia-v2-c88dce16
     digest: sha256:c12e23221a93e8a42985abde0e9858e1fe17713105b076328487e24caa719030
+  - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-synapse-bridge
+    newTag: build-required
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: socialmedia-v2-c88dce16
     digest: sha256:660119ecb97a5489921ed6285dce069176a160742bd0c9a9cb328b09ae799e12

@@ -69,6 +69,18 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: instagram-synapse-bridge
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      nodeSelector:
+        topology: null
+        node-pool: ks5-nvme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: mcp-server
   namespace: whatsapp-mcp
 spec:

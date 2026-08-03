@@ -14,6 +14,7 @@
  */
 
 import express from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import pino from 'pino';
 import { InstagramAPI, InstagramConfig } from './instagram-api';
 import { createWebhookRouter } from './webhook';
@@ -29,6 +30,7 @@ const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'instagram-verify-token';
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID || '';
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || '';
+const INTERNAL_API_TOKEN = process.env.INSTAGRAM_INTERNAL_API_TOKEN || '';
 
 export interface AccountEntry {
   name: string;
@@ -138,15 +140,34 @@ async function main(): Promise<void> {
   );
   await publisher.connect();
 
+  const skirmshopAppSecret = accounts.get('skirmshop')?.config.appSecret || '';
+  if (!skirmshopAppSecret) {
+    logger.error('Skirmshop webhook signing secret is not configured');
+    process.exit(1);
+  }
+  if (!INTERNAL_API_TOKEN) {
+    logger.error('Instagram internal API token is not configured');
+    process.exit(1);
+  }
+
   const app = express();
-  app.use(express.json());
+  app.use(
+    express.json({
+      verify: (req, _res, buffer) => {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+      },
+    })
+  );
 
   // Webhook routes — shared endpoint, routes by business account ID in payload
   app.use(
     '/',
-    createWebhookRouter(WEBHOOK_VERIFY_TOKEN, bizIdToAccount, (account, event) => {
-      publisher.publish(account, event);
-    })
+    createWebhookRouter(
+      WEBHOOK_VERIFY_TOKEN,
+      skirmshopAppSecret,
+      bizIdToAccount,
+      (account, event) => publisher.publish(account, event)
+    )
   );
 
   // Health check — all accounts
@@ -164,7 +185,31 @@ async function main(): Promise<void> {
         results[name] = { status: 'degraded', error: String(error) };
       }
     }
-    res.json({ status: 'ok', platform: 'instagram', accounts: results });
+    const requiredAccount = results.skirmshop as { status?: string } | undefined;
+    const healthy = requiredAccount?.status === 'ok' && publisher.isReady();
+    res.status(healthy ? 200 : 503).json({
+      status: healthy ? 'ok' : 'degraded',
+      platform: 'instagram',
+      broker: publisher.isReady() ? 'ok' : 'degraded',
+      accounts: results,
+    });
+  });
+
+  // Every connector API route, especially outbound send/publish actions, is
+  // internal-only. Webhook verification remains separately authenticated by Meta.
+  app.use('/api/v1', (req, res, next) => {
+    const authorization = req.get('authorization') || '';
+    const expected = `Bearer ${INTERNAL_API_TOKEN}`;
+    const actualBytes = Buffer.from(authorization);
+    const expectedBytes = Buffer.from(expected);
+    if (
+      actualBytes.length !== expectedBytes.length ||
+      !timingSafeEqual(actualBytes, expectedBytes)
+    ) {
+      res.sendStatus(401);
+      return;
+    }
+    next();
   });
 
   // List available accounts
@@ -178,10 +223,7 @@ async function main(): Promise<void> {
 
   // Helper to resolve account from route param
   function getAccount(name: string): AccountEntry | undefined {
-    return (
-      accounts.get(name.toLowerCase()) ||
-      (accounts.size === 1 ? accounts.values().next().value : undefined)
-    );
+    return accounts.get(name.toLowerCase());
   }
 
   // === Per-account API routes ===
