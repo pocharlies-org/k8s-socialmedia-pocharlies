@@ -12,9 +12,12 @@ packages:
 # HIGH/CRITICAL. Each entry is a transitive dep we cannot bump via a direct
 # dependency; revisit when the parent package ships the fix itself.
 overrides:
-  # CVE-2026-14257 is only fixed on the 5.x line. 5.0.8 still publishes a
-  # CommonJS build and requires node 20 || >=22, so the consumers keep working.
-  brace-expansion: ^5.0.8
+  # CVE-2026-69152 supersedes the earlier 5.0.8 fix. 5.0.9 retains the same
+  # CommonJS/Node contract while closing the unbounded-array bypass.
+  brace-expansion: ^5.0.9
+  # GHSA-7p8r-x3mc-p8w7: AJV's compatible ^3 range accepts 3.1.5, which fixes
+  # backslash host confusion without changing the public API.
+  fast-uri: ^3.1.5
   # Scoped to the 9.x line on purpose: eslint pulls minimatch 3.x, whose API
   # differs, and 3.1.5 is already past the fixed 3.1.4.
   minimatch@9: ^9.0.9
