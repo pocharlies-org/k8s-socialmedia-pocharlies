@@ -28,7 +28,7 @@ jobs:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
     steps:
-      - uses: actions/checkout@3d3c42e045d40ba00ea8b2dfcaa6e8a295af8a5d # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Start MinIO
         run: |
           curl -fsSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /tmp/minio
@@ -43,7 +43,7 @@ jobs:
           done
           cat /tmp/minio.log
           exit 1
-      - uses: actions/setup-node@249970708e65e494ad7c63d57a03ce7ba6991f33 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           # Matches the images and the root engines field. Node 20 went EOL in
           # April 2026 and cannot run the pinned pnpm.
