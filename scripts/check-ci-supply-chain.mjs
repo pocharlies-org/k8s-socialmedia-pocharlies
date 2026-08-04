@@ -23,6 +23,10 @@ if (mutable.length) {
 
 const ci = fs.readFileSync(path.join(workflowsDir, "ci.yml"), "utf8");
 const release = fs.readFileSync(path.join(workflowsDir, "release.yml"), "utf8");
+const instagramBridge = fs.readFileSync(
+  path.join(root, "k8s", "base", "instagram-synapse-bridge.yaml"),
+  "utf8",
+);
 const minioVersion = "RELEASE.2025-09-07T16-13-09Z";
 const minioSha256 = "7c5bd8512c6e966455b1d198209358b2d191c77a83ab377c4073281065fb855f";
 if (
@@ -62,6 +66,10 @@ for (const name of targetNames) {
       !releaseTargetsBlock.includes(`"deployRepository":"${repository}"`)) {
     throw new Error(`Manifest target is not exact for ${name}`);
   }
+}
+if (instagramBridge.includes("envFrom:") ||
+    !instagramBridge.includes("key: INSTAGRAM_WEBHOOK_SECRET")) {
+  throw new Error("Instagram bridge must project only its webhook HMAC secret");
 }
 
 console.log("CI supply-chain contract passed");

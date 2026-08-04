@@ -28,7 +28,11 @@ spec:
             - { name: INSTAGRAM_DM_DURABLE, value: "synapse-instagram-skirmshop-v1" }
             - { name: INSTAGRAM_DM_ACK_WAIT_MS, value: "30000" }
             - { name: INSTAGRAM_DM_RETRY_DELAY_MS, value: "5000" }
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+            - name: INSTAGRAM_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: whatsapp-mcp-secrets
+                  key: INSTAGRAM_WEBHOOK_SECRET
           readinessProbe:
             httpGet: { path: /health, port: http }
             initialDelaySeconds: 3
