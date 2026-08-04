@@ -46,14 +46,35 @@ jobs:
       images: |
         [
           {"name":"whatsappmcp-whatsapp-connector","context":".","dockerfile":"connectors/whatsapp-web/Dockerfile"},
-          {"name":"whatsappmcp-whatsapp-cloud-connector","context":".","dockerfile":"connectors/whatsapp-cloud/Dockerfile"},
           {"name":"whatsappmcp-telegram-connector","context":".","dockerfile":"connectors/telegram/Dockerfile"},
           {"name":"whatsappmcp-telegram-sync","context":".","dockerfile":"connectors/telegram-sync/Dockerfile"},
           {"name":"whatsappmcp-instagram-connector","context":".","dockerfile":"connectors/instagram/Dockerfile"},
           {"name":"whatsappmcp-instagram-synapse-bridge","context":".","dockerfile":"connectors/instagram-synapse-bridge/Dockerfile"},
-          {"name":"whatsappmcp-whatsapp-open-worker","context":".","dockerfile":"workers/whatsapp-open-worker/Dockerfile"},
           {"name":"whatsappmcp-mcp-server","context":".","dockerfile":"mcp-server/Dockerfile"},
           {"name":"whatsappmcp-whatsapp-synapse-bridge","context":".","dockerfile":"connectors/whatsapp-synapse-bridge/Dockerfile"}
+        ]
+    secrets:
+      HARBOR_USER: ${{ secrets.HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      OPENCLAW_GITHUB_NOTIFY_URL: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_URL }}
+      OPENCLAW_GITHUB_NOTIFY_TOKEN: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_TOKEN }}
+
+  auxiliary-images:
+    # These images remain releasable and signed, but are not part of the
+    # production Kustomize overlay yet, so they must not enter its promotion set.
+    needs: [contract]
+    if: ${{ github.event_name != 'pull_request' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@96ec4d91e103d5b62159fe5ac3d5ae9f84340063
+    with:
+      runner: arc-k8s
+      version: ${{ inputs.image_tag || (github.ref_type == 'tag' && github.ref_name) || format('social-{0}', github.sha) }}
+      images: |
+        [
+          {"name":"whatsappmcp-whatsapp-cloud-connector","context":".","dockerfile":"connectors/whatsapp-cloud/Dockerfile"},
+          {"name":"whatsappmcp-whatsapp-open-worker","context":".","dockerfile":"workers/whatsapp-open-worker/Dockerfile"}
         ]
     secrets:
       HARBOR_USER: ${{ secrets.HARBOR_USER }}
@@ -72,6 +93,17 @@ jobs:
       source_path: k8s/overlays/prod
       artifact_name: k8s-socialmedia-pocharlies
       version: ${{ inputs.image_tag || (github.ref_type == 'tag' && github.ref_name) || format('social-{0}', github.sha) }}
+      image_promotions: ${{ needs.release.outputs.release_images }}
+      image_targets: |
+        [
+          {"name":"whatsappmcp-whatsapp-connector","kind":"kustomize","path":"k8s/overlays/prod","matchName":"harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector","deployRepository":"harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector"},
+          {"name":"whatsappmcp-telegram-connector","kind":"kustomize","path":"k8s/overlays/prod","matchName":"harbor.e-dani.com/homelab/whatsappmcp-telegram-connector","deployRepository":"harbor.e-dani.com/homelab/whatsappmcp-telegram-connector"},
+          {"name":"whatsappmcp-telegram-sync","kind":"kustomize","path":"k8s/overlays/prod","matchName":"harbor.e-dani.com/homelab/whatsappmcp-telegram-sync","deployRepository":"harbor.e-dani.com/homelab/whatsappmcp-telegram-sync"},
+          {"name":"whatsappmcp-instagram-connector","kind":"kustomize","path":"k8s/overlays/prod","matchName":"harbor.e-dani.com/homelab/whatsappmcp-instagram-connector","deployRepository":"harbor.e-dani.com/homelab/whatsappmcp-instagram-connector"},
+          {"name":"whatsappmcp-instagram-synapse-bridge","kind":"kustomize","path":"k8s/overlays/prod","matchName":"harbor.e-dani.com/homelab/whatsappmcp-instagram-synapse-bridge","deployRepository":"harbor.e-dani.com/homelab/whatsappmcp-instagram-synapse-bridge"},
+          {"name":"whatsappmcp-mcp-server","kind":"kustomize","path":"k8s/overlays/prod","matchName":"harbor.e-dani.com/homelab/whatsappmcp-mcp-server","deployRepository":"harbor.e-dani.com/homelab/whatsappmcp-mcp-server"},
+          {"name":"whatsappmcp-whatsapp-synapse-bridge","kind":"kustomize","path":"k8s/overlays/prod","matchName":"harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge","deployRepository":"harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge"}
+        ]
     secrets:
       HARBOR_USER: ${{ secrets.HARBOR_USER }}
       HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
