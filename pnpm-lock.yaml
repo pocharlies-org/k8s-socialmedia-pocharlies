@@ -383,7 +383,7 @@ importers:
         specifier: ^8.13.0
         version: 8.22.0
       playwright:
-        specifier: ^1.56.0
+        specifier: 1.62.0
         version: 1.62.0
     devDependencies:
       '@types/express':

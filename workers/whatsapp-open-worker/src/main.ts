@@ -16,7 +16,10 @@ const PROCESSING_STALE_MINUTES = parseInt(
   process.env.WA_OPEN_WORKER_PROCESSING_STALE_MINUTES || '15',
   10
 );
-const HEADLESS = process.env.WA_OPEN_WORKER_HEADLESS === 'true';
+// Production is headless by default. A headed browser remains available for
+// explicit operator diagnostics, but requires an external display supplied by
+// that operator rather than a runtime package download.
+const HEADLESS = process.env.WA_OPEN_WORKER_HEADLESS !== 'false';
 const DRY_RUN = process.env.WA_OPEN_WORKER_DRY_RUN === 'true';
 const CHROME_USER_AGENT =
   process.env.WA_OPEN_WORKER_USER_AGENT ||

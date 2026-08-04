@@ -31,6 +31,14 @@ const instagramBridge = fs.readFileSync(
   path.join(root, "k8s", "base", "instagram-synapse-bridge.yaml"),
   "utf8",
 );
+const whatsappOpenWorkerDockerfile = fs.readFileSync(
+  path.join(root, "workers", "whatsapp-open-worker", "Dockerfile"),
+  "utf8",
+);
+const whatsappOpenWorkerSource = fs.readFileSync(
+  path.join(root, "workers", "whatsapp-open-worker", "src", "main.ts"),
+  "utf8",
+);
 const minioVersion = "RELEASE.2025-09-07T16-13-09Z";
 const minioSha256 = "7c5bd8512c6e966455b1d198209358b2d191c77a83ab377c4073281065fb855f";
 if (
@@ -85,6 +93,24 @@ for (const name of targetNames) {
 if (instagramBridge.includes("envFrom:") ||
     !instagramBridge.includes("key: INSTAGRAM_WEBHOOK_SECRET")) {
   throw new Error("Instagram bridge must project only its webhook HMAC secret");
+}
+
+const playwrightImage =
+  "mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07";
+if (
+  !whatsappOpenWorkerDockerfile.startsWith(`FROM ${playwrightImage}\n`) ||
+  !whatsappOpenWorkerDockerfile.includes("ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright") ||
+  !whatsappOpenWorkerDockerfile.includes('CMD ["pnpm", "start"]') ||
+  /(?:apt-get|playwright install|xvfb-run)/u.test(whatsappOpenWorkerDockerfile)
+) {
+  throw new Error(
+    "WhatsApp open worker must use the pinned Playwright runtime without OS or browser downloads",
+  );
+}
+if (!whatsappOpenWorkerSource.includes(
+  "const HEADLESS = process.env.WA_OPEN_WORKER_HEADLESS !== 'false';",
+)) {
+  throw new Error("WhatsApp open worker must default to its bundled headless Chromium");
 }
 
 console.log("CI supply-chain contract passed");
