@@ -1,0 +1,65 @@
+name: Release Auxiliary Socialmedia Images
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-auxiliary.yml
+      - connectors/whatsapp-cloud/**
+      - workers/whatsapp-open-worker/**
+      - package.json
+      - pnpm-lock.yaml
+  push:
+    tags: ["*"]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Optional explicit image tag, for example v1.2.3
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-auxiliary-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: arc-k8s
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Verify auxiliary image sources
+        run: |
+          pnpm security:dependency-contract
+          pnpm security:ci-supply-chain
+          pnpm --filter @mcp-socialmedia/whatsapp-cloud-connector build
+          pnpm --filter @mcp-socialmedia/whatsapp-open-worker test
+          pnpm --filter @mcp-socialmedia/whatsapp-open-worker build
+
+  release:
+    needs: [gate]
+    if: ${{ github.event_name != 'pull_request' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@96ec4d91e103d5b62159fe5ac3d5ae9f84340063
+    with:
+      runner: arc-k8s
+      version: ${{ inputs.image_tag || (github.ref_type == 'tag' && github.ref_name) || format('social-aux-{0}', github.sha) }}
+      images: |
+        [
+          {"name":"whatsappmcp-whatsapp-cloud-connector","context":".","dockerfile":"connectors/whatsapp-cloud/Dockerfile"},
+          {"name":"whatsappmcp-whatsapp-open-worker","context":".","dockerfile":"workers/whatsapp-open-worker/Dockerfile"}
+        ]
+    secrets:
+      HARBOR_USER: ${{ secrets.HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      OPENCLAW_GITHUB_NOTIFY_URL: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_URL }}
+      OPENCLAW_GITHUB_NOTIFY_TOKEN: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_TOKEN }}

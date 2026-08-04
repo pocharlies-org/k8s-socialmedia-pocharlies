@@ -23,6 +23,10 @@ if (mutable.length) {
 
 const ci = fs.readFileSync(path.join(workflowsDir, "ci.yml"), "utf8");
 const release = fs.readFileSync(path.join(workflowsDir, "release.yml"), "utf8");
+const auxiliaryRelease = fs.readFileSync(
+  path.join(workflowsDir, "release-auxiliary.yml"),
+  "utf8",
+);
 const instagramBridge = fs.readFileSync(
   path.join(root, "k8s", "base", "instagram-synapse-bridge.yaml"),
   "utf8",
@@ -56,7 +60,8 @@ for (const auxiliaryName of [
   "whatsappmcp-whatsapp-cloud-connector",
   "whatsappmcp-whatsapp-open-worker",
 ]) {
-  if (!release.includes(`"name":"${auxiliaryName}"`)) {
+  if (release.includes(`"name":"${auxiliaryName}"`) ||
+      !auxiliaryRelease.includes(`"name":"${auxiliaryName}"`)) {
     throw new Error(`Auxiliary signed release image is missing: ${auxiliaryName}`);
   }
 }
