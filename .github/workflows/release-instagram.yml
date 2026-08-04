@@ -41,7 +41,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@0c1b0a49f9c671534dc61e6ba50acfdf6f818ab6
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@5a0cdcb92bc663933e2f74b8152df0d72d0b6fa7
     with:
       runner: arc-k8s
       # Source-bound tag: dispatch cannot select or overwrite another release.
