@@ -41,7 +41,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@5a0cdcb92bc663933e2f74b8152df0d72d0b6fa7
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@5c055729c7780ac8e561e8c752e3416212549d68
     with:
       runner: arc-k8s
       # Source-bound tag: dispatch cannot select or overwrite another release.
@@ -52,4 +52,8 @@ jobs:
           {"name":"whatsappmcp-instagram-connector","context":".","dockerfile":"connectors/instagram/Dockerfile"},
           {"name":"whatsappmcp-instagram-synapse-bridge","context":".","dockerfile":"connectors/instagram-synapse-bridge/Dockerfile"}
         ]
-    secrets: inherit
+    secrets:
+      HARBOR_USER: ${{ secrets.HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      OPENCLAW_GITHUB_NOTIFY_URL: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_URL }}
+      OPENCLAW_GITHUB_NOTIFY_TOKEN: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_TOKEN }}

@@ -65,7 +65,7 @@ jobs:
   standard:
     needs: [s3-tests]
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@5a0cdcb92bc663933e2f74b8152df0d72d0b6fa7
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@5c055729c7780ac8e561e8c752e3416212549d68
     with:
       runner: arc-k8s
       node_version: "22"
@@ -83,4 +83,8 @@ jobs:
           {"name":"whatsappmcp-whatsapp-open-worker","context":".","dockerfile":"workers/whatsapp-open-worker/Dockerfile"},
           {"name":"whatsappmcp-mcp-server","context":".","dockerfile":"mcp-server/Dockerfile"}
         ]
-    secrets: inherit
+    secrets:
+      HARBOR_USER: ${{ secrets.HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      OPENCLAW_GITHUB_NOTIFY_URL: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_URL }}
+      OPENCLAW_GITHUB_NOTIFY_TOKEN: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_TOKEN }}
