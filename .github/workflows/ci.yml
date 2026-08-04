@@ -58,7 +58,7 @@ jobs:
   standard:
     needs: [s3-tests]
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@6ddafbfffb31d78f9733d765036bf54d916659b5
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@0c1b0a49f9c671534dc61e6ba50acfdf6f818ab6
     with:
       runner: arc-k8s
       node_version: "22"
