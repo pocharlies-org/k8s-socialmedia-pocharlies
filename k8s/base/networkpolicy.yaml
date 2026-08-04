@@ -77,3 +77,26 @@ spec:
           port: 3010
   policyTypes:
     - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: instagram-connector-allow-synapse
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: instagram-connector
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: synapse
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: synapse-adapter-messaging-send
+      ports:
+        - protocol: TCP
+          port: 3003
+  policyTypes:
+    - Ingress
