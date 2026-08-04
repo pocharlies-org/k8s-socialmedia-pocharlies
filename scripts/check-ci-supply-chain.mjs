@@ -68,6 +68,13 @@ for (const auxiliaryName of [
     throw new Error(`Auxiliary signed release image is missing: ${auxiliaryName}`);
   }
 }
+const sharedBuild = "pnpm --filter @mcp-socialmedia/shared build";
+const whatsappCloudBuild = "pnpm --filter @mcp-socialmedia/whatsapp-cloud-connector build";
+if (!auxiliaryRelease.includes(sharedBuild) ||
+    !auxiliaryRelease.includes(whatsappCloudBuild) ||
+    auxiliaryRelease.indexOf(sharedBuild) > auxiliaryRelease.indexOf(whatsappCloudBuild)) {
+  throw new Error("Auxiliary release must build shared before the WhatsApp Cloud connector");
+}
 for (const name of targetNames) {
   const repository = `harbor.e-dani.com/homelab/${name}`;
   if (!releaseTargetsBlock.includes(`"matchName":"${repository}"`) ||

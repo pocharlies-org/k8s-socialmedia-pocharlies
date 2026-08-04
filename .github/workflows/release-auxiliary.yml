@@ -39,6 +39,7 @@ jobs:
         run: |
           pnpm security:dependency-contract
           pnpm security:ci-supply-chain
+          pnpm --filter @mcp-socialmedia/shared build
           pnpm --filter @mcp-socialmedia/whatsapp-cloud-connector build
           pnpm --filter @mcp-socialmedia/whatsapp-open-worker test
           pnpm --filter @mcp-socialmedia/whatsapp-open-worker build
