@@ -39,7 +39,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@96ec4d91e103d5b62159fe5ac3d5ae9f84340063
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@0b01dafa99fd5a8278b446e0b06c00e117598c53
     with:
       runner: arc-k8s
       version: ${{ inputs.image_tag || (github.ref_type == 'tag' && github.ref_name) || format('social-{0}', github.sha) }}
@@ -64,7 +64,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-pr-release.yml@96ec4d91e103d5b62159fe5ac3d5ae9f84340063
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-pr-release.yml@0b01dafa99fd5a8278b446e0b06c00e117598c53
     with:
       runner: arc-k8s
       # The OCI artifact must include the overlay and its ../../base dependency.
