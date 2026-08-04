@@ -1,6 +1,9 @@
 name: Release Instagram Images
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/release-instagram.yml
   workflow_dispatch: {}
 
 permissions:
@@ -13,18 +16,19 @@ concurrency:
 jobs:
   gate:
     name: Instagram release gate
-    if: ${{ github.ref == 'refs/heads/deploy/prod' }}
+    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/deploy/prod' }}
     runs-on: arc-k8s
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: Verify contract, focused tests and builds
         run: |
+          pnpm security:dependency-contract
           pnpm contract:check
           pnpm --filter @mcp-socialmedia/instagram-connector test
           pnpm --filter @mcp-socialmedia/instagram-synapse-bridge test
@@ -33,10 +37,11 @@ jobs:
 
   release:
     needs: [gate]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/deploy/prod' }}
     permissions:
       contents: read
       id-token: write
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@70b31777bcc7e51874f897931426bb8c7b657f4f
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@0b01dafa99fd5a8278b446e0b06c00e117598c53
     with:
       runner: arc-k8s
       # Source-bound tag: dispatch cannot select or overwrite another release.
@@ -47,4 +52,8 @@ jobs:
           {"name":"whatsappmcp-instagram-connector","context":".","dockerfile":"connectors/instagram/Dockerfile"},
           {"name":"whatsappmcp-instagram-synapse-bridge","context":".","dockerfile":"connectors/instagram-synapse-bridge/Dockerfile"}
         ]
-    secrets: inherit
+    secrets:
+      HARBOR_USER: ${{ secrets.HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      OPENCLAW_GITHUB_NOTIFY_URL: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_URL }}
+      OPENCLAW_GITHUB_NOTIFY_TOKEN: ${{ secrets.OPENCLAW_GITHUB_NOTIFY_TOKEN }}

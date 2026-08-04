@@ -13,6 +13,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "contract:generate": "tsx scripts/generate-socialmedia-contract.ts",
     "contract:check": "tsx scripts/generate-socialmedia-contract.ts --check",
+    "security:dependency-contract": "node scripts/check-dependency-compatibility.mjs",
+    "security:ci-supply-chain": "node scripts/check-ci-supply-chain.mjs",
     "import:whatsapp-db": "tsx scripts/import-data.ts whatsapp-db",
     "import:whatsapp-txt": "tsx scripts/import-data.ts whatsapp-txt",
     "import:telegram": "tsx scripts/import-data.ts telegram",
