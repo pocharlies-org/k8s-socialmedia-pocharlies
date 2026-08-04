@@ -67,7 +67,8 @@ jobs:
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-pr-release.yml@96ec4d91e103d5b62159fe5ac3d5ae9f84340063
     with:
       runner: arc-k8s
-      source_path: k8s/overlays/prod
+      # The OCI artifact must include the overlay and its ../../base dependency.
+      source_path: k8s
       artifact_name: k8s-socialmedia-pocharlies
       version: ${{ inputs.image_tag || (github.ref_type == 'tag' && github.ref_name) || format('social-{0}', github.sha) }}
       image_promotions: ${{ needs.release.outputs.release_images }}

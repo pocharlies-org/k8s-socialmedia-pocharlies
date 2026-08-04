@@ -46,6 +46,9 @@ if (
 if (!release.includes("image_promotions: ${{ needs.release.outputs.release_images }}")) {
   throw new Error("Production manifest promotion must consume the exact release image output");
 }
+if (!release.includes("source_path: k8s\n")) {
+  throw new Error("Manifest artifact source must contain the prod overlay and its relative base");
+}
 const releaseImagesBlock = release.match(/\n\s{6}images: \|\n([\s\S]*?)\n\s{4}secrets:/)?.[1];
 const releaseTargetsBlock = release.match(/\n\s{6}image_targets: \|\n([\s\S]*?)\n\s{4}secrets:/)?.[1];
 if (!releaseImagesBlock || !releaseTargetsBlock) {
