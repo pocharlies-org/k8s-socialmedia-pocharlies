@@ -1,0 +1,49 @@
+name: Release Telegram Album Images
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-telegram-albums-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Telegram album release gate
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: arc-k8s
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Verify contract, canonical send tests and builds
+        run: |
+          pnpm contract:check
+          pnpm --filter @mcp-socialmedia/server test -- --runInBand
+          pnpm --filter @mcp-socialmedia/telegram-connector build
+          pnpm --filter @mcp-socialmedia/server build
+
+  release:
+    needs: [gate]
+    permissions:
+      contents: read
+      id-token: write
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@5cbfd9dda2ce6b59342b9db834691ad5520768fd
+    with:
+      runner: arc-k8s
+      # Only the two components that implement the native album contract.
+      # Source-bound and immutable; production consumes their signed digests.
+      version: telegram-albums-${{ github.sha }}
+      images: |
+        [
+          {"name":"whatsappmcp-telegram-connector","context":".","dockerfile":"connectors/telegram/Dockerfile"},
+          {"name":"whatsappmcp-mcp-server","context":".","dockerfile":"mcp-server/Dockerfile"}
+        ]
+    secrets: inherit
