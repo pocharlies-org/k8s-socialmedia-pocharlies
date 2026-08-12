@@ -39,7 +39,7 @@ jobs:
 
   release:
     needs: [contract]
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@main
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-release.yml@5cbfd9dda2ce6b59342b9db834691ad5520768fd
     with:
       runner: arc-k8s
       version: ${{ github.event.inputs.image_tag || github.ref_name }}
@@ -58,7 +58,7 @@ jobs:
 
   manifests:
     needs: [release]
-    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-release.yml@main
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-release.yml@5cbfd9dda2ce6b59342b9db834691ad5520768fd
     with:
       runner: arc-k8s
       source_path: k8s/overlays/prod
