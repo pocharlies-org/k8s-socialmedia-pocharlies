@@ -11,9 +11,12 @@ packages:
 # HIGH/CRITICAL. Each entry is a transitive dep we cannot bump via a direct
 # dependency; revisit when the parent package ships the fix itself.
 overrides:
-  # CVE-2026-14257 is only fixed on the 5.x line. 5.0.8 still publishes a
+  # CVE-2026-14257 and CVE-2026-69152 are fixed on the 5.x line. 5.0.9 still publishes a
   # CommonJS build and requires node 20 || >=22, so the consumers keep working.
-  brace-expansion: ^5.0.8
+  brace-expansion: ^5.0.9
+  # GHSA-5p4m-2wfm-xmqj is fixed in 4.3.1. Keep the older 3.x Istanbul branch
+  # on its own major until that parent dependency updates.
+  js-yaml@4: ^4.3.1
   # Scoped to the 9.x line on purpose: eslint pulls minimatch 3.x, whose API
   # differs, and 3.1.5 is already past the fixed 3.1.4.
   minimatch@9: ^9.0.9
