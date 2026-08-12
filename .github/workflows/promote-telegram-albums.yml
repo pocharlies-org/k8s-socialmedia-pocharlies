@@ -1,0 +1,22 @@
+name: Promote Telegram Album Manifests
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-telegram-albums-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  manifests:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-manifest-release.yml@5cbfd9dda2ce6b59342b9db834691ad5520768fd
+    with:
+      runner: arc-k8s
+      source_path: k8s/overlays/prod
+      artifact_name: k8s-socialmedia-pocharlies
+      version: telegram-albums-${{ github.sha }}
+    secrets: inherit

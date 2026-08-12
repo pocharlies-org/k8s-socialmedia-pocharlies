@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:socialmedia-v2-c88dce16@sha256:6467b5dac43b30dec961b8484978b5692d00a74bf76b022df81cdf8fdcc4dac2
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:telegram-albums-c58538fc812a4d4a67934e478d14bb21badefca3@sha256:eca4270a6dee72d6e16a9bdcebf118358e9ff478cb15a8f9ca28c39c70a00df9
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: mcp-server
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:socialmedia-v2-c88dce16@sha256:660119ecb97a5489921ed6285dce069176a160742bd0c9a9cb328b09ae799e12
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:telegram-albums-c58538fc812a4d4a67934e478d14bb21badefca3@sha256:c4466891b5c9ca27970ba0af9a9e6a039137c3a78bafdea17de69ce19863a5f4
 ---
 apiVersion: apps/v1
 kind: Deployment

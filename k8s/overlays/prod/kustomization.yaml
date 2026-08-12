@@ -9,15 +9,15 @@ patches:
   - path: patch-renew-qr-pro.yaml
   - path: patch-nodepool.yaml
 images:
-  # Atomic Socialmedia v2 cutover image set built and signed by Release
-  # Production run 30231910460 from c88dce161df3. Keep all deployed components
-  # on this one source revision.
+  # The original Socialmedia v2 cutover remains pinned for unchanged services.
+  # Telegram and MCP alone move to the signed native-album release from
+  # c58538fc812a (run 31602644224); both digests passed the release security gate.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: socialmedia-v2-c88dce16
     digest: sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: socialmedia-v2-c88dce16
-    digest: sha256:6467b5dac43b30dec961b8484978b5692d00a74bf76b022df81cdf8fdcc4dac2
+    newTag: telegram-albums-c58538fc812a4d4a67934e478d14bb21badefca3
+    digest: sha256:eca4270a6dee72d6e16a9bdcebf118358e9ff478cb15a8f9ca28c39c70a00df9
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
@@ -27,8 +27,8 @@ images:
     newTag: socialmedia-v2-c88dce16
     digest: sha256:c12e23221a93e8a42985abde0e9858e1fe17713105b076328487e24caa719030
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: socialmedia-v2-c88dce16
-    digest: sha256:660119ecb97a5489921ed6285dce069176a160742bd0c9a9cb328b09ae799e12
+    newTag: telegram-albums-c58538fc812a4d4a67934e478d14bb21badefca3
+    digest: sha256:c4466891b5c9ca27970ba0af9a9e6a039137c3a78bafdea17de69ce19863a5f4
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
