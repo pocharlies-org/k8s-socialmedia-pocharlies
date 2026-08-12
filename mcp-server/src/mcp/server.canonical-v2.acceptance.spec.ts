@@ -560,6 +560,108 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       });
     });
 
+    test('routes a native Telegram image album as one provider operation', async () => {
+      const server = createServer();
+      server.handleTelegramSendMessage = jest.fn(async () => legacy({ sent: true }));
+      server.handleTelegramSendFile = jest.fn(async () => legacy({ sent: true }));
+      server.handleTelegramSendMediaGroup = jest.fn(async (args: unknown) =>
+        legacy({ sent: true, messageId: '101', messageIds: ['101', '102'] })
+      );
+
+      const result = await server.executeCanonicalTool(
+        definition('social_send_message'),
+        {
+          channel: 'telegram',
+          accountId: 'personal',
+          target: '@studio_bot',
+          message: 'cinematic references',
+          mediaGroup: true,
+          attachments: [
+            {
+              url: 'https://example.test/reference-1.jpg',
+              name: 'reference-1.jpg',
+              mimeType: 'image/jpeg',
+            },
+            {
+              url: 'https://example.test/reference-2.png',
+              name: 'reference-2.png',
+              mimeType: 'image/png',
+            },
+          ],
+          replyTo: 22,
+          threadId: 77,
+        }
+      );
+
+      expect(result.structuredContent).toMatchObject({
+        ok: true,
+        status: 'accepted',
+        data: { providerMessageId: '101', providerMessageIds: ['101'] },
+      });
+      expect(server.handleTelegramSendMediaGroup).toHaveBeenCalledWith({
+        chatId: '@studio_bot',
+        account: 'personal',
+        replyTo: 22,
+        threadId: 77,
+        attachments: [
+          {
+            filePath: 'https://example.test/reference-1.jpg',
+            name: 'reference-1.jpg',
+            mimeType: 'image/jpeg',
+            caption: 'cinematic references',
+          },
+          {
+            filePath: 'https://example.test/reference-2.png',
+            name: 'reference-2.png',
+            mimeType: 'image/png',
+            caption: undefined,
+          },
+        ],
+      });
+      expect(server.handleTelegramSendMessage).not.toHaveBeenCalled();
+      expect(server.handleTelegramSendFile).not.toHaveBeenCalled();
+    });
+
+    test.each([
+      ['one attachment', 'telegram', [{ url: 'https://example.test/one.jpg' }]],
+      [
+        'non-image attachment',
+        'telegram',
+        [
+          { url: 'https://example.test/one.jpg', mimeType: 'image/jpeg' },
+          { url: 'https://example.test/file.pdf', mimeType: 'application/pdf' },
+        ],
+      ],
+      [
+        'non-Telegram channel',
+        'whatsapp',
+        [
+          { url: 'https://example.test/one.jpg', mimeType: 'image/jpeg' },
+          { url: 'https://example.test/two.jpg', mimeType: 'image/jpeg' },
+        ],
+      ],
+    ])('rejects native media group with %s', async (_label, channel, attachments) => {
+      const server = createServer();
+      server.handleTelegramSendMediaGroup = jest.fn(async () => legacy({ sent: true }));
+
+      const result = await server.executeCanonicalTool(
+        definition('social_send_message'),
+        {
+          channel,
+          accountId: 'personal',
+          target: '@studio_bot',
+          mediaGroup: true,
+          attachments,
+        }
+      );
+
+      expectStructuredError(
+        result,
+        channel === 'telegram' ? 'invalid_request' : 'unsupported_capability'
+      );
+      expect(server.handleTelegramSendMediaGroup).not.toHaveBeenCalled();
+    });
+
     const unsupportedSendShapes: Array<
       [string, Record<string, unknown>]
     > = [

@@ -807,6 +807,73 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * POST /messages/media/group - Send 2-10 images as one native Telegram album.
+   */
+  router.post('/messages/media/group', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const { chatId, attachments, replyTo, threadId } = req.body as {
+          chatId?: string;
+          attachments?: Array<{
+            filePath?: string;
+            name?: string;
+            mimeType?: string;
+            caption?: string;
+          }>;
+          replyTo?: string | number;
+          threadId?: string | number;
+        };
+        if (!chatId || !Array.isArray(attachments)) {
+          res.status(400).json({ error: 'Missing chatId or attachments' });
+          return;
+        }
+        if (attachments.length < 2 || attachments.length > 10) {
+          res.status(400).json({ error: 'attachments must contain between 2 and 10 images' });
+          return;
+        }
+        if (
+          attachments.some(
+            item =>
+              !item ||
+              typeof item.filePath !== 'string' ||
+              !item.filePath ||
+              (item.mimeType !== undefined && !item.mimeType.toLowerCase().startsWith('image/'))
+          )
+        ) {
+          res.status(400).json({ error: 'Every attachment must be an image with a filePath' });
+          return;
+        }
+        const parsedReplyTo =
+          replyTo !== undefined && replyTo !== null ? parseTopicId(replyTo) : undefined;
+        if (replyTo !== undefined && replyTo !== null && parsedReplyTo === null) {
+          res.status(400).json({ error: 'replyTo must be a positive integer' });
+          return;
+        }
+        const parsedThreadId =
+          threadId !== undefined && threadId !== null ? parseTopicId(threadId) : undefined;
+        if (threadId !== undefined && threadId !== null && parsedThreadId === null) {
+          res.status(400).json({ error: 'threadId must be a positive integer' });
+          return;
+        }
+        const messageIds = await client.sendImageGroup(
+          chatId,
+          attachments.map(item => ({
+            filePath: item.filePath as string,
+            caption: item.caption,
+          })),
+          {
+            replyTo: parsedReplyTo ?? undefined,
+            threadId: parsedThreadId ?? undefined,
+          }
+        );
+        res.json({ sent: true, messageId: messageIds[0] ?? null, messageIds });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
    * POST /messages/voice - Send a voice note from base64 audio bytes.
    */
   router.post('/messages/voice', (req: Request, res: Response): void => {

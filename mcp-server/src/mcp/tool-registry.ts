@@ -582,7 +582,8 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
   tool({
     name: 'social_send_message',
     title: 'Send message',
-    description: 'Send text, attachments, a reply, a Telegram thread message or Instagram DM.',
+    description:
+      'Send text, attachments, a native Telegram image album, a reply, a Telegram thread message or Instagram DM.',
     effect: 'externalWrite',
     authScope: 'social.write',
     capability: 'messages.send',
@@ -595,6 +596,12 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
           type: 'array',
           items: attachment,
           default: [],
+        },
+        mediaGroup: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Telegram only. Send 2-10 image attachments as one native album with a shared media_group_id. When message is present it becomes the album caption.',
         },
         replyTo: { type: ['string', 'integer', 'null'] },
         threadId: { type: ['string', 'integer', 'null'] },

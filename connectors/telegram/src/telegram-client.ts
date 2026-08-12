@@ -1032,6 +1032,43 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * Send 2-10 images as one native Telegram album. Telegram assigns the same
+   * media_group_id to every returned message, which lets receiving bots recover
+   * the ordered reference bundle instead of seeing unrelated documents.
+   */
+  async sendImageGroup(
+    chatId: string,
+    attachments: Array<{
+      filePath: string | Buffer;
+      caption?: string;
+    }>,
+    options?: { replyTo?: number; threadId?: number }
+  ): Promise<number[]> {
+    if (!this.connected) throw new Error('Not connected');
+    if (attachments.length < 2 || attachments.length > 10) {
+      throw new Error('A Telegram image album requires between 2 and 10 attachments');
+    }
+    const medias = await Promise.all(
+      attachments.map(async (item, index) => {
+        const source = await this.resolveMedia(item.filePath);
+        return InputMedia.photo(
+          source,
+          index === 0 && item.caption ? { caption: item.caption } : undefined
+        );
+      })
+    );
+    const effectiveReplyTo = options?.replyTo ?? options?.threadId;
+    const sendParams: CommonSendParams | undefined =
+      effectiveReplyTo !== undefined ? { replyTo: effectiveReplyTo } : undefined;
+    const messages = await this.client.sendMediaGroup(
+      toMtcutePeer(chatId),
+      medias,
+      sendParams
+    );
+    return messages.map(message => message.id);
+  }
+
+  /**
    * Mark a chat as read
    */
   async markAsRead(chatId: string): Promise<void> {

@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:2eb2860fb6cc00bfe3db17ab449ec07addade602774ddfbd96db9cd704daaae4",
+  "digest": "sha256:9dfdf9e1f993afc9e09761c7d7aa81191c066f4fcc8a0ff431a2f008d5caf7f6",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -5751,7 +5751,7 @@
     {
       "name": "social_send_message",
       "title": "Send message",
-      "description": "Send text, attachments, a reply, a Telegram thread message or Instagram DM.",
+      "description": "Send text, attachments, a native Telegram image album, a reply, a Telegram thread message or Instagram DM.",
       "effect": "externalWrite",
       "authScope": "social.write",
       "capability": "messages.send",
@@ -5813,6 +5813,11 @@
               ]
             },
             "default": []
+          },
+          "mediaGroup": {
+            "type": "boolean",
+            "default": false,
+            "description": "Telegram only. Send 2-10 image attachments as one native album with a shared media_group_id. When message is present it becomes the album caption."
           },
           "replyTo": {
             "type": [

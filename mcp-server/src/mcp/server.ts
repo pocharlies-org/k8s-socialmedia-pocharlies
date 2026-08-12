@@ -1798,6 +1798,7 @@ export class MCPServer {
       channelName === 'whatsapp' ? this.whatsAppProviderTarget(args) : this.target(args);
     const message = typeof args.message === 'string' ? args.message : '';
     const attachments = Array.isArray(args.attachments) ? args.attachments : [];
+    const mediaGroup = args.mediaGroup === true;
 
     if (args.template) {
       throw this.canonicalError(
@@ -1811,6 +1812,30 @@ export class MCPServer {
       throw this.canonicalError(
         'invalid_request',
         'message or at least one attachment is required'
+      );
+    }
+    if (mediaGroup && channelName !== 'telegram') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Native media groups are only supported for Telegram'
+      );
+    }
+    if (mediaGroup && (attachments.length < 2 || attachments.length > 10)) {
+      throw this.canonicalError(
+        'invalid_request',
+        'A native Telegram image album requires between 2 and 10 attachments'
+      );
+    }
+    if (
+      mediaGroup &&
+      attachments.some(item => {
+        const mimeType = pickString(asObject(item), ['mimeType']);
+        return mimeType && !mimeType.toLowerCase().startsWith('image/');
+      })
+    ) {
+      throw this.canonicalError(
+        'invalid_request',
+        'Every attachment in a native Telegram image album must have an image/* mimeType'
       );
     }
 
@@ -1848,7 +1873,27 @@ export class MCPServer {
 
     const operations: unknown[] = [];
     try {
-      if (message) {
+      if (mediaGroup) {
+        const sent = await this.handleTelegramSendMediaGroup({
+          chatId: destination,
+          attachments: attachments.map((item, index) => {
+            const attachmentValue = asObject(item);
+            return {
+              filePath: pickString(attachmentValue, ['url']),
+              name: pickString(attachmentValue, ['name']) || undefined,
+              mimeType: pickString(attachmentValue, ['mimeType']) || undefined,
+              caption:
+                index === 0
+                  ? message || pickString(attachmentValue, ['caption']) || undefined
+                  : undefined,
+            };
+          }),
+          account: accountIdValue,
+          replyTo: args.replyTo ?? undefined,
+          threadId: args.threadId ?? undefined,
+        });
+        operations.push(this.legacyResultData(sent));
+      } else if (message) {
         const sent =
           channelName === 'whatsapp'
             ? await this.handleSendMessage({
@@ -1870,7 +1915,7 @@ export class MCPServer {
         operations.push(this.legacyResultData(sent));
       }
 
-      for (const item of attachments) {
+      for (const item of mediaGroup ? [] : attachments) {
         const attachmentValue = asObject(item);
         const location = pickString(attachmentValue, ['url']);
         const sent =
@@ -3681,6 +3726,32 @@ export class MCPServer {
         filePath: args.filePath,
         caption: args.caption,
         voiceNote: args.voiceNote || false,
+        replyTo: args.replyTo,
+        threadId: args.threadId,
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  private async handleTelegramSendMediaGroup(args: {
+    chatId: string;
+    attachments: Array<{
+      filePath: string;
+      name?: string;
+      mimeType?: string;
+      caption?: string;
+    }>;
+    replyTo?: number | string;
+    threadId?: number | string;
+    account?: string;
+  }) {
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      '/api/v1/messages/media/group',
+      {
+        chatId: args.chatId,
+        attachments: args.attachments,
         replyTo: args.replyTo,
         threadId: args.threadId,
       }
