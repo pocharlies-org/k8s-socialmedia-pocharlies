@@ -17,6 +17,9 @@ overrides:
   # GHSA-5p4m-2wfm-xmqj is fixed in 4.3.1. Keep the older 3.x Istanbul branch
   # on its own major until that parent dependency updates.
   js-yaml@4: ^4.3.1
+  js-yaml@3: ^3.15.1
+  # CVE-2026-18446 is fixed in 3.1.5; Ajv's API stays on the same major.
+  fast-uri@3: ^3.1.5
   # Scoped to the 9.x line on purpose: eslint pulls minimatch 3.x, whose API
   # differs, and 3.1.5 is already past the fixed 3.1.4.
   minimatch@9: ^9.0.9
