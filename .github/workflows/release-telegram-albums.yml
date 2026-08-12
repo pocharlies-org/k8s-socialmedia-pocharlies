@@ -26,7 +26,7 @@ jobs:
       - name: Verify contract, canonical send tests and builds
         run: |
           pnpm contract:check
-          pnpm --filter @mcp-socialmedia/server test -- --runInBand
+          pnpm --filter @mcp-socialmedia/server test --runInBand
           pnpm --filter @mcp-socialmedia/telegram-connector build
           pnpm --filter @mcp-socialmedia/server build
 
