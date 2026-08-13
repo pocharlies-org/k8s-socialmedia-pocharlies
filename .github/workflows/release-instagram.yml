@@ -27,9 +27,7 @@ jobs:
         run: |
           pnpm contract:check
           pnpm --filter @mcp-socialmedia/instagram-connector test
-          pnpm --filter @mcp-socialmedia/instagram-synapse-bridge test
           pnpm --filter @mcp-socialmedia/instagram-connector build
-          pnpm --filter @mcp-socialmedia/instagram-synapse-bridge build
 
   release:
     needs: [gate]
@@ -44,7 +42,6 @@ jobs:
       version: instagram-${{ github.sha }}
       images: |
         [
-          {"name":"whatsappmcp-instagram-connector","context":".","dockerfile":"connectors/instagram/Dockerfile"},
-          {"name":"whatsappmcp-instagram-synapse-bridge","context":".","dockerfile":"connectors/instagram-synapse-bridge/Dockerfile"}
+          {"name":"whatsappmcp-instagram-connector","context":".","dockerfile":"connectors/instagram/Dockerfile"}
         ]
     secrets: inherit
