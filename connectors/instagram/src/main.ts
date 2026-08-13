@@ -15,7 +15,11 @@
 
 import express from 'express';
 import pino from 'pino';
-import { InstagramAPI, InstagramConfig } from './instagram-api';
+import {
+  discoverFacebookInstagramAccount,
+  InstagramAPI,
+  InstagramConfig,
+} from './instagram-api';
 import { createWebhookRouter } from './webhook';
 import { InstagramEventPublisher } from './publisher';
 
@@ -124,6 +128,35 @@ async function main(): Promise<void> {
           { account: name, id: data.id, user_id: data.user_id },
           'Registered Instagram IDs for routing'
         );
+      } else if (entry.config.fbAccessToken) {
+        try {
+          const facebookAccount = await discoverFacebookInstagramAccount(
+            entry.config.fbAccessToken,
+            entry.config.businessAccountId
+          );
+          if (facebookAccount) {
+            entry.api.setFacebookPrimary(facebookAccount.id);
+            bizIdToAccount.set(facebookAccount.id, name);
+            logger.info(
+              {
+                account: name,
+                instagramUserId: facebookAccount.id,
+                username: facebookAccount.username,
+              },
+              'Using Facebook Login system-user token after Instagram Login token validation failed'
+            );
+          } else {
+            logger.warn(
+              { account: name, status: res.status },
+              'Instagram Login token invalid and Facebook Login account could not be resolved'
+            );
+          }
+        } catch (facebookError) {
+          logger.warn(
+            { account: name, status: res.status, err: String(facebookError) },
+            'Instagram Login token invalid and Facebook Login fallback failed'
+          );
+        }
       } else {
         logger.warn({ account: name, status: res.status }, 'Failed to fetch IG IDs from /me');
       }
