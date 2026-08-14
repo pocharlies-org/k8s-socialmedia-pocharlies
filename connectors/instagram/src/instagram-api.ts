@@ -32,6 +32,9 @@ export interface InstagramConfig {
    * to this transport when the short-lived Instagram Login token is invalid.
    */
   primaryApi?: 'instagram-login' | 'facebook-login';
+  /** Meta processes uploaded video asynchronously before it can be published. */
+  mediaProcessingPollIntervalMs?: number;
+  mediaProcessingTimeoutMs?: number;
 }
 
 export interface FacebookInstagramAccount {
@@ -279,6 +282,34 @@ export class InstagramAPI {
     );
   }
 
+  async getMediaContainerStatus(containerId: string) {
+    return this.request<{ id: string; status_code?: string; status?: string }>(
+      `/${containerId}`,
+      { fields: 'id,status_code,status' }
+    );
+  }
+
+  async waitForMediaReady(containerId: string): Promise<void> {
+    const pollIntervalMs = this.config.mediaProcessingPollIntervalMs ?? 5_000;
+    const timeoutMs = this.config.mediaProcessingTimeoutMs ?? 300_000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (true) {
+      const status = await this.getMediaContainerStatus(containerId);
+      const statusCode = status.status_code?.toUpperCase();
+      if (statusCode === 'FINISHED' || statusCode === 'PUBLISHED') return;
+      if (statusCode === 'ERROR' || statusCode === 'EXPIRED') {
+        throw new Error(
+          `Instagram media container ${containerId} failed processing: ${status.status ?? statusCode}`
+        );
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for Instagram media container ${containerId}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+  }
+
   async getStories() {
     return this.request<{ data: MediaItem[] }>(`/${this.primaryAccountId()}/stories`, {
       fields: 'id,caption,media_type,media_url,permalink,timestamp',
@@ -356,6 +387,7 @@ export class InstagramAPI {
       'POST',
       body
     );
+    await this.waitForMediaReady(container.id);
     const published = await this.publishMedia(container.id);
     return { container_id: container.id, media_id: published.id };
   }

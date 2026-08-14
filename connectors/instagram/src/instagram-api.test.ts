@@ -72,3 +72,51 @@ test('uses Facebook Graph and the durable system-user token for publishing', asy
     globalThis.fetch = originalFetch;
   }
 });
+
+test('waits for Meta to finish processing a reel before publishing it', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  let statusChecks = 0;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    if (url.pathname.endsWith('/media')) return jsonResponse({ id: 'container-reel-1' });
+    if (url.pathname.endsWith('/container-reel-1')) {
+      statusChecks += 1;
+      return jsonResponse({
+        id: 'container-reel-1',
+        status_code: statusChecks === 1 ? 'IN_PROGRESS' : 'FINISHED',
+      });
+    }
+    if (url.pathname.endsWith('/media_publish')) return jsonResponse({ id: 'media-reel-1' });
+    return jsonResponse({ error: 'unexpected request' }, 500);
+  };
+  try {
+    const api = new InstagramAPI({
+      accessToken: 'expired-instagram-login-token',
+      businessAccountId: 'legacy-scoped-id',
+      fbAccessToken: 'system-user-token',
+      mediaProcessingPollIntervalMs: 0,
+      mediaProcessingTimeoutMs: 1_000,
+    });
+    api.setFacebookPrimary('17841444094675941');
+
+    const published = await api.publishReel('https://cdn.example.test/reel.mp4', 'caption');
+
+    assert.deepEqual(published, {
+      container_id: 'container-reel-1',
+      media_id: 'media-reel-1',
+    });
+    assert.deepEqual(
+      requests.map((request) => request.pathname),
+      [
+        '/v22.0/17841444094675941/media',
+        '/v22.0/container-reel-1',
+        '/v22.0/container-reel-1',
+        '/v22.0/17841444094675941/media_publish',
+      ]
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
