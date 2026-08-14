@@ -24,8 +24,8 @@ images:
     newTag: socialmedia-v2-c88dce16
     digest: sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: sha-a21a692dff1f
-    digest: sha256:36130e87dcf86c8c7c8208fbbdb050ea0a37724d4d302e9ed2c73b189d211db2
+    newTag: sha-985a199ea567
+    digest: sha256:38c141768e5fe10c731616c46fc82276fef9a3ddafabcae6c4ee98a68eb2e11a
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: telegram-albums-c58538fc812a4d4a67934e478d14bb21badefca3
     digest: sha256:c4466891b5c9ca27970ba0af9a9e6a039137c3a78bafdea17de69ce19863a5f4
