@@ -28,7 +28,7 @@ const CONNECTOR_SHARED_SECRET =
   process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
 // When true, the public /qr/page renders a "Generate new QR" button wired to an
 // unauthenticated POST /qr/renew. Only enable on LAN-only deployments (e.g. the
-// professional connector at whatsapp-pro.lan.e-dani.com) — never on the
+// professional connector at whatsapp-pro.e-dani.com) — never on the
 // internet-exposed personal page, where anyone with the URL could disconnect.
 const ALLOW_WEB_RENEW = process.env.ALLOW_WEB_RENEW === 'true';
 
