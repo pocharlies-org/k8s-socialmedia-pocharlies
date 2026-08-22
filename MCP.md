@@ -11,8 +11,8 @@ Unknown historical names return `method not found`.
 
 ## Endpoint
 
-- Streamable HTTP: `https://mcp-socialmedia.lan.e-dani.com/mcp`
-- SSE: `https://mcp-socialmedia.lan.e-dani.com/sse`
+- Streamable HTTP: `https://mcp-socialmedia.e-dani.com/mcp`
+- SSE: `https://mcp-socialmedia.e-dani.com/sse`
 - In-cluster: `http://mcp-sse.whatsapp-mcp.svc.cluster.local:3010/mcp`
 
 AgentGateway exposes the authorized route at `/social`. Its rules and the MCP

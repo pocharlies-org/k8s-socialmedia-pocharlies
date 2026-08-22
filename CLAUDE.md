@@ -25,7 +25,7 @@ El MCP enruta cada call a una de dos cuentas:
 - Para indicarle al MCP qué cuenta usar pasa `account: 'personal' \| 'professional'` en la tool call.
 - Default global: `personal`. Si el chat es claramente de skirmshop/business → pasar `professional`.
 - Para agentes/sesiones de Claude/Codex/OpenClaw que NO sean específicamente "hogar"/"familia", la guía es: **siempre `account: 'professional'`** salvo que el chat destino sea familiar/personal.
-- Vincular el número professional: escanear el QR en `https://whatsapp-pro.lan.e-dani.com/qr/page` (LAN).
+- Vincular el número professional: escanear el QR en `https://whatsapp-pro.e-dani.com/qr/page`.
 
 DB scoping (migración 002): los ids de la cuenta `personal` no llevan prefijo (compat con ~449k filas existentes); los de `professional` van prefijados `professional:`. La columna `account` está indexada para filtros rápidos.
 
