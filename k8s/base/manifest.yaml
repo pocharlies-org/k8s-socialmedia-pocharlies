@@ -355,9 +355,25 @@ metadata:
 spec:
   schedule: "*/5 * * * *"
   timeZone: Europe/Madrid
-  # Paused after repeated 502/fetch failures against skirmshop-brain-ingest.
-  # Keep this quiet until the Brain/BGE ingest path is repaired and verified.
-  suspend: true
+  # 29-08-2026: reactivado. Estuvo 74 dias suspendido por 502 repetidos contra
+  # skirmshop-brain-ingest, y la causa no era ese servicio (esta sano, 1/1): es que
+  # BGE depende del perfil de computo de los Sparks. Hay un deployment por perfil
+  # (`bge-m3-embedding` para llm-tp, `bge-m3-embedding-creative` para creative) y el
+  # arbitro los intercambia, asi que en REGIMEN hay embeddings en los dos perfiles.
+  # La ventana ciega es la TRANSICION: medido el 29-08 a las 07:2x con
+  # `phase: switching`, los tres deployments estaban a la vez a cero
+  # (bge-m3-embedding 0/0, -cpu 0/0, -creative 0/1) y /health daba primary y
+  # fallback down. Este cron disparaba cada 5 min sin mirar nada, asi que cada
+  # transicion le costaba una tanda de 502.
+  #
+  # Coste medido: `personal_documents` no recibia nada desde junio (telegram y
+  # gmail) y mayo (whatsapp).
+  #
+  # El arreglo es la guarda de abajo: la pasada comprueba /health y se salta sola
+  # cuando no hay embeddings, en vez de convertirse en una tormenta de 502.
+  # Saltarse pasadas no pierde datos: la ingesta es incremental (cursor keyset en
+  # `brain_ingest_cursor`) e idempotente (el Brain deduplica por source_id).
+  suspend: false
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 2
@@ -375,7 +391,32 @@ spec:
           containers:
             - name: brain-ingest
               image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
-              command: ["sh", "-c", "cd mcp-server && node --import tsx src/jobs/brain-ingest.ts"]
+              command:
+                - sh
+                - -c
+                - |
+                  cd mcp-server
+                  # Guarda de embebido. Sale 0 (no falla el Job) cuando el Brain no
+                  # tiene ni primary ni fallback de TEI: sin embeddings la ingesta
+                  # solo produce 502. Se reintenta en la pasada siguiente.
+                  node -e '
+                    const url = process.env.BRAIN_URL + "/health";
+                    fetch(url, { signal: AbortSignal.timeout(10000) })
+                      .then((r) => r.json())
+                      .then((d) => {
+                        const t = (d && d.tei) || {};
+                        if (t.primary_status !== "ok" && t.fallback_status !== "ok") {
+                          console.log("brain-ingest: sin embeddings (primary=" + t.primary_status + " fallback=" + t.fallback_status + "); se salta esta pasada");
+                          process.exit(3);
+                        }
+                        console.log("brain-ingest: embeddings via " + t.active_tei);
+                      })
+                      .catch((e) => {
+                        console.log("brain-ingest: /health inalcanzable (" + e.message + "); se salta esta pasada");
+                        process.exit(3);
+                      });
+                  ' || exit 0
+                  node --import tsx src/jobs/brain-ingest.ts
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
