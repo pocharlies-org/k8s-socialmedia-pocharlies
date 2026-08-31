@@ -356,12 +356,18 @@ spec:
   schedule: "*/5 * * * *"
   timeZone: Europe/Madrid
   # 29-08-2026: reactivado. Estuvo 74 dias suspendido por 502 repetidos contra
-  # skirmshop-brain-ingest, y la causa era estructural, no del servicio: BGE solo
-  # existe bajo el perfil de computo `creative` de los Sparks. Con `llm-tp` sus
-  # deployments quedan a CERO replicas (bge-m3-embedding 0/0, -cpu 0/0) y el Brain
-  # se queda sin embeddings, asi que este cron disparaba cada 5 min contra un
-  # embebedor muerto. Medido el 29-08: `personal_documents` no recibia nada desde
-  # junio (telegram y gmail) y mayo (whatsapp).
+  # skirmshop-brain-ingest, y la causa no era ese servicio (esta sano, 1/1): es que
+  # BGE depende del perfil de computo de los Sparks. Hay un deployment por perfil
+  # (`bge-m3-embedding` para llm-tp, `bge-m3-embedding-creative` para creative) y el
+  # arbitro los intercambia, asi que en REGIMEN hay embeddings en los dos perfiles.
+  # La ventana ciega es la TRANSICION: medido el 29-08 a las 07:2x con
+  # `phase: switching`, los tres deployments estaban a la vez a cero
+  # (bge-m3-embedding 0/0, -cpu 0/0, -creative 0/1) y /health daba primary y
+  # fallback down. Este cron disparaba cada 5 min sin mirar nada, asi que cada
+  # transicion le costaba una tanda de 502.
+  #
+  # Coste medido: `personal_documents` no recibia nada desde junio (telegram y
+  # gmail) y mayo (whatsapp).
   #
   # El arreglo es la guarda de abajo: la pasada comprueba /health y se salta sola
   # cuando no hay embeddings, en vez de convertirse en una tormenta de 502.
