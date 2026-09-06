@@ -284,12 +284,19 @@ async function main() {
         }
 
         // No (valid) session: only an `initialize` request may open one.
+        //
+        // 404, NOT 400. The session id the client sent is gone (idle-sweep,
+        // max-age, or a pod roll) and the spec says an unknown/terminated
+        // session MUST be a 404 so the client re-initializes on its own. With a
+        // 400 the client treats it as a permanent protocol error, keeps the dead
+        // id for the rest of its run, and every later call fails identically —
+        // the whole social plane stays dead until the agent restarts.
         if (!isInitializeRequest(body)) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(
             JSON.stringify({
               jsonrpc: '2.0',
-              error: { code: -32000, message: 'Bad Request: no valid session id' },
+              error: { code: -32001, message: 'Session not found: no valid session id' },
               id: null,
             })
           );
@@ -328,7 +335,11 @@ async function main() {
       if (req.method === 'GET' || req.method === 'DELETE') {
         const session = sid ? streamableSessions.get(sid) : undefined;
         if (!session) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
+          // Same rule as the POST path above: a session id we don't know is a
+          // 404 so the client re-initializes. Only a *missing* id is a genuine
+          // 400 — there is nothing for the client to recover from.
+          const status = sid ? 404 : 400;
+          res.writeHead(status, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Invalid or missing mcp-session-id' }));
           return;
         }
