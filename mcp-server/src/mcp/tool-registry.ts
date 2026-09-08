@@ -61,7 +61,23 @@ const attachment = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    url: { type: 'string', format: 'uri' },
+    url: {
+      type: 'string',
+      format: 'uri',
+      description:
+        'Media reference the CONNECTOR fetches server-side with a plain HTTP fetch before ' +
+        'uploading to the provider. MUST be an http(s) URL reachable from the connector pod ' +
+        '(it runs inside the cluster). Supported: public https URLs, cluster-internal http ' +
+        'URLs, and presigned S3/MinIO http URLs (e.g. from the skirmshop-drive bucket the ' +
+        'connector itself has credentials for). NOT supported — the fetch throws ' +
+        '"Failed to fetch file from <url>": file:// paths, s3:// URIs (the connector is not ' +
+        'an S3 client; s3:// only appears in READ results because ingestion presigns them), ' +
+        'and internal hosts that resolve to nothing (labels.local-style). The response ' +
+        'Content-Type decides the WhatsApp message type: image/* → photo, video/* → video, ' +
+        'audio/* → audio, anything else → document (fileName taken from the URL last path ' +
+        'segment, so prefer URLs ending in the real filename). Telegram fetches http(s) ' +
+        'connector-side too; non-http paths pass through and fail for cluster-internal URLs.',
+    },
     name: { type: 'string' },
     mimeType: { type: 'string' },
     caption: { type: 'string' },
