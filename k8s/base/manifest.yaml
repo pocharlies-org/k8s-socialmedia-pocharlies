@@ -23,14 +23,14 @@ metadata:
   name: whatsapp-mcp-secrets
   namespace: whatsapp-mcp
 spec:
-  refreshInterval: 1h
-  secretStoreRef: { name: vault-backend, kind: ClusterSecretStore }
+  refreshInterval: 6h
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
   target:
     name: whatsapp-mcp-secrets
     creationPolicy: Owner
     deletionPolicy: Retain
   dataFrom:
-    - extract: { key: secret/whatsapp-mcp }
+    - extract: { key: whatsapp-mcp }
 
 ---
 apiVersion: v1
@@ -427,7 +427,7 @@ spec:
                 - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
                 - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "10000" }
                 - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
-                # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (Vault) via envFrom.
+                # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (1Password) via envFrom.
               envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
               resources:
                 requests: { cpu: 50m, memory: 128Mi }
