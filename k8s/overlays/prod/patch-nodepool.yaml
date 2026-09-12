@@ -53,6 +53,13 @@ spec:
       nodeSelector:
         topology: null
         node-pool: ks5-nvme
+        # Pinned to cp-2: it is the only ks5-nvme node with the minio digest
+        # cached, and the image cannot be re-pulled (Docker Hub rate-limit on
+        # the OVH egress) nor mirrored to harbor/homelab yet (containerd
+        # content-store lacks the manifest-list children on the other nodes).
+        # Interim until the image is mirrored to harbor like the other
+        # components in patch-image.yaml.
+        kubernetes.io/hostname: ks5-cp-2
 ---
 apiVersion: apps/v1
 kind: Deployment
