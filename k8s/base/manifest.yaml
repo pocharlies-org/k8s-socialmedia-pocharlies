@@ -128,6 +128,11 @@ spec:
       containers:
         - name: minio
           image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          # Digest-pinned: declare the policy explicitly. Git never set it, so
+          # ArgoCD never owned the field and a stale `Always` (inherited from an
+          # old tag-based deploy) survived forever, re-pulling docker.io on every
+          # reschedule -> anonymous Docker Hub rate-limit on the OVH egress.
+          imagePullPolicy: IfNotPresent
           args: [server, /data, --console-address, ":9001"]
           ports:
             - { name: api, containerPort: 9000 }
