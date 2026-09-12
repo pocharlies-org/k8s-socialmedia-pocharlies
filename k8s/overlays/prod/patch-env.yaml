@@ -3,7 +3,11 @@ kind: ExternalSecret
 metadata:
   name: whatsapp-mcp-secrets
   namespace: whatsapp-mcp
+# SC-490: el patch se mantiene como override explícito de prod, pero con la
+# key en formato 1Password (item = `whatsapp-mcp`, ver _ops mapping.tsv). Con
+# `secret/whatsapp-mcp` el provider buscaba un item con ese título y el ES
+# quedaba en SecretSyncError (formato Vault, store onepassword).
 spec:
   dataFrom:
     - extract:
-        key: secret/whatsapp-mcp
+        key: whatsapp-mcp
