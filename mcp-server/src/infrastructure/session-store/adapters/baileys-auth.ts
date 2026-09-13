@@ -43,7 +43,7 @@ export function deserializeBaileysAuthPayload(payload: unknown): BaileysAuthPayl
     }
     assertSafeAuthFileName(name);
   }
-  return { files: files as Record<string, string> };
+  return { files };
 }
 
 function assertSafeAuthFileName(name: string): void {

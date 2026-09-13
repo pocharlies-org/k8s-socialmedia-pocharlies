@@ -52,7 +52,7 @@ export function deserializeInstagramToken(payload: unknown): InstagramTokenPaylo
   };
   for (const optional of ['appId', 'appSecret', 'fbAccessToken'] as const) {
     if (typeof value[optional] === 'string' && value[optional] !== '') {
-      result[optional] = value[optional] as string;
+      result[optional] = value[optional];
     }
   }
   return result;
