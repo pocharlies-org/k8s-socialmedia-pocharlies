@@ -29,6 +29,17 @@ El MCP enruta cada call a una de dos cuentas:
 
 DB scoping (migración 002): los ids de la cuenta `personal` no llevan prefijo (compat con ~449k filas existentes); los de `professional` van prefijados `professional:`. La columna `account` está indexada para filtros rápidos.
 
+## Almacén de credenciales por usuario (SC-552, flag OFF)
+
+Decisión CTO 13-09-2026: UN almacén por `sub` del JWT que el AgentGateway verifica en `/social` y reenvía como cabecera `x-user-sub`, con tres adaptadores de canal — no tres almacenes paralelos. Fontanería en `mcp-server/src/infrastructure/session-store/`:
+
+- `credential-store.ts` — tabla `user_channel_credentials` (migración 007, PK `(session_key, channel)`, payload jsonb opaco). Persistencia = la DB `whatsappmcp`: sobrevive reinicios del gateway y de los pods.
+- `request-context.ts` — AsyncLocalStorage alrededor de `transport.handleRequest`/`handlePostMessage` en `sse-server.ts` (por POST); expone `x-user-sub`/`x-user-name` al contexto de la tool call. Sin cabecera → contexto vacío.
+- `adapters/` — baileys (directorio multi-file auth-state → `{files: nombre→base64}`), mtcute (session string), instagram (token Graph + ids). Cada canal conserva su formato; el store no lo interpreta.
+- `credential-resolver.ts` — `resolveCredential`: (1) cabecera + fila → la fila gana; (2) sin cabecera → ruta legacy exacta, cero lecturas/escrituras; (3) cabecera sin fila → adopt-on-first-use (leer legacy, escribir fila, servir legacy).
+
+TODO detrás de `CREDENTIAL_STORE_ENABLED` (default `false`; en k8s NO se define ⇒ producción no cambia). Los conectores siguen cargando su credencial legacy en `connect()`: el pool de clientes por `sub` y la posture de secretos (session-strings de Telegram en 1Password vs. filas en la DB) son fase 2 del CTO.
+
 ## Estructura
 
 Tras el refactor del 2026-05-07 (commit `6791fae`), todo bajo carpetas dedicadas:
