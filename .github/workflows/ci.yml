@@ -19,19 +19,6 @@ jobs:
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
     runs-on: arc-k8s
-    services:
-      minio:
-        # 2026-09-13: dl.min.io now returns 410 for every binary path (public
-        # downloads removed), so MinIO is provisioned as its official container
-        # image instead of a downloaded binary. quay.io, not docker.io:
-        # anonymous docker.io pulls are rate-limited on this egress (b5b8267).
-        image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-        args: server /data --address :9000
     env:
       RUN_S3_INTEGRATION: "1"
       S3_ENDPOINT: http://127.0.0.1:9000
@@ -42,16 +29,29 @@ jobs:
       AWS_SECRET_ACCESS_KEY: minioadmin
     steps:
       - uses: actions/checkout@v4
-      - name: Wait for MinIO
+      # 2026-09-13: dl.min.io returns 410 for every binary path now (public
+      # downloads removed), so MinIO runs as its official container image on the
+      # job's dind daemon instead of a downloaded binary. Not a services: block:
+      # the Actions service schema has no way to pass the required
+      # "server /data" command (actions/runner DockerCreate puts options
+      # before the image and the image's default CMD does not start the
+      # server). quay.io, not docker.io: anonymous docker.io pulls are
+      # rate-limited on this egress (b5b8267).
+      - name: Start MinIO
         run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z \
+            server /data --address :9000
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:9000/minio/health/ready >/dev/null; then
               exit 0
             fi
             sleep 1
           done
-          docker ps -a
-          docker logs "$(docker ps -q --filter publish=9000 | head -1)" 2>/dev/null || true
+          docker logs minio
           exit 1
       - uses: actions/setup-node@v4
         with:
