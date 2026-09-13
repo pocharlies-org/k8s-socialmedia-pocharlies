@@ -19,6 +19,19 @@ jobs:
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
     runs-on: arc-k8s
+    services:
+      minio:
+        # 2026-09-13: dl.min.io now returns 410 for every binary path (public
+        # downloads removed), so MinIO is provisioned as its official container
+        # image instead of a downloaded binary. quay.io, not docker.io:
+        # anonymous docker.io pulls are rate-limited on this egress (b5b8267).
+        image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        args: server /data --address :9000
     env:
       RUN_S3_INTEGRATION: "1"
       S3_ENDPOINT: http://127.0.0.1:9000
@@ -29,19 +42,16 @@ jobs:
       AWS_SECRET_ACCESS_KEY: minioadmin
     steps:
       - uses: actions/checkout@v4
-      - name: Start MinIO
+      - name: Wait for MinIO
         run: |
-          curl -fsSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /tmp/minio
-          chmod +x /tmp/minio
-          mkdir -p /tmp/minio-data
-          MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin /tmp/minio server /tmp/minio-data --address :9000 >/tmp/minio.log 2>&1 &
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:9000/minio/health/ready >/dev/null; then
               exit 0
             fi
             sleep 1
           done
-          cat /tmp/minio.log
+          docker ps -a
+          docker logs "$(docker ps -q --filter publish=9000 | head -1)" 2>/dev/null || true
           exit 1
       - uses: actions/setup-node@v4
         with:
