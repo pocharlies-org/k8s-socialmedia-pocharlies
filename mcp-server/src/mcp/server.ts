@@ -2053,10 +2053,17 @@ export class MCPServer {
 
   private async canonicalClickInteraction(args: Record<string, any>): Promise<any> {
     this.requireChannel(args, 'telegram');
+    // Either form identifies the button; dataB64 is the lossless one and wins
+    // for bots with binary callback payloads.
+    const dataB64 = typeof args.dataB64 === 'string' ? args.dataB64 : undefined;
+    if (dataB64 === undefined && typeof args.data !== 'string') {
+      throw this.canonicalError('invalid_request', "Provide either 'data' or 'dataB64'");
+    }
     return this.handleTelegramClickButton({
       chatId: this.target(args),
       messageId: args.messageId,
-      data: this.string(args, 'data'),
+      data: typeof args.data === 'string' ? args.data : '',
+      dataB64,
       account: this.account(args),
     });
   }
@@ -3686,6 +3693,7 @@ export class MCPServer {
     chatId: string;
     messageId: number | string;
     data: string;
+    dataB64?: string;
     timeoutMs?: number;
     fireAndForget?: boolean;
     account?: string;
@@ -3701,6 +3709,7 @@ export class MCPServer {
         chatId: target.chatId,
         messageId,
         data: args.data,
+        ...(args.dataB64 ? { dataB64: args.dataB64 } : {}),
         timeoutMs,
         fireAndForget: args.fireAndForget === true,
       }

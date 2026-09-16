@@ -44,6 +44,29 @@ export interface TelegramMessage {
   isOutbound: boolean;
   chatType: 'private' | 'group' | 'supergroup' | 'channel';
   chatTitle?: string;
+  /**
+   * Inline keyboard rows, when the message carries one.
+   *
+   * Needed to drive third-party bots (BotFather, etc.) over the API: their
+   * callback_data is an opaque token, so a caller cannot guess it — it has to
+   * read the button and then press it. `data` is the UTF-8 decoding and is
+   * only present when it round-trips byte-for-byte; `dataB64` is always the
+   * exact bytes and is what a click should send back.
+   */
+  inlineButtons?: InlineKeyboardButton[][];
+}
+
+export interface InlineKeyboardButton {
+  /** Button label as shown to the user. */
+  text: string;
+  /** mtcute button kind: callback | url | game | web_app | ... */
+  type: string;
+  /** UTF-8 payload, only when it re-encodes to the original bytes. */
+  data?: string;
+  /** Exact callback bytes, base64. Use this to click losslessly. */
+  dataB64?: string;
+  /** Target for url / web_app buttons. */
+  url?: string;
 }
 
 export interface TelegramClientConfig {
@@ -72,6 +95,53 @@ function mapChatType(peer: Peer | undefined | null): TelegramMessage['chatType']
   if (ct === 'channel') return 'channel';
   // supergroup, gigagroup, monoforum, forum all map to 'supergroup'
   return 'supergroup';
+}
+
+/**
+ * Extract inline keyboard rows from a message's reply markup.
+ *
+ * Returns undefined when the message has no inline keyboard. Button `data` is
+ * kept only when its UTF-8 decoding re-encodes to the original bytes, so a
+ * caller can never click a lossy string by accident; `dataB64` always carries
+ * the exact bytes.
+ */
+function inlineButtonsOf(
+  markup: unknown
+): InlineKeyboardButton[][] | undefined {
+  const rows = (markup as { type?: string; buttons?: unknown[][] } | null);
+  if (!rows || rows.type !== 'inline' || !Array.isArray(rows.buttons)) return undefined;
+
+  const out: InlineKeyboardButton[][] = [];
+  for (const row of rows.buttons) {
+    if (!Array.isArray(row)) continue;
+    const buttons: InlineKeyboardButton[] = [];
+    for (const raw of row) {
+      const btn = raw as {
+        _?: string;
+        text?: string;
+        data?: Uint8Array;
+        url?: string;
+        web_app?: { url?: string };
+      };
+      if (!btn || typeof btn.text !== 'string') continue;
+      const button: InlineKeyboardButton = {
+        text: btn.text,
+        type: (btn._ || '').replace(/^keyboardButton/, '').toLowerCase() || 'unknown',
+      };
+      if (btn.data && btn.data.length > 0) {
+        const bytes = Buffer.from(btn.data);
+        button.dataB64 = bytes.toString('base64');
+        const asText = bytes.toString('utf8');
+        // Only offer the readable form when it survives a re-encode.
+        if (Buffer.from(asText, 'utf8').equals(bytes)) button.data = asText;
+      }
+      const url = btn.url || btn.web_app?.url;
+      if (typeof url === 'string') button.url = url;
+      buttons.push(button);
+    }
+    if (buttons.length > 0) out.push(buttons);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function chatTitleOf(peer: Peer | undefined | null): string | undefined {
@@ -295,6 +365,7 @@ export class TelegramClientWrapper extends EventEmitter {
         isOutbound,
         chatType: mapChatType(chat),
         chatTitle: chatTitleOf(chat),
+        inlineButtons: inlineButtonsOf(message.markup),
       };
     } catch (e) {
       this.logger.error(`Error parsing message: ${e}`);
@@ -346,7 +417,7 @@ export class TelegramClientWrapper extends EventEmitter {
     chatId: string,
     messageId: number,
     data: string,
-    options?: { timeoutMs?: number; fireAndForget?: boolean }
+    options?: { timeoutMs?: number; fireAndForget?: boolean; dataB64?: string }
   ): Promise<{
     alert: boolean;
     hasUrl: boolean;
@@ -356,10 +427,16 @@ export class TelegramClientWrapper extends EventEmitter {
     cacheTime: number;
   }> {
     if (!this.connected) throw new Error('Not connected to Telegram');
+    // Prefer the exact bytes when the caller echoes back a button's dataB64:
+    // third-party bots (BotFather) use binary callback_data that does not
+    // survive a UTF-8 round-trip, and a lossy payload gets DATA_INVALID.
+    const payload: string | Uint8Array = options?.dataB64
+      ? Buffer.from(options.dataB64, 'base64')
+      : data;
     const answer = await this.client.getCallbackAnswer({
       chatId: toMtcutePeer(chatId),
       message: messageId,
-      data,
+      data: payload,
       ...(options?.timeoutMs ? { timeout: options.timeoutMs } : {}),
       ...(options?.fireAndForget ? { fireAndForget: true } : {}),
     });

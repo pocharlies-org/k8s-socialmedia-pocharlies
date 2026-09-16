@@ -687,14 +687,21 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
           res.status(503).json({ error: 'Not connected to Telegram' });
           return;
         }
-        const { chatId, messageId, data, timeoutMs, fireAndForget } = req.body as {
+        const { chatId, messageId, data, dataB64, timeoutMs, fireAndForget } = req.body as {
           chatId?: string;
           messageId?: number | string;
           data?: string;
+          dataB64?: string;
           timeoutMs?: number | string;
           fireAndForget?: boolean;
         };
-        if (!chatId || messageId === undefined || messageId === null || data === undefined) {
+        // dataB64 alone is enough: binary callback_data has no text form.
+        if (
+          !chatId ||
+          messageId === undefined ||
+          messageId === null ||
+          (data === undefined && dataB64 === undefined)
+        ) {
           res.status(400).json({ error: 'Missing chatId, messageId or data' });
           return;
         }
@@ -711,8 +718,9 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
           res.status(400).json({ error: 'timeoutMs must be a positive integer' });
           return;
         }
-        const answer = await client.clickCallbackButton(chatId, msgId, String(data), {
+        const answer = await client.clickCallbackButton(chatId, msgId, String(data ?? ''), {
           ...(timeout ? { timeoutMs: timeout } : {}),
+          ...(dataB64 ? { dataB64: String(dataB64) } : {}),
           fireAndForget: fireAndForget === true,
         });
         res.json({ clicked: true, answer });

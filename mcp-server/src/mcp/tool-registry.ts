@@ -843,9 +843,15 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
           minLength: 1,
           description: 'Exact Telegram callback payload from the selected inline button.',
         },
+        dataB64: {
+          type: 'string',
+          minLength: 1,
+          description:
+            "Button's dataB64 from social_list_messages, echoed back verbatim. Required for bots whose callback payload is binary (BotFather); takes precedence over data.",
+        },
         threadId: { type: ['string', 'integer', 'null'] },
       },
-      ['channel', 'accountId', 'target', 'messageId', 'data']
+      ['channel', 'accountId', 'target', 'messageId']
     ),
     destructive: true,
   }),

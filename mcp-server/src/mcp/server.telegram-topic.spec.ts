@@ -88,6 +88,29 @@ describe('Telegram topic MCP helpers', () => {
     );
   });
 
+  it('forwards dataB64 so binary callback payloads reach the connector intact', async () => {
+    const { server, connectorCall } = topicServer();
+    await server.handleTelegramClickButton({
+      chatId: 'tg_-1003749364241_4775',
+      messageId: '4777',
+      data: '',
+      dataB64: 'ugAAAAAAAAA=',
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://telegram-personal',
+      'POST',
+      '/api/v1/messages/callback',
+      {
+        chatId: '-1003749364241',
+        messageId: 4777,
+        data: '',
+        dataB64: 'ugAAAAAAAAA=',
+        timeoutMs: 10000,
+        fireAndForget: false,
+      }
+    );
+  });
+
   it('rejects callback clicks without a message id before calling the connector', async () => {
     const { server, connectorCall } = topicServer();
     await expect(
