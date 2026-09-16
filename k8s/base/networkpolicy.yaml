@@ -77,3 +77,30 @@ spec:
           port: 3010
   policyTypes:
     - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-dashboard-telegram
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - telegram-connector
+          - telegram-connector-professional
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: control-nexus
+          podSelector:
+            matchLabels:
+              app: dgx-dashboard-backend
+      ports:
+        - protocol: TCP
+          port: 3002
+  policyTypes:
+    - Ingress
