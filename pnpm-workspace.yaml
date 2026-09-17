@@ -14,17 +14,23 @@ overrides:
   # CVE-2026-14257 and CVE-2026-69152 are fixed on the 5.x line. 5.0.9 still publishes a
   # CommonJS build and requires node 20 || >=22, so the consumers keep working.
   brace-expansion: ^5.0.9
-  # GHSA-5p4m-2wfm-xmqj is fixed in 4.3.1. Keep the older 3.x Istanbul branch
-  # on its own major until that parent dependency updates.
-  js-yaml@4: ^4.3.1
-  js-yaml@3: ^3.15.1
-  # CVE-2026-18446 is fixed in 3.1.5; Ajv's API stays on the same major.
-  fast-uri@3: ^3.1.5
+  # GHSA-5p4m-2wfm-xmqj is fixed in 4.3.1 and CVE-2026-84375 in 4.3.2/3.15.2.
+  # Keep the older 3.x Istanbul branch on its own major until that parent
+  # dependency updates.
+  js-yaml@4: ^4.3.2
+  js-yaml@3: ^3.15.2
+  # CVE-2026-18446 is fixed in 3.1.5 and CVE-2026-75899/-75931/-75975/-76172 in
+  # 3.1.6; Ajv's API stays on the same major.
+  fast-uri@3: ^3.1.6
   # Scoped to the 9.x line on purpose: eslint pulls minimatch 3.x, whose API
   # differs, and 3.1.5 is already past the fixed 3.1.4.
   minimatch@9: ^9.0.9
   # Reaches us through @nestjs/platform-express, which still ships 2.0.2.
-  multer: ^2.2.0
+  # CVE-2026-77037, CVE-2026-77078 and CVE-2026-82333 are fixed in 2.3.0.
+  multer: ^2.3.0
+  # GHSA-rgj7-g3m4-5g8c is fixed in 0.35.4. Reaches us as a peer of the image
+  # pipeline; the 0.35.x API is unchanged.
+  sharp: ^0.35.4
   # CVE-2026-43897 is fixed in 4.0.1. baileys 7.0.0-rc13 (the newest release)
   # still declares a `^3.0.0` peer range, but it only ever calls
   # `getLinkPreview(text, options?)`, whose name and signature are unchanged in
