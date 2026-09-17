@@ -772,7 +772,7 @@ spec:
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 100m, memory: 1Gi }
-            limits:   { memory: 3Gi }   # OOM audit 2026-07-06: p95/max ~1850/1929Mi, too close to 2Gi.
+            limits:   { memory: 4Gi }   # OOM audit 2026-07-06 subió 2->3Gi; 17-09 working-set 2842Mi (94%) otra vez cerca. Crecimiento lento: vigilar leak en la app.
           readinessProbe:
             httpGet: { path: /health, port: 3080 }
             initialDelaySeconds: 10
