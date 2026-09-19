@@ -957,26 +957,29 @@ export class TelegramClientWrapper extends EventEmitter {
    * Fetch the per-reactor identity for a given message: who reacted with what.
    * Returns null if the message isn't reachable. Used by the dashboard's
    * reaction-badge tooltip to show "Alice, Bob — 👍".
+   *
+   * Telegram caps `messages.getMessageReactionsList` at 100 reactors per call
+   * and hands back a `next` offset plus the REAL `total`. A single call
+   * therefore silently truncates any message with more than 100 reactions
+   * (a poll or a contest looks like a 100-way tie), so we page until we have
+   * `limit` reactors or Telegram runs out, and surface `total` untouched.
    */
   async getReactionUsers(
     chatId: string,
     messageId: number,
     limit = 100
-  ): Promise<Array<{
-    emoji: string;
-    userId: number;
-    displayName: string | null;
-    mine: boolean;
-  }> | null> {
+  ): Promise<{
+    total: number;
+    reactors: Array<{
+      emoji: string;
+      userId: number;
+      displayName: string | null;
+      mine: boolean;
+    }>;
+  } | null> {
     if (!this.connected) throw new Error('Not connected');
     try {
       const peer = toMtcutePeer(chatId);
-      const result: any = await (this.client as any).getReactionUsers({
-        chatId: peer,
-        message: messageId,
-        limit,
-      });
-      const raw = Array.isArray(result) ? result : result?.items || [];
       const meId = this.selfId ? Number(this.selfId) : null;
       const out: Array<{
         emoji: string;
@@ -984,16 +987,37 @@ export class TelegramClientWrapper extends EventEmitter {
         displayName: string | null;
         mine: boolean;
       }> = [];
-      for (const pr of raw) {
-        const emoji = typeof pr.emoji === 'string' ? pr.emoji : String(pr.emoji);
-        const peerObj: any = pr.peer;
-        const userId: number | undefined = peerObj?.id ?? peerObj?.userId;
-        if (typeof userId !== 'number') continue;
-        const displayName: string | null =
-          peerObj?.displayName || peerObj?.firstName || peerObj?.username || peerObj?.title || null;
-        out.push({ emoji, userId, displayName, mine: meId !== null && userId === meId });
+      let total = 0;
+      let offset: string | undefined;
+      // Hard stop on the page count as well: a runaway `next` offset must not
+      // loop forever against Telegram.
+      for (let page = 0; page < 50; page++) {
+        const pageSize = Math.min(100, limit - out.length);
+        if (pageSize <= 0) break;
+        const result: any = await (this.client as any).getReactionUsers({
+          chatId: peer,
+          message: messageId,
+          limit: pageSize,
+          ...(offset ? { offset } : {}),
+        });
+        const raw = Array.isArray(result) ? result : result?.items || [];
+        // `total` is the count Telegram reports for the whole message, not for
+        // the page — it is already the answer to "how many reactions?".
+        if (typeof result?.total === 'number') total = result.total;
+        for (const pr of raw) {
+          const emoji = typeof pr.emoji === 'string' ? pr.emoji : String(pr.emoji);
+          const peerObj: any = pr.peer;
+          const userId: number | undefined = peerObj?.id ?? peerObj?.userId;
+          if (typeof userId !== 'number') continue;
+          const displayName: string | null =
+            peerObj?.displayName || peerObj?.firstName || peerObj?.username || peerObj?.title || null;
+          out.push({ emoji, userId, displayName, mine: meId !== null && userId === meId });
+        }
+        offset = result?.next;
+        if (!offset || raw.length === 0) break;
       }
-      return out;
+      if (!total) total = out.length;
+      return { total, reactors: out };
     } catch (e) {
       this.logger.warn(
         `getReactionUsers failed for ${chatId}/${messageId}: ${(e as Error).message}`

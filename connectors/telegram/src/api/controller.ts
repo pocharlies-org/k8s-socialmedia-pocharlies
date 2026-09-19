@@ -633,8 +633,13 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
 
   /**
    * GET /messages/reactors/:chatId/:msgId - Per-reactor identity for a message.
-   * Returns `[{emoji, userId, displayName, mine}]`. Used by the dashboard's
-   * "who reacted?" tooltip when the user hovers/clicks a reaction badge.
+   * Returns `{total, reactors: [{emoji, userId, displayName, mine}]}`. Used by
+   * the dashboard's "who reacted?" tooltip when the user hovers/clicks a
+   * reaction badge.
+   *
+   * `total` is Telegram's own count for the whole message and is authoritative
+   * even when `reactors` is shorter: the list is paged at 100 per Telegram
+   * call and `limit` (default 100) bounds how many pages we walk.
    */
   router.get('/messages/reactors/:chatId/:msgId', (req: Request, res: Response): void => {
     void (async () => {
@@ -645,8 +650,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
           res.status(400).json({ error: 'Bad msgId' });
           return;
         }
-        const reactors = await client.getReactionUsers(req.params.chatId, msgId, limit);
-        res.json({ reactors: reactors || [] });
+        const result = await client.getReactionUsers(req.params.chatId, msgId, limit);
+        res.json({ reactors: result?.reactors || [], total: result?.total || 0 });
       } catch (e) {
         res.status(500).json({ error: String(e) });
       }
