@@ -14,6 +14,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { MCPServer } from './server';
+import {
+  actorFromHeaders,
+  runWithRequestActor,
+} from '../infrastructure/session-store/request-context';
 
 const DATABASE_URL =
   process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp';
@@ -279,7 +283,13 @@ async function main() {
         const existing = sid ? streamableSessions.get(sid) : undefined;
         if (existing) {
           existing.lastActivity = Date.now();
-          await existing.transport.handleRequest(req, res, body);
+          // SC-552: per-request actor (x-user-sub / x-user-name injected by
+          // the AgentGateway on /social). The AsyncLocalStorage wraps the SDK
+          // call, so the tool-call handler it awaits sees the actor; no header
+          // → empty actor → consumers take the exact legacy path.
+          await runWithRequestActor(actorFromHeaders(req.headers), () =>
+            existing.transport.handleRequest(req, res, body)
+          );
           return;
         }
 
@@ -321,7 +331,9 @@ async function main() {
 
         const sessionServer = mcpServer.createSessionServer();
         await sessionServer.connect(transport);
-        await transport.handleRequest(req, res, body);
+        await runWithRequestActor(actorFromHeaders(req.headers), () =>
+          transport.handleRequest(req, res, body)
+        );
         return;
       }
 
@@ -470,7 +482,9 @@ async function main() {
         return;
       }
 
-      await s.transport.handlePostMessage(req, res);
+      await runWithRequestActor(actorFromHeaders(req.headers), () =>
+        s.transport.handlePostMessage(req, res)
+      );
       return;
     }
 
