@@ -29,19 +29,29 @@ jobs:
       AWS_SECRET_ACCESS_KEY: minioadmin
     steps:
       - uses: actions/checkout@v4
+      # 2026-09-13: dl.min.io returns 410 for every binary path now (public
+      # downloads removed), so MinIO runs as its official container image on the
+      # job's dind daemon instead of a downloaded binary. Not a services: block:
+      # the Actions service schema has no way to pass the required
+      # "server /data" command (actions/runner DockerCreate puts options
+      # before the image and the image's default CMD does not start the
+      # server). quay.io, not docker.io: anonymous docker.io pulls are
+      # rate-limited on this egress (b5b8267).
       - name: Start MinIO
         run: |
-          curl -fsSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /tmp/minio
-          chmod +x /tmp/minio
-          mkdir -p /tmp/minio-data
-          MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin /tmp/minio server /tmp/minio-data --address :9000 >/tmp/minio.log 2>&1 &
-          for i in $(seq 1 30); do
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z \
+            server /data --address :9000
+          for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:9000/minio/health/ready >/dev/null; then
               exit 0
             fi
             sleep 1
           done
-          cat /tmp/minio.log
+          docker logs minio
           exit 1
       - uses: actions/setup-node@v4
         with:
