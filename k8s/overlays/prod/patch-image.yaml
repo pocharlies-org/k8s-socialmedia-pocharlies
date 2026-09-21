@@ -22,6 +22,19 @@ spec:
         - name: whatsapp-connector-professional
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:socialmedia-v2-c88dce16@sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
 ---
+# SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-connector-leila
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-connector-leila
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:socialmedia-v2-c88dce16@sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
