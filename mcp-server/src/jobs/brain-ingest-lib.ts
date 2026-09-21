@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 
-export const ACCOUNTS = ['personal', 'professional'] as const;
+export const ACCOUNTS = ['personal', 'professional', 'leila'] as const;
 export type Account = (typeof ACCOUNTS)[number];
 export type Platform = 'whatsapp' | 'telegram' | 'instagram';
 
@@ -51,6 +51,9 @@ function assertCursorTableName(table: string): void {
 }
 
 export function instanceForAccount(account: Account): string {
+  // 'leila' (SC-1144 fase 2) ingesta en la instancia 'personal' — su PVC arranca
+  // vacío y no hay mensajes hasta que el operador la empareje; si el CTO decide
+  // otra instancia, es un cambio de una línea aquí.
   return account === 'professional' ? 'skirmshop' : 'personal';
 }
 

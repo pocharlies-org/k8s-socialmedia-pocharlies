@@ -28,7 +28,7 @@ export interface MessageReceivedEvent {
   }>;
   isForwarded: boolean;
   replyToWaId?: string;
-  /** Owning account: 'personal' | 'professional'. Defaults to 'personal'. */
+  /** Owning account: 'personal' | 'professional' | 'leila'. Defaults to 'personal'. */
   account?: string;
   /**
    * Sender's WhatsApp display name (Baileys `pushName`). Attacker-controlled
@@ -76,7 +76,7 @@ export type WhatsAppEvent = MessageReceivedEvent | MessageUpdatedEvent | ChatUpd
 
 export interface TelegramMessageReceivedEvent {
   eventType: EventType.TELEGRAM_MESSAGE_RECEIVED;
-  // Emitting account/connector instance ('personal' | 'professional'), from
+  // Emitting account/connector instance ('personal' | 'professional' | 'leila'), from
   // CONNECTOR_ACCOUNT. Optional for backward-compat with pre-existing consumers.
   account?: string;
   conversationId: string;

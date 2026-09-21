@@ -38,7 +38,7 @@ export interface ReplayOptions {
 
 function parseAccount(value: string | undefined): Account[] {
   if (!value) return [...ACCOUNTS];
-  if (value === 'personal' || value === 'professional') return [value];
+  if ((ACCOUNTS as readonly string[]).includes(value ?? '')) return [value as Account];
   throw new Error(`invalid ACCOUNT: ${value}`);
 }
 

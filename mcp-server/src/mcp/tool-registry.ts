@@ -31,7 +31,11 @@ const channel = {
 const accountId = {
   type: 'string',
   minLength: 1,
-  description: "Configured provider account, for example 'personal' or 'professional'.",
+  description:
+    "Configured provider account, for example 'personal', 'professional' or 'leila' " +
+    '(WhatsApp), ' +
+    "'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be " +
+    'bound to the verified caller.',
 } as const;
 
 const target = {

@@ -33,6 +33,7 @@ function createServer() {
   server.waUrls = {
     personal: 'http://wa-personal',
     professional: 'http://wa-professional',
+    leila: 'http://wa-leila',
   };
   server.tgUrls = {
     personal: 'http://tg-personal',
@@ -211,7 +212,9 @@ describe('Socialmedia canonical v2 adapter', () => {
       { readSource: 'provider' }
     );
     expect(result.structuredContent.ok).toBe(true);
-    expect(result.structuredContent.data.conversations).toHaveLength(5);
+    // 7 configured accounts, 6 answer (telegram-professional is the injected failure):
+    // wa personal+professional+leila, tg personal, ig skirmshop+barbelpapis.
+    expect(result.structuredContent.data.conversations).toHaveLength(6);
     expect(result.structuredContent.meta).toMatchObject({
       source: { kind: 'providerQuery', completeness: 'partial' },
       partialErrors: [

@@ -1,19 +1,24 @@
 /**
- * Multi-account (personal / professional) helpers.
+ * Multi-account (personal / professional / leila) helpers.
  *
  * DB scoping strategy (migration 002): a row's id is namespaced by account so
  * the existing PK/UNIQUE constraints stay globally valid across accounts.
  * "personal" keeps the bare id (so the ~449k pre-existing single-account rows
- * need NO backfill); "professional" is prefixed with "professional:".
+ * need NO backfill); every other account is prefixed with "<account>:".
  * The `account` column is a denormalized, indexed copy for fast read filtering.
+ *
+ * 'leila' (SC-1144 fase 2) is a third Baileys WhatsApp account with its own
+ * session PVC; it has no Telegram connector instance, so `telegram` calls
+ * with accountId 'leila' fail as "not configured" in the routing layer.
  */
-export type Account = 'personal' | 'professional';
+export type Account = 'personal' | 'professional' | 'leila';
 
-export const ACCOUNTS: readonly Account[] = ['personal', 'professional'] as const;
+export const ACCOUNTS: readonly Account[] = ['personal', 'professional', 'leila'] as const;
 
 /** Validate/normalize an account selector coming from a tool arg. Defaults to 'personal'. */
 export function normalizeAccount(value: unknown): Account {
-  return value === 'professional' ? 'professional' : 'personal';
+  if (value === 'professional' || value === 'leila') return value;
+  return 'personal';
 }
 
 /**
