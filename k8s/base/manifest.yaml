@@ -23,7 +23,7 @@ metadata:
   name: whatsapp-mcp-secrets
   namespace: whatsapp-mcp
 spec:
-  refreshInterval: 6h
+  refreshInterval: 24h
   secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
   target:
     name: whatsapp-mcp-secrets
