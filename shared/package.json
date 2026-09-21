@@ -10,10 +10,12 @@
     "test": "echo 'No tests configured'"
   },
   "dependencies": {
-    "crypto": "^1.0.1"
+    "crypto": "^1.0.1",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
     "typescript": "^5.3.2"
   }
 }

@@ -4,8 +4,16 @@ import { QRHandler } from './qr-handler';
 import { EventPublisher } from './events/publisher';
 import { createRouter } from './api/controller';
 import { join } from 'path';
-import { MessageReceivedEvent, EventType } from '@mcp-socialmedia/shared';
+import { MessageReceivedEvent, EventType, PostgresCredentialStore } from '@mcp-socialmedia/shared';
 import { scrubSignalSessionLogs } from './signal-log-scrub';
+import { getPool } from './db-writer';
+import {
+  CredentialWriteBack,
+  createCredentialWriteBack,
+  credentialSessionKeyFromEnv,
+  loadCredentialSession,
+  sessionPathForSub,
+} from './credential-session';
 
 // F0.8: redact libsignal SessionEntry console dumps (privKey/rootKey/chainKey
 // Buffers) BEFORE any Baileys socket can open/close a session. Display-only;
@@ -51,12 +59,29 @@ process.on('uncaughtException', error => {
 });
 
 async function main(): Promise<void> {
-  const client = new BaileysClient(SESSION_PATH, ENCRYPTION_KEY);
+  // SC-705 phase 1.5: per-user sessions are keyed by the caller's Keycloak
+  // `sub` (CREDENTIAL_SESSION_KEY = `<sub>` or `<sub>:<cuenta>`). The house
+  // accounts (personal/professional) do NOT set it and keep the exact legacy
+  // path — legacy authDir, zero store reads/writes (SC-1144 criterion 4).
+  const credentialSessionKey = credentialSessionKeyFromEnv();
+  const client = new BaileysClient(
+    credentialSessionKey ? sessionPathForSub(SESSION_PATH, credentialSessionKey) : SESSION_PATH,
+    ENCRYPTION_KEY
+  );
   const qrHandler = new QRHandler();
   const eventPublisher = new EventPublisher(NATS_URL, NATS_CA_CERT);
 
   const app = express();
   app.use(express.json({ limit: '15mb' })); // large enough for base64 voice notes
+  // SC-705: the mcp-server forwards the verified caller identity
+  // (`x-user-sub`, from the gateway JWT) on every connector call. Phase 1.5
+  // logs it (observable proof the header traverses gateway→mcp-server→
+  // connector); the phase-2 per-sub client pool will route on it.
+  app.use('/api/v1', (req, _res, next) => {
+    const sub = req.headers['x-user-sub'];
+    if (typeof sub === 'string' && sub) console.log(`API request carries x-user-sub=${sub}`);
+    next();
+  });
   app.use('/api/v1', createRouter(client, qrHandler, CONNECTOR_SHARED_SECRET));
 
   app.get('/', (_req, res) => {
@@ -288,21 +313,43 @@ ${renewScript}
     }
   });
 
+  // SC-705: per-sub session lifecycle against the credential store. The load
+  // must happen BEFORE connect() so a restarted pod comes back on its stored
+  // session (criterion 3: no QR after rollout restart). Write-back is
+  // obligatory: without it the row and the PVC diverge and rotation is lost.
+  let credentialWriteBack: CredentialWriteBack | null = null;
+  if (credentialSessionKey) {
+    const store = new PostgresCredentialStore(getPool());
+    await loadCredentialSession(store, credentialSessionKey, client.getAuthDir());
+    credentialWriteBack = createCredentialWriteBack(
+      store,
+      credentialSessionKey,
+      client.getAuthDir()
+    );
+    client.setCredsSavedHook(() => credentialWriteBack?.schedule());
+    client.setSessionInvalidatedHook(() => store.delete(credentialSessionKey, 'whatsapp'));
+  }
+
   await client.connect();
 
-  process.on('SIGINT', () => {
+  const shutdown = (): void => {
     console.log('Shutting down...');
     client.disconnect();
     void eventPublisher.disconnect();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', () => {
-    console.log('Shutting down...');
-    client.disconnect();
-    void eventPublisher.disconnect();
-    process.exit(0);
-  });
+    const done = (): void => process.exit(0);
+    if (credentialWriteBack) {
+      // Give a pending write-back ≤5s to land before the pod dies; a hung DB
+      // must not block the shutdown (the next start re-persists on connect).
+      void Promise.race([
+        credentialWriteBack.flush(),
+        new Promise(resolve => setTimeout(resolve, 5000).unref?.()),
+      ]).then(done, done);
+      return;
+    }
+    done();
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch(error => {

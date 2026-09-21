@@ -2,8 +2,8 @@ import {
   CredentialChannel,
   CredentialStore,
   StoredCredential,
-} from './credential-store';
-import { resolveCredential } from './credential-resolver';
+} from '@mcp-socialmedia/shared';
+import { resolveCredential } from '@mcp-socialmedia/shared';
 
 class FakeStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();
@@ -27,6 +27,10 @@ class FakeStore implements CredentialStore {
       payload,
       updatedAt: new Date(),
     });
+  }
+
+  async delete(sessionKey: string, channel: CredentialChannel): Promise<void> {
+    this.rows.delete(`${sessionKey}/${channel}`);
   }
 }
 

@@ -1025,3 +1025,14 @@ metadata: { name: telegram-sync-professional, namespace: whatsapp-mcp }
 spec:
   selector: { app: telegram-sync-professional }
   ports: [{ name: http, port: 3080, targetPort: 3080 }]
+# ── SC-705 phase 1.5 — DB-migration PreSync Job: intentionally NOT in this PR ─
+# (architect verdict SC-1144, 21-09, bloqueante). The prod/stg images pinned
+# today (mcp-server socialmedia-v3-f0f219bd) predate the credential store and
+# do not even contain migrations/007_user_channel_credentials.sql, so any
+# command of this Job against those images is a no-op or an explosion — and a
+# failing PreSync blocks the whole `socialmedia` ArgoCD sync.
+# migrate.ts now keeps a `_migrations` ledger (skip applied, baseline a
+# pre-ledger schema, per-file transaction), but that code only takes effect
+# once the image carries it. The Job returns in PR2 TOGETHER WITH the image
+# re-pin (PR2 = pin new image + CREDENTIAL_STORE_ENABLED=true + Job), as
+# documented in k8s/overlays/prod/patch-credential-store.yaml.

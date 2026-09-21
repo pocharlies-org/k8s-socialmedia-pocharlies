@@ -50,3 +50,19 @@ export function runWithRequestActor<T>(actor: RequestActor, fn: () => Promise<T>
 export function getRequestActor(): RequestActor {
   return actorStorage.getStore() ?? {};
 }
+
+/**
+ * SC-705 phase 1.5: the actor as outbound HTTP headers. The mcp-server calls
+ * its connectors (whatsapp/telegram/instagram) over HMAC-signed HTTP; those
+ * calls must carry the same identity the gateway handed us, so a connector
+ * (phase-2 per-sub pool) can resolve the caller's own session. Empty actor →
+ * no headers → connectors keep the exact legacy behaviour (no-regression rule).
+ */
+export function actorRequestHeaders(
+  actor: RequestActor = getRequestActor()
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (actor.sub) headers['x-user-sub'] = actor.sub;
+  if (actor.name) headers['x-user-name'] = actor.name;
+  return headers;
+}

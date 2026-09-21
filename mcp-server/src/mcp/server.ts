@@ -20,7 +20,7 @@ import {
 } from '../application/unread-digest.service';
 import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
-import { generateHMACSignature } from '@mcp-socialmedia/shared';
+import { actorRequestHeaders, generateHMACSignature } from '@mcp-socialmedia/shared';
 import {
   ACCOUNTS,
   accountKey,
@@ -1018,6 +1018,8 @@ export class MCPServer {
 
   private async providerGet(baseUrl: string, path: string, timeoutMs = 30000): Promise<any> {
     const response = await fetch(`${baseUrl}${path}`, {
+      // SC-705: forward the verified caller identity to the connector.
+      headers: actorRequestHeaders(),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
@@ -2919,6 +2921,8 @@ export class MCPServer {
           'Content-Type': 'application/json',
           'X-Connector-Signature': signature,
           'X-Connector-Timestamp': timestamp.toString(),
+          // SC-705: forward the verified caller identity to the connector.
+          ...actorRequestHeaders(),
         },
         body: JSON.stringify(body),
       });
@@ -3001,6 +3005,8 @@ export class MCPServer {
           'Content-Type': 'application/json',
           'X-Connector-Signature': signature,
           'X-Connector-Timestamp': timestamp.toString(),
+          // SC-705: forward the verified caller identity to the connector.
+          ...actorRequestHeaders(),
         },
         body: JSON.stringify(body),
       });
@@ -3239,6 +3245,8 @@ export class MCPServer {
           'Content-Type': 'application/json',
           'X-Connector-Signature': signature,
           'X-Connector-Timestamp': timestamp.toString(),
+          // SC-705: forward the verified caller identity to the connector.
+          ...actorRequestHeaders(),
         },
         body: JSON.stringify(body),
       });
@@ -4177,6 +4185,8 @@ export class MCPServer {
         'Content-Type': 'application/json',
         'X-Connector-Signature': signature,
         'X-Connector-Timestamp': timestamp.toString(),
+        // SC-705: forward the verified caller identity to the connector.
+        ...actorRequestHeaders(),
       },
       ...(method !== 'GET' && method !== 'DELETE' ? { body: JSON.stringify(payload) } : {}),
       signal: AbortSignal.timeout(timeoutMs),
