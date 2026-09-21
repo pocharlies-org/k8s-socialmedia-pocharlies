@@ -12,6 +12,7 @@
 export * from './credential-store';
 export * from './payload-crypto';
 export * from './credential-resolver';
+export * from './credential-session-key';
 export * from './request-context';
 export * from './adapters/baileys-auth';
 export * from './adapters/mtcute-session';
