@@ -20,7 +20,11 @@ import {
 } from '../application/unread-digest.service';
 import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
-import { actorRequestHeaders, generateHMACSignature } from '@mcp-socialmedia/shared';
+import {
+  actorRequestHeaders,
+  generateHMACSignature,
+  getRequestActor,
+} from '@mcp-socialmedia/shared';
 import {
   ACCOUNTS,
   accountKey,
@@ -29,7 +33,6 @@ import {
   type Account,
 } from '../domain/account';
 import { identityBindingEnabled, resolveBoundAccount } from '../domain/identity-bindings';
-import { getRequestActor } from '../infrastructure/session-store/request-context';
 import { createHash, createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';

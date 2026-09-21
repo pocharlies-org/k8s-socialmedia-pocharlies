@@ -5,7 +5,7 @@
  * `backends/workspace/identity-bindings.yaml` (SC-709): a table in GitOps maps
  * ONE verified Keycloak principal (`sub`, forwarded by the AgentGateway as the
  * `x-user-sub` header and exposed by
- * `infrastructure/session-store/request-context.getRequestActor()`) to the
+ * `@mcp-socialmedia/shared` session-store `getRequestActor()`) to the
  * social accounts it may touch, whatever the channel (WhatsApp / Telegram /
  * Instagram — the binding is per account, not per channel).
  *
@@ -26,7 +26,7 @@
  */
 import * as fs from 'node:fs';
 import * as yaml from 'js-yaml';
-import type { RequestActor } from '../infrastructure/session-store/request-context';
+import type { RequestActor } from '@mcp-socialmedia/shared';
 
 export interface IdentityBindingEntry {
   /** Human name of the principal; appears in the fail-closed error messages. */
