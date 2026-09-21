@@ -28,10 +28,9 @@
 # Subs del realm `edani` verificados el 21-09-2026 (keycloak-admin, igual que en
 # backends/workspace/identity-bindings.yaml de k8s-agentgateway-pocharlies).
 #
-# OJO — superficie Instagram: skirmshop/barbelpapis no estan ligados a nadie;
-# con la bandera ON, las tools de Instagram quedan fail-closed hasta que se
-# añadan a quien deban. La bandera en el despliegue sigue en OFF (la decide el
-# operador, no esta historia).
+# Instagram: skirmshop/barbelpapis van ligadas a Daniel y a las maquinas de
+# operador, que es quien las usa hoy — asi encender la bandera NO rompe esa
+# superficie. Leila no las lleva (no es suya ninguna cuenta de Instagram).
 bindings:
   # Maquinas de operador: clients/agentgateway-auth-proxy.js minte tokens
   # client_credentials para el cliente `agentgateway-mcp` (realm edani) -> el
@@ -39,13 +38,13 @@ bindings:
   # que hoy conecta Open WebUI.
   - sub: 2379d025-dfb6-433e-bd02-0f2aa9a5ae75
     label: operator-machines (agentgateway-mcp service-account via auth-proxy)
-    accounts: [personal, professional]
+    accounts: [personal, professional, skirmshop, barbelpapis]
 
   # Daniel — usuario humano de Keycloak (me@e-dani.com). Mismas cuentas que las
   # maquinas de operador; `leila` deliberadamente NO.
   - sub: e51253a7-c137-4c6c-9fb9-af9cecd3b147
     label: daniel
-    accounts: [personal, professional]
+    accounts: [personal, professional, skirmshop, barbelpapis]
 
   # Leila (lays84.mv@gmail.com) — solo su cuenta. `personal` y `professional`
   # deliberadamente NO. Su WhatsApp se empareja a mano por el QR de
