@@ -71,8 +71,10 @@ export function credentialStoreEnabled(env: NodeJS.ProcessEnv = process.env): bo
 /**
  * Postgres-backed store (DB `whatsappmcp`, same DATABASE_URL as the server and
  * connectors). Persistence = the DB: rows survive gateway and pod restarts.
- * Table created by migration 007_user_channel_credentials.sql, applied in
- * prod by the `whatsapp-mcp-migrate` PreSync Job (k8s/base/manifest.yaml).
+ * Table created by migration 007_user_channel_credentials.sql. It is NOT
+ * applied yet: the `whatsapp-mcp-migrate` PreSync Job rides PR2 together
+ * with the image re-pin (k8s/base/manifest.yaml carries the deferral note;
+ * migrate.ts keeps the `_migrations` ledger that makes the chain idempotent).
  *
  * Encryption: the master key is resolved once at construction from
  * `opts.masterKey` (test seam) or CREDENTIAL_STORE_MASTER_KEY in the

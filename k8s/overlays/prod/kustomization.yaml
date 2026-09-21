@@ -8,7 +8,8 @@ patches:
   - path: patch-image.yaml
   - path: patch-renew-qr-pro.yaml
   - path: patch-nodepool.yaml
-  # SC-705 phase 1.5: CREDENTIAL_STORE_ENABLED=true (prod only; stg stays OFF).
+  # SC-705 phase 1.5: CREDENTIAL_STORE_ENABLED=false in this PR (the patch
+  # keeps it OFF until PR2 re-pins the image; ON is prod-only, stg stays OFF).
   - path: patch-credential-store.yaml
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
