@@ -29,7 +29,7 @@ import {
   type Account,
 } from '../domain/account';
 import { identityBindingEnabled, resolveBoundAccount } from '../domain/identity-bindings';
-import { getRequestActor } from '../infrastructure/session-store/request-context';
+import { getRequestActor } from '@mcp-socialmedia/shared';
 import { createHash, createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
