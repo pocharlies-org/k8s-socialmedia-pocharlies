@@ -441,6 +441,9 @@ export class BaileysClient extends EventEmitter {
   private sessionPath: string;
   // kept for backward compat with the old constructor signature; unused.
   private encryptionKey: Buffer;
+  // SC-705 credential-store hooks (see setCredsSavedHook / setSessionInvalidatedHook).
+  private credsSavedHook: (() => void) | null = null;
+  private sessionInvalidatedHook: (() => Promise<void> | void) | null = null;
   private logger: pino.Logger;
 
   // State exposed via getStatus()/getCachedState()/isConnected()
@@ -622,6 +625,30 @@ export class BaileysClient extends EventEmitter {
     return join(this.sessionPath, 'baileys-auth');
   }
 
+  /** Public view of the auth dir (SC-705 credential-store wiring in main.ts). */
+  getAuthDir(): string {
+    return this.authDir();
+  }
+
+  /**
+   * SC-705: called after every baileys `saveCreds()` completes. The per-sub
+   * connector sets this to the credential-store write-back; the house
+   * connectors leave it unset and behave exactly as before.
+   */
+  setCredsSavedHook(hook: () => void): void {
+    this.credsSavedHook = hook;
+  }
+
+  /**
+   * SC-705: called when the session is irrecoverably dead (WhatsApp
+   * `loggedOut` — the user unlinked this device). The per-sub connector uses
+   * it to delete its credential-store row so a restart cannot resurrect a
+   * dead session.
+   */
+  setSessionInvalidatedHook(hook: () => Promise<void> | void): void {
+    this.sessionInvalidatedHook = hook;
+  }
+
   private async destroyCurrentSocket(reason: string): Promise<void> {
     const sock = this.sock;
     this.sock = null;
@@ -639,7 +666,11 @@ export class BaileysClient extends EventEmitter {
     if (!sock) return;
 
     sock.ev.on('creds.update', () => {
-      void saveCreds();
+      // SC-705: after the on-disk save completes, let the per-sub connector
+      // mirror the auth dir into the credential store (no-op for the house).
+      void saveCreds()
+        .then(() => this.credsSavedHook?.())
+        .catch((e: any) => this.logger.warn(`saveCreds failed: ${e?.message || e}`));
     });
 
     sock.ev.on('connection.update', update => {
@@ -690,6 +721,14 @@ export class BaileysClient extends EventEmitter {
           this.logger.error('WhatsApp session was logged out — rescan QR required');
           // Wipe local creds so next connect() emits a fresh QR.
           void fsp.rm(this.authDir(), { recursive: true, force: true }).catch(() => {});
+          // SC-705: the stored row is dead too — without this the next pod
+          // restart would re-apply it and loop on loggedOut (no-op for the
+          // house connectors, which have no hook).
+          if (this.sessionInvalidatedHook) {
+            void Promise.resolve(this.sessionInvalidatedHook()).catch((e: any) =>
+              this.logger.warn(`session-invalidated hook failed: ${e?.message || e}`)
+            );
+          }
           this.scheduleReconnect('logged out');
           return;
         }

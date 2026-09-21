@@ -889,3 +889,39 @@ metadata: { name: telegram-sync-professional, namespace: whatsapp-mcp }
 spec:
   selector: { app: telegram-sync-professional }
   ports: [{ name: http, port: 3080, targetPort: 3080 }]
+---
+# ── SC-705: GitOps application of the DB migrations (idempotent) ─────────────
+# migrate.ts re-runs every idempotent *.sql (CREATE TABLE IF NOT EXISTS / ADD
+# COLUMN IF NOT EXISTS), so this Job is a no-op on an already-migrated DB —
+# safe to run on every sync. ArgoCD PreSync hook: it executes BEFORE the pods
+# sync (a connector with CREDENTIAL_STORE_ENABLED=true must find table 007),
+# runs under a fresh generated name each sync, and self-deletes on success.
+# Image = mcp-server (ships src + tsx); the prod/stg `images:` pin rewrites the
+# tag exactly as for the mcp-server Deployment.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: whatsapp-mcp-migrate
+  namespace: whatsapp-mcp
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: Succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: migrate
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          command: ["sh", "-c", "cd mcp-server && tsx src/infrastructure/database/migrate.ts"]
+          env:
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { memory: 256Mi }

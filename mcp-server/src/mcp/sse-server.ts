@@ -14,10 +14,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { MCPServer } from './server';
-import {
-  actorFromHeaders,
-  runWithRequestActor,
-} from '../infrastructure/session-store/request-context';
+import { actorFromHeaders, runWithRequestActor } from '@mcp-socialmedia/shared';
 
 const DATABASE_URL =
   process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp';

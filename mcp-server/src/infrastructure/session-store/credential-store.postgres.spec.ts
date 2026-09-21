@@ -14,13 +14,20 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { PostgresCredentialStore } from './credential-store';
-import { resolveCredential } from './credential-resolver';
+import {
+  PostgresCredentialStore,
+  isEncryptedPayloadEnvelope,
+  resolveCredential,
+} from '@mcp-socialmedia/shared';
 
 const TEST_DATABASE_URL = process.env.CREDSTORE_TEST_DATABASE_URL || '';
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;
+
+// Deterministic test master key (32 bytes). Production reads the real one
+// from CREDENTIAL_STORE_MASTER_KEY via external-secrets (payload-crypto.ts).
+const TEST_MASTER_KEY = randomBytes(32);
 
 const MIGRATION_007 = join(
   __dirname,
@@ -37,14 +44,14 @@ describeDb('SC-552 PostgresCredentialStore (real Postgres)', () => {
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DATABASE_URL });
     await pool.query(readFileSync(MIGRATION_007, 'utf-8'));
-    store = new PostgresCredentialStore(pool);
+    store = new PostgresCredentialStore(pool, { masterKey: TEST_MASTER_KEY });
   });
 
   afterAll(async () => {
     await pool.end();
   });
 
-  test('put/get round-trips an opaque channel payload', async () => {
+  test('put/get round-trips an opaque channel payload (DB holds only the envelope)', async () => {
     const key = `test-${randomUUID()}`;
     await store.put(key, 'whatsapp', { files: { 'creds.json': 'e30=' } });
 
@@ -53,6 +60,15 @@ describeDb('SC-552 PostgresCredentialStore (real Postgres)', () => {
     expect(row?.sessionKey).toBe(key);
     expect(row?.channel).toBe('whatsapp');
     expect(row?.updatedAt).toBeInstanceOf(Date);
+
+    // The column itself: envelope, and the plaintext creds.json value is not
+    // findable in the raw jsonb.
+    const raw = await pool.query(
+      'SELECT payload FROM user_channel_credentials WHERE session_key = $1 AND channel = $2',
+      [key, 'whatsapp']
+    );
+    expect(isEncryptedPayloadEnvelope(raw.rows[0].payload)).toBe(true);
+    expect(JSON.stringify(raw.rows[0].payload)).not.toContain('e30=');
   });
 
   test('channels are isolated per key and put upserts', async () => {
@@ -103,7 +119,19 @@ describeDb('SC-552 PostgresCredentialStore (real Postgres)', () => {
       'SELECT payload FROM user_channel_credentials WHERE session_key = $1 AND channel = $2',
       [key, 'telegram']
     );
-    expect(inDb.rows[0]?.payload).toEqual(legacy);
+    // SC-705: the adopted row is stored as an encryption envelope, never as
+    // the plaintext session string.
+    const stored = inDb.rows[0]?.payload;
+    expect(isEncryptedPayloadEnvelope(stored)).toBe(true);
+    expect(JSON.stringify(stored)).not.toContain('adopted-session');
+    expect((await store.get(key, 'telegram'))?.payload).toEqual(legacy);
+  });
+
+  test('fail-closed: put without a master key refuses to write plaintext', async () => {
+    const keyless = new PostgresCredentialStore(pool, { masterKey: null });
+    await expect(keyless.put(`test-${randomUUID()}`, 'whatsapp', { secret: 'x' })).rejects.toThrow(
+      /CREDENTIAL_STORE_MASTER_KEY/
+    );
   });
 
   test('resolve: header with row → the row wins over legacy', async () => {
@@ -130,9 +158,16 @@ describeDb('SC-552 PostgresCredentialStore (real Postgres)', () => {
     // reading the same database.
     const restartedPool = new Pool({ connectionString: TEST_DATABASE_URL });
     try {
-      const restartedStore = new PostgresCredentialStore(restartedPool);
+      const restartedStore = new PostgresCredentialStore(restartedPool, {
+        masterKey: TEST_MASTER_KEY,
+      });
       const row = await restartedStore.get(key, 'whatsapp');
       expect(row?.payload).toEqual({ files: { 'session-1': 'AAEC' } });
+      // A restart with a DIFFERENT key must fail closed, never serve garbage.
+      const wrongKeyStore = new PostgresCredentialStore(restartedPool, {
+        masterKey: randomBytes(32),
+      });
+      await expect(wrongKeyStore.get(key, 'whatsapp')).rejects.toThrow();
     } finally {
       await restartedPool.end();
     }

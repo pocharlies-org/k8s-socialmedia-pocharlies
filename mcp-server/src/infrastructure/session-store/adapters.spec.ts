@@ -5,12 +5,12 @@ import {
   applyBaileysAuthDir,
   deserializeBaileysAuthPayload,
   serializeBaileysAuthDir,
-} from './baileys-auth';
-import { deserializeMtcuteSession, serializeMtcuteSession } from './mtcute-session';
+} from '@mcp-socialmedia/shared';
+import { deserializeMtcuteSession, serializeMtcuteSession } from '@mcp-socialmedia/shared';
 import {
   deserializeInstagramToken,
   serializeInstagramToken,
-} from './instagram-graph-token';
+} from '@mcp-socialmedia/shared';
 
 describe('SC-552 baileys auth-state adapter', () => {
   test('round-trips a multi-file auth dir byte-for-byte (incl. binary)', async () => {

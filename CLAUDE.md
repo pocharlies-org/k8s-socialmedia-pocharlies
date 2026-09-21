@@ -29,16 +29,18 @@ El MCP enruta cada call a una de dos cuentas:
 
 DB scoping (migración 002): los ids de la cuenta `personal` no llevan prefijo (compat con ~449k filas existentes); los de `professional` van prefijados `professional:`. La columna `account` está indexada para filtros rápidos.
 
-## Almacén de credenciales por usuario (SC-552, flag OFF)
+## Almacén de credenciales por usuario (SC-552 + fase 1.5 SC-705)
 
-Decisión CTO 13-09-2026: UN almacén por `sub` del JWT que el AgentGateway verifica en `/social` y reenvía como cabecera `x-user-sub`, con tres adaptadores de canal — no tres almacenes paralelos. Fontanería en `mcp-server/src/infrastructure/session-store/`:
+Decisión CTO 13-09-2026: UN almacén por `sub` del JWT que el AgentGateway verifica en `/social` y reenvía como cabecera `x-user-sub`, con tres adaptadores de canal — no tres almacenes paralelos. Implementación en `shared/src/session-store/` (desde la fase 1.5, 21-09: la consumen DOS runtimes — mcp-server y el conector whatsapp-web —; un solo código que habla con la tabla). Sus specs de regresión corren en el jest de mcp-server (`mcp-server/src/infrastructure/session-store/*.spec.ts`, que compila `shared` antes de testear).
 
-- `credential-store.ts` — tabla `user_channel_credentials` (migración 007, PK `(session_key, channel)`, payload jsonb opaco). Persistencia = la DB `whatsappmcp`: sobrevive reinicios del gateway y de los pods.
-- `request-context.ts` — AsyncLocalStorage alrededor de `transport.handleRequest`/`handlePostMessage` en `sse-server.ts` (por POST); expone `x-user-sub`/`x-user-name` al contexto de la tool call. Sin cabecera → contexto vacío.
+- `credential-store.ts` — tabla `user_channel_credentials` (migración 007, PK `(session_key, channel)`). Persistencia = la DB `whatsappmcp`: sobrevive reinicios del gateway y de los pods. **El payload va CIFRADO en la capa del store** (`put` cifra, `get` descifra; la DB nunca ve texto plano): envelope AES-256-GCM con data-key aleatoria por fila envuelta por la clave maestra `CREDENTIAL_STORE_MASTER_KEY` (base64 de 32 bytes; viaja dentro del item 1Password `whatsapp-mcp` → `envFrom`; formato y justificación del envelope en `payload-crypto.ts`). Fail-closed: sin clave, `put`/`get` lanzan; una fila NO-envelope se rechaza.
+- `request-context.ts` — AsyncLocalStorage alrededor de `transport.handleRequest`/`handlePostMessage` en `sse-server.ts` (por POST); expone `x-user-sub`/`x-user-name` al contexto de la tool call. Sin cabecera → contexto vacío. `actorRequestHeaders()` reenvía el actor en las llamadas HTTP del mcp-server a los conectores (SC-705).
 - `adapters/` — baileys (directorio multi-file auth-state → `{files: nombre→base64}`), mtcute (session string), instagram (token Graph + ids). Cada canal conserva su formato; el store no lo interpreta.
 - `credential-resolver.ts` — `resolveCredential`: (1) cabecera + fila → la fila gana; (2) sin cabecera → ruta legacy exacta, cero lecturas/escrituras; (3) cabecera sin fila → adopt-on-first-use (leer legacy, escribir fila, servir legacy).
 
-TODO detrás de `CREDENTIAL_STORE_ENABLED` (default `false`; en k8s NO se define ⇒ producción no cambia). Los conectores siguen cargando su credencial legacy en `connect()`: el pool de clientes por `sub` y la posture de secretos (session-strings de Telegram en 1Password vs. filas en la DB) son fase 2 del CTO.
+**Cableado WhatsApp (fase 1.5, `connectors/whatsapp-web/src/credential-session.ts`)**: un conector por sesión emparejada indexa su sesión por `session_key = <sub>` (o `<sub>:<cuenta>` si un usuario tuviera dos cuentas — convención del tech-lead, el PK ya la soporta). Con `CREDENTIAL_STORE_ENABLED=true` **y** `CREDENTIAL_SESSION_KEY=<sub>`: authDir por sub (`<SESSION_PATH>/by-sub/<key>/baileys-auth`), carga de la fila antes de `connect()` (persistencia tras `rollout restart`, sin QR), write-back OBLIGATORIO de `saveCreds`→`store.put` (debounced, con trailing run) y borrado de la fila en `loggedOut`. Sin `CREDENTIAL_SESSION_KEY` (las cuentas de la casa `personal`/`professional`) o con flag OFF: ruta legacy exacta, cero lecturas/escrituras — criterio de cero regresión.
+
+Despliegue: la migración 007 la aplica el Job PreSync `whatsapp-mcp-migrate` (idempotente, `k8s/base/manifest.yaml`). `CREDENTIAL_STORE_ENABLED=true` SOLO en el overlay `prod` (`k8s/overlays/.../patch-credential-store.yaml`; stg OFF). Pendiente de fase 2: pool multiplexado por `sub` en un solo proceso; inyección de `x-user-sub` en la ruta `/social` del AgentGateway (hoy solo la hacen `/workspace` y `/chat-*` vía `transformations.request.set`).
 
 ## Estructura
 
