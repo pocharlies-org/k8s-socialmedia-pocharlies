@@ -7,7 +7,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { MCPServer } from './server';
 import { SOCIAL_TOOL_REGISTRY, type SocialToolDefinition } from './tool-registry';
-import { runWithRequestActor } from '../infrastructure/session-store/request-context';
+import { runWithRequestActor } from '@mcp-socialmedia/shared';
 import { IdentityBindingError } from '../domain/identity-bindings';
 
 const DANIEL = 'e51253a7-c137-4c6c-9fb9-af9cecd3b147';
