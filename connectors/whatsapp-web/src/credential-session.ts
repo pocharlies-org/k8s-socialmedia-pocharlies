@@ -28,34 +28,15 @@ import { join } from 'path';
 import {
   CredentialStore,
   applyBaileysAuthDir,
-  credentialStoreEnabled,
   serializeBaileysAuthDir,
 } from '@mcp-socialmedia/shared';
 
-/**
- * session_key charset: UUID subs and `<sub>:<account>` fit; path separators
- * and traversal are rejected so the key can never escape the sessionPath
- * root when used as a directory name.
- */
-export const CREDENTIAL_SESSION_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
-
-/**
- * The session_key this process should key its baileys session by, or null
- * when it must run the legacy path (flag off, or no key set — the house
- * accounts). Throws on a malformed key: a typo'd key would silently create a
- * second source of truth.
- */
-export function credentialSessionKeyFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
-  if (!credentialStoreEnabled(env)) return null;
-  const raw = (env.CREDENTIAL_SESSION_KEY || '').trim();
-  if (!raw) return null;
-  if (!CREDENTIAL_SESSION_KEY_RE.test(raw)) {
-    throw new Error(
-      `CREDENTIAL_SESSION_KEY must match ${CREDENTIAL_SESSION_KEY_RE} (a Keycloak sub, optionally '<sub>:<account>')`
-    );
-  }
-  return raw;
-}
+// SC-1145: the session_key convention (regex + env parsing) moved to
+// shared/session-store/credential-session-key.ts so the telegram connector
+// keys its rows by the identical rule — one source of truth for the
+// tech-lead's binding convention. Re-exported here unchanged for this
+// connector's callers and specs.
+export { CREDENTIAL_SESSION_KEY_RE, credentialSessionKeyFromEnv } from '@mcp-socialmedia/shared';
 
 /** Per-sub sessionPath so two per-sub connectors could share a PVC root. */
 export function sessionPathForSub(baseSessionPath: string, sessionKey: string): string {

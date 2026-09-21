@@ -11,6 +11,35 @@ import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
 import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
+import { isSessionInvalidatedError } from './credential-session';
+
+/**
+ * SC-1145: MemoryStorage with a save() hook.
+ *
+ * mtcute persists session state by calling StorageManager.save(), which
+ * delegates to `driver.save?.()` — on session import (start()), on every
+ * per-DC auth-key creation, and on update-state sync. The plain
+ * MemoryStorageDriver has no save() (nothing to write), so adding one here
+ * gives the connector the exact counterpart of the baileys `saveCreds`
+ * trigger: every library persist schedules the credential-store write-back.
+ * The repos keep referencing the base driver instance; the shadowed driver
+ * inherits its state through the prototype chain, so nothing else changes.
+ */
+export class PersistHookedMemoryStorage extends MemoryStorage {
+  constructor(onPersist: () => void) {
+    super();
+    const base = this.driver;
+    const hooked: MemoryStorage['driver'] & { save(): Promise<void> } = Object.assign(
+      Object.create(base),
+      {
+        save: async (): Promise<void> => {
+          onPersist();
+        },
+      }
+    );
+    Object.defineProperty(this, 'driver', { value: hooked, enumerable: true });
+  }
+}
 
 export interface TelegramMessage {
   conversationId: string;
@@ -159,6 +188,10 @@ export class TelegramClientWrapper extends EventEmitter {
   private selfId?: string;
   private unreadChatsCache: { expiresAtMs: number; value: any[] } | null = null;
   private unreadChatsInflight: Promise<any[]> | null = null;
+  // SC-1145 credential-store hooks (see setSessionPersistHook /
+  // setSessionInvalidatedHook). Unset = legacy behaviour, byte for byte.
+  private sessionPersistHook: (() => void) | null = null;
+  private sessionInvalidatedHook: (() => Promise<void> | void) | null = null;
 
   constructor(config: TelegramClientConfig) {
     super();
@@ -170,7 +203,9 @@ export class TelegramClientWrapper extends EventEmitter {
     this.client = new TelegramClient({
       apiId: config.apiId,
       apiHash: config.apiHash,
-      storage: new MemoryStorage(),
+      // PersistHookedMemoryStorage only adds a save() that calls the hook —
+      // null until a per-sub connector sets it, so the house path is a no-op.
+      storage: new PersistHookedMemoryStorage(() => this.sessionPersistHook?.()),
       // Dispatch outgoing messages we send to the event handler too. mtcute
       // defaults to no-dispatch on self-sent messages; we want them on NATS
       // for parity with the previous gramjs behavior (incoming + outgoing).
@@ -184,7 +219,22 @@ export class TelegramClientWrapper extends EventEmitter {
     }
 
     // start() consumes the session string and signs in
-    await this.client.start({ session: this.sessionString });
+    try {
+      await this.client.start({ session: this.sessionString });
+    } catch (e) {
+      // SC-1145: a session the server rejects (revoked from the user's app,
+      // deactivated) must take its stored row with it — otherwise every pod
+      // restart re-applies the dead credential and loops. The connector still
+      // fails the start (the pairing gesture is the operator's to redo); we
+      // only guarantee the store does not resurrect it.
+      if (isSessionInvalidatedError(e) && this.sessionInvalidatedHook) {
+        this.logger.warn('Telegram session was revoked/expired — invalidating stored credential');
+        await Promise.resolve(this.sessionInvalidatedHook()).catch((err: any) =>
+          this.logger.warn(`session-invalidated hook failed: ${err?.message || err}`)
+        );
+      }
+      throw e;
+    }
 
     const me = await this.client.getMe();
     this.selfId = me.id.toString();
@@ -506,6 +556,37 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   getSessionString(): string {
     return this.sessionString;
+  }
+
+  /**
+   * SC-1145: export the CURRENT session string (mtcute folds per-DC auth keys
+   * created at runtime into it). Also refreshes the cached string so
+   * GET /session reflects what the credential store is being given.
+   */
+  async exportSessionString(): Promise<string> {
+    const exported = await this.client.exportSession();
+    this.sessionString = exported;
+    return exported;
+  }
+
+  /**
+   * SC-1145: called on every mtcute storage persist (session import, auth-key
+   * creation, update-state sync). The per-sub connector sets this to the
+   * credential-store write-back; the house connectors leave it unset and
+   * behave exactly as before.
+   */
+  setSessionPersistHook(hook: () => void): void {
+    this.sessionPersistHook = hook;
+  }
+
+  /**
+   * SC-1145: called when the server rejects the session at connect (revoked
+   * from the user's app, deactivated, expired). The per-sub connector uses it
+   * to delete its credential-store row so a restart cannot keep re-applying a
+   * dead session.
+   */
+  setSessionInvalidatedHook(hook: () => Promise<void> | void): void {
+    this.sessionInvalidatedHook = hook;
   }
 
   /**

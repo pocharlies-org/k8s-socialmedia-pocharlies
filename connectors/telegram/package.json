@@ -8,6 +8,7 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "lint": "eslint src/**/*.ts",
+    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/credential-session.test.ts",
     "generate-session": "tsx src/generate-session-mtcute.ts"
   },
   "dependencies": {
@@ -17,11 +18,13 @@
     "nats": "^2.18.0",
     "pino": "^8.17.2",
     "pino-pretty": "^10.3.1",
-    "big-integer": "^1.6.52"
+    "big-integer": "^1.6.52",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
     "eslint": "^8.56.0",
     "tsx": "^4.23.1",
     "typescript": "^5.3.3"

@@ -7,10 +7,13 @@
  * `MemoryStorage`. The channel format is that string as-is; this adapter only
  * wraps/unwraps it for the store's opaque jsonb payload.
  *
- * Phase-1 note: no production flow writes this row yet — moving session
- * strings out of the Secrets is the CTO's secrets-posture call (adopt rows
- * only ever come from the legacy env under CREDENTIAL_STORE_ENABLED, default
- * OFF).
+ * SC-705 part 4 (SC-1145): the telegram connector
+ * (connectors/telegram/src/credential-session.ts) is the production writer —
+ * it resolves this payload through the resolver (adopt rows only ever come
+ * from the legacy env under CREDENTIAL_STORE_ENABLED, default OFF) and
+ * write-backs the exported mtcute session on every storage persist. The
+ * house accounts (personal/professional) never take this path: no
+ * CREDENTIAL_SESSION_KEY → legacy env, no row (SC-705 binding decision 2).
  */
 export interface MtcuteSessionPayload {
   sessionString: string;
