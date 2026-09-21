@@ -12,22 +12,36 @@ Servidor MCP multi-plataforma (WhatsApp + Telegram + Instagram) que expone tools
 - El stack docker-compose viejo en sauvage `~/mcp-socialmedia/` está parado a propósito desde 2026-05-22 (migración a k8s). NO arrancarlo.
 - Imágenes en Harbor: `harbor.e-dani.com/homelab/whatsappmcp-*`
 
-## Multi-account (personal / professional)
+## Multi-account (personal / professional / leila)
 
-El MCP enruta cada call a una de dos cuentas:
+El MCP enruta cada call a una de tres cuentas de WhatsApp (y dos de Telegram):
 
 | Account | Telegram | WhatsApp |
 |---|---|---|
 | `personal` (**default**) | `telegram-connector` — sesión `paxanguero` | `whatsapp-connector` — Baileys (número personal) |
 | `professional` | `telegram-connector-professional` — sesión `sauvageadminbot` (skirmshop) | `whatsapp-connector-professional` — Baileys (número de negocio) |
+| `leila` | — (sin conector Telegram; `accountId: 'leila'` + `channel: 'telegram'` = "not configured") | `whatsapp-connector-leila` — Baileys (número de Leila), **desplegada pero SIN emparejar** |
 
-- **Ambas cuentas de WhatsApp son Baileys (WhatsApp Web)** — cada una un Deployment con su número, sesión y PVC propia. NO se usa Cloud API (eliminado: el usuario no quiere pagar a Meta y quiere contestar a mano desde el móvil; Baileys es un dispositivo vinculado).
-- Para indicarle al MCP qué cuenta usar pasa `account: 'personal' \| 'professional'` en la tool call.
+- **Las tres cuentas de WhatsApp son Baileys (WhatsApp Web)** — cada una un Deployment con su número, sesión y PVC propia. NO se usa Cloud API (eliminado: el usuario no quiere pagar a Meta y quiere contestar a mano desde el móvil; Baileys es un dispositivo vinculado).
+- Para indicarle al MCP qué cuenta usar pasa `accountId: 'personal' | 'professional' | 'leila'` en la tool call (el parámetro canónico se llama `accountId`; el `account` interno de los handlers se deriva de él).
 - Default global: `personal`. Si el chat es claramente de skirmshop/business → pasar `professional`.
 - Para agentes/sesiones de Claude/Codex/OpenClaw que NO sean específicamente "hogar"/"familia", la guía es: **siempre `account: 'professional'`** salvo que el chat destino sea familiar/personal.
 - Vincular el número professional: escanear el QR en `https://whatsapp-pro.e-dani.com/qr/page`.
+- Vincular el número de Leila (pendiente del operador — SC-1144 criterio 2): QR **solo por LAN** en `https://whatsapp-leila.lan.e-dani.com/qr/page` (botón de renovar activo vía `ALLOW_WEB_RENEW`, igual que professional). NUNCA exponerla al edge: la página pública del personal (`whatsapp.e-dani.com`) es legado y no se replica.
 
-DB scoping (migración 002): los ids de la cuenta `personal` no llevan prefijo (compat con ~449k filas existentes); los de `professional` van prefijados `professional:`. La columna `account` está indexada para filtros rápidos.
+DB scoping (migración 002): los ids de la cuenta `personal` no llevan prefijo (compat con ~449k filas existentes); los de `professional` van prefijados `professional:` y los de `leila` `leila:`. La columna `account` está indexada para filtros rápidos.
+
+### Vínculos de identidad por usuario (SC-1144 fase 2, bandera OFF)
+
+Un usuario verificado solo puede tocar las cuentas ligadas a su `sub` de Keycloak. La tabla vive en GitOps: `k8s/base/social-identity-bindings.yaml` (misma forma y misma postura fail-closed que `backends/workspace/identity-bindings.yaml` de k8s-agentgateway-pocharlies), montada en el pod `mcp-sse` como ConfigMap de nombre estático en `/identity/` — el código (`mcp-server/src/domain/identity-bindings.ts`) **relee el fichero cuando cambia (stat mtime+size), así editar un vínculo no reinicia el pod**.
+
+- Bandera `SOCIAL_IDENTITY_BINDING` (default **`off`**; el repo la entrega off en base y en prod). Con OFF: cero lecturas del fichero, enrutado byte-idéntico al de siempre. Volcarla a ON es decisión del operador.
+- Con ON, el gate único es `applyIdentityBinding` en `executeCanonicalTool` (todas las tools con `accountId` pasan por ahí; `social_list_accounts` no lo tiene y no se gatea):
+  - `sub` ligado + `accountId` pedido fuera de su lista → error explícito nombrando principal y cuentas ligadas.
+  - `accountId` omitido → **primera cuenta de su lista** (nunca el default global `personal`).
+  - `sub` sin entrada en la tabla, o llamada sin `x-user-sub` → fail-closed, ninguna cuenta.
+- El vínculo es **por cuenta, sea el canal que sea**: con ON, Instagram (`skirmshop`/`barbelpapis`) queda fail-closed para todo el mundo hasta que se añadan a la tabla.
+- **Riesgo residual declarado**: `x-user-sub` lo estampa el gateway sobrescribiendo al cliente, pero `mcp-sse` es alcanzable por la ruta LAN `mcp-socialmedia.lan.e-dani.com` con el **bearer compartido**, así que quien posea ese token puede forjar la cabecera. Eso lo cierra la **Parte 5 (SC-1146, retirada de la clave compartida)**, no esta historia.
 
 ## Almacén de credenciales por usuario (SC-552, flag OFF)
 
@@ -39,6 +53,8 @@ Decisión CTO 13-09-2026: UN almacén por `sub` del JWT que el AgentGateway veri
 - `credential-resolver.ts` — `resolveCredential`: (1) cabecera + fila → la fila gana; (2) sin cabecera → ruta legacy exacta, cero lecturas/escrituras; (3) cabecera sin fila → adopt-on-first-use (leer legacy, escribir fila, servir legacy).
 
 TODO detrás de `CREDENTIAL_STORE_ENABLED` (default `false`; en k8s NO se define ⇒ producción no cambia). Los conectores siguen cargando su credencial legacy en `connect()`: el pool de clientes por `sub` y la posture de secretos (session-strings de Telegram en 1Password vs. filas en la DB) son fase 2 del CTO.
+
+El mismo `request-context.ts` es la base de los **vínculos de identidad SC-1144 fase 2** (sección "Vínculos de identidad por usuario" arriba): `getRequestActor().sub` alimenta `mcp-server/src/domain/identity-bindings.ts`, gated por `SOCIAL_IDENTITY_BINDING` (default OFF, misma regla de no-regresión: sin cabecera y sin bandera, ruta legacy exacta).
 
 ## Estructura
 
@@ -52,6 +68,7 @@ Tras el refactor del 2026-05-07 (commit `6791fae`), todo bajo carpetas dedicadas
 |----------|--------|--------|-------|
 | WhatsApp Web personal | 3001 | ✅ | Baileys, número personal; sesión en PVC `whatsapp-session-data` |
 | WhatsApp Web professional | 3001 | ✅ | Baileys, número de negocio; deploy `whatsapp-connector-professional`, PVC `whatsapp-session-data-professional` |
+| WhatsApp Web leila | 3001 | 🟡 desplegada, sin emparejar | Baileys, número de Leila (SC-1144 fase 2); deploy `whatsapp-connector-leila`, PVC `whatsapp-session-data-leila` (arranca vacío → pedirá QR por LAN en `whatsapp-leila.lan.e-dani.com/qr/page`) |
 | Telegram | 3002 | ✅ | gramjs (send + realtime); personal + professional |
 | Telegram-sync | 3080 | ✅ | telethon, ingestion → Postgres |
 | Instagram | 3003 | ✅ 2 cuentas | skirmshop (~7.135), barbelpapis (~14.949) |

@@ -21,7 +21,7 @@ export interface SearchOptions {
   to?: Date;
   sender?: string;
   limit?: number;
-  /** Account scope (personal|professional). Defaults to personal. */
+  /** Account scope (personal|professional|leila). Defaults to personal. */
   account?: Account;
   platform?: 'whatsapp' | 'telegram';
 }

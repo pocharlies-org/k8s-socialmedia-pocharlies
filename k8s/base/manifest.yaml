@@ -184,6 +184,18 @@ spec:
   resources: { requests: { storage: 1Gi } }
   storageClassName: longhorn
 ---
+# SC-1144 fase 2: tercera cuenta Baileys (Leila). PVC propio RWO — arranca
+# vacio = sin sesion = pedira QR cuando el operador la empareje (criterio 2).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whatsapp-session-data-leila
+  namespace: whatsapp-mcp
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  storageClassName: longhorn
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -345,6 +357,89 @@ kind: Service
 metadata: { name: whatsapp-connector-professional, namespace: whatsapp-mcp }
 spec:
   selector: { app: whatsapp-connector-professional }
+  ports: [{ name: http, port: 3001, targetPort: 3001 }]
+---
+# ── WhatsApp leila: a THIRD Baileys (WhatsApp Web) connector (SC-1144 fase 2) ─
+# Cloned from whatsapp-connector-professional: same image/resources/nodepin
+# (ubuntu — Baileys flags datacenter IPs and the session PVC is Longhorn RWO).
+# CONNECTOR_ACCOUNT=leila namespaces its ids ("leila:...") in the shared DB.
+# DEPLOYED BUT NOT PAIRED: the PVC starts empty, so the connector will show a
+# QR until the operator links Leila's phone (criterio 2, manual). LAN-only QR
+# (whatsapp-leila.lan.e-dani.com) — deliberately NOT published to the edge:
+# the personal connector's public QR page is legacy and is not replicated here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-connector-leila
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: whatsapp-connector-leila } }
+  template:
+    metadata: { labels: { app: whatsapp-connector-leila } }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
+      containers:
+        - name: whatsapp-connector-leila
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
+          ports: [{ name: http, containerPort: 3001 }]
+          env:
+            - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
+              valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
+            - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
+            - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            - { name: ENABLE_SENDING, value: "true" }
+            - { name: SESSION_PATH, value: "/app/persistent-session" }
+            # leila account → published events carry account=leila
+            - { name: CONNECTOR_ACCOUNT, value: "leila" }
+            - { name: WA_QR_PUBLIC_URL, value: "https://whatsapp-leila.lan.e-dani.com/qr/page" }
+            # Voice-note parity with the professional connector (F1.7 honest
+            # voice): presign to S3 before the NATS emit.
+            - { name: WA_EMIT_AUDIO_ATTACHMENTS, value: "true" }
+            - { name: S3_PUBLIC_ENDPOINT, value: "https://skirmshop-s3.e-dani.com" }
+            - { name: S3_PRESIGN_EXPIRY_SECONDS, value: "3600" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_BUCKET, value: "skirmshop-drive" }
+            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_PREFIX, value: "socialmedia" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
+            - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+            - { name: MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+            - { name: MINIO_USE_SSL, value: "false" }
+            - { name: MINIO_BUCKET, value: "socialmedia-media" }
+            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
+            - { name: EMBEDDING_MODEL, value: "bge-m3" }
+            - { name: EMBEDDING_DIMENSION, value: "1024" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: 3001 }
+            initialDelaySeconds: 15
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: whatsapp-session-data-leila
+              mountPath: /app/persistent-session
+      volumes:
+        - name: whatsapp-session-data-leila
+          persistentVolumeClaim: { claimName: whatsapp-session-data-leila }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: whatsapp-connector-leila, namespace: whatsapp-mcp }
+spec:
+  selector: { app: whatsapp-connector-leila }
   ports: [{ name: http, port: 3001, targetPort: 3001 }]
 ---
 # ── WhatsApp professional Cloud API connector ─────────────────────────────────
@@ -521,7 +616,7 @@ spec:
     metadata:
       labels: { app: mcp-server }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:f584f736db798053c457849b6b745f3a6345cc8881b18584a63b9dbc22c399c8"
+        contracts.e-dani.com/socialmedia-digest: "sha256:146dd7a5a6d95f980505c2203d55fcbe804f2cfb2204cc6b6b5c028290e060da"
     spec:
       enableServiceLinks: false
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
@@ -536,6 +631,7 @@ spec:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
+            - { name: WHATSAPP_LEILA_URL, value: "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
@@ -584,7 +680,7 @@ spec:
     metadata:
       labels: { app: mcp-sse }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:f584f736db798053c457849b6b745f3a6345cc8881b18584a63b9dbc22c399c8"
+        contracts.e-dani.com/socialmedia-digest: "sha256:146dd7a5a6d95f980505c2203d55fcbe804f2cfb2204cc6b6b5c028290e060da"
     spec:
       enableServiceLinks: false
       nodeSelector:
@@ -609,6 +705,16 @@ spec:
             - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
+            - { name: WHATSAPP_LEILA_URL, value: "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001" }
+            # SC-1144 fase 2: vinculos sub->cuentas (k8s/base/social-identity-bindings.yaml
+            # -> ConfigMap social-identity-bindings, montado en /identity). La bandera
+            # sale OFF del repo: con OFF el enrutado es byte-identico al de hoy (cero
+            # lecturas del fichero). Volcarla a "on" es decision del operador, y exige
+            # que el llamante traiga el x-user-sub que estampa el AgentGateway — por la
+            # LAN con el bearer compartido no hay sub => fail-closed. Ver el riesgo
+            # residual documentado en CLAUDE.md (lo cierra SC-1146, parte 5).
+            - { name: SOCIAL_IDENTITY_BINDING, value: "off" }
+            - { name: SOCIAL_IDENTITY_BINDINGS_FILE, value: "/identity/social-identity-bindings.yaml" }
             - { name: TELEGRAM_CONNECTOR_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
             - { name: INSTAGRAM_CONNECTOR_URL, value: "http://instagram-connector.whatsapp-mcp.svc.cluster.local:3003" }
             - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
@@ -640,6 +746,17 @@ spec:
             httpGet: { path: /health, port: 3010 }
             initialDelaySeconds: 30
             periodSeconds: 30
+          volumeMounts:
+            - name: identity
+              mountPath: /identity
+              readOnly: true
+      volumes:
+        # SC-1144 fase 2: la tabla de vinculos sub->cuentas (ConfigMap generado
+        # desde k8s/base/social-identity-bindings.yaml por el kustomization de
+        # base, nombre estatico a proposito: el codigo relee el fichero montado
+        # al cambiar, asi editar un vinculo no reinicia el pod).
+        - name: identity
+          configMap: { name: social-identity-bindings }
 ---
 apiVersion: v1
 kind: Service
@@ -703,6 +820,25 @@ spec:
       kind: Rule
       services:
         - name: whatsapp-connector-professional
+          port: 3001
+  tls:
+    store: { name: default, namespace: traefik-lan }
+---
+# LAN-only IngressRoute for the leila Baileys connector (SC-1144 fase 2) — QR
+# inspection and renew for the operator on LAN/tailnet. Deliberately NOT on the
+# edge: only the personal connector is public, and that is legacy.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whatsapp-leila-lan
+  namespace: whatsapp-mcp
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`whatsapp-leila.lan.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-connector-leila
           port: 3001
   tls:
     store: { name: default, namespace: traefik-lan }

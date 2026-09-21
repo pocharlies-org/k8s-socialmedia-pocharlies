@@ -4,3 +4,19 @@ resources:
   - manifest.yaml
   - whatsapp-synapse-bridge.yaml
   - networkpolicy.yaml
+
+# SC-1144 fase 2: la tabla de vinculos sub->cuentas vive en
+# social-identity-bindings.yaml (el fichero checked-in es el trace GitOps: cada
+# cambio de vinculo es un git diff). El ConfigMap se renderiza desde ese fichero
+# con nombre ESTATICO a proposito (disableNameSuffixHash): el codigo de
+# mcp-server/src/domain/identity-bindings.ts relee el fichero montado cuando
+# cambia (stat mtime+size), asi que editar un vinculo aplica sin reiniciar el
+# pod. Hashearlo forzaria rolls inutilmente — la postura es la misma que la del
+# shim de workspace en k8s-agentgateway-pocharlies.
+configMapGenerator:
+  - name: social-identity-bindings
+    files:
+      - social-identity-bindings.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true

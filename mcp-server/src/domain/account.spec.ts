@@ -11,6 +11,14 @@ describe('account helpers', () => {
     expect(accountKey('professional', '3EB0ABC')).toBe('professional:3EB0ABC');
   });
 
+  it('namespaces leila ids (SC-1144 fase 2)', () => {
+    expect(accountKey('leila', '34660242739@s.whatsapp.net')).toBe(
+      'leila:34660242739@s.whatsapp.net'
+    );
+    expect(accountKey('leila', 'leila:tg_123')).toBe('leila:tg_123'); // idempotent
+    expect(stripAccount('leila:tg_123')).toEqual({ account: 'leila', id: 'tg_123' });
+  });
+
   it('does NOT collide across accounts for the same raw id', () => {
     expect(accountKey('personal', 'x')).not.toBe(accountKey('professional', 'x'));
   });
@@ -39,6 +47,7 @@ describe('account helpers', () => {
     expect(normalizeAccount(undefined)).toBe('personal');
     expect(normalizeAccount('personal')).toBe('personal');
     expect(normalizeAccount('professional')).toBe('professional');
+    expect(normalizeAccount('leila')).toBe('leila');
     expect(normalizeAccount('garbage')).toBe('personal');
     expect(normalizeAccount(null)).toBe('personal');
   });

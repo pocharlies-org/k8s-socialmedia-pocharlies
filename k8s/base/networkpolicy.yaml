@@ -57,6 +57,7 @@ spec:
         values:
           - whatsapp-connector
           - whatsapp-connector-professional
+          - whatsapp-connector-leila
           - mcp-sse
   ingress:
     - from:

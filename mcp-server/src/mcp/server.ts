@@ -28,6 +28,8 @@ import {
   stripAccount,
   type Account,
 } from '../domain/account';
+import { identityBindingEnabled, resolveBoundAccount } from '../domain/identity-bindings';
+import { getRequestActor } from '../infrastructure/session-store/request-context';
 import { createHash, createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
@@ -226,7 +228,7 @@ export function isLidJid(chatId: unknown): boolean {
 
 /**
  * True when the chatId points at a WhatsApp group (`@g.us`), regardless of any
- * `personal:` / `professional:` account prefix. Canonical reads
+ * `personal:` / `professional:` / `leila:` account prefix. Canonical reads
  * (`social_get_conversation`, `social_resolve_target`, ...) return
  * account-prefixed ids; those must be reduced to the
  * bare jid before they reach the connector, which calls `sock.groupMetadata()`
@@ -327,7 +329,7 @@ export class MCPServer {
   private telegramBridgeSecret: string;
   private instagramUrl: string;
   private connectorSecret: string;
-  // Per-account connector routing (personal / professional).
+  // Per-account connector routing (WhatsApp: personal / professional / leila).
   private waUrls!: Record<string, string>;
   private tgUrls!: Record<string, string>;
   private tgBridgeUrls!: Record<string, string>;
@@ -390,13 +392,15 @@ export class MCPServer {
     this.instagramUrl = process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003';
     this.connectorSecret = _connectorSharedSecret;
 
-    // Account routing. Both WhatsApp accounts are separate Baileys (WhatsApp
-    // Web) connector instances, each linked to its own number/session.
-    // Telegram: two separate connector instances too.
+    // Account routing. Every WhatsApp account is a separate Baileys (WhatsApp
+    // Web) connector instance, each linked to its own number/session
+    // (personal / professional / leila — SC-1144 fase 2).
+    // Telegram: two separate connector instances (personal / professional).
     this.waUrls = {
       personal: process.env.WHATSAPP_PERSONAL_URL || this.connectorUrl,
       professional:
         process.env.WHATSAPP_PROFESSIONAL_URL || 'http://whatsapp-connector-professional:3001',
+      leila: process.env.WHATSAPP_LEILA_URL || 'http://whatsapp-connector-leila:3001',
     };
     this.tgUrls = {
       personal: process.env.TELEGRAM_PERSONAL_URL || this.telegramUrl,
@@ -481,10 +485,33 @@ export class MCPServer {
     });
   }
 
+  /**
+   * SC-1144 fase 2 — the single identity-binding gate. Every canonical tool
+   * except social_list_accounts carries `accountId` in its inputSchema, so
+   * this is the one point all account-routed calls pass through (WhatsApp,
+   * Telegram and Instagram alike: the binding is per account, not per channel).
+   *
+   * With SOCIAL_IDENTITY_BINDING off this returns immediately without even
+   * touching the bindings file — the legacy path stays byte-identical.
+   */
+  private applyIdentityBinding(definition: SocialToolDefinition, args: Record<string, any>): void {
+    if (!identityBindingEnabled()) return;
+    const properties = asObject((definition.inputSchema as any)?.properties);
+    if (!('accountId' in properties)) return;
+    const requested =
+      typeof args.accountId === 'string' && args.accountId.trim() ? args.accountId : undefined;
+    // Throws IdentityBindingError (canonicalCode 'forbidden') fail-closed when the
+    // caller has no verified sub, no binding, or asked for an unbound account.
+    // Omitted accountId resolves to the FIRST account of the binding — never the
+    // global 'personal' default.
+    args.accountId = resolveBoundAccount(requested, getRequestActor());
+  }
+
   private async executeCanonicalTool(
     definition: SocialToolDefinition,
     args: Record<string, any>
   ): Promise<any> {
+    this.applyIdentityBinding(definition, args);
     this.validateCanonicalArguments(definition, args);
 
     const execute = async () => {
@@ -962,10 +989,13 @@ export class MCPServer {
     const accountIdValue = normalizeAccount(this.account(args));
     const raw = this.string(args, field);
     const parsed = stripAccount(raw);
-    if (raw.startsWith('professional:') && accountIdValue !== 'professional') {
+    // Generalized from the professional-only guard (SC-1144 fase 2): a target
+    // namespaced to one account must never be served under another — bare
+    // (personal) targets stay allowed on every account, as before.
+    if (parsed.account !== 'personal' && accountIdValue !== parsed.account) {
       throw this.canonicalError(
         'invalid_request',
-        `${field} belongs to the professional WhatsApp namespace but accountId is '${accountIdValue}'`
+        `${field} belongs to the ${parsed.account} WhatsApp namespace but accountId is '${accountIdValue}'`
       );
     }
     return parsed.id;
@@ -1016,6 +1046,19 @@ export class MCPServer {
       {
         channel: 'whatsapp',
         accountId: 'professional',
+        transport: 'baileys',
+        capabilities: {
+          conversations: true,
+          messages: true,
+          media: true,
+          send: true,
+          templates: false,
+          groups: true,
+        },
+      },
+      {
+        channel: 'whatsapp',
+        accountId: 'leila',
         transport: 'baileys',
         capabilities: {
           conversations: true,
@@ -1102,6 +1145,7 @@ export class MCPServer {
     const all: Array<{ channel: SocialChannel; accountId: string }> = [
       { channel: 'whatsapp', accountId: 'personal' },
       { channel: 'whatsapp', accountId: 'professional' },
+      { channel: 'whatsapp', accountId: 'leila' },
       { channel: 'telegram', accountId: 'personal' },
       { channel: 'telegram', accountId: 'professional' },
       { channel: 'instagram', accountId: 'skirmshop' },
@@ -4507,6 +4551,7 @@ export class MCPServer {
     const targets = [
       ['whatsapp', 'personal', this.waUrl('personal'), '/api/v1/health'],
       ['whatsapp', 'professional', this.waUrl('professional'), '/api/v1/health'],
+      ['whatsapp', 'leila', this.waUrl('leila'), '/api/v1/health'],
       ['telegram', 'personal', this.tgUrl('personal'), '/health'],
       ['telegram', 'professional', this.tgUrl('professional'), '/health'],
       [

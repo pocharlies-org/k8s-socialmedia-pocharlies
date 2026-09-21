@@ -1,0 +1,55 @@
+# social-identity-bindings.yaml — vinculos `sub` -> cuentas del MCP de socialmedia (SC-1144 fase 2)
+#
+# Consumido por mcp-server/src/domain/identity-bindings.ts cuando la bandera
+# SOCIAL_IDENTITY_BINDING=on (default OFF: con OFF el enrutado es byte-identico
+# al de siempre y este fichero NO se lee). Montado por el Deployment `mcp-sse`
+# en SOCIAL_IDENTITY_BINDINGS_FILE (default /identity/social-identity-bindings.yaml)
+# desde el ConfigMap `social-identity-bindings` que kustomize genera desde este
+# fichero (k8s/base/kustomization.yaml, configMapGenerator con nombre estatico a
+# proposito: el codigo relee el fichero montado al cambiar — stat mtime+size —,
+# asi editar un vinculo no exige reiniciar el pod; un hash forzaria rolls).
+#
+# Formato: lista `bindings:`; cada entrada liga UN principal verificado de
+# Keycloak a las cuentas sociales que puede tocar.
+#   sub      — UUID del usuario de Keycloak (claim `sub` del JWT que el
+#              AgentGateway verifica en /social y reenvia como `x-user-sub`;
+#              para tokens client_credentials del auth-proxy es el
+#              service-account del cliente).
+#   label    — nombre humano; aparece en los mensajes de error fail-closed.
+#   accounts — cuentas ligadas, sea cual sea el canal (WhatsApp/Telegram
+#              personal|professional|leila; Instagram skirmshop|barbelpapis).
+#              Omitir `accountId` en una tool call sirve la PRIMERA de la lista
+#              — nunca el default global `personal`.
+#
+# Fail-closed por ausencia: un `sub` que no este aqui (o una entrada con el
+# `sub`/`accounts` sin rellenar) no obtiene NINGUNA cuenta, ni siquiera omitiendo
+# el parametro. Una cuenta pedida fuera de la lista es un error explicito.
+#
+# Subs del realm `edani` verificados el 21-09-2026 (keycloak-admin, igual que en
+# backends/workspace/identity-bindings.yaml de k8s-agentgateway-pocharlies).
+#
+# Instagram: skirmshop/barbelpapis van ligadas a Daniel y a las maquinas de
+# operador, que es quien las usa hoy — asi encender la bandera NO rompe esa
+# superficie. Leila no las lleva (no es suya ninguna cuenta de Instagram).
+bindings:
+  # Maquinas de operador: clients/agentgateway-auth-proxy.js minte tokens
+  # client_credentials para el cliente `agentgateway-mcp` (realm edani) -> el
+  # `sub` es el service-account user de ese cliente. Es tambien el bearer con el
+  # que hoy conecta Open WebUI.
+  - sub: 2379d025-dfb6-433e-bd02-0f2aa9a5ae75
+    label: operator-machines (agentgateway-mcp service-account via auth-proxy)
+    accounts: [personal, professional, skirmshop, barbelpapis]
+
+  # Daniel — usuario humano de Keycloak (me@e-dani.com). Mismas cuentas que las
+  # maquinas de operador; `leila` deliberadamente NO.
+  - sub: e51253a7-c137-4c6c-9fb9-af9cecd3b147
+    label: daniel
+    accounts: [personal, professional, skirmshop, barbelpapis]
+
+  # Leila (lays84.mv@gmail.com) — solo su cuenta. `personal` y `professional`
+  # deliberadamente NO. Su WhatsApp se empareja a mano por el QR de
+  # https://whatsapp-leila.lan.e-dani.com/qr/page (criterio 2 de SC-1144:
+  # pendiente del operador; la cuenta esta desplegada pero SIN emparejar).
+  - sub: 66ec6f4f-5f2c-44f6-a3db-0dccba6e1748
+    label: leila
+    accounts: [leila]

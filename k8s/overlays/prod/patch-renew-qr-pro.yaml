@@ -1,8 +1,9 @@
 # LAN-only renew-QR button (PR #21): ALLOW_WEB_RENEW gates POST /qr/renew and
-# the button on /qr/page. Enabled ONLY on the professional connector — it is
-# reachable via the canonical whatsapp-pro.e-dani.com split-DNS endpoint. The
-# personal connector is public internet (whatsapp.e-dani.com) and must NOT
-# expose an unauthenticated renew endpoint.
+# the button on /qr/page. Enabled on the professional and the leila connectors —
+# both are reachable ONLY via LAN/split-DNS endpoints
+# (whatsapp-pro.e-dani.com / whatsapp-leila.lan.e-dani.com). The personal
+# connector is public internet (whatsapp.e-dani.com) and must NOT expose an
+# unauthenticated renew endpoint.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +14,22 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
+          env:
+            - name: ALLOW_WEB_RENEW
+              value: "true"
+---
+# SC-1144 fase 2: Leila tiene que poder renovar su QR por LAN cuando el
+# operador la empareje (criterio 2) — mismo patrón que el professional.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-connector-leila
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-connector-leila
           env:
             - name: ALLOW_WEB_RENEW
               value: "true"
