@@ -8,11 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import type {
-  CredentialChannel,
-  CredentialStore,
-  StoredCredential,
-} from '@mcp-socialmedia/shared';
+import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import {
   IG_AUTHORIZE_URL,
   IG_MIN_LONG_LIVED_EXPIRES_IN,
@@ -64,7 +60,10 @@ class FakeStore implements CredentialStore {
   }
 }
 
-function metaFetch(handlers: Record<string, () => unknown>): { fetch: PairingFetch; calls: string[] } {
+function metaFetch(handlers: Record<string, () => unknown>): {
+  fetch: PairingFetch;
+  calls: string[];
+} {
   const calls: string[] = [];
   const fetchImpl: PairingFetch = async (url: string) => {
     calls.push(url);
@@ -75,7 +74,11 @@ function metaFetch(handlers: Record<string, () => unknown>): { fetch: PairingFet
         return response;
       }
     }
-    return { ok: false, status: 400, json: async () => ({ error: { message: `unhandled ${url}` } }) };
+    return {
+      ok: false,
+      status: 400,
+      json: async () => ({ error: { message: `unhandled ${url}` } }),
+    };
   };
   return { fetch: fetchImpl, calls };
 }
@@ -84,7 +87,11 @@ function metaFetch(handlers: Record<string, () => unknown>): { fetch: PairingFet
 
 test('state round-trips through sign/verify', () => {
   const now = 1_700_000_000_000;
-  const state = signPairingState({ sub: 'e51253a7-c137-4c6c-9fb9-af9cecd3b147', exp: 0 }, STATE_SECRET, now);
+  const state = signPairingState(
+    { sub: 'e51253a7-c137-4c6c-9fb9-af9cecd3b147', exp: 0 },
+    STATE_SECRET,
+    now
+  );
   const decoded = verifyPairingState(state, STATE_SECRET, now + 1000);
   assert.ok(decoded);
   assert.equal(decoded.sub, 'e51253a7-c137-4c6c-9fb9-af9cecd3b147');
@@ -93,11 +100,7 @@ test('state round-trips through sign/verify', () => {
 
 test('state carries an account label for second accounts', () => {
   const now = 1_700_000_000_000;
-  const state = signPairingState(
-    { sub: 'sub-a', label: 'negocio', exp: 0 },
-    STATE_SECRET,
-    now
-  );
+  const state = signPairingState({ sub: 'sub-a', label: 'negocio', exp: 0 }, STATE_SECRET, now);
   const decoded = verifyPairingState(state, STATE_SECRET, now + 1);
   assert.equal(decoded?.label, 'negocio');
 });
@@ -237,7 +240,11 @@ test('long-lived exchange sends ig_exchange_token and the client secret', async 
 
 test('identity lookup reads id, user_id and username from /me', async () => {
   const { fetch } = metaFetch({
-    '/me': () => ({ id: '17841444094675941', user_id: '17841444094675941', username: 'skirmshopes' }),
+    '/me': () => ({
+      id: '17841444094675941',
+      user_id: '17841444094675941',
+      username: 'skirmshopes',
+    }),
   });
   const identity = await fetchInstagramIdentity('EAAL', fetch);
   assert.equal(identity.id, '17841444094675941');
@@ -267,7 +274,10 @@ test('refresh hits refresh_access_token with ig_refresh_token and keeps the floo
 // ── session key convention ───────────────────────────────────────────────
 
 test('session key: first account under sub, second under sub:username', () => {
-  assert.equal(sessionKeyForPairing('sub-a', undefined, null, { id: '111', username: 'uno' }), 'sub-a');
+  assert.equal(
+    sessionKeyForPairing('sub-a', undefined, null, { id: '111', username: 'uno' }),
+    'sub-a'
+  );
   const existing: StoredCredential = {
     sessionKey: 'sub-a',
     channel: 'instagram',
@@ -283,14 +293,15 @@ test('session key: first account under sub, second under sub:username', () => {
     sessionKeyForPairing('sub-a', undefined, existing, { id: '222', username: 'dos' }),
     'sub-a:dos'
   );
-  assert.equal(sessionKeyForPairing('sub-a', 'negocio', existing, { id: '222', username: 'dos' }), 'sub-a:negocio');
-  const longUsername = 'u'.repeat(40);
-  const key = sessionKeyForPairing(
-    '12345678-1234-1234-1234-123456789abc',
-    undefined,
-    existing,
-    { id: '17841444094675941', username: longUsername }
+  assert.equal(
+    sessionKeyForPairing('sub-a', 'negocio', existing, { id: '222', username: 'dos' }),
+    'sub-a:negocio'
   );
+  const longUsername = 'u'.repeat(40);
+  const key = sessionKeyForPairing('12345678-1234-1234-1234-123456789abc', undefined, existing, {
+    id: '17841444094675941',
+    username: longUsername,
+  });
   assert.ok(
     /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(key),
     'overflowing username falls back to the account id'
@@ -308,11 +319,22 @@ test('pairing stores the 60-day credential under the sub (criterion 2)', async (
       token_type: 'bearer',
       expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
     }),
-    '/me?': () => ({ id: '17841444094675941', user_id: '17841444094675941', username: 'skirmshopes' }),
+    '/me?': () => ({
+      id: '17841444094675941',
+      user_id: '17841444094675941',
+      username: 'skirmshopes',
+    }),
   });
   const now = Date.now();
   const state = signPairingState({ sub: 'daniel-sub', exp: 0 }, STATE_SECRET, now);
-  const result = await pairInstagramAccount({ code: 'CODE', state, config: CONFIG, store, fetchImpl: fetch, now });
+  const result = await pairInstagramAccount({
+    code: 'CODE',
+    state,
+    config: CONFIG,
+    store,
+    fetchImpl: fetch,
+    now,
+  });
 
   assert.equal(result.sessionKey, 'daniel-sub');
   assert.equal(result.username, 'skirmshopes');
@@ -361,7 +383,14 @@ test('pairing of a second account lands under sub:username', async () => {
   });
   const now = Date.now();
   const state = signPairingState({ sub: 'daniel-sub', exp: 0 }, STATE_SECRET, now);
-  const result = await pairInstagramAccount({ code: 'C', state, config: CONFIG, store, fetchImpl: fetch, now });
+  const result = await pairInstagramAccount({
+    code: 'C',
+    state,
+    config: CONFIG,
+    store,
+    fetchImpl: fetch,
+    now,
+  });
   assert.equal(result.sessionKey, 'daniel-sub:barbelpapis');
   assert.equal(store.puts[store.puts.length - 1].payload.accessToken, 'EAAL-two');
 });

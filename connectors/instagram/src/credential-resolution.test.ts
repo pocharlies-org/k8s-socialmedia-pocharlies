@@ -9,16 +9,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type {
-  CredentialChannel,
-  CredentialStore,
-  StoredCredential,
-} from '@mcp-socialmedia/shared';
+import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import { InstagramAPI } from './instagram-api';
-import {
-  createInstagramCredentialStore,
-  resolveInstagramEntry,
-} from './credential-resolution';
+import { createInstagramCredentialStore, resolveInstagramEntry } from './credential-resolution';
 import { IG_MIN_LONG_LIVED_EXPIRES_IN, PairingFetch } from './oauth-pairing';
 
 class FakeStore implements CredentialStore {
@@ -185,7 +178,11 @@ test('near-expiry token is refreshed and written back under the same key', async
     return {
       ok: true,
       status: 200,
-      json: async () => ({ access_token: 'EAAL-refreshed', token_type: 'bearer', expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN }),
+      json: async () => ({
+        access_token: 'EAAL-refreshed',
+        token_type: 'bearer',
+        expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+      }),
     };
   };
   const resolution = await resolveInstagramEntry({
@@ -222,7 +219,10 @@ test('scoped row keeps its own key on write-back', async () => {
     fetchImpl: async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ access_token: 'EAAL-scoped-refreshed', expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN }),
+      json: async () => ({
+        access_token: 'EAAL-scoped-refreshed',
+        expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+      }),
     }),
     now,
   });
@@ -233,7 +233,10 @@ test('scoped row keeps its own key on write-back', async () => {
 test('young token is served untouched (Meta: refresh needs 24h of age)', async () => {
   const store = new FakeStore();
   const now = Date.now();
-  store.seed('daniel-sub', pairedPayload({ issuedAt: now - 60 * 60 * 1000, expiresAt: now + 1 * DAY }));
+  store.seed(
+    'daniel-sub',
+    pairedPayload({ issuedAt: now - 60 * 60 * 1000, expiresAt: now + 1 * DAY })
+  );
   let fetchCalls = 0;
   const resolution = await resolveInstagramEntry({
     headers: { 'x-user-sub': 'daniel-sub' },

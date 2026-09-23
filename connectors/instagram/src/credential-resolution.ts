@@ -51,8 +51,7 @@ export interface ResolvedInstagramEntry {
 }
 
 export type InstagramResolution =
-  | { entry: ResolvedInstagramEntry }
-  | { error: { code: string; message: string } };
+  { entry: ResolvedInstagramEntry } | { error: { code: string; message: string } };
 
 /**
  * Bootstrap the store from env. Returns null when the flag is off — the
@@ -109,7 +108,9 @@ export interface ResolveInstagramEntryOptions {
   /** Null while the store is disabled — the whole feature is flag-gated. */
   store: CredentialStore | null;
   /** Legacy env-indexed lookup (main.ts `getAccount`). */
-  legacyLookup: (name: string) => { name: string; api: InstagramAPI; config: InstagramConfig } | undefined;
+  legacyLookup: (
+    name: string
+  ) => { name: string; api: InstagramAPI; config: InstagramConfig } | undefined;
   /** Injected for tests; production uses global fetch. */
   fetchImpl?: PairingFetch;
   now?: number;
@@ -199,7 +200,9 @@ export async function resolveInstagramEntry(
 ): Promise<InstagramResolution> {
   const log = opts.log ?? ((msg: string) => console.log(msg));
   const now = opts.now ?? Date.now();
-  const fetchImpl = (opts.fetchImpl ?? (globalThis.fetch as unknown as PairingFetch)).bind(globalThis);
+  const fetchImpl = (opts.fetchImpl ?? (globalThis.fetch as unknown as PairingFetch)).bind(
+    globalThis
+  );
   const actor = actorFromHeaders(opts.headers as never);
 
   // Case 1 — flag off or anonymous caller: exact legacy path, store untouched.

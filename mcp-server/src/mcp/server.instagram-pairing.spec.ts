@@ -26,7 +26,9 @@ function pairingServer(fetchImpl: jest.Mock) {
 }
 
 function callPrivate(server: MCPServer, method: string, ...args: unknown[]): Promise<unknown> {
-  return (server as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method](...args);
+  return (server as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method](
+    ...args
+  );
 }
 
 const originalFetch = global.fetch;
@@ -92,7 +94,9 @@ describe('social_manage_session startPairing (criterion 2 + gate C5)', () => {
       })
     )) as { content: Array<{ text: string }> };
 
-    expect(calls[0].url).toBe('http://instagram-connector:3003/api/v1/oauth/instagram/authorize-url');
+    expect(calls[0].url).toBe(
+      'http://instagram-connector:3003/api/v1/oauth/instagram/authorize-url'
+    );
     expect(calls[0].headers['x-user-sub']).toBe('daniel-sub');
     const payload = JSON.parse(result.content[0].text);
     expect(payload.pairingUrl).toContain('instagram.com/oauth/authorize');
@@ -105,7 +109,10 @@ describe('social_manage_session startPairing (criterion 2 + gate C5)', () => {
     const server = pairingServer(fetchMock);
 
     await expect(
-      callPrivate(server, 'canonicalManageSession', { channel: 'instagram', action: 'startPairing' })
+      callPrivate(server, 'canonicalManageSession', {
+        channel: 'instagram',
+        action: 'startPairing',
+      })
     ).rejects.toThrow(/x-user-sub/);
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -71,7 +71,10 @@ export interface PairingResponse {
   json(): Promise<unknown>;
   text?(): Promise<string>;
 }
-export type PairingFetch = (url: string, init?: Record<string, unknown>) => Promise<PairingResponse>;
+export type PairingFetch = (
+  url: string,
+  init?: Record<string, unknown>
+) => Promise<PairingResponse>;
 
 export interface InstagramLoginConfig {
   /** The Instagram app id (App Dashboard → Instagram Login → Instagram App ID). */
@@ -91,7 +94,13 @@ export interface InstagramLoginConfig {
  */
 export function deriveStateSecret(masterKey: Buffer): Buffer {
   return Buffer.from(
-    hkdfSync('sha256', masterKey, Buffer.from('x86-socialmedia:v1'), Buffer.from('instagram-pairing-state/v1'), 32)
+    hkdfSync(
+      'sha256',
+      masterKey,
+      Buffer.from('x86-socialmedia:v1'),
+      Buffer.from('instagram-pairing-state/v1'),
+      32
+    )
   );
 }
 
@@ -178,7 +187,10 @@ export function verifyPairingState(
   const value = decoded as Partial<PairingState>;
   if (typeof value.sub !== 'string' || !IG_SESSION_KEY_RE.test(value.sub)) return null;
   if (typeof value.exp !== 'number' || value.exp <= now) return null;
-  if (value.label !== undefined && (typeof value.label !== 'string' || !IG_SESSION_KEY_RE.test(value.label))) {
+  if (
+    value.label !== undefined &&
+    (typeof value.label !== 'string' || !IG_SESSION_KEY_RE.test(value.label))
+  ) {
     return null;
   }
   return { sub: value.sub, label: value.label, exp: value.exp };
@@ -200,7 +212,7 @@ export function buildAuthorizeUrl(config: InstagramLoginConfig, state: string): 
 async function readJsonError(response: PairingResponse, context: string): Promise<never> {
   let detail = '';
   try {
-    detail = (await response.json ? JSON.stringify(await response.json()) : '') ?? '';
+    detail = ((await response.json) ? JSON.stringify(await response.json()) : '') ?? '';
   } catch {
     /* keep empty */
   }
@@ -230,7 +242,10 @@ export async function exchangeAuthorizationCode(
   if (!data || typeof data.access_token !== 'string' || !data.access_token) {
     throw new Error('instagram code exchange returned no access_token');
   }
-  return { accessToken: data.access_token, userId: data.user_id === undefined ? undefined : String(data.user_id) };
+  return {
+    accessToken: data.access_token,
+    userId: data.user_id === undefined ? undefined : String(data.user_id),
+  };
 }
 
 /**
@@ -263,7 +278,11 @@ export async function exchangeForLongLivedToken(
     );
   }
   const now = Date.now();
-  return { accessToken: data.access_token, expiresIn: data.expires_in, expiresAt: now + data.expires_in * 1000 };
+  return {
+    accessToken: data.access_token,
+    expiresIn: data.expires_in,
+    expiresAt: now + data.expires_in * 1000,
+  };
 }
 
 /** Step 4: identity of the paired account (id + username for the payload). */
@@ -276,11 +295,25 @@ export async function fetchInstagramIdentity(
   url.searchParams.set('access_token', accessToken);
   const response = await fetchImpl(url.toString());
   if (!response.ok) await readJsonError(response, 'instagram identity lookup');
-  const data = (await response.json()) as { id?: string; user_id?: string | number; username?: string };
-  if (!data || typeof data.id !== 'string' || !data.id || typeof data.username !== 'string' || !data.username) {
+  const data = (await response.json()) as {
+    id?: string;
+    user_id?: string | number;
+    username?: string;
+  };
+  if (
+    !data ||
+    typeof data.id !== 'string' ||
+    !data.id ||
+    typeof data.username !== 'string' ||
+    !data.username
+  ) {
     throw new Error('instagram identity lookup returned no id/username');
   }
-  return { id: data.id, userId: data.user_id === undefined ? undefined : String(data.user_id), username: data.username };
+  return {
+    id: data.id,
+    userId: data.user_id === undefined ? undefined : String(data.user_id),
+    username: data.username,
+  };
 }
 
 /**
@@ -305,7 +338,11 @@ export async function refreshInstagramToken(
       `instagram token refresh returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_LONG_LIVED_EXPIRES_IN}s`
     );
   }
-  return { accessToken: data.access_token, expiresIn: data.expires_in, expiresAt: Date.now() + data.expires_in * 1000 };
+  return {
+    accessToken: data.access_token,
+    expiresIn: data.expires_in,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
 }
 
 // ── pairing orchestration ────────────────────────────────────────────────

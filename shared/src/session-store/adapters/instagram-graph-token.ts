@@ -70,7 +70,13 @@ export function deserializeInstagramToken(payload: unknown): InstagramTokenPaylo
     accessToken: value.accessToken,
     businessAccountId: value.businessAccountId,
   };
-  for (const optional of ['appId', 'appSecret', 'fbAccessToken', 'username', 'instagramUserId'] as const) {
+  for (const optional of [
+    'appId',
+    'appSecret',
+    'fbAccessToken',
+    'username',
+    'instagramUserId',
+  ] as const) {
     if (typeof value[optional] === 'string' && value[optional] !== '') {
       result[optional] = value[optional];
     }

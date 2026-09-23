@@ -16,11 +16,7 @@
 import express, { Request, Response } from 'express';
 import pino from 'pino';
 import { actorFromHeaders } from '@mcp-socialmedia/shared';
-import {
-  discoverFacebookInstagramAccount,
-  InstagramAPI,
-  InstagramConfig,
-} from './instagram-api';
+import { discoverFacebookInstagramAccount, InstagramAPI, InstagramConfig } from './instagram-api';
 import { createWebhookRouter } from './webhook';
 import { InstagramEventPublisher } from './publisher';
 import {
@@ -256,7 +252,10 @@ async function main(): Promise<void> {
     const actor = actorFromHeaders(req.headers);
     if (!actor.sub) {
       res.status(400).json({
-        error: { code: 'no_actor', message: 'x-user-sub header required to start instagram pairing' },
+        error: {
+          code: 'no_actor',
+          message: 'x-user-sub header required to start instagram pairing',
+        },
       });
       return;
     }
@@ -276,7 +275,10 @@ async function main(): Promise<void> {
         : undefined;
     if (label && !IG_SESSION_KEY_RE.test(`${actor.sub}:${label}`)) {
       res.status(400).json({
-        error: { code: 'invalid_account_label', message: 'account label must match [A-Za-z0-9][A-Za-z0-9_.:-]{0,63}' },
+        error: {
+          code: 'invalid_account_label',
+          message: 'account label must match [A-Za-z0-9][A-Za-z0-9_.:-]{0,63}',
+        },
       });
       return;
     }
@@ -301,14 +303,20 @@ async function main(): Promise<void> {
     );
   }
   const escapeHtml = (value: string) =>
-    value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+    value.replace(
+      /[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
+    );
 
   // Instagram redirects the user's browser here after consent. Everything the
   // exchange needs (app secret included) is server-side; the response never
   // echoes a token.
   app.get('/oauth/instagram/callback', async (req: Request, res: Response) => {
     const deny = (status: number, message: string) => {
-      res.status(status).type('html').send(pairingPage('Instagram pairing failed', escapeHtml(message)));
+      res
+        .status(status)
+        .type('html')
+        .send(pairingPage('Instagram pairing failed', escapeHtml(message)));
     };
     if (typeof req.query.error === 'string' && req.query.error) {
       deny(400, `Instagram returned: ${req.query.error}`);
