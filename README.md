@@ -121,6 +121,10 @@ INSTAGRAM_BARBELPAPIS_BUSINESS_ACCOUNT_ID=
 FACEBOOK_APP_ID=
 FACEBOOK_APP_SECRET=
 INSTAGRAM_WEBHOOK_VERIFY_TOKEN=
+# Per-user Instagram pairing (SC-1194) — inert while CREDENTIAL_STORE_ENABLED=false
+INSTAGRAM_LOGIN_APP_ID=          # Instagram Login app id (falls back to FACEBOOK_APP_ID)
+INSTAGRAM_LOGIN_APP_SECRET=      # its secret (falls back to FACEBOOK_APP_SECRET)
+INSTAGRAM_OAUTH_REDIRECT_URI=    # must match a Valid OAuth Redirect URI on the Meta app
 
 # WhatsApp Cloud (official Business Platform transport)
 WHATSAPP_ACCESS_TOKEN=
@@ -144,6 +148,38 @@ EMERGENCY_DISABLE_SENDING=false
 # MCP SSE auth (clients use Bearer)
 MCP_SSE_AUTH_TOKEN=
 ```
+
+## Instagram pairing per user (SC-1194 P1)
+
+Each chat.e-dani.com user can pair **their own** Instagram account, stored in the
+SC-705 credential store (`user_channel_credentials`, envelope-encrypted, keyed by the
+gateway-verified `x-user-sub`). Everything below is inert while
+`CREDENTIAL_STORE_ENABLED=false` — the env accounts (`INSTAGRAM_<NAME>_*`) keep serving
+their routes untouched.
+
+Flow (Instagram API with Instagram Login — Meta's standard OAuth, per the CTO ruling):
+
+1. The user asks their agent: `social_manage_session` with `channel=instagram`,
+   `action=startPairing`. The connector answers with the
+   `https://www.instagram.com/oauth/authorize` link (scopes
+   `instagram_business_basic` + `instagram_business_content_publish`, short-lived
+   HMAC-signed `state` carrying the sub). The link is plain tool output — no new screen.
+2. The user approves in the browser; Instagram redirects to
+   `GET /oauth/instagram/callback` on the connector (public path rule on
+   `whatsapp.e-dani.com`). Code → short-lived token → 60-day long-lived exchange
+   (`graph.instagram.com/v21.0/access_token?grant_type=ig_exchange_token`) runs
+   server-side; tokens under 5.184.000 s of `expires_in` are refused.
+3. The credential lands via `store.put` under `session_key = <sub>` (or
+   `<sub>:<account>` for a second account). A caller with no row gets an explicit
+   `no instagram credential for this user` — house tokens are never adopted, another
+   user's rows are structurally unreachable.
+4. Refresh-on-use: paired tokens are renewed via
+   `graph.instagram.com/v21.0/refresh_access_token?grant_type=ig_refresh_token` when
+   ≤14 days remain (Meta requires the token to be ≥24 h old); failures log loudly and
+   keep serving the current token.
+
+Facebook Login (EAA) remains only for the four endpoints without an Instagram-Login
+equivalent (hashtag search/media, `/me/accounts`, business discovery).
 
 ## Security
 

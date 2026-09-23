@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:146dd7a5a6d95f980505c2203d55fcbe804f2cfb2204cc6b6b5c028290e060da",
+  "digest": "sha256:29d060fab08e52ad05edf0e82204f5879aa8f550c809f6e88c5e52b580b845b4",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -4547,7 +4547,7 @@
     {
       "name": "social_manage_session",
       "title": "Manage provider session",
-      "description": "Renew a WhatsApp QR session or repair a WhatsApp group encryption session.",
+      "description": "Renew a WhatsApp QR session, repair a WhatsApp group encryption session, or start Instagram pairing for the verified user (action=startPairing on channel=instagram returns the Instagram Login authorize link; it needs no accountId and only works when the call carries the gateway-verified user identity).",
       "effect": "externalWrite",
       "authScope": "social.write",
       "capability": "sessions.manage",
@@ -4584,7 +4584,8 @@
             "type": "string",
             "enum": [
               "renewQr",
-              "repairGroup"
+              "repairGroup",
+              "startPairing"
             ]
           },
           "confirmDisconnect": {
@@ -4593,7 +4594,6 @@
         },
         "required": [
           "channel",
-          "accountId",
           "action"
         ],
         "allOf": [
@@ -4607,6 +4607,7 @@
             },
             "then": {
               "required": [
+                "accountId",
                 "confirmDisconnect"
               ],
               "properties": {
@@ -4626,8 +4627,25 @@
             },
             "then": {
               "required": [
+                "accountId",
                 "target"
               ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "startPairing"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "channel": {
+                  "const": "instagram"
+                }
+              }
             }
           }
         ]

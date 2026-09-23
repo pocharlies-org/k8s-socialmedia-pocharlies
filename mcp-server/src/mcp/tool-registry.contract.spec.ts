@@ -83,19 +83,17 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_validate_account: 'read',
 };
 
-const EXPECTED_AUTH_SCOPES: Record<
-  (typeof EXPECTED_TOOL_NAMES)[number],
-  SocialAuthScope
-> = Object.fromEntries(
-  EXPECTED_TOOL_NAMES.map(name => [
-    name,
-    name === 'social_start_digest' || name === 'social_continue_digest'
-      ? 'social.read'
-      : EXPECTED_EFFECTS[name] === 'read' || EXPECTED_EFFECTS[name] === 'compute'
+const EXPECTED_AUTH_SCOPES: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialAuthScope> =
+  Object.fromEntries(
+    EXPECTED_TOOL_NAMES.map(name => [
+      name,
+      name === 'social_start_digest' || name === 'social_continue_digest'
         ? 'social.read'
-        : 'social.write',
-  ])
-) as Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialAuthScope>;
+        : EXPECTED_EFFECTS[name] === 'read' || EXPECTED_EFFECTS[name] === 'compute'
+          ? 'social.read'
+          : 'social.write',
+    ])
+  ) as Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialAuthScope>;
 
 const EXPECTED_ANNOTATIONS: Record<
   (typeof EXPECTED_TOOL_NAMES)[number],
@@ -371,10 +369,7 @@ function requiredFields(tool: SocialToolDefinition): string[] {
     : [];
 }
 
-function assertBasicObjectSchema(
-  schema: Record<string, unknown>,
-  schemaName: string
-): void {
+function assertBasicObjectSchema(schema: Record<string, unknown>, schemaName: string): void {
   expect(schema.type).toBe('object');
   expect(schema.properties).toEqual(expect.any(Object));
 
@@ -392,13 +387,8 @@ function assertBasicObjectSchema(
 }
 
 describe('Socialmedia v2 tool contract', () => {
-  const manifestPath = resolve(
-    __dirname,
-    '../../../contracts/socialmedia-tools.json'
-  );
-  const manifest = JSON.parse(
-    readFileSync(manifestPath, 'utf8')
-  ) as ContractManifest;
+  const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
   it('contains exactly the 34 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
@@ -431,17 +421,33 @@ describe('Socialmedia v2 tool contract', () => {
     );
 
     expect(writes).toHaveLength(15);
+    // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
+    // exist yet — startPairing is reached before any Instagram credential is
+    // stored, so it cannot carry an accountId. Every other action of the same
+    // tool (renewQr, repairGroup) still requires it, enforced conditionally
+    // below; all other write tools keep requiring it unconditionally.
     for (const tool of writes) {
-      expect(requiredFields(tool)).toEqual(
-        expect.arrayContaining(['channel', 'accountId'])
-      );
+      if (tool.name === 'social_manage_session') continue;
+      expect(requiredFields(tool)).toEqual(expect.arrayContaining(['channel', 'accountId']));
     }
+
+    const manageSession = SOCIAL_TOOL_REGISTRY.find(tool => tool.name === 'social_manage_session');
+    expect(manageSession).toBeDefined();
+    expect(requiredFields(manageSession!)).toEqual(expect.arrayContaining(['channel', 'action']));
+    const branches = (manageSession!.inputSchema.allOf ?? []) as Array<{
+      if: { properties: { action: { const: string } } };
+      then: { required?: string[] };
+    }>;
+    const requiredByAction = new Map(
+      branches.map(branch => [branch.if.properties.action.const, branch.then.required ?? []])
+    );
+    expect(requiredByAction.get('renewQr')).toContain('accountId');
+    expect(requiredByAction.get('repairGroup')).toContain('accountId');
+    expect(requiredByAction.get('startPairing') ?? []).not.toContain('accountId');
   });
 
   it('keeps the generated manifest byte-contract aligned with the registry digest', () => {
-    const generatedTools = SOCIAL_TOOL_REGISTRY.map(
-      ({ handler: _handler, ...tool }) => tool
-    );
+    const generatedTools = SOCIAL_TOOL_REGISTRY.map(({ handler: _handler, ...tool }) => tool);
     const computedDigest = `sha256:${createHash('sha256')
       .update(stableJson(generatedTools))
       .digest('hex')}`;
@@ -454,9 +460,9 @@ describe('Socialmedia v2 tool contract', () => {
   });
 
   it('publishes no legacy tool names', () => {
-    const publicNames = SOCIAL_TOOL_REGISTRY.map(tool =>
-      publicToolDefinition(tool)
-    ).map(tool => tool.name);
+    const publicNames = SOCIAL_TOOL_REGISTRY.map(tool => publicToolDefinition(tool)).map(
+      tool => tool.name
+    );
 
     expect(publicNames).toEqual(EXPECTED_TOOL_NAMES);
     for (const name of publicNames) {

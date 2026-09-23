@@ -2080,6 +2080,16 @@ export class MCPServer {
   }
 
   private async canonicalManageSession(args: Record<string, any>): Promise<any> {
+    if (this.channel(args) === 'instagram') {
+      const action = this.string(args, 'action');
+      if (action !== 'startPairing') {
+        throw this.canonicalError(
+          'invalid_request',
+          "for channel 'instagram', action must be 'startPairing'"
+        );
+      }
+      return this.handleInstagramStartPairing();
+    }
     this.requireChannel(args, 'whatsapp');
     switch (this.string(args, 'action')) {
       case 'renewQr':
@@ -2095,6 +2105,38 @@ export class MCPServer {
       default:
         throw this.canonicalError('invalid_request', "action must be 'renewQr' or 'repairGroup'");
     }
+  }
+
+  /**
+   * SC-1194 P1 (criterion 2): Instagram pairing over the existing session
+   * surface. The authorize link is returned as tool output — chat.e-dani.com
+   * renders it as text, the same way the WhatsApp flow already hands out its
+   * QR page link — so no new screen is needed (epic gate C5). The connector
+   * owns the OAuth app config; this call only needs the verified actor, which
+   * connectorCall forwards as x-user-sub (SC-705 pattern).
+   */
+  private async handleInstagramStartPairing(): Promise<any> {
+    const actor = getRequestActor();
+    if (!actor.sub) {
+      throw this.canonicalError(
+        'invalid_request',
+        'Instagram pairing requires a verified user: this call carries no x-user-sub. Start it from your own chat.e-dani.com conversation.'
+      );
+    }
+    const data = await this.connectorCall(
+      this.instagramUrl,
+      'GET',
+      '/api/v1/oauth/instagram/authorize-url'
+    );
+    return this.jsonResponse({
+      action: 'startPairing',
+      channel: 'instagram',
+      pairingUrl: data.url,
+      scopes: data.scopes,
+      linkExpiresInSec: data.stateExpiresInSec,
+      instructions:
+        'Open this link, log in with your Instagram professional account and approve. The credential is stored encrypted under YOUR user id; afterwards the MCP serves only your own accounts. To pair a second account, run this again.',
+    });
   }
 
   private async canonicalClickInteraction(args: Record<string, any>): Promise<any> {
@@ -4723,7 +4765,13 @@ export class MCPServer {
     const url = `${this.instagramUrl}${path}`;
     const options: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // SC-1194 P1 (criterion 3): forward the gateway-verified actor exactly
+        // like the WhatsApp/Telegram routes (SC-705). With no actor the
+        // headers are empty and the connector keeps its legacy env path.
+        ...actorRequestHeaders(),
+      },
       signal: AbortSignal.timeout(timeoutMs),
     };
     if (body) options.body = JSON.stringify(body);

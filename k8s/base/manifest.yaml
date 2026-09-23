@@ -553,6 +553,17 @@ spec:
           ports: [{ name: http, containerPort: 3003 }]
           env:
             - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
+            # SC-1194 P1: per-sub credential store plumbing (code ships dark).
+            # CREDENTIAL_STORE_ENABLED stays explicitly false until PR2 of
+            # SC-1144 lands the 007 migration + image pin (devops flips the
+            # overlay). DATABASE_URL feeds the store's pool; the connector
+            # never opens it while the flag is off. INSTAGRAM_OAUTH_REDIRECT_URI
+            # must match a Valid OAuth Redirect URI registered on the Meta app
+            # (operator gesture) and is served by the path rule added to the
+            # whatsapp-public IngressRoute below.
+            - { name: CREDENTIAL_STORE_ENABLED, value: "false" }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            - { name: INSTAGRAM_OAUTH_REDIRECT_URI, value: "https://whatsapp.e-dani.com/oauth/instagram/callback" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 30m, memory: 64Mi }
@@ -616,7 +627,7 @@ spec:
     metadata:
       labels: { app: mcp-server }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:146dd7a5a6d95f980505c2203d55fcbe804f2cfb2204cc6b6b5c028290e060da"
+        contracts.e-dani.com/socialmedia-digest: "sha256:29d060fab08e52ad05edf0e82204f5879aa8f550c809f6e88c5e52b580b845b4"
     spec:
       enableServiceLinks: false
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
@@ -680,7 +691,7 @@ spec:
     metadata:
       labels: { app: mcp-sse }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:146dd7a5a6d95f980505c2203d55fcbe804f2cfb2204cc6b6b5c028290e060da"
+        contracts.e-dani.com/socialmedia-digest: "sha256:29d060fab08e52ad05edf0e82204f5879aa8f550c809f6e88c5e52b580b845b4"
     spec:
       enableServiceLinks: false
       nodeSelector:
@@ -778,6 +789,17 @@ spec:
   entryPoints: [websecure]
   ingressClassName: traefik-edge
   routes:
+    # SC-1194 P1: the Instagram Login OAuth callback (user's browser lands here
+    # after consent). Path-scoped to the single callback route so nothing else
+    # of the instagram connector's internal API becomes public; the connector
+    # answers it with the whatsapp-public host already provisioned (DNS, cert,
+    # Cloudflare). Traefik prefers the more specific rule over the Host-only
+    # one below.
+    - match: Host(`whatsapp.e-dani.com`) && Path(`/oauth/instagram/callback`)
+      kind: Rule
+      services:
+        - name: instagram-connector
+          port: 3003
     - match: Host(`whatsapp.e-dani.com`)
       kind: Rule
       services:

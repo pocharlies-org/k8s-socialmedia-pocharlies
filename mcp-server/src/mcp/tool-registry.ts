@@ -800,7 +800,11 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
   tool({
     name: 'social_manage_session',
     title: 'Manage provider session',
-    description: 'Renew a WhatsApp QR session or repair a WhatsApp group encryption session.',
+    description:
+      'Renew a WhatsApp QR session, repair a WhatsApp group encryption session, or start ' +
+      'Instagram pairing for the verified user (action=startPairing on channel=instagram ' +
+      'returns the Instagram Login authorize link; it needs no accountId and only works when ' +
+      'the call carries the gateway-verified user identity).',
     effect: 'externalWrite',
     authScope: 'social.write',
     capability: 'sessions.manage',
@@ -808,22 +812,26 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     inputSchema: objectSchema(
       {
         ...writeProperties,
-        action: { type: 'string', enum: ['renewQr', 'repairGroup'] },
+        action: { type: 'string', enum: ['renewQr', 'repairGroup', 'startPairing'] },
         confirmDisconnect: { type: 'boolean' },
       },
-      ['channel', 'accountId', 'action'],
+      ['channel', 'action'],
       {
         allOf: [
           {
             if: { properties: { action: { const: 'renewQr' } } },
             then: {
-              required: ['confirmDisconnect'],
+              required: ['accountId', 'confirmDisconnect'],
               properties: { confirmDisconnect: { const: true } },
             },
           },
           {
             if: { properties: { action: { const: 'repairGroup' } } },
-            then: { required: ['target'] },
+            then: { required: ['accountId', 'target'] },
+          },
+          {
+            if: { properties: { action: { const: 'startPairing' } } },
+            then: { properties: { channel: { const: 'instagram' } } },
           },
         ],
       }
