@@ -79,6 +79,34 @@ spec:
   policyTypes:
     - Ingress
 ---
+# SC-1194 P1: the Instagram Login OAuth callback path on whatsapp.e-dani.com
+# routes to instagram-connector:3003. Only the Traefik namespaces may reach it
+# (NOT the tailnet/pod CIDR blocks: the connector API is unauthenticated and
+# must not become reachable by raw IP — the IngressRoute's exact-path rule is
+# the only public door).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-traefik-instagram
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: instagram-connector
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-lan
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-edge
+      ports:
+        - protocol: TCP
+          port: 3003
+  policyTypes:
+    - Ingress
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

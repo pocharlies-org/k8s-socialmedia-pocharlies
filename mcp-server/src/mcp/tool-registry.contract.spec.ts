@@ -431,11 +431,29 @@ describe('Socialmedia v2 tool contract', () => {
     );
 
     expect(writes).toHaveLength(15);
+    // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
+    // exist yet — startPairing is reached before any Instagram credential is
+    // stored, so it cannot carry an accountId. Every other action of the same
+    // tool (renewQr, repairGroup) still requires it, enforced conditionally
+    // below; all other write tools keep requiring it unconditionally.
     for (const tool of writes) {
-      expect(requiredFields(tool)).toEqual(
-        expect.arrayContaining(['channel', 'accountId'])
-      );
+      if (tool.name === 'social_manage_session') continue;
+      expect(requiredFields(tool)).toEqual(expect.arrayContaining(['channel', 'accountId']));
     }
+
+    const manageSession = SOCIAL_TOOL_REGISTRY.find(tool => tool.name === 'social_manage_session');
+    expect(manageSession).toBeDefined();
+    expect(requiredFields(manageSession!)).toEqual(expect.arrayContaining(['channel', 'action']));
+    const branches = (manageSession!.inputSchema.allOf ?? []) as Array<{
+      if: { properties: { action: { const: string } } };
+      then: { required?: string[] };
+    }>;
+    const requiredByAction = new Map(
+      branches.map(branch => [branch.if.properties.action.const, branch.then.required ?? []])
+    );
+    expect(requiredByAction.get('renewQr')).toContain('accountId');
+    expect(requiredByAction.get('repairGroup')).toContain('accountId');
+    expect(requiredByAction.get('startPairing') ?? []).not.toContain('accountId');
   });
 
   it('keeps the generated manifest byte-contract aligned with the registry digest', () => {
