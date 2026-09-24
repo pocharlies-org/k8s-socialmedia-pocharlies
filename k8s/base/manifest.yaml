@@ -239,8 +239,8 @@ spec:
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
             - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -322,8 +322,8 @@ spec:
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
             - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -405,8 +405,8 @@ spec:
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
             - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -647,8 +647,8 @@ spec:
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
             - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -734,8 +734,8 @@ spec:
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
             - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -960,8 +960,8 @@ spec:
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
             - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
@@ -1064,8 +1064,8 @@ spec:
             - { name: S3_BUCKET, value: "skirmshop-drive" }
             - { name: S3_REGION, value: "us-east-1" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-app, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
             - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
