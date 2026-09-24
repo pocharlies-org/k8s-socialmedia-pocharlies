@@ -1,0 +1,151 @@
+# SC-1197 P3 (SC-1226) D5 — exposicion de la API de emparejamientos: SOLO in-cluster.
+# - social-api:3020 solo desde ns messages / pods app=dgx-messages (sin IngressRoute).
+# - Los pools (whatsapp-pairing:3001, telegram-pairing:3002) solo desde social-api.
+# - Ninguno de los tres entra en whatsapp-mcp-allow-traefik-http (esa abre el pod
+#   CIDR 10.42.0.0/16 y el tailnet): ni traefik ni el pod CIDR llegan a ellos.
+# Nota: las NetworkPolicy son ADITIVAS y whatsapp-mcp-allow-same-namespace (podSelector
+# vacio) sigue dejando entrar a cualquier pod de whatsapp-mcp; no se edita aqui (P3 no
+# cambia objetos existentes). Los pools exigen el HMAC de CONNECTOR_SHARED_SECRET.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-messages-social-api
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: social-api
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: messages
+          podSelector:
+            matchLabels:
+              app: dgx-messages
+      ports:
+        - protocol: TCP
+          port: 3020
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-social-api-pairing-pools
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - whatsapp-pairing
+          - telegram-pairing
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: social-api
+      ports:
+        - protocol: TCP
+          port: 3001
+        - protocol: TCP
+          port: 3002
+  policyTypes:
+    - Ingress
+---
+# Egress de social-api: DNS, keycloak in-cluster (JWKS; svc :80 -> pod :8080), los
+# pools y Postgres (credential store). Nada mas.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-social-api-egress
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: social-api
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+          podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - whatsapp-pairing
+                  - telegram-pairing
+      ports:
+        - { protocol: TCP, port: 3001 }
+        - { protocol: TCP, port: 3002 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+      ports:
+        - { protocol: TCP, port: 5432 }
+  policyTypes:
+    - Egress
+---
+# Egress de los pools: DNS, Postgres (credential store) e internet publico
+# (servidores de WhatsApp / Telegram), como los conectores de la casa; las redes
+# privadas, el pod CIDR y el tailnet quedan fuera del bloque de internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-social-pairing-pools-egress
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - whatsapp-pairing
+          - telegram-pairing
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+  policyTypes:
+    - Egress

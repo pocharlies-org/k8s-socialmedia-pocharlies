@@ -76,6 +76,9 @@ Tras el refactor del 2026-05-07 (commit `6791fae`), todo bajo carpetas dedicadas
 | Instagram | 3003 | ✅ 2 cuentas | skirmshop (~7.135), barbelpapis (~14.949) |
 | MCP server (interno) | 3000 | ✅ | |
 | MCP SSE (público) | 3010 | ✅ | Bearer token |
+| social-api (SC-1197) | 3020 | ⏸ inerte (`replicas: 0`, `SOCIAL_PAIRING_API=off`) | imagen mcp-server; única cara de la API de emparejamientos por `sub`, solo in-cluster desde ns `messages` / `app: dgx-messages` (netpol `whatsapp-mcp-allow-messages-social-api`), sin IngressRoute; verifica el JWT |
+| whatsapp-pairing (SC-1197) | 3001 | ⏸ inerte (`replicas: 0`) | imagen whatsapp-connector; pool baileys por `sub`, `Recreate`, `SESSION_PATH` en `emptyDir` de memoria (persistencia solo en el credential store); solo lo alcanza social-api |
+| telegram-pairing (SC-1197) | 3002 | ⏸ inerte (`replicas: 0`) | imagen telegram-connector; pool mtcute por `sub`, `Recreate`, `emptyDir` de memoria; solo lo alcanza social-api |
 
 > **WhatsApp Cloud API eliminado (2026-05-27).** Se sustituyó por una segunda cuenta Baileys. Motivo: coste cero (no Meta) y poder contestar a mano desde el móvil.
 

@@ -1,0 +1,183 @@
+# SC-1197 P3 (SC-1226) — API de emparejamientos sociales por sub: topologia
+# INERTE. Tres Deployments nuevos a replicas: 0 con SOCIAL_PAIRING_API=off; los
+# conectores de la casa no cambian ni un byte. Diseno vinculante: 10-plan.md y
+# nota del architect de SC-1197 (Topologia, D5, D7).
+#
+#  - social-api        imagen mcp-server,         :3020  unica cara (solo in-cluster,
+#                      desde ns messages / app dgx-messages), unico que verifica el JWT.
+#  - whatsapp-pairing  imagen whatsapp-connector, :3001  pool baileys por sub.
+#  - telegram-pairing  imagen telegram-connector, :3002  pool mtcute por sub.
+#
+# social-api -> pools con el HMAC existente (CONNECTOR_SHARED_SECRET, via el
+# envFrom del item `whatsapp-mcp`); el sessionKey va en el cuerpo firmado.
+# Persistencia SOLO en el credential store (DB whatsappmcp): los pools llevan
+# SESSION_PATH en emptyDir de memoria, sin PVC (sin segunda copia de credenciales),
+# y strategy Recreate (nunca dos procesos con la misma sesion).
+#
+# Imagenes: el tag `latest` de aqui lo reescribe el `images:` del overlay prod,
+# asi que corren EXACTAMENTE el mismo pin que mcp-server / whatsapp-connector /
+# telegram-connector — sin CI nuevo. Las imagenes ejecutan el codigo fuente con
+# tsx (el Dockerfile no compila dist/), igual que mcp-server y mcp-sse.
+#
+# Encendido (fuera de este PR, despues de la PR2 de SC-705): una sola PR que pone
+# SOCIAL_PAIRING_API=on, replicas: 1 y re-pinea a una imagen que traiga los
+# entrypoints de P1a/P1b/P4b. CREDENTIAL_STORE_ENABLED no se fija aqui (default
+# del codigo = off; shared/src/session-store/credential-store.ts).
+# Sin IngressRoute y fuera de allow-traefik-http: ver networkpolicy-social-pairing.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: social-api
+  namespace: whatsapp-mcp
+spec:
+  replicas: 0
+  selector: { matchLabels: { app: social-api } }
+  template:
+    metadata: { labels: { app: social-api } }
+    spec:
+      enableServiceLinks: false
+      # Mismo sitio que mcp-server en prod (sin sesion atada a IP).
+      nodeSelector: { node-pool: ks5-nvme, kubernetes.io/arch: amd64 }
+      containers:
+        - name: social-api
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          # Entrypoint de P1b (mcp-server/src/social-api/main.ts), por tsx como mcp-server.
+          command: ["sh", "-c", "cd /app/mcp-server && exec tsx src/social-api/main.ts"]
+          ports: [{ name: http, containerPort: 3020 }]
+          env:
+            - { name: PORT, value: "3020" }
+            - { name: SOCIAL_PAIRING_API, value: "off" }
+            - { name: SOCIAL_API_ALLOWED_ORIGINS, value: "" }
+            # D2: verificador JWT (mismos valores que agentgateway-config.yaml).
+            - { name: SOCIAL_API_JWT_ISSUER, value: "https://auth-next.e-dani.com/realms/edani" }
+            - { name: SOCIAL_API_JWKS_URL, value: "http://keycloak.keycloak.svc.cluster.local/realms/edani/protocol/openid-connect/certs" }
+            - { name: SOCIAL_API_JWT_AUDIENCE, value: "social-api" }
+            - { name: SOCIAL_API_ALLOWED_AZP, value: "dgx-messages" }
+            - { name: WHATSAPP_PAIRING_URL, value: "http://whatsapp-pairing.whatsapp-mcp.svc.cluster.local:3001" }
+            - { name: TELEGRAM_PAIRING_URL, value: "http://telegram-pairing.whatsapp-mcp.svc.cluster.local:3002" }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            # D3/D4: registro y vinculos solo se LEEN (houseAccounts de /social/status).
+            - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
+            - { name: SOCIAL_IDENTITY_BINDINGS_FILE, value: "/identity/social-identity-bindings.yaml" }
+          # CONNECTOR_SHARED_SECRET (HMAC), DB_USER/DB_PASSWORD y la clave maestra del store.
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits:   { memory: 384Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 3020 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3020 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - { name: accounts, mountPath: /accounts, readOnly: true }
+            - { name: identity, mountPath: /identity, readOnly: true }
+      volumes:
+        - name: accounts
+          configMap: { name: social-accounts }
+        - name: identity
+          configMap: { name: social-identity-bindings }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: social-api, namespace: whatsapp-mcp }
+spec:
+  selector: { app: social-api }
+  ports: [{ name: http, port: 3020, targetPort: 3020 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-pairing
+  namespace: whatsapp-mcp
+spec:
+  replicas: 0
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: whatsapp-pairing } }
+  template:
+    metadata: { labels: { app: whatsapp-pairing } }
+    spec:
+      enableServiceLinks: false
+      # Mismo nodo que los conectores baileys de la casa: WhatsApp marca las IP de datacenter.
+      nodeSelector: { topology: lan, kubernetes.io/hostname: ubuntu, kubernetes.io/arch: amd64 }
+      containers:
+        - name: whatsapp-pairing
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:latest
+          # Entrypoint de P1a (connectors/whatsapp-web/src/pairing/main.ts), como `pnpm start`.
+          command: ["sh", "-c", "cd /app/connectors/whatsapp-web && exec node --import tsx src/pairing/main.ts"]
+          ports: [{ name: http, containerPort: 3001 }]
+          env:
+            - { name: PORT, value: "3001" }
+            - { name: SOCIAL_PAIRING_API, value: "off" }
+            - { name: SESSION_PATH, value: "/app/pairing-sessions" }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 768Mi }   # incluye el emptyDir de memoria (sizeLimit abajo)
+          readinessProbe:
+            tcpSocket: { port: 3001 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - { name: pairing-sessions, mountPath: /app/pairing-sessions }
+      volumes:
+        - name: pairing-sessions
+          emptyDir: { medium: Memory, sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: whatsapp-pairing, namespace: whatsapp-mcp }
+spec:
+  selector: { app: whatsapp-pairing }
+  ports: [{ name: http, port: 3001, targetPort: 3001 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-pairing
+  namespace: whatsapp-mcp
+spec:
+  replicas: 0
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: telegram-pairing } }
+  template:
+    metadata: { labels: { app: telegram-pairing } }
+    spec:
+      enableServiceLinks: false
+      # Mismo sitio que telegram-connector en prod (patch-telegram-dgx.yaml no esta activo).
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: telegram-pairing
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest
+          # Entrypoint de P4b (connectors/telegram/src/pairing/main.ts), por tsx sin watch.
+          command: ["sh", "-c", "cd /app/connectors/telegram && exec tsx src/pairing/main.ts"]
+          ports: [{ name: http, containerPort: 3002 }]
+          env:
+            - { name: PORT, value: "3002" }
+            - { name: SOCIAL_PAIRING_API, value: "off" }
+            - { name: SESSION_PATH, value: "/app/pairing-sessions" }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 30m, memory: 192Mi }
+            limits:   { memory: 768Mi }
+          readinessProbe:
+            tcpSocket: { port: 3002 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - { name: pairing-sessions, mountPath: /app/pairing-sessions }
+      volumes:
+        - name: pairing-sessions
+          emptyDir: { medium: Memory, sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: telegram-pairing, namespace: whatsapp-mcp }
+spec:
+  selector: { app: telegram-pairing }
+  ports: [{ name: http, port: 3002, targetPort: 3002 }]
