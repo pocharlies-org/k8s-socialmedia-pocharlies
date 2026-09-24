@@ -35,10 +35,16 @@ jobs:
           cache: false
       - name: Start MinIO
         run: |
-          # dl.min.io/server devuelve HTTP 410 desde 2025-10: MinIO ya no publica
+          # Las descargas de MinIO devuelven HTTP 410 desde 2025-10 (sin binarios de comunidad):
+          # go install del último tag community. El binario AIStor no vale (sin licencia deniega S3).
+          go install github.com/minio/minio@RELEASE.2025-10-15T17-29-55Z
+          cp "$(go env GOPATH)/bin/minio" /tmp/minio
           # binarios de comunidad (distribución solo-fuente, ver README de
           # github.com/minio/minio). Canal oficial: `go install`, fijado al último
-          # tag community. El binario AIStor (dl.min.io/aistor/...) no vale: sin
+          # Las descargas de MinIO devuelven HTTP 410 desde 2025-10 (sin binarios de comunidad):
+          # go install del último tag community. El binario AIStor no vale (sin licencia deniega S3).
+          go install github.com/minio/minio@RELEASE.2025-10-15T17-29-55Z
+          cp "$(go env GOPATH)/bin/minio" /tmp/minio
           # licencia arranca en modo offline y deniega TODAS las operaciones S3.
           go install github.com/minio/minio@RELEASE.2025-10-15T17-29-55Z
           mv "$(go env GOPATH)/bin/minio" /tmp/minio
