@@ -38,6 +38,15 @@ spec:
           podSelector:
             matchLabels:
               app: dgx-dashboard-backend
+        # dgx-messages salio del dashboard a su propio namespace y sirve los
+        # adjuntos (stickers, notas de voz) de socialmedia-media: sin esta regla
+        # el default-deny le devuelve connection refused.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: messages
+          podSelector:
+            matchLabels:
+              app: dgx-messages
       ports:
         - protocol: TCP
           port: 9000
