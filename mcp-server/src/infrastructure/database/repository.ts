@@ -7,6 +7,7 @@ import {
   Attachment,
 } from '../../domain/entities';
 import { accountKey, normalizeAccount } from '../../domain/account';
+import { socialAccountId, type AccountChannel } from '../../domain/account-registry';
 
 export class DatabaseRepository {
   constructor(private client: Pool) {}
@@ -227,6 +228,8 @@ export class DatabaseRepository {
     limit?: number;
     includeParticipants?: boolean;
     account?: string;
+    /** When set, scope by social account (account_id) instead of the legacy namespace. */
+    channel?: AccountChannel;
   }): Promise<
     {
       id: string;
@@ -242,6 +245,10 @@ export class DatabaseRepository {
     const { type, query, limit = 20, includeParticipants = true } = options;
     const account = normalizeAccount(options.account);
     const searchPattern = query ? `%${query}%` : null;
+    // The legacy `account` column is shared by every channel of a namespace
+    // (WhatsApp and Telegram 'personal'); account_id is one provider account.
+    const scope = options.channel ? 'c.account_id = $3' : 'c.account = $3';
+    const scopeValue = options.channel ? socialAccountId(options.channel, account) : account;
 
     const result = await this.client.query(
       `SELECT c.*,
@@ -256,11 +263,11 @@ export class DatabaseRepository {
                          JOIN participants p ON p.id = cp.participant_id
                          WHERE cp.conversation_id = c.id
                          AND (p.name ILIKE $2 OR p.push_name ILIKE $2 OR p.id ILIKE $2)))
-         AND c.account = $3
+         AND ${scope}
          AND c.merged_into IS NULL
        ORDER BY c.last_message_at DESC NULLS LAST
        LIMIT $4`,
-      [type || null, searchPattern, account, limit]
+      [type || null, searchPattern, scopeValue, limit]
     );
 
     const conversations = await Promise.all(
