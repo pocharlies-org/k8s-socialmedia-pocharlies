@@ -141,3 +141,88 @@ export function createCredentialWriteBack(
     },
   };
 }
+
+/**
+ * The slice of BaileysClient the credential-store wiring needs. Kept
+ * structural so the pairing pool's specs can drive it with a fake socket.
+ */
+export interface CredentialSessionClient {
+  getAuthDir(): string;
+  setCredsSavedHook(hook: () => void): void;
+  setSessionInvalidatedHook(hook: () => Promise<void> | void): void;
+  once(event: 'connected', listener: () => void): unknown;
+}
+
+export interface AttachCredentialSessionOptions {
+  /**
+   * SC-1225 (pairing pool): no row is written until the socket reaches its
+   * first `connection: open` — a QR that is never scanned leaves nothing in
+   * the store. Default false = the SC-705 per-sub connector behaviour
+   * (every saveCreds is mirrored from the start).
+   */
+  writeAfterFirstOpen?: boolean;
+  /** Called after the row of a logged-out session has been deleted. */
+  onInvalidated?: () => void;
+  log?: (msg: string) => void;
+  logError?: (msg: string) => void;
+  debounceMs?: number;
+}
+
+export interface AttachedCredentialSession {
+  /** 'loaded' = the stored row was applied to the auth dir before connect(). */
+  loaded: 'loaded' | 'fresh';
+  writeBack: CredentialWriteBack;
+}
+
+/**
+ * SC-1225: the SC-705 wiring that lived inline in main.ts, extracted so the
+ * per-sub connector (main.ts) and the pairing pool share one copy. Call it
+ * BEFORE `client.connect()`: it loads the row into the auth dir, installs
+ * the saveCreds → store.put write-back and deletes the row on `loggedOut`.
+ * With default options it is exactly the previous main.ts code path.
+ */
+export async function attachCredentialSession(
+  client: CredentialSessionClient,
+  store: CredentialStore,
+  sessionKey: string,
+  opts: AttachCredentialSessionOptions = {}
+): Promise<AttachedCredentialSession> {
+  const authDir = client.getAuthDir();
+  const loaded = await loadCredentialSession(store, sessionKey, authDir, opts.log);
+  const writeBack = createCredentialWriteBack(
+    store,
+    sessionKey,
+    authDir,
+    opts.logError,
+    opts.debounceMs
+  );
+
+  if (!opts.writeAfterFirstOpen) {
+    client.setCredsSavedHook(() => writeBack.schedule());
+    client.setSessionInvalidatedHook(async () => {
+      await store.delete(sessionKey, 'whatsapp');
+      opts.onInvalidated?.();
+    });
+    return { loaded, writeBack };
+  }
+
+  let opened = false;
+  let invalidated = false;
+  client.once('connected', () => {
+    if (invalidated) return;
+    opened = true;
+    writeBack.schedule(); // the first row lands right after the first open
+  });
+  client.setCredsSavedHook(() => {
+    if (opened && !invalidated) writeBack.schedule();
+  });
+  client.setSessionInvalidatedHook(async () => {
+    invalidated = true;
+    // Let an in-flight put land first so it cannot resurrect the row after
+    // the delete; no new put can be scheduled once `invalidated` is set.
+    await writeBack.flush();
+    await store.delete(sessionKey, 'whatsapp');
+    opts.onInvalidated?.();
+  });
+  return { loaded, writeBack };
+}

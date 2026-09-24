@@ -14,7 +14,9 @@ import type {
   CredentialStore,
   StoredCredential,
 } from '@mcp-socialmedia/shared';
+import { EventEmitter } from 'node:events';
 import {
+  attachCredentialSession,
   createCredentialWriteBack,
   credentialSessionKeyFromEnv,
   loadCredentialSession,
@@ -168,4 +170,83 @@ test('write-back: empty auth dir still round-trips through serialize (fresh pair
 
   assert.equal(store.puts.length, 1);
   assert.deepEqual((store.puts[0].payload as { files: Record<string, string> }).files, {});
+});
+
+/** Minimal stand-in for BaileysClient's credential-store surface. */
+class FakeHookClient extends EventEmitter {
+  credsSaved: (() => void) | null = null;
+  invalidated: (() => Promise<void> | void) | null = null;
+  constructor(private readonly dir: string) {
+    super();
+  }
+  getAuthDir(): string {
+    return this.dir;
+  }
+  setCredsSavedHook(hook: () => void): void {
+    this.credsSaved = hook;
+  }
+  setSessionInvalidatedHook(hook: () => Promise<void> | void): void {
+    this.invalidated = hook;
+  }
+}
+
+test('attachCredentialSession (default = SC-705 main.ts path): load, every saveCreds put, loggedOut deletes', async () => {
+  const store = new FakeStore();
+  store.rows.set('sub-1/whatsapp', {
+    sessionKey: 'sub-1',
+    channel: 'whatsapp',
+    payload: { files: { 'creds.json': Buffer.from('{"me":{"id":"1@s.whatsapp.net"}}').toString('base64') } },
+    updatedAt: new Date(),
+  });
+  const dir = await mkdtemp(join(tmpdir(), 'cred-attach-'));
+  const client = new FakeHookClient(dir);
+  const { loaded, writeBack } = await attachCredentialSession(client, store, 'sub-1', {
+    debounceMs: 0,
+    log: () => {},
+  });
+  assert.equal(loaded, 'loaded');
+  assert.match(await readFile(join(dir, 'creds.json'), 'utf-8'), /1@s.whatsapp.net/);
+
+  // No `connected` needed: the per-sub connector mirrors from the first saveCreds.
+  client.credsSaved?.();
+  await writeBack.flush();
+  assert.equal(store.puts.length, 1);
+
+  await client.invalidated?.();
+  assert.equal(store.rows.has('sub-1/whatsapp'), false);
+});
+
+test('attachCredentialSession writeAfterFirstOpen: nothing is written before the first connection open', async () => {
+  const store = new FakeStore();
+  const dir = await mkdtemp(join(tmpdir(), 'cred-attach-open-'));
+  const client = new FakeHookClient(dir);
+  let invalidatedCalls = 0;
+  const { loaded, writeBack } = await attachCredentialSession(client, store, 'sub-9', {
+    writeAfterFirstOpen: true,
+    debounceMs: 0,
+    log: () => {},
+    onInvalidated: () => {
+      invalidatedCalls += 1;
+    },
+  });
+  assert.equal(loaded, 'fresh');
+
+  await writeFile(join(dir, 'creds.json'), '{"noiseKey":1}');
+  client.credsSaved?.(); // pre-pairing saveCreds (QR phase)
+  await writeBack.flush();
+  assert.equal(store.puts.length, 0);
+
+  client.emit('connected');
+  await writeBack.flush();
+  assert.equal(store.puts.length, 1);
+  client.credsSaved?.(); // rotation after open is mirrored
+  await writeBack.flush();
+  assert.equal(store.puts.length, 2);
+
+  await client.invalidated?.();
+  assert.equal(store.rows.has('sub-9/whatsapp'), false);
+  assert.equal(invalidatedCalls, 1);
+  client.credsSaved?.(); // late saveCreds after loggedOut must not resurrect the row
+  await writeBack.flush();
+  assert.equal(store.rows.has('sub-9/whatsapp'), false);
 });

@@ -9,9 +9,8 @@ import { scrubSignalSessionLogs } from './signal-log-scrub';
 import { getPool } from './db-writer';
 import {
   CredentialWriteBack,
-  createCredentialWriteBack,
+  attachCredentialSession,
   credentialSessionKeyFromEnv,
-  loadCredentialSession,
   sessionPathForSub,
 } from './credential-session';
 
@@ -317,17 +316,16 @@ ${renewScript}
   // must happen BEFORE connect() so a restarted pod comes back on its stored
   // session (criterion 3: no QR after rollout restart). Write-back is
   // obligatory: without it the row and the PVC diverge and rotation is lost.
+  // SC-1225: the wiring lives in attachCredentialSession() (shared with the
+  // pairing pool); default options = the exact SC-705 behaviour.
   let credentialWriteBack: CredentialWriteBack | null = null;
   if (credentialSessionKey) {
     const store = new PostgresCredentialStore(getPool());
-    await loadCredentialSession(store, credentialSessionKey, client.getAuthDir());
-    credentialWriteBack = createCredentialWriteBack(
+    ({ writeBack: credentialWriteBack } = await attachCredentialSession(
+      client,
       store,
-      credentialSessionKey,
-      client.getAuthDir()
-    );
-    client.setCredsSavedHook(() => credentialWriteBack?.schedule());
-    client.setSessionInvalidatedHook(() => store.delete(credentialSessionKey, 'whatsapp'));
+      credentialSessionKey
+    ));
   }
 
   await client.connect();
