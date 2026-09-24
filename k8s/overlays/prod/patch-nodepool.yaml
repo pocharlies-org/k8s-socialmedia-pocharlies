@@ -24,6 +24,8 @@
 # MOVED 2026-06-04 to sauvage (edge node, role=edge:NoSchedule → toleration):
 #  - telegram-sync{,-professional}: SESSION-LESS since v1.3.38 (ingests via NATS + the connector
 #    HTTP API, holds no Telethon session) → no IP binding → safe on the OVH edge node (amd64).
+#    That placement is now the renderer default for every telegram-sync (syncNodeSelector /
+#    syncTolerations in scripts/render-connectors.py), so it is no longer patched here.
 #
 # MOVED to node-pool=ks5-nvme (no IP-bound session): instagram-connector (Graph API tokens),
 # mcp-server, mcp-sse, brain-ingest, and the nats/minio backends. nats/minio carry RWO
@@ -110,34 +112,3 @@ spec:
           nodeSelector:
             topology: null
             node-pool: ks5-nvme
----
-# telegram-sync{,-professional} → sauvage (edge, amd64). Session-less since v1.3.38, no IP
-# binding. Drop topology, pin to sauvage, keep arch:amd64, tolerate role=edge. (base already
-# has strategy:Recreate.)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: telegram-sync
-  namespace: whatsapp-mcp
-spec:
-  template:
-    spec:
-      nodeSelector:
-        topology: null
-        kubernetes.io/hostname: sauvage
-      tolerations:
-        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: telegram-sync-professional
-  namespace: whatsapp-mcp
-spec:
-  template:
-    spec:
-      nodeSelector:
-        topology: null
-        kubernetes.io/hostname: sauvage
-      tolerations:
-        - { key: role, operator: Equal, value: edge, effect: NoSchedule }
