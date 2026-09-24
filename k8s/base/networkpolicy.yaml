@@ -137,6 +137,14 @@ spec:
           podSelector:
             matchLabels:
               app: dgx-dashboard-backend
+        # The messages console left the dashboard (DGX-137): it sends to both
+        # Telegram connectors like it did from control-nexus.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: messages
+          podSelector:
+            matchLabels:
+              app: dgx-messages
       ports:
         - protocol: TCP
           port: 3002
