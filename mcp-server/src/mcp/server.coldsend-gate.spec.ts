@@ -1,3 +1,4 @@
+import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
 
 /**
@@ -20,10 +21,12 @@ function serverWith(queryImpl: QueryImpl) {
   const server = Object.create(MCPServer.prototype) as MCPServer;
   const connectorCall = jest.fn(async () => ({ ok: true }));
   const query = jest.fn(queryImpl);
+  useTestAccounts({
+    whatsapp: { personal: 'http://wa-personal', professional: 'http://wa-professional' },
+  });
   Object.assign(server as unknown as Record<string, unknown>, {
     dbClient: { query },
     connectorCall,
-    waUrls: { personal: 'http://wa-personal', professional: 'http://wa-professional' },
   });
   return {
     connectorCall,

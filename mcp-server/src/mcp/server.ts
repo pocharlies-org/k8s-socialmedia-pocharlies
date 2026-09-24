@@ -22,13 +22,19 @@ import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
 import { actorRequestHeaders, generateHMACSignature } from '@mcp-socialmedia/shared';
 import {
-  ACCOUNTS,
+  accountList,
   accountKey,
   normalizeAccount,
   stripAccount,
   type Account,
 } from '../domain/account';
 import { identityBindingEnabled, resolveBoundAccount } from '../domain/identity-bindings';
+import {
+  findAccount,
+  getAccounts,
+  type AccountChannel,
+  type SocialAccount,
+} from '../domain/account-registry';
 import { getRequestActor } from '@mcp-socialmedia/shared';
 import { createHash, createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
@@ -329,10 +335,6 @@ export class MCPServer {
   private telegramBridgeSecret: string;
   private instagramUrl: string;
   private connectorSecret: string;
-  // Per-account connector routing (WhatsApp: personal / professional / leila).
-  private waUrls!: Record<string, string>;
-  private tgUrls!: Record<string, string>;
-  private tgBridgeUrls!: Record<string, string>;
   private inputValidators?: Map<string, ValidateFunction>;
 
   constructor(
@@ -392,27 +394,8 @@ export class MCPServer {
     this.instagramUrl = process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003';
     this.connectorSecret = _connectorSharedSecret;
 
-    // Account routing. Every WhatsApp account is a separate Baileys (WhatsApp
-    // Web) connector instance, each linked to its own number/session
-    // (personal / professional / leila — SC-1144 fase 2).
-    // Telegram: two separate connector instances (personal / professional).
-    this.waUrls = {
-      personal: process.env.WHATSAPP_PERSONAL_URL || this.connectorUrl,
-      professional:
-        process.env.WHATSAPP_PROFESSIONAL_URL || 'http://whatsapp-connector-professional:3001',
-      leila: process.env.WHATSAPP_LEILA_URL || 'http://whatsapp-connector-leila:3001',
-    };
-    this.tgUrls = {
-      personal: process.env.TELEGRAM_PERSONAL_URL || this.telegramUrl,
-      professional:
-        process.env.TELEGRAM_PROFESSIONAL_URL || 'http://telegram-connector-professional:3002',
-    };
-    // Telethon bridge (live unread) is per-account, served by each telegram-sync instance.
-    this.tgBridgeUrls = {
-      personal: this.telegramBridgeUrl,
-      professional:
-        process.env.TELEGRAM_BRIDGE_PROFESSIONAL_URL || 'http://telegram-sync-professional:3080',
-    };
+    // Account routing comes from the account registry (account-registry.ts):
+    // one entry per connector instance, re-read on each call.
 
     this.logger = pino({
       transport: {
@@ -424,36 +407,32 @@ export class MCPServer {
     this.setupHandlers();
   }
 
-  /** WhatsApp connector URL for an account (both are Baileys/WhatsApp Web). */
-  private waUrl(account?: string): string {
-    if (account === undefined) return this.waUrls.personal;
-    const url = this.waUrls[account];
-    if (!url) {
+  /** Registry entry for an account, or a canonical unsupported_capability error. */
+  private registryAccount(channel: AccountChannel, account?: string): SocialAccount {
+    const id = account === undefined ? 'personal' : account;
+    const entry = findAccount(channel, id);
+    if (!entry) {
       throw this.canonicalError(
         'unsupported_capability',
-        `WhatsApp account '${account}' is not configured`
+        `${channel === 'whatsapp' ? 'WhatsApp' : channel === 'telegram' ? 'Telegram' : 'Instagram'} account '${id}' is not configured`
       );
     }
-    return url;
+    return entry;
+  }
+
+  /** WhatsApp connector URL for an account (every one is a Baileys instance). */
+  private waUrl(account?: string): string {
+    return this.registryAccount('whatsapp', account).connectorUrl as string;
   }
 
   /** Telegram connector URL for an account (separate instance per account). */
   private tgUrl(account?: string): string {
-    if (account === undefined) return this.tgUrls.personal;
-    const url = this.tgUrls[account];
-    if (!url) {
-      throw this.canonicalError(
-        'unsupported_capability',
-        `Telegram account '${account}' is not configured`
-      );
-    }
-    return url;
+    return this.registryAccount('telegram', account).connectorUrl as string;
   }
 
   /** Telegram-sync (Telethon) bridge URL for an account — used by live unread. */
   private tgBridgeUrl(account?: string): string {
-    if (account === undefined) return this.tgBridgeUrls.personal;
-    const url = this.tgBridgeUrls[account];
+    const url = this.registryAccount('telegram', account).bridgeUrl;
     if (!url) {
       throw this.canonicalError(
         'unsupported_capability',
@@ -461,6 +440,11 @@ export class MCPServer {
       );
     }
     return url;
+  }
+
+  /** Cold-send policy of a WhatsApp account (registry attribute). */
+  private requiresInboundBeforeSend(account?: string): boolean {
+    return this.registryAccount('whatsapp', account || undefined).requireInboundBeforeSend;
   }
 
   private setupHandlers(): void {
@@ -1031,101 +1015,13 @@ export class MCPServer {
   private async canonicalListAccounts(args: Record<string, any>): Promise<any> {
     const status = this.legacyResultData(await this.handleMessagingStatus());
     const selectedChannel = args.channel === undefined ? undefined : this.channel(args);
-    const accounts = [
-      {
-        channel: 'whatsapp',
-        accountId: 'personal',
-        transport: 'baileys',
-        capabilities: {
-          conversations: true,
-          messages: true,
-          media: true,
-          send: true,
-          templates: false,
-          groups: true,
-        },
-      },
-      {
-        channel: 'whatsapp',
-        accountId: 'professional',
-        transport: 'baileys',
-        capabilities: {
-          conversations: true,
-          messages: true,
-          media: true,
-          send: true,
-          templates: false,
-          groups: true,
-        },
-      },
-      {
-        channel: 'whatsapp',
-        accountId: 'leila',
-        transport: 'baileys',
-        capabilities: {
-          conversations: true,
-          messages: true,
-          media: true,
-          send: true,
-          templates: false,
-          groups: true,
-        },
-      },
-      {
-        channel: 'telegram',
-        accountId: 'personal',
-        transport: 'mtcute',
-        capabilities: {
-          conversations: true,
-          messages: true,
-          media: true,
-          send: true,
-          forums: true,
-          interactions: true,
-        },
-      },
-      {
-        channel: 'telegram',
-        accountId: 'professional',
-        transport: 'mtcute',
-        capabilities: {
-          conversations: true,
-          messages: true,
-          media: true,
-          send: true,
-          forums: true,
-          interactions: true,
-        },
-      },
-      {
-        channel: 'instagram',
-        accountId: 'skirmshop',
-        transport: 'instagram-graph-api',
-        capabilities: {
-          conversations: true,
-          messages: true,
-          media: true,
-          send: true,
-          publish: true,
-          comments: true,
-          insights: true,
-        },
-      },
-      {
-        channel: 'instagram',
-        accountId: 'barbelpapis',
-        transport: 'instagram-graph-api',
-        capabilities: {
-          conversations: true,
-          messages: true,
-          media: true,
-          send: true,
-          publish: true,
-          comments: true,
-          insights: true,
-        },
-      },
-    ]
+    const accounts = getAccounts()
+      .map(item => ({
+        channel: item.channel,
+        accountId: item.accountId,
+        transport: item.transport,
+        capabilities: item.capabilities,
+      }))
       .filter(item => !selectedChannel || item.channel === selectedChannel)
       .map(item => ({
         ...item,
@@ -1144,15 +1040,10 @@ export class MCPServer {
     channel: SocialChannel;
     accountId: string;
   }> {
-    const all: Array<{ channel: SocialChannel; accountId: string }> = [
-      { channel: 'whatsapp', accountId: 'personal' },
-      { channel: 'whatsapp', accountId: 'professional' },
-      { channel: 'whatsapp', accountId: 'leila' },
-      { channel: 'telegram', accountId: 'personal' },
-      { channel: 'telegram', accountId: 'professional' },
-      { channel: 'instagram', accountId: 'skirmshop' },
-      { channel: 'instagram', accountId: 'barbelpapis' },
-    ];
+    const all = getAccounts().map(item => ({
+      channel: item.channel as SocialChannel,
+      accountId: item.accountId,
+    }));
     return channel ? all.filter(item => item.channel === channel) : all;
   }
 
@@ -3021,7 +2912,7 @@ export class MCPServer {
     // keep the inbound gate untouched.
     const conversationId = isGroupJid(args.chatId)
       ? bareWhatsAppJid(args.chatId)
-      : account === 'professional'
+      : this.requiresInboundBeforeSend(account)
         ? await this.requireProfessionalInboundChat(args.chatId, {
             phone: args.phone,
             phoneE164: args.phoneE164,
@@ -3944,9 +3835,11 @@ export class MCPServer {
     const bare = this.bareTelegramTgId(chatId);
     let candidates: string[];
     if (bare) {
-      candidates = [...new Set(ACCOUNTS.map(a => accountKey(a, bare)))];
+      candidates = [...new Set(accountList().map(a => accountKey(a, bare)))];
     } else {
-      const resolved = await Promise.all(ACCOUNTS.map(a => this.resolveTelegramChatId(chatId, a)));
+      const resolved = await Promise.all(
+        accountList().map(a => this.resolveTelegramChatId(chatId, a))
+      );
       candidates = [...new Set(resolved.filter((c): c is string => !!c))];
     }
     if (!candidates.length) return { account: requested, source: 'fallback', candidates };
@@ -4273,7 +4166,7 @@ export class MCPServer {
       // BARE `@g.us` jid on both accounts (an account prefix reaches
       // sock.groupMetadata() verbatim and times out).
       body.conversationId = bareWhatsAppJid(body.conversationId);
-    } else if (normalizeAccount(account) === 'professional') {
+    } else if (this.requiresInboundBeforeSend(account)) {
       // Same cold-send guard as text sends: block first-contact media to a
       // professional chat with no prior inbound (Baileys account_restricted /
       // ban risk) and resolve the @lid-aware send jid. Mirrors handleSendMessage.
@@ -4303,7 +4196,7 @@ export class MCPServer {
       // handleSendMessage/handleSendFile: membership implies established
       // context, and the connector needs the bare `@g.us` jid.
       body.toChatId = bareWhatsAppJid(body.toChatId);
-    } else if (normalizeAccount(account) === 'professional') {
+    } else if (this.requiresInboundBeforeSend(account)) {
       // Gate the forward DESTINATION (toChatId) through the same inbound guard
       // as text/media sends — chatId is only the source we read from, so it
       // does not initiate contact. Resolves the @lid-aware send jid too.
@@ -4600,19 +4493,20 @@ export class MCPServer {
   }
 
   private async handleMessagingStatus() {
-    const targets = [
-      ['whatsapp', 'personal', this.waUrl('personal'), '/api/v1/health'],
-      ['whatsapp', 'professional', this.waUrl('professional'), '/api/v1/health'],
-      ['whatsapp', 'leila', this.waUrl('leila'), '/api/v1/health'],
-      ['telegram', 'personal', this.tgUrl('personal'), '/health'],
-      ['telegram', 'professional', this.tgUrl('professional'), '/health'],
+    const targets: Array<readonly [string, string, string, string]> = [
+      ...getAccounts('whatsapp').map(
+        a => ['whatsapp', a.accountId, a.connectorUrl as string, '/api/v1/health'] as const
+      ),
+      ...getAccounts('telegram').map(
+        a => ['telegram', a.accountId, a.connectorUrl as string, '/health'] as const
+      ),
       [
         'instagram',
         'default',
         process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003',
         '/health',
       ],
-    ] as const;
+    ];
     const checks = await Promise.all(
       targets.map(async ([kind, account, url, endpoint]) => {
         try {

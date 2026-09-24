@@ -17,6 +17,12 @@ configMapGenerator:
   - name: social-identity-bindings
     files:
       - social-identity-bindings.yaml
+  # Registro de cuentas del MCP (mcp-server/src/domain/account-registry.ts):
+  # una entrada por instancia de conector. Mismo criterio de nombre estatico:
+  # el codigo relee el fichero montado al cambiar (stat mtime+size).
+  - name: social-accounts
+    files:
+      - social-accounts.json
 
 generatorOptions:
   disableNameSuffixHash: true

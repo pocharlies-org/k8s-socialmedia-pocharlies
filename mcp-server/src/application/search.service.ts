@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import OpenAI from 'openai';
 import pino from 'pino';
 import { accountKey, type Account } from '../domain/account';
+import { accountNamespaces } from '../domain/account-registry';
 
 export interface SearchResult {
   messageId: string;
@@ -76,7 +77,7 @@ export class SearchService {
         params.push(accountKey(options.account, chatId));
       } else {
         sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push([chatId, accountKey('professional', chatId)]);
+        params.push(inEveryNamespace(chatId));
       }
       paramIndex++;
     }
@@ -99,7 +100,7 @@ export class SearchService {
         params.push(accountKey(options.account, sender));
       } else {
         sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push([sender, accountKey('professional', sender)]);
+        params.push(inEveryNamespace(sender));
       }
       paramIndex++;
     }
@@ -172,7 +173,7 @@ export class SearchService {
         params.push(accountKey(options.account, chatId));
       } else {
         sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push([chatId, accountKey('professional', chatId)]);
+        params.push(inEveryNamespace(chatId));
       }
       paramIndex++;
     }
@@ -195,7 +196,7 @@ export class SearchService {
         params.push(accountKey(options.account, sender));
       } else {
         sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push([sender, accountKey('professional', sender)]);
+        params.push(inEveryNamespace(sender));
       }
       paramIndex++;
     }
@@ -245,4 +246,9 @@ export class SearchService {
     // Fallback to keyword search
     return this.keywordSearch(query, options);
   }
+}
+
+/** Account-less filter: the raw id under every declared namespace (personal = bare). */
+function inEveryNamespace(id: string): string[] {
+  return [...new Set(accountNamespaces().map(a => accountKey(a, id)))];
 }

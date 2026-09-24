@@ -1,3 +1,4 @@
+import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
 import { SOCIAL_TOOL_REGISTRY } from './tool-registry';
 
@@ -16,13 +17,11 @@ function fakeRedis() {
   return {
     values,
     get: jest.fn(async (key: string) => values.get(key) ?? null),
-    set: jest.fn(
-      async (key: string, value: string, ...args: Array<string | number>) => {
-        if (args.includes('NX') && values.has(key)) return null;
-        values.set(key, value);
-        return 'OK';
-      }
-    ),
+    set: jest.fn(async (key: string, value: string, ...args: Array<string | number>) => {
+      if (args.includes('NX') && values.has(key)) return null;
+      values.set(key, value);
+      return 'OK';
+    }),
   };
 }
 
@@ -30,15 +29,19 @@ function createServer() {
   const server: any = Object.create(MCPServer.prototype);
   server.redisClient = fakeRedis();
   server.logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn() };
-  server.waUrls = {
-    personal: 'http://wa-personal',
-    professional: 'http://wa-professional',
-    leila: 'http://wa-leila',
-  };
-  server.tgUrls = {
-    personal: 'http://tg-personal',
-    professional: 'http://tg-professional',
-  };
+  useTestAccounts({
+    whatsapp: {
+      personal: 'http://wa-personal',
+      professional: 'http://wa-professional',
+      leila: 'http://wa-leila',
+    },
+  });
+  useTestAccounts({
+    telegram: {
+      personal: 'http://tg-personal',
+      professional: 'http://tg-professional',
+    },
+  });
   return server;
 }
 
@@ -158,18 +161,12 @@ describe('Socialmedia canonical v2 adapter', () => {
       message: 'uno',
       idempotencyKey: 'send-1',
     };
-    const first = await server.executeCanonicalTool(
-      definition('social_send_message'),
-      base
-    );
-    const replay = await server.executeCanonicalTool(
-      definition('social_send_message'),
-      base
-    );
-    const conflict = await server.executeCanonicalTool(
-      definition('social_send_message'),
-      { ...base, message: 'dos' }
-    );
+    const first = await server.executeCanonicalTool(definition('social_send_message'), base);
+    const replay = await server.executeCanonicalTool(definition('social_send_message'), base);
+    const conflict = await server.executeCanonicalTool(definition('social_send_message'), {
+      ...base,
+      message: 'dos',
+    });
 
     expect(first.structuredContent.ok).toBe(true);
     expect(replay.structuredContent.meta.replayed).toBe(true);
@@ -207,10 +204,9 @@ describe('Socialmedia canonical v2 adapter', () => {
       })
     );
 
-    const result = await server.executeCanonicalTool(
-      definition('social_list_conversations'),
-      { readSource: 'provider' }
-    );
+    const result = await server.executeCanonicalTool(definition('social_list_conversations'), {
+      readSource: 'provider',
+    });
     expect(result.structuredContent.ok).toBe(true);
     // 7 configured accounts, 6 answer (telegram-professional is the injected failure):
     // wa personal+professional+leila, tg personal, ig skirmshop+barbelpapis.
@@ -230,16 +226,13 @@ describe('Socialmedia canonical v2 adapter', () => {
   test('routes the complete Telegram forum management surface', async () => {
     const server = createServer();
     server.connectorCall = jest.fn(async () => ({ ok: true }));
-    const result = await server.executeCanonicalTool(
-      definition('social_manage_forum'),
-      {
-        channel: 'telegram',
-        accountId: 'professional',
-        action: 'addMembers',
-        target: '-100123456',
-        members: ['@alice', '1234'],
-      }
-    );
+    const result = await server.executeCanonicalTool(definition('social_manage_forum'), {
+      channel: 'telegram',
+      accountId: 'professional',
+      action: 'addMembers',
+      target: '-100123456',
+      members: ['@alice', '1234'],
+    });
     expect(result.structuredContent).toMatchObject({ ok: true, status: 'accepted' });
     expect(server.connectorCall).toHaveBeenCalledWith(
       'http://tg-professional',
@@ -251,14 +244,11 @@ describe('Socialmedia canonical v2 adapter', () => {
 
   test('rejects unsupported source/provider combinations explicitly', async () => {
     const server = createServer();
-    const result = await server.executeCanonicalTool(
-      definition('social_list_conversations'),
-      {
-        channel: 'instagram',
-        accountId: 'skirmshop',
-        readSource: 'index',
-      }
-    );
+    const result = await server.executeCanonicalTool(definition('social_list_conversations'), {
+      channel: 'instagram',
+      accountId: 'skirmshop',
+      readSource: 'index',
+    });
     expect(result).toMatchObject({
       isError: true,
       structuredContent: {

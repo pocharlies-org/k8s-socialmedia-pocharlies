@@ -9,11 +9,12 @@
  * `@mcp-socialmedia/core` repository with the others.
  */
 import { Pool } from 'pg';
+import { requireAccount } from '../domain/account-registry';
 import pino from 'pino';
 
 export interface InstagramEvent {
   platform: 'instagram';
-  account: string; // 'skirmshop' | 'barbelpapis'
+  account: string; // an instagram accountId of the account registry
   eventType: 'dm' | 'comment' | 'mention' | 'story_mention' | 'media' | 'unknown';
   senderId: string;
   senderUsername?: string;
@@ -37,7 +38,10 @@ export class InstagramIngestionService {
 
   async handleEvent(event: InstagramEvent): Promise<void> {
     try {
-      const account = routeInstagramAccount(event.account);
+      // DB namespace declared by the registry (skirmshop → professional,
+      // barbelpapis → personal today). An undeclared account is refused: it
+      // used to be filed under 'personal' silently.
+      const account = requireAccount('instagram', event.account).namespace;
       // DM events have a real message id and conversation; comments/mentions are
       // attached to a media post and we synthesise a conversation key per post.
       const ts = new Date(event.timestamp || new Date().toISOString());
@@ -93,7 +97,10 @@ export class InstagramIngestionService {
         return;
       }
 
-      const senderWaId = `ig_${event.senderId}`;
+      // Scoped by Instagram account: the same IGSID seen by two accounts is two
+      // participants. The bare `ig_<id>` key made the upsert below re-file the
+      // participant under whichever account wrote last.
+      const senderWaId = `ig_${event.account}_${event.senderId}`;
       const isGroup = convType === 'GROUP';
       const senderName = event.senderUsername || null;
 
@@ -157,8 +164,4 @@ export class InstagramIngestionService {
       this.logger.error(`Failed to ingest IG event: ${error}`);
     }
   }
-}
-
-function routeInstagramAccount(instagramAccount: string): 'personal' | 'professional' {
-  return instagramAccount === 'skirmshop' ? 'professional' : 'personal';
 }

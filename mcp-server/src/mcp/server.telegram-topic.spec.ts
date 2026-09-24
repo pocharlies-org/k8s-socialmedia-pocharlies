@@ -1,12 +1,15 @@
+import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
 
 function topicServer() {
   const server = Object.create(MCPServer.prototype) as MCPServer;
   const anyServer = server as any;
-  anyServer.tgUrls = {
-    personal: 'http://telegram-personal',
-    professional: 'http://telegram-professional',
-  };
+  useTestAccounts({
+    telegram: {
+      personal: 'http://telegram-personal',
+      professional: 'http://telegram-professional',
+    },
+  });
   anyServer.connectorCall = jest.fn(async () => ({ success: true }));
   anyServer.dbClient = {
     query: jest.fn(async () => ({ rows: [] })),
