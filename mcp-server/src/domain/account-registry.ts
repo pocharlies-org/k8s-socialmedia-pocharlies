@@ -36,6 +36,12 @@ export interface SocialAccount {
    * rows are filed under.
    */
   namespace: string;
+  /**
+   * Profile (social_profiles): groups accounts of any channel for the UI and
+   * permissions ("personal", "professional"...). Never decides storage.
+   * Defaults to the namespace.
+   */
+  profile: string;
   /** Cold-send gate: refuse 1:1 first contact without a prior inbound. */
   requireInboundBeforeSend: boolean;
   capabilities: Record<string, boolean>;
@@ -132,6 +138,10 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     if (channel !== 'instagram' && namespace !== item.accountId) {
       throw new AccountRegistryError(`${key}: a ${channel} account is its own namespace`);
     }
+    const profile = item.profile ?? namespace;
+    if (typeof profile !== 'string' || !ID_RE.test(profile)) {
+      throw new AccountRegistryError(`${key}: profile must be an account-style id`);
+    }
     const connectorUrl = httpUrl(item.connectorUrl, 'connectorUrl', key);
     if (channel !== 'instagram' && !connectorUrl) {
       throw new AccountRegistryError(`${key}: connectorUrl is required`);
@@ -156,6 +166,7 @@ export function parseAccounts(value: unknown): SocialAccount[] {
       connectorUrl,
       bridgeUrl: httpUrl(item.bridgeUrl, 'bridgeUrl', key),
       namespace,
+      profile,
       requireInboundBeforeSend: item.requireInboundBeforeSend ?? false,
       capabilities: { ...DEFAULT_CAPABILITIES[channel], ...(item.capabilities || {}) },
     } as SocialAccount;
@@ -170,17 +181,12 @@ export function parseAccounts(value: unknown): SocialAccount[] {
       );
     }
   }
-  // The inbound gate is implemented against the professional allowlist /
-  // manual-open tables (migrations 003/004). Declaring it elsewhere would
-  // claim a protection the code does not give, so refuse it until the gate is
-  // generalised.
+  // The inbound gate checks WhatsApp inbound history per account (ADR 0001);
+  // Telegram/Instagram have no cold-send risk model, so refuse the claim there.
   for (const a of accounts) {
-    if (
-      a.requireInboundBeforeSend &&
-      !(a.channel === 'whatsapp' && a.accountId === 'professional')
-    ) {
+    if (a.requireInboundBeforeSend && a.channel !== 'whatsapp') {
       throw new AccountRegistryError(
-        `${a.channel}:${a.accountId}: requireInboundBeforeSend is only implemented for whatsapp:professional`
+        `${a.channel}:${a.accountId}: requireInboundBeforeSend only applies to WhatsApp accounts`
       );
     }
   }
@@ -297,4 +303,9 @@ export function activeNamespaces(): string[] {
 /** Every account id declared on any channel (for identity-binding validation). */
 export function declaredAccountIds(): Set<string> {
   return new Set(getAccounts(undefined, true).map(a => a.accountId));
+}
+
+/** Primary key of the account in social_accounts: '<channel>:<accountId>'. */
+export function socialAccountId(channel: AccountChannel, accountId: string): string {
+  return `${channel}:${accountId}`;
 }

@@ -31,11 +31,7 @@ function resolverWith(opts: {
     resolve: (chatId: string, messageId: string, requested: Account): Promise<Resolution> =>
       (
         server as unknown as {
-          resolveTelegramMediaAccount: (
-            c: string,
-            m: string,
-            r: Account
-          ) => Promise<Resolution>;
+          resolveTelegramMediaAccount: (c: string, m: string, r: Account) => Promise<Resolution>;
         }
       ).resolveTelegramMediaAccount(chatId, messageId, requested),
   };
@@ -43,20 +39,24 @@ function resolverWith(opts: {
 
 describe('resolveTelegramMediaAccount', () => {
   it('overrides an explicit professional request when the message lives in the personal chat', async () => {
-    const { resolve } = resolverWith({ messageRows: [{ conversation_id: 'tg_8621739742' }] });
+    const { resolve } = resolverWith({
+      messageRows: [{ conversation_id: 'tg_8621739742', account_id: 'telegram:personal' }],
+    });
     const r = await resolve('8621739742', '197531', 'professional');
     expect(r.account).toBe('personal');
     expect(r.source).toBe('message');
     expect(r.candidates).toEqual([
-        'tg_8621739742',
-        'professional:tg_8621739742',
-        'leila:tg_8621739742',
-      ]);
+      'tg_8621739742',
+      'professional:tg_8621739742',
+      'leila:tg_8621739742',
+    ]);
   });
 
   it('keeps professional when the message really belongs to the professional chat', async () => {
     const { resolve } = resolverWith({
-      messageRows: [{ conversation_id: 'professional:tg_8621739742' }],
+      messageRows: [
+        { conversation_id: 'professional:tg_8621739742', account_id: 'telegram:professional' },
+      ],
     });
     const r = await resolve('8621739742', '197531', 'professional');
     expect(r.account).toBe('professional');
@@ -65,7 +65,9 @@ describe('resolveTelegramMediaAccount', () => {
 
   it('promotes a default personal request to professional when the message is professional', async () => {
     const { resolve } = resolverWith({
-      messageRows: [{ conversation_id: 'professional:tg_8621739742' }],
+      messageRows: [
+        { conversation_id: 'professional:tg_8621739742', account_id: 'telegram:professional' },
+      ],
     });
     const r = await resolve('8621739742', '197531', 'personal');
     expect(r.account).toBe('professional');
@@ -75,7 +77,7 @@ describe('resolveTelegramMediaAccount', () => {
   it('falls back to conversation-level evidence when no message row matches', async () => {
     const { resolve } = resolverWith({
       messageRows: [],
-      conversationRows: [{ id: 'professional:tg_999' }],
+      conversationRows: [{ id: 'professional:tg_999', account_id: 'telegram:professional' }],
     });
     const r = await resolve('999', '5', 'personal');
     expect(r.account).toBe('professional');
@@ -93,8 +95,8 @@ describe('resolveTelegramMediaAccount', () => {
   it('keeps the requested account on an ambiguous message match', async () => {
     const { resolve } = resolverWith({
       messageRows: [
-        { conversation_id: 'tg_8621739742' },
-        { conversation_id: 'professional:tg_8621739742' },
+        { conversation_id: 'tg_8621739742', account_id: 'telegram:personal' },
+        { conversation_id: 'professional:tg_8621739742', account_id: 'telegram:professional' },
       ],
     });
     const r = await resolve('8621739742', '197531', 'professional');
@@ -103,30 +105,34 @@ describe('resolveTelegramMediaAccount', () => {
   });
 
   it('normalizes tg-prefixed and account-prefixed chat ids to the same candidate set', async () => {
-    const { resolve } = resolverWith({ messageRows: [{ conversation_id: 'tg_8621739742' }] });
+    const { resolve } = resolverWith({
+      messageRows: [{ conversation_id: 'tg_8621739742', account_id: 'telegram:personal' }],
+    });
     const fromTgPrefix = await resolve('tg_8621739742', '197531', 'professional');
     const fromAccountPrefix = await resolve('professional:tg_8621739742', '197531', 'professional');
     expect(fromTgPrefix.candidates).toEqual([
-        'tg_8621739742',
-        'professional:tg_8621739742',
-        'leila:tg_8621739742',
-      ]);
+      'tg_8621739742',
+      'professional:tg_8621739742',
+      'leila:tg_8621739742',
+    ]);
     expect(fromAccountPrefix.candidates).toEqual([
-        'tg_8621739742',
-        'professional:tg_8621739742',
-        'leila:tg_8621739742',
-      ]);
+      'tg_8621739742',
+      'professional:tg_8621739742',
+      'leila:tg_8621739742',
+    ]);
   });
 
   it('resolves username chats per-account before probing for the message', async () => {
     const queryImpl: QueryImpl = async (sql: string, params: unknown[]) => {
       if (/lower\(metadata->>'username'\)/i.test(sql)) {
-        const like = String(params[1]);
-        return like.startsWith('professional:')
-          ? { rows: [{ id: 'professional:tg_555' }] }
+        return params[1] === 'telegram:professional'
+          ? { rows: [{ id: 'professional:tg_555', account_id: 'telegram:professional' }] }
           : { rows: [] };
       }
-      if (/FROM messages/i.test(sql)) return { rows: [{ conversation_id: 'professional:tg_555' }] };
+      if (/FROM messages/i.test(sql))
+        return {
+          rows: [{ conversation_id: 'professional:tg_555', account_id: 'telegram:professional' }],
+        };
       return { rows: [] };
     };
     const { resolve } = resolverWith({ queryImpl });

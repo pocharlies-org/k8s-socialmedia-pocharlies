@@ -2,6 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - manifest.yaml
+  # Per-account connector workloads, rendered from social-accounts.json by
+  # scripts/render-connectors.py (CI fails if stale: --check).
+  - generated/connectors.yaml
   - whatsapp-synapse-bridge.yaml
   - networkpolicy.yaml
 
@@ -20,9 +23,12 @@ configMapGenerator:
   # Registro de cuentas del MCP (mcp-server/src/domain/account-registry.ts):
   # una entrada por instancia de conector. Mismo criterio de nombre estatico:
   # el codigo relee el fichero montado al cambiar (stat mtime+size).
+  # Se monta la PROYECCION de runtime (generated/social-accounts.json = el
+  # registro sin los bloques `deploy`, que solo consume el renderizador), con la
+  # misma clave de fichero que antes.
   - name: social-accounts
     files:
-      - social-accounts.json
+      - social-accounts.json=generated/social-accounts.json
 
 generatorOptions:
   disableNameSuffixHash: true

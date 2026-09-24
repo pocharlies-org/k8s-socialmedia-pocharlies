@@ -65,7 +65,7 @@ export class DraftService {
     const result = await this.dbClient.query(
       `SELECT m.content, m.sender_wa_id, m.wa_timestamp
        FROM messages m
-       WHERE m.conversation_id = $1
+       WHERE m.conversation_id = COALESCE((SELECT merged_into FROM conversations WHERE id = $1), $1)
          AND (m.is_deleted IS NULL OR m.is_deleted = false)
        ORDER BY m.wa_timestamp DESC
        LIMIT $2`,
@@ -87,7 +87,7 @@ export class DraftService {
     const result = await this.dbClient.query(
       `SELECT COUNT(*) as count
        FROM draft_replies
-       WHERE conversation_id = $1
+       WHERE conversation_id = COALESCE((SELECT merged_into FROM conversations WHERE id = $1), $1)
          AND created_at >= $2`,
       [conversationId, oneHourAgo]
     );
@@ -224,7 +224,7 @@ Generate a draft reply. Keep it concise and appropriate for WhatsApp messaging.`
   async listDrafts(chatId: string, status?: string): Promise<DraftReplyData[]> {
     let sql = `
       SELECT * FROM draft_replies
-      WHERE conversation_id = $1
+      WHERE conversation_id = COALESCE((SELECT merged_into FROM conversations WHERE id = $1), $1)
     `;
     const params: unknown[] = [chatId];
 
