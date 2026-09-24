@@ -66,6 +66,7 @@ async function main() {
     apiId: TELEGRAM_API_ID,
     apiHash: TELEGRAM_API_HASH,
     sessionString,
+    credentialSessionKey,
   });
 
   if (credentialSessionKey && credentialStore) {

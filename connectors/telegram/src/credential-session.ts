@@ -16,7 +16,7 @@
  *    inadoptable — the same mechanism the WhatsApp adapter uses.
  *  - Write-back is OBLIGATORY (tech-lead ruling on SC-1144): mtcute persists
  *    session state through StorageManager.save() (session import, per-DC auth
- *    key creation, update-state sync — see PersistHookedMemoryStorage in
+ *    key creation, update-state sync — see HookedMemoryStorageDriver in
  *    telegram-client.ts). Every such persist schedules a debounced
  *    export+put, the counterpart of the baileys saveCreds write-back. Without
  *    it the row and the live session diverge and a pod restart loses rotation.

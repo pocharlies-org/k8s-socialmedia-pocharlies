@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import type { MemoryStorage } from '@mtcute/node';
+import { MemoryStorage } from '@mtcute/node';
 import type { Pool } from 'pg';
 import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import {
@@ -24,7 +24,11 @@ import {
   isSessionInvalidatedError,
   resolveTelegramSession,
 } from './credential-session';
-import { PersistHookedMemoryStorage } from './telegram-client';
+import {
+  HookedMemoryStorageDriver,
+  PersistHookedStorage,
+  createTelegramStorage,
+} from './telegram-client';
 
 class FakeStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();
@@ -302,18 +306,37 @@ test('isSessionInvalidatedError: revoked/expired sessions true, everything else 
 // the mtcute persist hook itself
 // ---------------------------------------------------------------------------
 
-test('PersistHookedMemoryStorage: driver.save fires the hook; repos keep working', async () => {
+test('createTelegramStorage: no credentialSessionKey → plain MemoryStorage (house path untouched)', () => {
   let fired = 0;
-  const storage = new PersistHookedMemoryStorage(() => fired++);
-  // The shadowed driver carries save(); the declared MemoryStorageDriver type
-  // does not, so reach it the way StorageManager does (driver.save?.()).
-  const driver = storage.driver as MemoryStorage['driver'] & { save?: () => Promise<void> };
-  assert.equal(typeof driver.save, 'function');
-  await driver.save?.();
-  await driver.save?.();
+  for (const key of [undefined, null, '']) {
+    const storage = createTelegramStorage(key, () => fired++);
+    assert.ok(storage instanceof MemoryStorage);
+    assert.ok(!(storage instanceof PersistHookedStorage));
+    assert.equal(storage.driver.constructor.name, 'MemoryStorageDriver');
+    assert.equal((storage.driver as { save?: unknown }).save, undefined);
+  }
+  assert.equal(fired, 0);
+});
+
+test('createTelegramStorage: with credentialSessionKey → driver.save() fires the persist hook', async () => {
+  let fired = 0;
+  const storage = createTelegramStorage('sub-a', () => fired++);
+  assert.ok(storage instanceof PersistHookedStorage);
+  assert.ok(storage.driver instanceof HookedMemoryStorageDriver);
+  // StorageManager.save() reaches the driver exactly this way.
+  await storage.driver.save?.();
+  await storage.driver.save?.();
   assert.equal(fired, 2);
-  // The shadowed driver shares state with the repos built on the base one.
+});
+
+test('PersistHookedStorage: every repository is built on the hooked driver and keeps working', () => {
+  const storage = new PersistHookedStorage(() => {});
+  for (const repo of [storage.kv, storage.authKeys, storage.peers, storage.refMessages]) {
+    assert.equal(repo._driver, storage.driver);
+  }
   const key = new Uint8Array([1, 2, 3]);
   storage.authKeys.set(2, key);
   assert.deepEqual(storage.authKeys.get(2), key);
+  storage.kv.set('k', new Uint8Array([9]));
+  assert.deepEqual(storage.kv.get('k'), new Uint8Array([9]));
 });

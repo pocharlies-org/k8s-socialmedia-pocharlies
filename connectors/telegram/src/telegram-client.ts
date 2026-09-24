@@ -1,12 +1,18 @@
 import {
   TelegramClient,
   MemoryStorage,
+  MemoryStorageDriver,
+  MemoryKeyValueRepository,
+  MemoryAuthKeysRepository,
+  MemoryPeersRepository,
+  MemoryRefMessagesRepository,
   InputMedia,
   Message,
   Peer,
   User,
   Chat,
 } from '@mtcute/node';
+import type { ITelegramStorageProvider } from '@mtcute/node';
 import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
 import pino from 'pino';
@@ -14,31 +20,57 @@ import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 import { isSessionInvalidatedError } from './credential-session';
 
 /**
- * SC-1145: MemoryStorage with a save() hook.
+ * SC-1145: in-memory storage driver with a save() hook.
  *
  * mtcute persists session state by calling StorageManager.save(), which
  * delegates to `driver.save?.()` — on session import (start()), on every
  * per-DC auth-key creation, and on update-state sync. The plain
- * MemoryStorageDriver has no save() (nothing to write), so adding one here
- * gives the connector the exact counterpart of the baileys `saveCreds`
- * trigger: every library persist schedules the credential-store write-back.
- * The repos keep referencing the base driver instance; the shadowed driver
- * inherits its state through the prototype chain, so nothing else changes.
+ * MemoryStorageDriver has no save() (nothing to write); this subclass adds
+ * one, using the extension point mtcute exports (IStorageDriver.save is
+ * optional), so the connector gets the exact counterpart of the baileys
+ * `saveCreds` trigger: every library persist schedules the credential-store
+ * write-back.
  */
-export class PersistHookedMemoryStorage extends MemoryStorage {
-  constructor(onPersist: () => void) {
+export class HookedMemoryStorageDriver extends MemoryStorageDriver {
+  constructor(private readonly onPersist: () => void) {
     super();
-    const base = this.driver;
-    const hooked: MemoryStorage['driver'] & { save(): Promise<void> } = Object.assign(
-      Object.create(base),
-      {
-        save: async (): Promise<void> => {
-          onPersist();
-        },
-      }
-    );
-    Object.defineProperty(this, 'driver', { value: hooked, enumerable: true });
   }
+
+  save(): void {
+    this.onPersist();
+  }
+}
+
+/**
+ * SC-1145: the storage provider for a per-sub connector — the same four
+ * memory repositories MemoryStorage builds, all wired to the hooked driver.
+ */
+export class PersistHookedStorage implements ITelegramStorageProvider {
+  readonly driver: HookedMemoryStorageDriver;
+  readonly kv: MemoryKeyValueRepository;
+  readonly authKeys: MemoryAuthKeysRepository;
+  readonly peers: MemoryPeersRepository;
+  readonly refMessages: MemoryRefMessagesRepository;
+
+  constructor(onPersist: () => void) {
+    this.driver = new HookedMemoryStorageDriver(onPersist);
+    this.kv = new MemoryKeyValueRepository(this.driver);
+    this.authKeys = new MemoryAuthKeysRepository(this.driver);
+    this.peers = new MemoryPeersRepository(this.driver);
+    this.refMessages = new MemoryRefMessagesRepository(this.driver);
+  }
+}
+
+/**
+ * SC-1145: storage selection. Only a per-sub connector (credentialSessionKey
+ * set) gets the persist hook; the house accounts (no key, flags OFF) keep a
+ * plain `new MemoryStorage()`, byte-identical to before.
+ */
+export function createTelegramStorage(
+  credentialSessionKey: string | null | undefined,
+  onPersist: () => void
+): ITelegramStorageProvider {
+  return credentialSessionKey ? new PersistHookedStorage(onPersist) : new MemoryStorage();
 }
 
 export interface TelegramMessage {
@@ -102,6 +134,8 @@ export interface TelegramClientConfig {
   apiId: number;
   apiHash: string;
   sessionString?: string;
+  /** SC-1145: set only on a per-sub connector; unset = house account, legacy path. */
+  credentialSessionKey?: string | null;
 }
 
 /**
@@ -203,9 +237,11 @@ export class TelegramClientWrapper extends EventEmitter {
     this.client = new TelegramClient({
       apiId: config.apiId,
       apiHash: config.apiHash,
-      // PersistHookedMemoryStorage only adds a save() that calls the hook —
-      // null until a per-sub connector sets it, so the house path is a no-op.
-      storage: new PersistHookedMemoryStorage(() => this.sessionPersistHook?.()),
+      // Per-sub connector → hooked driver whose save() fires the persist hook;
+      // house account (no key) → plain MemoryStorage, exactly as before.
+      storage: createTelegramStorage(config.credentialSessionKey, () =>
+        this.sessionPersistHook?.()
+      ),
       // Dispatch outgoing messages we send to the event handler too. mtcute
       // defaults to no-dispatch on self-sent messages; we want them on NATS
       // for parity with the previous gramjs behavior (incoming + outgoing).
