@@ -52,6 +52,9 @@ Fecha: 2026-09-24. Estado: aceptado. Contexto: integración del fork NAS de Jord
 5. **Políticas y despliegue por cuenta**: la puerta cold-send se parametriza por cuenta (las tablas
    003/004 ya tienen `account`); los Deployments de conector se generan desde el registro con
    un renderizador y un check de CI de "generado al día".
+   Implementado en `scripts/render-connectors.py`: los parámetros por cuenta viven en el bloque
+   opcional `deploy` de cada entrada del registro; salida en `k8s/base/generated/` (manifiestos +
+   la proyección de runtime del registro, sin `deploy`, que es lo que monta el ConfigMap).
 
 ## Consecuencias
 
