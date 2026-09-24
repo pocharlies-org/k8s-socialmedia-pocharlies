@@ -253,49 +253,6 @@ export function bareWhatsAppJid(chatId: string): string {
   return stripAccount(String(chatId).trim()).id;
 }
 
-/**
- * Resolve a WhatsApp direct-send chatId into the provider ids to gate on
- * (`lookupRefs`, resolved per account by the ConversationResolver) and the jid
- * to actually send to.
- *
- * - LID jids keep their opaque id verbatim: sendJid = `<lid>` unless trusted
- *   phone evidence names the phone jid, which is then also looked up.
- * - Bare phones / `@c.us` / `@s.whatsapp.net` normalize to a phone jid.
- *
- * Returns null when the id is neither a LID jid nor a normalizable phone jid,
- * so the caller can raise the "valid individual phone or WhatsApp chat ID" error.
- */
-export function resolveDirectSendTarget(
-  chatId: unknown,
-  evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {}
-): {
-  lookupRefs: string[];
-  sendJid: string;
-  sourceLidJid?: string;
-  phoneE164?: string;
-  phoneWaJid?: string;
-  manualOpenUrl?: string;
-  phoneEvidenceSource?: TrustedPhoneEvidenceSource;
-} | null {
-  if (isLidJid(chatId)) {
-    const lidJid = bareWhatsAppJid(String(chatId));
-    const phone = trustedPhoneEvidence(evidence);
-    if (!phone) return { lookupRefs: [lidJid], sendJid: lidJid };
-    return {
-      lookupRefs: [lidJid, phone.sendJid],
-      sendJid: phone.sendJid,
-      sourceLidJid: lidJid,
-      phoneE164: phone.phoneE164,
-      phoneWaJid: phone.phoneWaJid,
-      manualOpenUrl: phone.manualOpenUrl,
-      phoneEvidenceSource: phone.source,
-    };
-  }
-  const waJid = normalizeDirectWhatsAppJid(chatId);
-  if (!waJid) return null;
-  return { lookupRefs: [waJid], sendJid: waJid };
-}
-
 export function normalizeDirectWhatsAppJid(chatId: unknown): string | null {
   if (typeof chatId !== 'string' && typeof chatId !== 'number') return null;
 
@@ -436,11 +393,6 @@ export class MCPServer {
       );
     }
     return url;
-  }
-
-  /** Cold-send policy of a WhatsApp account (registry attribute). */
-  private requiresInboundBeforeSend(account?: string): boolean {
-    return this.registryAccount('whatsapp', account || undefined).requireInboundBeforeSend;
   }
 
   private setupHandlers(): void {
@@ -2907,21 +2859,9 @@ export class MCPServer {
     }
 
     const account = normalizeAccount(args.account);
-    // Group sends bypass the professional cold-send gate: membership in a group
-    // already implies established context (no unsolicited first-contact), and the
-    // gate only ever supported 1:1 targets. Both accounts must hand the connector
-    // the BARE `@g.us` jid — a `professional:`/`personal:` prefix reaches
-    // `sock.groupMetadata()` verbatim and times out. Non-group professional sends
-    // keep the inbound gate untouched.
-    const conversationId = isGroupJid(args.chatId)
-      ? bareWhatsAppJid(args.chatId)
-      : this.requiresInboundBeforeSend(account)
-        ? await this.requireInboundChat(account, args.chatId, {
-            phone: args.phone,
-            phoneE164: args.phoneE164,
-            manualOpenUrl: args.manualOpenUrl,
-          })
-        : args.chatId;
+    // The connector expects the BARE jid: a legacy `professional:` prefix
+    // reaches Baileys verbatim (groups: sock.groupMetadata() times out).
+    const conversationId = bareWhatsAppJid(args.chatId);
     const connectorUrl = this.waUrl(account);
     const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
     const timestamp = Math.floor(Date.now() / 1000);
@@ -2994,105 +2934,6 @@ export class MCPServer {
       this.logger.error(`Error sending message: ${error}`);
       throw new McpError(ErrorCode.InternalError, `Failed to send message: ${error}`);
     }
-  }
-
-  /**
-   * True when any of `refs` resolves (id, external id or contact alias) to a
-   * canonical conversation of `account` holding an inbound WhatsApp message.
-   */
-  private async hasInbound(account: Account, refs: string[]): Promise<boolean> {
-    for (const ref of [...new Set(refs.filter(Boolean))]) {
-      const row = await this.conversations().resolve('whatsapp', account, ref);
-      if (!row || !ConversationResolver.belongsTo(row, 'whatsapp', account)) continue;
-      const inbound = await this.dbClient.query(
-        `SELECT 1 FROM messages m
-          WHERE m.conversation_id = $1 AND m.platform = 'whatsapp' AND m.direction = 'INBOUND'
-          LIMIT 1`,
-        [row.id]
-      );
-      if (inbound.rows.length > 0) return true;
-    }
-    return false;
-  }
-
-  /**
-   * Record trusted phone evidence for a LID contact as a contact alias
-   * (phone jid → LID) of this account. Replaces overloading
-   * conversations.wa_chat_id (ADR 0001); best effort.
-   */
-  private async persistLidPhoneAlias(
-    account: Account,
-    target: {
-      sourceLidJid?: string;
-      sendJid: string;
-      phoneEvidenceSource?: TrustedPhoneEvidenceSource;
-    }
-  ): Promise<void> {
-    if (!target.sourceLidJid || !normalizeDirectWhatsAppJid(target.sendJid)) return;
-    try {
-      await this.dbClient.query(
-        `INSERT INTO social_contact_aliases (account_id, alias_external_id, canonical_external_id, evidence)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (account_id, alias_external_id) DO NOTHING`,
-        [
-          socialAccountId('whatsapp', account),
-          target.sendJid,
-          target.sourceLidJid,
-          `send-phone-evidence:${target.phoneEvidenceSource || 'unknown'}`,
-        ]
-      );
-    } catch (error) {
-      (this.logger as pino.Logger | undefined)?.warn?.(
-        `Could not persist LID phone alias account=${account} source=${target.phoneEvidenceSource || 'unknown'}: ${safeError(error)}`
-      );
-    }
-  }
-
-  /**
-   * Cold-send gate for an account with requireInboundBeforeSend (registry):
-   * a 1:1 direct send needs an existing inbound message from that contact, and
-   * returns the jid that must actually be sent to.
-   *
-   * LID chats (`<n>@lid` / `<n>@hosted.lid`) are an opaque Baileys identity, not
-   * a phone: they are looked up verbatim and need trusted phone evidence.
-   * Bare phones / `@c.us` / `@s.whatsapp.net` normalize to a phone jid; the
-   * resolver maps a phone jid to its LID conversation through the aliases.
-   */
-  private async requireInboundChat(
-    account: Account,
-    chatId: string,
-    evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {}
-  ): Promise<string> {
-    const target = resolveDirectSendTarget(chatId, evidence);
-    if (!target) {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        `WhatsApp ${account} direct sends require a valid individual phone or WhatsApp chat ID`
-      );
-    }
-
-    if (isLidJid(chatId) && !target.phoneE164) {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        `WhatsApp ${account} @lid sends require trusted phone evidence (phone, phoneE164, or manualOpenUrl/wa.me) before automated sending.`
-      );
-    }
-
-    if (!(await this.hasInbound(account, target.lookupRefs))) {
-      const fallbackUrl =
-        target.manualOpenUrl ||
-        (target.phoneE164
-          ? manualWhatsAppOpenUrlFromPhone(target.phoneE164, '')
-          : manualWhatsAppOpenUrl(target.sendJid, ''));
-      const fallback = fallbackUrl ? ` Manual fallback: ${fallbackUrl}` : '';
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        `WhatsApp ${account} direct sends are only allowed after the customer has sent an inbound message.${fallback}`
-      );
-    }
-
-    await this.persistLidPhoneAlias(account, target);
-    return target.sendJid;
   }
 
   private async handleSendTemplate(args: {
@@ -4162,22 +4003,7 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
-    if (isGroupJid(body.conversationId)) {
-      // Group sends bypass the professional cold-send gate — parity with
-      // handleSendMessage: group membership already implies established
-      // context (no unsolicited first-contact), and the connector needs the
-      // BARE `@g.us` jid on both accounts (an account prefix reaches
-      // sock.groupMetadata() verbatim and times out).
-      body.conversationId = bareWhatsAppJid(body.conversationId);
-    } else if (this.requiresInboundBeforeSend(account)) {
-      // Same cold-send guard as text sends: block first-contact media to a
-      // professional chat with no prior inbound (Baileys account_restricted /
-      // ban risk) and resolve the @lid-aware send jid. Mirrors handleSendMessage.
-      body.conversationId = await this.requireInboundChat(
-        normalizeAccount(account),
-        body.conversationId
-      );
-    }
+    body.conversationId = bareWhatsAppJid(body.conversationId);
     const data = await this.connectorCall(
       this.waUrl(account),
       'POST',
@@ -4197,17 +4023,7 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
-    if (isGroupJid(body.toChatId)) {
-      // Forwarding INTO a group bypasses the cold-send gate — same parity as
-      // handleSendMessage/handleSendFile: membership implies established
-      // context, and the connector needs the bare `@g.us` jid.
-      body.toChatId = bareWhatsAppJid(body.toChatId);
-    } else if (this.requiresInboundBeforeSend(account)) {
-      // Gate the forward DESTINATION (toChatId) through the same inbound guard
-      // as text/media sends — chatId is only the source we read from, so it
-      // does not initiate contact. Resolves the @lid-aware send jid too.
-      body.toChatId = await this.requireInboundChat(normalizeAccount(account), body.toChatId);
-    }
+    body.toChatId = bareWhatsAppJid(body.toChatId);
     const data = await this.connectorCall(
       this.waUrl(account),
       'POST',

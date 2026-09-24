@@ -5,7 +5,7 @@
  *
  * One entry per provider INSTANCE (a Baileys session, a Telegram connector, an
  * Instagram business account). The catalogue, connector routing, health
- * checks, DB namespaces and the cold-send policy derive from it — no account
+ * checks and DB namespaces derive from it — no account
  * name is special in the code any more.
  *
  * Who may use which account is NOT here: that stays in the SC-1144 identity
@@ -42,8 +42,6 @@ export interface SocialAccount {
    * Defaults to the namespace.
    */
   profile: string;
-  /** Cold-send gate: refuse 1:1 first contact without a prior inbound. */
-  requireInboundBeforeSend: boolean;
   capabilities: Record<string, boolean>;
 }
 
@@ -125,12 +123,6 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     if (item.enabled !== undefined && typeof item.enabled !== 'boolean') {
       throw new AccountRegistryError(`${key}: enabled must be a boolean`);
     }
-    if (
-      item.requireInboundBeforeSend !== undefined &&
-      typeof item.requireInboundBeforeSend !== 'boolean'
-    ) {
-      throw new AccountRegistryError(`${key}: requireInboundBeforeSend must be a boolean`);
-    }
     const namespace = channel === 'instagram' ? item.namespace : (item.namespace ?? item.accountId);
     if (typeof namespace !== 'string' || !ID_RE.test(namespace)) {
       throw new AccountRegistryError(`${key}: namespace is required and must be an account id`);
@@ -167,7 +159,6 @@ export function parseAccounts(value: unknown): SocialAccount[] {
       bridgeUrl: httpUrl(item.bridgeUrl, 'bridgeUrl', key),
       namespace,
       profile,
-      requireInboundBeforeSend: item.requireInboundBeforeSend ?? false,
       capabilities: { ...DEFAULT_CAPABILITIES[channel], ...(item.capabilities || {}) },
     } as SocialAccount;
   });
@@ -178,15 +169,6 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     if (a.channel === 'instagram' && !namespaces.has(a.namespace)) {
       throw new AccountRegistryError(
         `instagram:${a.accountId}: namespace '${a.namespace}' is not a declared account`
-      );
-    }
-  }
-  // The inbound gate checks WhatsApp inbound history per account (ADR 0001);
-  // Telegram/Instagram have no cold-send risk model, so refuse the claim there.
-  for (const a of accounts) {
-    if (a.requireInboundBeforeSend && a.channel !== 'whatsapp') {
-      throw new AccountRegistryError(
-        `${a.channel}:${a.accountId}: requireInboundBeforeSend only applies to WhatsApp accounts`
       );
     }
   }
@@ -206,7 +188,6 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       channel: 'whatsapp',
       accountId: 'professional',
       connectorUrl: env.WHATSAPP_PROFESSIONAL_URL || 'http://whatsapp-connector-professional:3001',
-      requireInboundBeforeSend: true,
     },
     {
       channel: 'whatsapp',

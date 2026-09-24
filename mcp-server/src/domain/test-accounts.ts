@@ -31,7 +31,6 @@ export function useTestAccounts(maps: {
       channel: 'whatsapp',
       accountId,
       connectorUrl,
-      requireInboundBeforeSend: accountId === 'professional',
     });
   }
   for (const [accountId, connectorUrl] of Object.entries(state.telegram)) {

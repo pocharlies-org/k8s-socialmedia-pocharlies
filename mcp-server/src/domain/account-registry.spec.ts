@@ -57,8 +57,7 @@ describe('account registry', () => {
     ]);
     const byKey = Object.fromEntries(accounts.map(a => [`${a.channel}:${a.accountId}`, a]));
     expect(byKey['whatsapp:personal'].connectorUrl).toBe('http://whatsapp-connector:3001');
-    expect(byKey['whatsapp:professional'].requireInboundBeforeSend).toBe(true);
-    expect(byKey['whatsapp:personal'].requireInboundBeforeSend).toBe(false);
+    expect(byKey['whatsapp:professional']).not.toHaveProperty('requireInboundBeforeSend');
     expect(byKey['telegram:professional'].bridgeUrl).toBe('http://telegram-sync-professional:3080');
     expect(byKey['instagram:skirmshop'].namespace).toBe('professional');
     expect(byKey['instagram:barbelpapis'].namespace).toBe('personal');
@@ -147,18 +146,6 @@ describe('account registry', () => {
     [[wa('personal', { connectorUrl: 'http://u:p@host' })], /without credentials/],
     [[wa('personal', { connectorUrl: 'file:///etc/passwd' })], /http\(s\)/],
     [[wa('personal', { namespace: 'other' })], /its own namespace/],
-    [
-      [
-        wa('personal'),
-        {
-          channel: 'telegram',
-          accountId: 'personal',
-          connectorUrl: 'http://tg',
-          requireInboundBeforeSend: true,
-        },
-      ],
-      /only applies to WhatsApp accounts/,
-    ],
     [[wa('personal', { profile: 'Bad Profile' })], /profile must be/],
     [[wa('shop')], /'personal' namespace/],
     [{ nope: true }, /JSON array/],
@@ -166,12 +153,8 @@ describe('account registry', () => {
     expect(() => parseAccounts(entries)).toThrow(error);
   });
 
-  it('allows the inbound gate on any WhatsApp account and defaults profile to the namespace', () => {
-    const [personal, leila] = parseAccounts([
-      wa('personal', { requireInboundBeforeSend: true }),
-      wa('leila', { profile: 'family' }),
-    ]);
-    expect(personal.requireInboundBeforeSend).toBe(true);
+  it('defaults profile to the namespace', () => {
+    const [personal, leila] = parseAccounts([wa('personal'), wa('leila', { profile: 'family' })]);
     expect(personal.profile).toBe('personal');
     expect(leila.profile).toBe('family');
   });
