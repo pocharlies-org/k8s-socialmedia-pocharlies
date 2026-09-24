@@ -3,9 +3,10 @@
 # - Los pools (whatsapp-pairing:3001, telegram-pairing:3002) solo desde social-api.
 # - Ninguno de los tres entra en whatsapp-mcp-allow-traefik-http (esa abre el pod
 #   CIDR 10.42.0.0/16 y el tailnet): ni traefik ni el pod CIDR llegan a ellos.
-# Nota: las NetworkPolicy son ADITIVAS y whatsapp-mcp-allow-same-namespace (podSelector
-# vacio) sigue dejando entrar a cualquier pod de whatsapp-mcp; no se edita aqui (P3 no
-# cambia objetos existentes). Los pools exigen el HMAC de CONNECTOR_SHARED_SECRET.
+# Corte efectivo (hallazgo QA H1, cerrado en esta PR): whatsapp-mcp-allow-same-namespace
+# excluye ya a estos tres pods de su podSelector (app NotIn), asi que lo que hay AQUI
+# es la lista completa y minima de lo que puede entrarles — ningun pod de la casa
+# (mcp-sse, conectores) los alcanza. Ver comentario en networkpolicy.yaml.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -29,19 +30,18 @@ spec:
   policyTypes:
     - Ingress
 ---
+# Una politica por pool, con su unico puerto (hallazgo QA H3: la version conjunta
+# abria 3001 y 3002 a ambos pods). Cada pod solo escucha el suyo; el manifiesto
+# queda siendo el minimo del trafico real de la PR de encendido.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: whatsapp-mcp-allow-social-api-pairing-pools
+  name: whatsapp-mcp-allow-social-api-whatsapp-pairing
   namespace: whatsapp-mcp
 spec:
   podSelector:
-    matchExpressions:
-      - key: app
-        operator: In
-        values:
-          - whatsapp-pairing
-          - telegram-pairing
+    matchLabels:
+      app: whatsapp-pairing
   ingress:
     - from:
         - podSelector:
@@ -50,6 +50,24 @@ spec:
       ports:
         - protocol: TCP
           port: 3001
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-social-api-telegram-pairing
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: telegram-pairing
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: social-api
+      ports:
         - protocol: TCP
           port: 3002
   policyTypes:
@@ -77,6 +95,11 @@ spec:
       ports:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
+    # El CNI de este cluster evalua el egress contra el puerto POST-DNAT (el
+    # containerPort del pod, no el del Service): el gateway de agentes lo sufrio
+    # y lo documenta asi (k8s-agentgateway-pocharlies manifest.yaml, crash-loop
+    # JWKS 2026-07-04; el fix de alli permite 80 Y 8080 "to survive either
+    # shape"). keycloak: svc :80 -> pod :8080. Mismos dos puertos aqui.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -85,17 +108,16 @@ spec:
             matchLabels:
               app: keycloak
       ports:
+        - { protocol: TCP, port: 80 }
         - { protocol: TCP, port: 8080 }
+    # Un puerto por pool, espejo del ingress (H3).
     - to:
-        - podSelector:
-            matchExpressions:
-              - key: app
-                operator: In
-                values:
-                  - whatsapp-pairing
-                  - telegram-pairing
+        - podSelector: { matchLabels: { app: whatsapp-pairing } }
       ports:
         - { protocol: TCP, port: 3001 }
+    - to:
+        - podSelector: { matchLabels: { app: telegram-pairing } }
+      ports:
         - { protocol: TCP, port: 3002 }
     - to:
         - namespaceSelector:

@@ -131,6 +131,12 @@ spec:
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_PASSWORD } }
             - name: CREDENTIAL_STORE_MASTER_KEY
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CREDENTIAL_STORE_MASTER_KEY, optional: true } }
+            # El entrypoint de P1a (pairing/main.ts) lo lee: cifra el auth-state
+            # baileys que luego viaja al credential store. Sin el, cae al
+            # `dev-encryption-key-change-in-production` hardcodeado en el repo
+            # (igual que connectors/whatsapp-web/src/main.ts) — estable pero publico.
+            - name: SESSION_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: SESSION_ENCRYPTION_KEY } }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
           resources:
             requests: { cpu: 50m, memory: 128Mi }
