@@ -71,7 +71,7 @@ export class SummarizationService {
     let sql = `
       SELECT m.content, m.sender_wa_id, m.wa_timestamp
       FROM messages m
-      WHERE m.conversation_id = $1
+      WHERE m.conversation_id = COALESCE((SELECT merged_into FROM conversations WHERE id = $1), $1)
         AND (m.is_deleted IS NULL OR m.is_deleted = false)
     `;
 

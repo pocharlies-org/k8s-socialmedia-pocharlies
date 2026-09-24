@@ -21,7 +21,10 @@ import pino from 'pino';
 const logger = pino();
 
 export interface BackfillClient {
-  query(sql: string, params?: unknown[]): Promise<{ rows: Array<Record<string, unknown>>; rowCount?: number | null }>;
+  query(
+    sql: string,
+    params?: unknown[]
+  ): Promise<{ rows: Array<Record<string, unknown>>; rowCount?: number | null }>;
 }
 
 export interface BackfillOptions {

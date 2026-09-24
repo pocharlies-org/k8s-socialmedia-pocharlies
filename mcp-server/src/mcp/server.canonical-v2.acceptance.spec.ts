@@ -48,6 +48,19 @@ function createServer() {
     },
   });
   server.instagramUrl = 'http://instagram';
+  // Draft ownership comes from the conversation's account_id (ADR 0001); the
+  // fixture conversations are keyed like the backfilled prod rows.
+  server.dbClient = {
+    query: jest.fn(async (sql: string, params: unknown[] = []) =>
+      sql.includes('legacy_namespace AS ns')
+        ? {
+            rows: [
+              { ns: String(params[0]).startsWith('professional:') ? 'professional' : 'personal' },
+            ],
+          }
+        : { rows: [] }
+    ),
+  };
   return server;
 }
 

@@ -15,7 +15,7 @@ import { MCPServer } from './server';
  * exists, and (c) leave personal sends completely untouched.
  */
 
-type QueryImpl = (sql: string, params: unknown[]) => Promise<{ rows: unknown[] }>;
+type QueryImpl = (sql: string, params: unknown[]) => Promise<{ rows: any[] }>;
 
 function serverWith(queryImpl: QueryImpl) {
   const server = Object.create(MCPServer.prototype) as MCPServer;
@@ -47,7 +47,20 @@ function serverWith(queryImpl: QueryImpl) {
   };
 }
 
-const hasInbound: QueryImpl = async () => ({ rows: [{ id: 'professional:x' }] });
+// Every reference resolves to a professional conversation that has inbound history.
+const hasInbound: QueryImpl = async (sql, params) =>
+  sql.includes("m.direction = 'INBOUND'")
+    ? { rows: [{ found: 1 }] }
+    : {
+        rows: [
+          {
+            id: `professional:${params[0]}`,
+            account_id: 'whatsapp:professional',
+            external_id: params[0],
+            merged_into: null,
+          },
+        ],
+      };
 const noInbound: QueryImpl = async () => ({ rows: [] });
 
 describe('handleSendFile cold-send gate (professional)', () => {
@@ -197,7 +210,8 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
     });
     // The gate is keyed on the DESTINATION, not the source chat.
     expect(query).toHaveBeenCalledWith(expect.any(String), [
-      'professional:34660242739@s.whatsapp.net',
+      '34660242739@s.whatsapp.net',
+      'whatsapp:professional',
     ]);
     expect(connectorCall).toHaveBeenCalledWith(
       'http://wa-professional',

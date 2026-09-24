@@ -7,6 +7,7 @@
 
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { Pool } from 'pg';
+import { syncSocialAccountsBestEffort } from '../infrastructure/database/social-accounts';
 import Redis, { RedisOptions } from 'ioredis';
 import * as fs from 'fs';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -138,6 +139,7 @@ async function main() {
   } as any);
   // Touch the pool once so we surface bad credentials at boot.
   await dbPool.query('SELECT 1');
+  await syncSocialAccountsBestEffort(dbPool);
   console.log('[SSE] Connected to database (pool max=30, statement_timeout=10s)');
 
   let redisOptions: RedisOptions = {};

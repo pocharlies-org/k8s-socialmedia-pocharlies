@@ -7,7 +7,7 @@
 -- Idempotent: every statement is IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT,
 -- so re-running it (or the ledger baselining it on social_accounts) is harmless.
 -- The row backfill and the UNIQUE (account_id, external_id) indexes are NOT
--- here: they run batched / CONCURRENTLY from scripts/multiaccount-backfill.ts.
+-- here: they run batched / CONCURRENTLY from src/jobs/multiaccount-backfill.ts.
 
 CREATE TABLE IF NOT EXISTS social_accounts (
   id               TEXT PRIMARY KEY,               -- '<channel>:<accountKey>'
@@ -276,8 +276,47 @@ BEGIN
    WHERE a.external_id LIKE '%@c.us' AND a.merged_into IS NULL AND b.merged_into IS NULL
   ON CONFLICT (account_id, alias_external_id) DO NOTHING;
   GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+
+  -- The connector (and the pre-008 MCP send gate) store the phone jid of a LID
+  -- conversation in wa_chat_id. Only unambiguous pairs: 26 wa_chat_id values
+  -- are shared by several conversations (measured 24-09) and are skipped.
+  WITH wc AS (
+    SELECT c.account_id, c.external_id AS lid,
+           regexp_replace(c.wa_chat_id, '^[a-z][a-z0-9_-]*:', '') AS pn
+      FROM conversations c
+     WHERE c.external_id LIKE '%@lid' AND c.merged_into IS NULL AND c.account_id IS NOT NULL
+       AND c.wa_chat_id ~ '^([a-z][a-z0-9_-]*:)?[0-9]{8,}@s\.whatsapp\.net$'
+  )
+  INSERT INTO social_contact_aliases (account_id, alias_external_id, canonical_external_id, evidence)
+  SELECT w.account_id, w.pn, w.lid, 'wa_chat_id'
+    FROM wc w
+   WHERE (SELECT count(*) FROM wc x WHERE x.account_id = w.account_id AND x.pn = w.pn) = 1
+  ON CONFLICT (account_id, alias_external_id) DO NOTHING;
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
   RETURN n;
 END $$;
+
+-- Live capture of the same evidence: a writer that sets the phone jid of a LID
+-- conversation records the alias too (no connector change needed).
+CREATE OR REPLACE FUNCTION social_capture_wa_chat_alias() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_pn TEXT;
+BEGIN
+  IF NEW.account_id IS NULL OR NEW.external_id NOT LIKE '%@lid' OR NEW.merged_into IS NOT NULL THEN
+    RETURN NULL;
+  END IF;
+  v_pn := regexp_replace(COALESCE(NEW.wa_chat_id, ''), '^[a-z][a-z0-9_-]*:', '');
+  IF v_pn ~ '^[0-9]{8,}@s\.whatsapp\.net$' THEN
+    INSERT INTO social_contact_aliases (account_id, alias_external_id, canonical_external_id, evidence)
+    VALUES (NEW.account_id, v_pn, NEW.external_id, 'wa_chat_id')
+    ON CONFLICT (account_id, alias_external_id) DO NOTHING;
+  END IF;
+  RETURN NULL;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_social_wa_chat_alias ON conversations;
+CREATE TRIGGER trg_social_wa_chat_alias AFTER INSERT OR UPDATE OF wa_chat_id
+  ON conversations FOR EACH ROW EXECUTE FUNCTION social_capture_wa_chat_alias();
 
 CREATE OR REPLACE FUNCTION social_merge_conversation(p_alias TEXT, p_canonical TEXT) RETURNS INTEGER
 LANGUAGE plpgsql AS $$

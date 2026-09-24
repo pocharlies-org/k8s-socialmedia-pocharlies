@@ -34,6 +34,9 @@ export function normalizeAccount(value: unknown): Account {
 
 /**
  * Namespace an id by account. Personal stays bare; others are prefixed.
+ * ADR 0001: only for MINTING the legacy opaque id when writing (and for
+ * looking up a row by that id). The account of a stored row is its
+ * `account_id` column — never re-derive it from this prefix.
  * Idempotent: an id that already carries the account prefix is returned
  * unchanged, so a namespaced id read back from the DB (and handed to a tool
  * again) is never double-prefixed.
@@ -46,7 +49,9 @@ export function accountKey(account: Account, id: string): string {
 
 /**
  * Inverse of accountKey: recover { account, id } from a (possibly namespaced)
- * key. Only declared namespaces are prefixes — a native JID colon (device
+ * key. ADR 0001: only for decoding a reference a CALLER handed us (tool input
+ * holding a legacy id) or a connector payload — never for a DB row, whose
+ * account/provider id are `account_id` / `external_id`. Only declared namespaces are prefixes — a native JID colon (device
  * suffix) is never read as an account.
  */
 export function stripAccount(key: string): { account: Account; id: string } {

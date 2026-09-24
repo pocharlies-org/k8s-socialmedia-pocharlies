@@ -70,6 +70,7 @@ const ALL_FILES = [
   '005_whatsapp_manual_open_processing_status.sql',
   '006_unread_digest_sessions.sql',
   '007_user_channel_credentials.sql',
+  '008_multiaccount_first_class.sql',
 ];
 
 describe('migrate.ts _migrations ledger', () => {
@@ -81,7 +82,7 @@ describe('migrate.ts _migrations ledger', () => {
     expect(db.ledger.every(l => !l.baseline)).toBe(true);
     expect(db.executed).toHaveLength(ALL_FILES.length);
     expect(db.executed[0]).toMatch(/CREATE TABLE conversations/); // 001, the non-idempotent one
-    expect(db.executed[db.executed.length - 1]).toMatch(/user_channel_credentials/);
+    expect(db.executed[db.executed.length - 1]).toMatch(/social_accounts/);
     expect(db.commits).toBe(ALL_FILES.length);
     expect(db.openTx).toBe(false);
   });

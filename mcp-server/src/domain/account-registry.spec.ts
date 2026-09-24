@@ -148,13 +148,32 @@ describe('account registry', () => {
     [[wa('personal', { connectorUrl: 'file:///etc/passwd' })], /http\(s\)/],
     [[wa('personal', { namespace: 'other' })], /its own namespace/],
     [
-      [wa('personal', { requireInboundBeforeSend: true })],
-      /only implemented for whatsapp:professional/,
+      [
+        wa('personal'),
+        {
+          channel: 'telegram',
+          accountId: 'personal',
+          connectorUrl: 'http://tg',
+          requireInboundBeforeSend: true,
+        },
+      ],
+      /only applies to WhatsApp accounts/,
     ],
+    [[wa('personal', { profile: 'Bad Profile' })], /profile must be/],
     [[wa('shop')], /'personal' namespace/],
     [{ nope: true }, /JSON array/],
   ])('rejects an invalid registry %#', (entries, error) => {
     expect(() => parseAccounts(entries)).toThrow(error);
+  });
+
+  it('allows the inbound gate on any WhatsApp account and defaults profile to the namespace', () => {
+    const [personal, leila] = parseAccounts([
+      wa('personal', { requireInboundBeforeSend: true }),
+      wa('leila', { profile: 'family' }),
+    ]);
+    expect(personal.requireInboundBeforeSend).toBe(true);
+    expect(personal.profile).toBe('personal');
+    expect(leila.profile).toBe('family');
   });
 
   it('fails closed on a configured but unreadable or invalid file', () => {
