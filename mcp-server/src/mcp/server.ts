@@ -32,9 +32,11 @@ import { identityBindingEnabled, resolveBoundAccount } from '../domain/identity-
 import {
   findAccount,
   getAccounts,
+  socialAccountId,
   type AccountChannel,
   type SocialAccount,
 } from '../domain/account-registry';
+import { ConversationResolver } from '../infrastructure/database/social-accounts';
 import { getRequestActor } from '@mcp-socialmedia/shared';
 import { createHash, createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
@@ -252,23 +254,22 @@ export function bareWhatsAppJid(chatId: string): string {
 }
 
 /**
- * Resolve a professional WhatsApp direct-send chatId into the conversation key
- * to gate on and the jid to actually send to.
+ * Resolve a WhatsApp direct-send chatId into the provider ids to gate on
+ * (`lookupRefs`, resolved per account by the ConversationResolver) and the jid
+ * to actually send to.
  *
- * - LID jids keep their opaque id verbatim: lookupKey = `professional:<lid>`,
- *   sendJid = `<lid>` (Baileys sends to LID natively).
- * - Bare phones / `@c.us` / `@s.whatsapp.net` normalize to a phone jid:
- *   sendJid = `<digits>@s.whatsapp.net`, lookupKey = `professional:<jid>`.
+ * - LID jids keep their opaque id verbatim: sendJid = `<lid>` unless trusted
+ *   phone evidence names the phone jid, which is then also looked up.
+ * - Bare phones / `@c.us` / `@s.whatsapp.net` normalize to a phone jid.
  *
  * Returns null when the id is neither a LID jid nor a normalizable phone jid,
  * so the caller can raise the "valid individual phone or WhatsApp chat ID" error.
  */
-export function resolveProfessionalSendTarget(
+export function resolveDirectSendTarget(
   chatId: unknown,
   evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {}
 ): {
-  lookupKey: string;
-  lookupKeys: string[];
+  lookupRefs: string[];
   sendJid: string;
   sourceLidJid?: string;
   phoneE164?: string;
@@ -277,16 +278,11 @@ export function resolveProfessionalSendTarget(
   phoneEvidenceSource?: TrustedPhoneEvidenceSource;
 } | null {
   if (isLidJid(chatId)) {
-    const lidJid = stripAccount(String(chatId).trim()).id;
-    const lidLookupKey = accountKey('professional', lidJid);
+    const lidJid = bareWhatsAppJid(String(chatId));
     const phone = trustedPhoneEvidence(evidence);
-    if (!phone) {
-      return { lookupKey: lidLookupKey, lookupKeys: [lidLookupKey], sendJid: lidJid };
-    }
-    const phoneLookupKey = accountKey('professional', phone.sendJid);
+    if (!phone) return { lookupRefs: [lidJid], sendJid: lidJid };
     return {
-      lookupKey: lidLookupKey,
-      lookupKeys: [lidLookupKey, phoneLookupKey],
+      lookupRefs: [lidJid, phone.sendJid],
       sendJid: phone.sendJid,
       sourceLidJid: lidJid,
       phoneE164: phone.phoneE164,
@@ -297,8 +293,7 @@ export function resolveProfessionalSendTarget(
   }
   const waJid = normalizeDirectWhatsAppJid(chatId);
   if (!waJid) return null;
-  const lookupKey = accountKey('professional', waJid);
-  return { lookupKey, lookupKeys: [lookupKey], sendJid: waJid };
+  return { lookupRefs: [waJid], sendJid: waJid };
 }
 
 export function normalizeDirectWhatsAppJid(chatId: unknown): string | null {
@@ -327,6 +322,7 @@ export class MCPServer {
   private draftService: DraftService;
   private repository: DatabaseRepository;
   private dbClient: Pool;
+  private conversationResolver?: ConversationResolver;
   private redisClient: Redis;
   private logger: pino.Logger;
   private connectorUrl: string;
@@ -2274,24 +2270,26 @@ export class MCPServer {
     };
   }
 
+  /** Conversation references → canonical row (ADR 0001: account from account_id). */
+  private conversations(): ConversationResolver {
+    this.conversationResolver ??= new ConversationResolver(this.dbClient);
+    return this.conversationResolver;
+  }
+
   private async handleGetChat(args: { chatId: string; account?: string }) {
     const account = normalizeAccount(args.account);
-    const chatId = accountKey(account, args.chatId);
-    // conversations.id IS the wa_chat_id
-    const convResult = await this.dbClient.query(`SELECT * FROM conversations WHERE id = $1`, [
-      chatId,
-    ]);
+    const row = await this.conversations().resolve('whatsapp', account, args.chatId);
 
-    if (convResult.rows.length === 0) {
+    if (!row || !ConversationResolver.belongsTo(row, 'whatsapp', account)) {
       throw this.canonicalError(
         'not_found',
         `Conversation '${args.chatId}' was not found in the WhatsApp index for account '${account}'`
       );
     }
-    const row = convResult.rows[0];
+    const chatId = row.id;
     const conversation = {
       id: row.id,
-      waChatId: row.wa_chat_id || stripAccount(row.id).id,
+      waChatId: row.external_id,
       type: row.type || (row.is_group ? 'GROUP' : 'INDIVIDUAL'),
       name: row.name,
     };
@@ -2775,7 +2773,12 @@ export class MCPServer {
     if (!draft) {
       throw this.canonicalError('not_found', `Draft '${draftId}' was not found`);
     }
-    const actualAccount = stripAccount(draft.conversationId).account;
+    const owner = await this.dbClient.query(
+      `SELECT a.legacy_namespace AS ns FROM conversations c
+         JOIN social_accounts a ON a.id = c.account_id WHERE c.id = $1`,
+      [draft.conversationId]
+    );
+    const actualAccount = owner.rows[0]?.ns;
     if (actualAccount !== expectedAccount) {
       throw this.canonicalError(
         'not_found',
@@ -2913,7 +2916,7 @@ export class MCPServer {
     const conversationId = isGroupJid(args.chatId)
       ? bareWhatsAppJid(args.chatId)
       : this.requiresInboundBeforeSend(account)
-        ? await this.requireProfessionalInboundChat(args.chatId, {
+        ? await this.requireInboundChat(account, args.chatId, {
             phone: args.phone,
             phoneE164: args.phoneE164,
             manualOpenUrl: args.manualOpenUrl,
@@ -2993,91 +2996,89 @@ export class MCPServer {
     }
   }
 
-  private async hasProfessionalInbound(conversationId: string): Promise<boolean> {
-    const result = await this.dbClient.query(
-      `SELECT c.id, max(m.wa_timestamp) AS last_inbound_at
-         FROM conversations c
-         JOIN messages m ON m.conversation_id = c.id
-        WHERE (c.id = $1 OR c.wa_chat_id = $1)
-          AND c.account = 'professional'
-          AND m.account = 'professional'
-          AND m.platform = 'whatsapp'
-          AND m.direction = 'INBOUND'
-        GROUP BY c.id
-        LIMIT 1`,
-      [conversationId]
-    );
-    return result.rows.length > 0;
-  }
-
-  private async hasProfessionalInboundAny(conversationIds: string[]): Promise<boolean> {
-    const unique = [...new Set(conversationIds.filter(Boolean))];
-    for (const id of unique) {
-      if (await this.hasProfessionalInbound(id)) return true;
+  /**
+   * True when any of `refs` resolves (id, external id or contact alias) to a
+   * canonical conversation of `account` holding an inbound WhatsApp message.
+   */
+  private async hasInbound(account: Account, refs: string[]): Promise<boolean> {
+    for (const ref of [...new Set(refs.filter(Boolean))]) {
+      const row = await this.conversations().resolve('whatsapp', account, ref);
+      if (!row || !ConversationResolver.belongsTo(row, 'whatsapp', account)) continue;
+      const inbound = await this.dbClient.query(
+        `SELECT 1 FROM messages m
+          WHERE m.conversation_id = $1 AND m.platform = 'whatsapp' AND m.direction = 'INBOUND'
+          LIMIT 1`,
+        [row.id]
+      );
+      if (inbound.rows.length > 0) return true;
     }
     return false;
   }
 
-  private async persistProfessionalLidPhoneMapping(target: {
-    sourceLidJid?: string;
-    sendJid: string;
-    phoneEvidenceSource?: TrustedPhoneEvidenceSource;
-  }): Promise<void> {
+  /**
+   * Record trusted phone evidence for a LID contact as a contact alias
+   * (phone jid → LID) of this account. Replaces overloading
+   * conversations.wa_chat_id (ADR 0001); best effort.
+   */
+  private async persistLidPhoneAlias(
+    account: Account,
+    target: {
+      sourceLidJid?: string;
+      sendJid: string;
+      phoneEvidenceSource?: TrustedPhoneEvidenceSource;
+    }
+  ): Promise<void> {
     if (!target.sourceLidJid || !normalizeDirectWhatsAppJid(target.sendJid)) return;
     try {
       await this.dbClient.query(
-        `UPDATE conversations
-            SET wa_chat_id = $2,
-                metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
-                updated_at = now()
-          WHERE id = $1
-            AND account = 'professional'
-            AND (wa_chat_id IS NULL OR wa_chat_id = '' OR wa_chat_id = id)`,
+        `INSERT INTO social_contact_aliases (account_id, alias_external_id, canonical_external_id, evidence)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (account_id, alias_external_id) DO NOTHING`,
         [
-          accountKey('professional', target.sourceLidJid),
-          accountKey('professional', target.sendJid),
-          JSON.stringify({
-            lidPhoneMappingSource: 'professional_send_phone_evidence',
-            phoneEvidenceSource: target.phoneEvidenceSource || 'unknown',
-          }),
+          socialAccountId('whatsapp', account),
+          target.sendJid,
+          target.sourceLidJid,
+          `send-phone-evidence:${target.phoneEvidenceSource || 'unknown'}`,
         ]
       );
     } catch (error) {
       (this.logger as pino.Logger | undefined)?.warn?.(
-        `Could not persist professional LID phone mapping source=${target.phoneEvidenceSource || 'unknown'}: ${safeError(error)}`
+        `Could not persist LID phone alias account=${account} source=${target.phoneEvidenceSource || 'unknown'}: ${safeError(error)}`
       );
     }
   }
 
   /**
-   * Gate professional WhatsApp direct sends behind an existing inbound message
-   * (no cold first-contact sends) and return the jid that must actually be sent.
+   * Cold-send gate for an account with requireInboundBeforeSend (registry):
+   * a 1:1 direct send needs an existing inbound message from that contact, and
+   * returns the jid that must actually be sent to.
    *
    * LID chats (`<n>@lid` / `<n>@hosted.lid`) are an opaque Baileys identity, not
-   * a phone: the conversation is stored verbatim (e.g. `professional:198...@lid`)
-   * so we look it up under the ORIGINAL jid and send to the LID jid unchanged.
-   * Bare phones / `@c.us` / `@s.whatsapp.net` keep the legacy normalize+gate path.
+   * a phone: they are looked up verbatim and need trusted phone evidence.
+   * Bare phones / `@c.us` / `@s.whatsapp.net` normalize to a phone jid; the
+   * resolver maps a phone jid to its LID conversation through the aliases.
    */
-  private async requireProfessionalInboundChat(
+  private async requireInboundChat(
+    account: Account,
     chatId: string,
     evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {}
   ): Promise<string> {
-    const target = resolveProfessionalSendTarget(chatId, evidence);
+    const target = resolveDirectSendTarget(chatId, evidence);
     if (!target) {
       throw new McpError(
         ErrorCode.InvalidRequest,
-        'Professional WhatsApp direct sends require a valid individual phone or WhatsApp chat ID'
+        `WhatsApp ${account} direct sends require a valid individual phone or WhatsApp chat ID`
       );
     }
 
     if (isLidJid(chatId) && !target.phoneE164) {
       throw new McpError(
         ErrorCode.InvalidRequest,
-        'Professional WhatsApp @lid sends require trusted phone evidence (phone, phoneE164, or manualOpenUrl/wa.me) before automated sending.'
+        `WhatsApp ${account} @lid sends require trusted phone evidence (phone, phoneE164, or manualOpenUrl/wa.me) before automated sending.`
       );
     }
 
-    if (!(await this.hasProfessionalInboundAny(target.lookupKeys || [target.lookupKey]))) {
+    if (!(await this.hasInbound(account, target.lookupRefs))) {
       const fallbackUrl =
         target.manualOpenUrl ||
         (target.phoneE164
@@ -3086,11 +3087,11 @@ export class MCPServer {
       const fallback = fallbackUrl ? ` Manual fallback: ${fallbackUrl}` : '';
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `Professional WhatsApp direct sends are only allowed after the customer has sent an inbound message.${fallback}`
+        `WhatsApp ${account} direct sends are only allowed after the customer has sent an inbound message.${fallback}`
       );
     }
 
-    await this.persistProfessionalLidPhoneMapping(target);
+    await this.persistLidPhoneAlias(account, target);
     return target.sendJid;
   }
 
@@ -3323,6 +3324,7 @@ export class MCPServer {
       limit: args.limit || 20,
       includeParticipants: args.includeParticipants !== false,
       account: args.account,
+      channel: 'whatsapp',
     });
 
     return {
@@ -3767,8 +3769,9 @@ export class MCPServer {
     if (chatId.startsWith('@')) {
       const username = chatId.slice(1).toLowerCase();
       const r = await this.dbClient.query(
-        `SELECT id FROM conversations WHERE id LIKE $2 AND lower(metadata->>'username') = $1 LIMIT 1`,
-        [username, accountKey(account, 'tg_') + '%']
+        `SELECT COALESCE(merged_into, id) AS id FROM conversations
+          WHERE account_id = $2 AND lower(metadata->>'username') = $1 LIMIT 1`,
+        [username, socialAccountId('telegram', account)]
       );
       return r.rows[0]?.id ?? null;
     }
@@ -3844,11 +3847,11 @@ export class MCPServer {
     }
     if (!candidates.length) return { account: requested, source: 'fallback', candidates };
 
-    const accountsFrom = (rows: Array<{ conversation_id?: string; id?: string }>) => {
+    const accountsFrom = (rows: Array<{ account_id?: string | null }>) => {
       const set = new Set<Account>();
       for (const row of rows) {
-        const key = row.conversation_id ?? row.id;
-        if (key) set.add(stripAccount(String(key)).account);
+        if (row.account_id?.startsWith('telegram:'))
+          set.add(row.account_id.slice('telegram:'.length));
       }
       return set;
     };
@@ -3856,7 +3859,7 @@ export class MCPServer {
       set.size === 1 ? [...set][0] : set.has(requested) ? requested : 'personal';
 
     const msg = await this.dbClient.query(
-      `SELECT DISTINCT conversation_id
+      `SELECT DISTINCT account_id
          FROM messages
         WHERE conversation_id = ANY($1::text[])
           AND (wa_message_id = $2 OR metadata->>'telegram_message_id' = $2)`,
@@ -3872,7 +3875,7 @@ export class MCPServer {
     }
 
     const conv = await this.dbClient.query(
-      `SELECT id FROM conversations WHERE id = ANY($1::text[])`,
+      `SELECT id, account_id FROM conversations WHERE id = ANY($1::text[])`,
       [candidates]
     );
     const convAccounts = accountsFrom(conv.rows);
@@ -4008,22 +4011,22 @@ export class MCPServer {
   private async handleTelegramGetDialogs(args?: { account?: string }) {
     const account = normalizeAccount(args?.account);
     const result = await this.dbClient.query(
-      `SELECT c.id, c.name, c.type, c.is_group, c.last_message_at, c.metadata,
+      `SELECT c.id, c.external_id, c.name, c.type, c.is_group, c.last_message_at, c.metadata,
               (SELECT count(*)::int FROM messages
                 WHERE conversation_id = c.id
                   AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
          FROM conversations c
-        WHERE c.id LIKE $1
+        WHERE c.account_id = $1 AND c.merged_into IS NULL
         ORDER BY c.last_message_at DESC NULLS LAST
         LIMIT 1000`,
-      [accountKey(account, 'tg_') + '%']
+      [socialAccountId('telegram', account)]
     );
     return this.jsonResponse({
       source: 'db',
       count: result.rows.length,
       dialogs: result.rows.map((c: any) => ({
         id: c.id,
-        chatId: stripAccount(c.id).id.replace(/^tg_/, ''),
+        chatId: String(c.external_id).replace(/^tg_/, ''),
         name: c.name,
         type: c.is_group ? 'group' : 'private',
         lastMessageAt: c.last_message_at,
@@ -4170,7 +4173,10 @@ export class MCPServer {
       // Same cold-send guard as text sends: block first-contact media to a
       // professional chat with no prior inbound (Baileys account_restricted /
       // ban risk) and resolve the @lid-aware send jid. Mirrors handleSendMessage.
-      body.conversationId = await this.requireProfessionalInboundChat(body.conversationId);
+      body.conversationId = await this.requireInboundChat(
+        normalizeAccount(account),
+        body.conversationId
+      );
     }
     const data = await this.connectorCall(
       this.waUrl(account),
@@ -4200,7 +4206,7 @@ export class MCPServer {
       // Gate the forward DESTINATION (toChatId) through the same inbound guard
       // as text/media sends — chatId is only the source we read from, so it
       // does not initiate contact. Resolves the @lid-aware send jid too.
-      body.toChatId = await this.requireProfessionalInboundChat(body.toChatId);
+      body.toChatId = await this.requireInboundChat(normalizeAccount(account), body.toChatId);
     }
     const data = await this.connectorCall(
       this.waUrl(account),
@@ -4240,26 +4246,14 @@ export class MCPServer {
 
   private async getUnreadWhatsAppChatsFromDb(account: Account, reason: string) {
     const result = await this.dbClient.query(
-      `SELECT c.id, c.name, c.type, c.is_group, c.unread_count, c.last_message_at
+      `SELECT c.id, c.external_id, c.name, c.type, c.is_group, c.unread_count, c.last_message_at
          FROM conversations c
-        WHERE c.account = $1
+        WHERE c.account_id = $1
+          AND c.merged_into IS NULL
           AND COALESCE(c.unread_count, 0) > 0
-          AND regexp_replace(c.id, '^(personal|professional):', '') NOT LIKE 'tg_%'
-          AND (
-            regexp_replace(c.id, '^(personal|professional):', '') LIKE '%@%'
-            OR regexp_replace(COALESCE(c.wa_chat_id, ''), '^(personal|professional):', '') LIKE '%@%'
-            OR EXISTS (
-              SELECT 1
-                FROM messages m
-               WHERE m.conversation_id = c.id
-                 AND m.account = $1
-                 AND m.platform = 'whatsapp'
-               LIMIT 1
-            )
-          )
         ORDER BY c.unread_count DESC, c.last_message_at DESC NULLS LAST
         LIMIT 200`,
-      [account]
+      [socialAccountId('whatsapp', account)]
     );
 
     return {
@@ -4268,7 +4262,7 @@ export class MCPServer {
       totalResults: result.rows.length,
       chats: result.rows.map(row => ({
         id: row.id,
-        waChatId: stripAccount(row.id).id,
+        waChatId: row.external_id,
         name: row.name,
         unreadCount: Number(row.unread_count || 0),
         isGroup: Boolean(row.is_group),
@@ -4596,7 +4590,7 @@ export class MCPServer {
         `Could not resolve Telegram chatId '${args.chatId}'`
       );
     const result = await this.dbClient.query(
-      `SELECT id, name, type, is_group, participant_count, last_message_at, metadata,
+      `SELECT id, external_id, name, type, is_group, participant_count, last_message_at, metadata,
               (SELECT count(*)::int FROM messages
                 WHERE conversation_id = c.id
                   AND (is_deleted IS NULL OR is_deleted = false)) AS message_count
@@ -4609,7 +4603,7 @@ export class MCPServer {
     return this.jsonResponse({
       source: 'db',
       id: c.id,
-      chatId: stripAccount(c.id).id.replace(/^tg_/, ''),
+      chatId: String(c.external_id).replace(/^tg_/, ''),
       name: c.name,
       type: c.is_group ? 'group' : 'private',
       participantCount: c.participant_count,

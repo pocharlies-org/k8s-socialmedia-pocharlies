@@ -6,7 +6,6 @@ resources:
 patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
-  - path: patch-renew-qr-pro.yaml
   - path: patch-nodepool.yaml
   # SC-705 phase 1.5: CREDENTIAL_STORE_ENABLED=false in this PR (the patch
   # keeps it OFF until PR2 re-pins the image; ON is prod-only, stg stays OFF).
@@ -33,8 +32,8 @@ images:
     newTag: sha-985a199ea567
     digest: sha256:38c141768e5fe10c731616c46fc82276fef9a3ddafabcae6c4ee98a68eb2e11a
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.52
-    digest: sha256:0ad8c5050ba044c86f7e6d8183077cf647e9a35f5f7828fa6d91fad004384444
+    newTag: v1.3.54
+    digest: sha256:01682afe354211eb64ac3110c3f4ea6a20b18182864889c41fa56983e465bbde
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

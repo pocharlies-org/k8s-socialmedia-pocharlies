@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { syncSocialAccountsBestEffort } from '../infrastructure/database/social-accounts';
 import Redis, { RedisOptions } from 'ioredis';
 import * as fs from 'fs';
 import { MCPServer } from './server';
@@ -43,6 +44,8 @@ async function main() {
 
     const redisClient = new Redis(REDIS_URL, redisOptions);
     console.log('Connected to Redis' + (REDIS_TLS_CA ? ' with TLS' : ''));
+
+    await syncSocialAccountsBestEffort(dbPool);
 
     // Create MCP server
     const server = new MCPServer(

@@ -6,7 +6,8 @@ import {
   Message,
   Attachment,
 } from '../../domain/entities';
-import { accountKey, normalizeAccount, stripAccount } from '../../domain/account';
+import { accountKey, normalizeAccount } from '../../domain/account';
+import { socialAccountId, type AccountChannel } from '../../domain/account-registry';
 
 export class DatabaseRepository {
   constructor(private client: Pool) {}
@@ -197,7 +198,7 @@ export class DatabaseRepository {
     const searchPattern = `%${query}%`;
     const result = await this.client.query(
       `SELECT p.id as wa_user_id, COALESCE(p.name, p.push_name, p.id) as display_name,
-              c.id as conversation_id, c.id as wa_chat_id,
+              c.id as conversation_id, c.external_id as wa_chat_id,
               COALESCE(c.type, CASE WHEN c.is_group THEN 'GROUP' ELSE 'INDIVIDUAL' END) as conversation_type,
               c.name as conversation_name
        FROM participants p
@@ -205,6 +206,7 @@ export class DatabaseRepository {
        JOIN conversations c ON cp.conversation_id = c.id
        WHERE (p.name ILIKE $1 OR p.push_name ILIKE $1 OR p.id ILIKE $1 OR p.phone ILIKE $1)
          AND c.account = $3
+         AND c.merged_into IS NULL
        ORDER BY c.last_message_at DESC NULLS LAST
        LIMIT $2`,
       [searchPattern, limit, normalizeAccount(account)]
@@ -226,6 +228,8 @@ export class DatabaseRepository {
     limit?: number;
     includeParticipants?: boolean;
     account?: string;
+    /** When set, scope by social account (account_id) instead of the legacy namespace. */
+    channel?: AccountChannel;
   }): Promise<
     {
       id: string;
@@ -241,6 +245,10 @@ export class DatabaseRepository {
     const { type, query, limit = 20, includeParticipants = true } = options;
     const account = normalizeAccount(options.account);
     const searchPattern = query ? `%${query}%` : null;
+    // The legacy `account` column is shared by every channel of a namespace
+    // (WhatsApp and Telegram 'personal'); account_id is one provider account.
+    const scope = options.channel ? 'c.account_id = $3' : 'c.account = $3';
+    const scopeValue = options.channel ? socialAccountId(options.channel, account) : account;
 
     const result = await this.client.query(
       `SELECT c.*,
@@ -255,10 +263,11 @@ export class DatabaseRepository {
                          JOIN participants p ON p.id = cp.participant_id
                          WHERE cp.conversation_id = c.id
                          AND (p.name ILIKE $2 OR p.push_name ILIKE $2 OR p.id ILIKE $2)))
-         AND c.account = $3
+         AND ${scope}
+         AND c.merged_into IS NULL
        ORDER BY c.last_message_at DESC NULLS LAST
        LIMIT $4`,
-      [type || null, searchPattern, account, limit]
+      [type || null, searchPattern, scopeValue, limit]
     );
 
     const conversations = await Promise.all(
@@ -274,7 +283,7 @@ export class DatabaseRepository {
           participants?: { waUserId: string; name: string | null; isAdmin: boolean }[];
         } = {
           id: row.id,
-          waChatId: stripAccount(row.id).id,
+          waChatId: row.external_id,
           type: row.conv_type,
           name: row.name,
           lastMessageAt: row.last_message_at,
@@ -343,14 +352,15 @@ export class DatabaseRepository {
     const acc = normalizeAccount(account);
 
     const result = await this.client.query(
-      `SELECT m.id, m.conversation_id, c.id as wa_chat_id, c.name as conversation_name,
+      `SELECT m.id, m.conversation_id, c.external_id as wa_chat_id, c.name as conversation_name,
               m.wa_message_id, m.content, m.message_type, m.wa_timestamp,
               m.is_forwarded, m.is_edited
        FROM messages m
        JOIN conversations c ON m.conversation_id = c.id
        WHERE m.sender_wa_id = $1
          AND (m.is_deleted IS NULL OR m.is_deleted = false)
-         AND ($2::TEXT IS NULL OR m.conversation_id = $2)
+         AND ($2::TEXT IS NULL OR m.conversation_id =
+              COALESCE((SELECT merged_into FROM conversations WHERE id = $2), $2))
          AND ($3::TIMESTAMP IS NULL OR m.wa_timestamp >= $3)
          AND ($4::TIMESTAMP IS NULL OR m.wa_timestamp <= $4)
        ORDER BY m.wa_timestamp DESC

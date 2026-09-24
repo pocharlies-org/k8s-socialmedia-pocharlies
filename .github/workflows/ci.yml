@@ -16,6 +16,19 @@ permissions:
   actions: read
 
 jobs:
+  # ADR 0001 decision 5: per-account connectors are rendered from the registry.
+  connectors-generated:
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
+    runs-on: arc-k8s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
+      - run: python3 scripts/render-connectors.py --check
+      - run: python3 -m unittest scripts/test_render_connectors.py
+
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
     runs-on: arc-k8s
