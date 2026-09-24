@@ -800,13 +800,37 @@ spec:
       services:
         - name: instagram-connector
           port: 3003
+    - match: Host(`whatsapp.e-dani.com`) && PathPrefix(`/api/public`)
+      kind: Rule
+      middlewares:
+        - { name: connector-public-api-deny, namespace: whatsapp-mcp }
+      services:
+        - name: whatsapp-connector
+          port: 3001
+    # Everything else (QR page, status) only behind the generic Keycloak chain:
+    # this host is internet-facing through Cloudflare.
     - match: Host(`whatsapp.e-dani.com`)
       kind: Rule
+      middlewares:
+        - { name: sso-chain, namespace: keycloak }
       services:
         - name: whatsapp-connector
           port: 3001
   tls:
     store: { name: default, namespace: traefik-edge }
+---
+# Deny-all for the connector's unauthenticated /api/public/* surface (chat list,
+# full history, media backfill). In-cluster consumers (mcp-server) reach the
+# Service directly and never cross an IngressRoute, so no ingress host needs it.
+# ipAllowList with loopback only: every real client gets 403.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: connector-public-api-deny
+  namespace: whatsapp-mcp
+spec:
+  ipAllowList:
+    sourceRange: ["127.0.0.1/32"]
 ---
 # LAN-only IngressRoute so in-host workloads (e.g. the synapse-adapter-messaging
 # Hermes worker running on sauvage under user-systemd) can POST
@@ -820,6 +844,13 @@ metadata:
 spec:
   entryPoints: [websecure]
   routes:
+    - match: Host(`whatsapp.lan.e-dani.com`) && PathPrefix(`/api/public`)
+      kind: Rule
+      middlewares:
+        - { name: connector-public-api-deny, namespace: whatsapp-mcp }
+      services:
+        - name: whatsapp-connector
+          port: 3001
     - match: Host(`whatsapp.lan.e-dani.com`)
       kind: Rule
       services:
@@ -838,6 +869,13 @@ metadata:
 spec:
   entryPoints: [websecure]
   routes:
+    - match: Host(`whatsapp-pro.lan.e-dani.com`) && PathPrefix(`/api/public`)
+      kind: Rule
+      middlewares:
+        - { name: connector-public-api-deny, namespace: whatsapp-mcp }
+      services:
+        - name: whatsapp-connector-professional
+          port: 3001
     - match: Host(`whatsapp-pro.lan.e-dani.com`)
       kind: Rule
       services:
@@ -857,6 +895,13 @@ metadata:
 spec:
   entryPoints: [websecure]
   routes:
+    - match: Host(`whatsapp-leila.lan.e-dani.com`) && PathPrefix(`/api/public`)
+      kind: Rule
+      middlewares:
+        - { name: connector-public-api-deny, namespace: whatsapp-mcp }
+      services:
+        - name: whatsapp-connector-leila
+          port: 3001
     - match: Host(`whatsapp-leila.lan.e-dani.com`)
       kind: Rule
       services:
