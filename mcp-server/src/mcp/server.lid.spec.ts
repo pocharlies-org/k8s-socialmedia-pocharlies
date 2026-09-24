@@ -1,3 +1,4 @@
+import { useTestAccounts } from '../domain/test-accounts';
 import {
   isLidJid,
   normalizeDirectWhatsAppJid,
@@ -82,10 +83,7 @@ describe('resolveProfessionalSendTarget', () => {
       })
     ).toEqual({
       lookupKey: 'professional:198517716955152@lid',
-      lookupKeys: [
-        'professional:198517716955152@lid',
-        'professional:35796658668@s.whatsapp.net',
-      ],
+      lookupKeys: ['professional:198517716955152@lid', 'professional:35796658668@s.whatsapp.net'],
       sendJid: '35796658668@s.whatsapp.net',
       sourceLidJid: '198517716955152@lid',
       phoneE164: '+35796658668',
@@ -154,7 +152,7 @@ describe('requireProfessionalInboundChat gate (DB-backed)', () => {
   });
 
   it('@lid plus trusted phone evidence and inbound history sends to the phone-number jid', async () => {
-    const { call, query } = gateWith(async (sql) => {
+    const { call, query } = gateWith(async sql => {
       if (/SELECT c\.id/.test(sql)) return { rows: [{ id: 'professional:198517716955152@lid' }] };
       return { rows: [] };
     });
@@ -204,7 +202,9 @@ describe('requireProfessionalInboundChat gate (DB-backed)', () => {
 
   it('bare phone with NO inbound throws the guard error with a wa.me manual fallback', async () => {
     const { call } = gateWith(async () => ({ rows: [] }));
-    await expect(call('34660242739')).rejects.toThrow(/Manual fallback: https:\/\/wa\.me\/34660242739/);
+    await expect(call('34660242739')).rejects.toThrow(
+      /Manual fallback: https:\/\/wa\.me\/34660242739/
+    );
   });
 
   it('rejects an unusable id before touching the DB', async () => {
@@ -233,9 +233,11 @@ describe('handleSendMessage professional @lid + phone fallback behavior', () => 
     const server = Object.create(MCPServer.prototype) as MCPServer;
     const query = jest.fn(queryImpl);
     const logger = { error: jest.fn(), warn: jest.fn() };
+    useTestAccounts({
+      whatsapp: { personal: 'http://wa-personal', professional: 'http://wa-professional' },
+    });
     Object.assign(server as unknown as Record<string, unknown>, {
       dbClient: { query },
-      waUrls: { personal: 'http://wa-personal', professional: 'http://wa-professional' },
       logger,
     });
     return {
@@ -275,7 +277,7 @@ describe('handleSendMessage professional @lid + phone fallback behavior', () => 
     }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const { send } = sendServer(async (sql) => {
+    const { send } = sendServer(async sql => {
       if (/SELECT c\.id/.test(sql)) return { rows: [{ id: 'professional:198517716955152@lid' }] };
       return { rows: [] };
     });

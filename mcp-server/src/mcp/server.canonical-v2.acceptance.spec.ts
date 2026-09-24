@@ -1,3 +1,4 @@
+import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
 import { SOCIAL_TOOL_REGISTRY } from './tool-registry';
 
@@ -16,13 +17,11 @@ function fakeRedis() {
   return {
     values,
     get: jest.fn(async (key: string) => values.get(key) ?? null),
-    set: jest.fn(
-      async (key: string, value: string, ...args: Array<string | number>) => {
-        if (args.includes('NX') && values.has(key)) return null;
-        values.set(key, value);
-        return 'OK';
-      }
-    ),
+    set: jest.fn(async (key: string, value: string, ...args: Array<string | number>) => {
+      if (args.includes('NX') && values.has(key)) return null;
+      values.set(key, value);
+      return 'OK';
+    }),
   };
 }
 
@@ -30,18 +29,24 @@ function createServer() {
   const server: any = Object.create(MCPServer.prototype);
   server.redisClient = fakeRedis();
   server.logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn() };
-  server.waUrls = {
-    personal: 'http://wa-personal',
-    professional: 'http://wa-professional',
-  };
-  server.tgUrls = {
-    personal: 'http://tg-personal',
-    professional: 'http://tg-professional',
-  };
-  server.tgBridgeUrls = {
-    personal: 'http://tg-bridge-personal',
-    professional: 'http://tg-bridge-professional',
-  };
+  useTestAccounts({
+    whatsapp: {
+      personal: 'http://wa-personal',
+      professional: 'http://wa-professional',
+    },
+  });
+  useTestAccounts({
+    telegram: {
+      personal: 'http://tg-personal',
+      professional: 'http://tg-professional',
+    },
+  });
+  useTestAccounts({
+    bridge: {
+      personal: 'http://tg-bridge-personal',
+      professional: 'http://tg-bridge-professional',
+    },
+  });
   server.instagramUrl = 'http://instagram';
   return server;
 }
@@ -276,9 +281,7 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
 
     test.each(invalidCases)('%s', (_label, toolName, args) => {
       const server = createServer();
-      expect(() =>
-        server.validateCanonicalArguments(definition(toolName), args)
-      ).toThrow();
+      expect(() => server.validateCanonicalArguments(definition(toolName), args)).toThrow();
     });
 
     test.each([
@@ -312,9 +315,7 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       ],
     ])('%s', (_label, toolName, args) => {
       const server = createServer();
-      expect(() =>
-        server.validateCanonicalArguments(definition(toolName), args)
-      ).not.toThrow();
+      expect(() => server.validateCanonicalArguments(definition(toolName), args)).not.toThrow();
     });
   });
 
@@ -334,15 +335,12 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         server.handleTelegramSendMessage = jest.fn(async () => legacy({ sent: true }));
         server.handleInstagramSendDm = jest.fn(async () => legacy({ sent: true }));
 
-        const result = await server.executeCanonicalTool(
-          definition('social_send_message'),
-          {
-            channel,
-            accountId,
-            target: '12345',
-            message: 'hola',
-          }
-        );
+        const result = await server.executeCanonicalTool(definition('social_send_message'), {
+          channel,
+          accountId,
+          target: '12345',
+          message: 'hola',
+        });
 
         expectStructuredError(result, 'unsupported_capability');
         expect(server.handleSendMessage).not.toHaveBeenCalled();
@@ -355,14 +353,11 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       const server = createServer();
       server.providerGet = jest.fn(async () => ({ dialogs: [] }));
 
-      const result = await server.executeCanonicalTool(
-        definition('social_list_conversations'),
-        {
-          channel: 'telegram',
-          accountId: 'does-not-exist',
-          readSource: 'provider',
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_list_conversations'), {
+        channel: 'telegram',
+        accountId: 'does-not-exist',
+        readSource: 'provider',
+      });
 
       expectStructuredError(result, 'unsupported_capability');
       expect(server.providerGet).not.toHaveBeenCalled();
@@ -405,14 +400,11 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       };
       server.handleApproveDraft = jest.fn(async () => legacy({ approved: true }));
 
-      const result = await server.executeCanonicalTool(
-        definition('social_approve_draft'),
-        {
-          channel: 'whatsapp',
-          accountId: 'personal',
-          draftId: 'draft-1',
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_approve_draft'), {
+        channel: 'whatsapp',
+        accountId: 'personal',
+        draftId: 'draft-1',
+      });
 
       expectStructuredError(result, 'not_found');
       expect(server.handleApproveDraft).not.toHaveBeenCalled();
@@ -428,14 +420,11 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         })),
       };
 
-      const result = await server.executeCanonicalTool(
-        definition('social_get_digest'),
-        {
-          channel: 'telegram',
-          accountId: 'personal',
-          digestId: 'digest-1',
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_get_digest'), {
+        channel: 'telegram',
+        accountId: 'personal',
+        digestId: 'digest-1',
+      });
 
       expectStructuredError(result, 'not_found');
     });
@@ -480,22 +469,19 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       server.handleSendMessage = jest.fn(async (args: unknown) => legacy(args));
       server.handleSendFile = jest.fn(async (args: unknown) => legacy(args));
 
-      const result = await server.executeCanonicalTool(
-        definition('social_send_message'),
-        {
-          channel: 'whatsapp',
-          accountId: 'professional',
-          target: '34600000000@s.whatsapp.net',
-          message: 'texto',
-          attachments: [
-            {
-              url: 'https://example.test/photo.jpg',
-              caption: 'foto',
-            },
-          ],
-          replyTo: 71,
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_send_message'), {
+        channel: 'whatsapp',
+        accountId: 'professional',
+        target: '34600000000@s.whatsapp.net',
+        message: 'texto',
+        attachments: [
+          {
+            url: 'https://example.test/photo.jpg',
+            caption: 'foto',
+          },
+        ],
+        replyTo: 71,
+      });
 
       expect(result.structuredContent).toMatchObject({
         ok: true,
@@ -521,23 +507,20 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       server.handleTelegramSendMessage = jest.fn(async (args: unknown) => legacy(args));
       server.handleTelegramSendFile = jest.fn(async (args: unknown) => legacy(args));
 
-      const result = await server.executeCanonicalTool(
-        definition('social_send_message'),
-        {
-          channel: 'telegram',
-          accountId: 'personal',
-          target: '-100123456',
-          message: 'texto',
-          attachments: [
-            {
-              url: 'https://example.test/document.pdf',
-              caption: 'documento',
-            },
-          ],
-          replyTo: 22,
-          threadId: 77,
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_send_message'), {
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '-100123456',
+        message: 'texto',
+        attachments: [
+          {
+            url: 'https://example.test/document.pdf',
+            caption: 'documento',
+          },
+        ],
+        replyTo: 22,
+        threadId: 77,
+      });
 
       expect(result.structuredContent).toMatchObject({
         ok: true,
@@ -568,30 +551,27 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         legacy({ sent: true, messageId: '101', messageIds: ['101', '102'] })
       );
 
-      const result = await server.executeCanonicalTool(
-        definition('social_send_message'),
-        {
-          channel: 'telegram',
-          accountId: 'personal',
-          target: '@studio_bot',
-          message: 'cinematic references',
-          mediaGroup: true,
-          attachments: [
-            {
-              url: 'https://example.test/reference-1.jpg',
-              name: 'reference-1.jpg',
-              mimeType: 'image/jpeg',
-            },
-            {
-              url: 'https://example.test/reference-2.png',
-              name: 'reference-2.png',
-              mimeType: 'image/png',
-            },
-          ],
-          replyTo: 22,
-          threadId: 77,
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_send_message'), {
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '@studio_bot',
+        message: 'cinematic references',
+        mediaGroup: true,
+        attachments: [
+          {
+            url: 'https://example.test/reference-1.jpg',
+            name: 'reference-1.jpg',
+            mimeType: 'image/jpeg',
+          },
+          {
+            url: 'https://example.test/reference-2.png',
+            name: 'reference-2.png',
+            mimeType: 'image/png',
+          },
+        ],
+        replyTo: 22,
+        threadId: 77,
+      });
 
       expect(result.structuredContent).toMatchObject({
         ok: true,
@@ -644,16 +624,13 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       const server = createServer();
       server.handleTelegramSendMediaGroup = jest.fn(async () => legacy({ sent: true }));
 
-      const result = await server.executeCanonicalTool(
-        definition('social_send_message'),
-        {
-          channel,
-          accountId: 'personal',
-          target: '@studio_bot',
-          mediaGroup: true,
-          attachments,
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_send_message'), {
+        channel,
+        accountId: 'personal',
+        target: '@studio_bot',
+        mediaGroup: true,
+        attachments,
+      });
 
       expectStructuredError(
         result,
@@ -662,9 +639,7 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       expect(server.handleTelegramSendMediaGroup).not.toHaveBeenCalled();
     });
 
-    const unsupportedSendShapes: Array<
-      [string, Record<string, unknown>]
-    > = [
+    const unsupportedSendShapes: Array<[string, Record<string, unknown>]> = [
       [
         'WhatsApp thread',
         {
@@ -713,10 +688,7 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         server.handleSendMessage = jest.fn(async () => legacy({ sent: true }));
         server.handleInstagramSendDm = jest.fn(async () => legacy({ sent: true }));
 
-        const result = await server.executeCanonicalTool(
-          definition('social_send_message'),
-          args
-        );
+        const result = await server.executeCanonicalTool(definition('social_send_message'), args);
 
         expectStructuredError(result, 'unsupported_capability');
         expect(server.handleSendMessage).not.toHaveBeenCalled();
@@ -733,33 +705,21 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         throw new Error('media provider failed');
       });
 
-      const result = await server.executeCanonicalTool(
-        definition('social_send_message'),
-        {
-          channel: 'telegram',
-          accountId: 'personal',
-          target: '-100123456',
-          message: 'texto',
-          attachments: [{ url: 'https://example.test/document.pdf' }],
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_send_message'), {
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '-100123456',
+        message: 'texto',
+        attachments: [{ url: 'https://example.test/document.pdf' }],
+      });
 
       expectStructuredError(result, 'outcome_unknown');
-      expect(result.structuredContent.error.message).toContain(
-        'accepted 1 sub-operation'
-      );
+      expect(result.structuredContent.error.message).toContain('accepted 1 sub-operation');
     });
   });
 
   describe('complete Telegram forum action matrix', () => {
-    const topicCases: Array<
-      [
-        string,
-        string,
-        Record<string, unknown>,
-        Record<string, unknown>,
-      ]
-    > = [
+    const topicCases: Array<[string, string, Record<string, unknown>, Record<string, unknown>]> = [
       [
         'createTopic',
         'handleTelegramCreateTopic',
@@ -847,38 +807,26 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       ],
     ];
 
-    test.each(topicCases)(
-      '%s routes to %s',
-      async (action, handler, extraArgs, expected) => {
-        const server = createServer();
-        server[handler] = jest.fn(async (args: unknown) => legacy(args));
+    test.each(topicCases)('%s routes to %s', async (action, handler, extraArgs, expected) => {
+      const server = createServer();
+      server[handler] = jest.fn(async (args: unknown) => legacy(args));
 
-        const result = await server.executeCanonicalTool(
-          definition('social_manage_forum'),
-          {
-            channel: 'telegram',
-            accountId: 'professional',
-            action,
-            ...extraArgs,
-          }
-        );
+      const result = await server.executeCanonicalTool(definition('social_manage_forum'), {
+        channel: 'telegram',
+        accountId: 'professional',
+        action,
+        ...extraArgs,
+      });
 
-        expect(result.structuredContent).toMatchObject({
-          ok: true,
-          status: 'accepted',
-        });
-        expect(server[handler]).toHaveBeenCalledWith(expected);
-      }
-    );
+      expect(result.structuredContent).toMatchObject({
+        ok: true,
+        status: 'accepted',
+      });
+      expect(server[handler]).toHaveBeenCalledWith(expected);
+    });
 
     const groupCases: Array<
-      [
-        string,
-        Record<string, unknown>,
-        string,
-        string,
-        Record<string, unknown>,
-      ]
+      [string, Record<string, unknown>, string, string, Record<string, unknown>]
     > = [
       [
         'createGroup',
@@ -936,15 +884,12 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         const server = createServer();
         server.connectorCall = jest.fn(async () => ({ ok: true }));
 
-        const result = await server.executeCanonicalTool(
-          definition('social_manage_forum'),
-          {
-            channel: 'telegram',
-            accountId: 'professional',
-            action,
-            ...extraArgs,
-          }
-        );
+        const result = await server.executeCanonicalTool(definition('social_manage_forum'), {
+          channel: 'telegram',
+          accountId: 'professional',
+          action,
+          ...extraArgs,
+        });
 
         expect(result.structuredContent).toMatchObject({
           ok: true,
@@ -961,14 +906,7 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
   });
 
   describe('complete Telegram chat action matrix', () => {
-    const chatCases: Array<
-      [
-        string,
-        string,
-        Record<string, unknown>,
-        Record<string, unknown>,
-      ]
-    > = [
+    const chatCases: Array<[string, string, Record<string, unknown>, Record<string, unknown>]> = [
       [
         'setTitle',
         'handleTelegramSetChatTitle',
@@ -1011,36 +949,28 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       ],
     ];
 
-    test.each(chatCases)(
-      '%s routes to %s',
-      async (action, handler, extraArgs, expected) => {
-        const server = createServer();
-        server[handler] = jest.fn(async (args: unknown) => legacy(args));
+    test.each(chatCases)('%s routes to %s', async (action, handler, extraArgs, expected) => {
+      const server = createServer();
+      server[handler] = jest.fn(async (args: unknown) => legacy(args));
 
-        const result = await server.executeCanonicalTool(
-          definition('social_manage_chat'),
-          {
-            channel: 'telegram',
-            accountId: 'personal',
-            target: '-1001',
-            action,
-            ...extraArgs,
-          }
-        );
+      const result = await server.executeCanonicalTool(definition('social_manage_chat'), {
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '-1001',
+        action,
+        ...extraArgs,
+      });
 
-        expect(result.structuredContent).toMatchObject({
-          ok: true,
-          status: 'accepted',
-        });
-        expect(server[handler]).toHaveBeenCalledWith(expected);
-      }
-    );
+      expect(result.structuredContent).toMatchObject({
+        ok: true,
+        status: 'accepted',
+      });
+      expect(server[handler]).toHaveBeenCalledWith(expected);
+    });
   });
 
   describe('unsupported read sources and structured errors', () => {
-    const sourceCases: Array<
-      [string, Record<string, unknown>]
-    > = [
+    const sourceCases: Array<[string, Record<string, unknown>]> = [
       [
         'social_list_conversations',
         {
@@ -1076,10 +1006,7 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
           readSource: 'index',
         },
       ],
-      [
-        'social_search_messages',
-        { query: 'hola', readSource: 'provider' },
-      ],
+      ['social_search_messages', { query: 'hola', readSource: 'provider' }],
       [
         'social_resolve_target',
         {
@@ -1199,10 +1126,7 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       '%s reports unsupported_capability instead of a silent empty result',
       async (toolName, args) => {
         const server = createServer();
-        const result = await server.executeCanonicalTool(
-          definition(toolName),
-          args
-        );
+        const result = await server.executeCanonicalTool(definition(toolName), args);
         expectStructuredError(result, 'unsupported_capability');
       }
     );
@@ -1213,15 +1137,12 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         throw new Error('provider exploded');
       });
 
-      const result = await server.executeCanonicalTool(
-        definition('social_get_forum'),
-        {
-          channel: 'telegram',
-          accountId: 'personal',
-          target: '-1001',
-          readSource: 'provider',
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_get_forum'), {
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '-1001',
+        readSource: 'provider',
+      });
 
       expectStructuredError(result, 'provider_error');
       expect(result.structuredContent.error.message).toBe('provider exploded');
@@ -1293,20 +1214,15 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
           throw new Error('redis unavailable');
         }),
       };
-      server.handleSendMessage = jest.fn(async () =>
-        legacy({ accepted: true, messageId: 'wa-1' })
-      );
+      server.handleSendMessage = jest.fn(async () => legacy({ accepted: true, messageId: 'wa-1' }));
 
-      const result = await server.executeCanonicalTool(
-        definition('social_send_message'),
-        {
-          channel: 'whatsapp',
-          accountId: 'personal',
-          target: '34600000000@s.whatsapp.net',
-          message: 'hola',
-          idempotencyKey: 'send-durability-1',
-        }
-      );
+      const result = await server.executeCanonicalTool(definition('social_send_message'), {
+        channel: 'whatsapp',
+        accountId: 'personal',
+        target: '34600000000@s.whatsapp.net',
+        message: 'hola',
+        idempotencyKey: 'send-durability-1',
+      });
 
       expectStructuredError(result, 'outcome_unknown');
       expect(result.structuredContent.error.message).toContain(

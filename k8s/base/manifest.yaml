@@ -657,6 +657,9 @@ spec:
             - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
             - { name: EMBEDDING_DIMENSION, value: "1024" }
+            # Registro de cuentas (k8s/base/social-accounts.json -> ConfigMap
+            # social-accounts): namespaces validos para la ingesta.
+            - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }
@@ -669,6 +672,13 @@ spec:
             httpGet: { path: /health, port: 3000 }
             initialDelaySeconds: 30
             periodSeconds: 30
+          volumeMounts:
+            - name: accounts
+              mountPath: /accounts
+              readOnly: true
+      volumes:
+        - name: accounts
+          configMap: { name: social-accounts }
 ---
 apiVersion: v1
 kind: Service
@@ -726,6 +736,9 @@ spec:
             # residual documentado en CLAUDE.md (lo cierra SC-1146, parte 5).
             - { name: SOCIAL_IDENTITY_BINDING, value: "off" }
             - { name: SOCIAL_IDENTITY_BINDINGS_FILE, value: "/identity/social-identity-bindings.yaml" }
+            # Registro de cuentas: catalogo, enrutado a conectores, health y
+            # politica de envio en frio salen de aqui (account-registry.ts).
+            - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
             - { name: TELEGRAM_CONNECTOR_URL, value: "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002" }
             - { name: INSTAGRAM_CONNECTOR_URL, value: "http://instagram-connector.whatsapp-mcp.svc.cluster.local:3003" }
             - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
@@ -761,7 +774,12 @@ spec:
             - name: identity
               mountPath: /identity
               readOnly: true
+            - name: accounts
+              mountPath: /accounts
+              readOnly: true
       volumes:
+        - name: accounts
+          configMap: { name: social-accounts }
         # SC-1144 fase 2: la tabla de vinculos sub->cuentas (ConfigMap generado
         # desde k8s/base/social-identity-bindings.yaml por el kustomization de
         # base, nombre estatico a proposito: el codigo relee el fichero montado

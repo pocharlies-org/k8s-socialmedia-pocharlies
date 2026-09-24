@@ -27,6 +27,7 @@
 import * as fs from 'node:fs';
 import * as yaml from 'js-yaml';
 import type { RequestActor } from '@mcp-socialmedia/shared';
+import { declaredAccountIds } from './account-registry';
 
 export interface IdentityBindingEntry {
   /** Human name of the principal; appears in the fail-closed error messages. */
@@ -153,12 +154,20 @@ export function resolveBoundAccount(
     );
   }
   const wanted = typeof requested === 'string' ? requested.trim().toLowerCase() : '';
-  if (!wanted) return entry.accounts[0];
-  if (!(entry.accounts as readonly string[]).includes(wanted)) {
+  const chosen = wanted || entry.accounts[0];
+  if (wanted && !(entry.accounts as readonly string[]).includes(wanted)) {
     throw new IdentityBindingError(
       `account '${requested}' no está ligado a este llamante. Principal: ${entry.label} ` +
         `(sub ${sub}). Cuentas ligadas: ${entry.accounts.join(', ')}.`
     );
   }
-  return wanted;
+  // A binding may only point at an account the registry declares: a typo or a
+  // retired account in the table must not reach the routing layer.
+  if (!declaredAccountIds().has(chosen)) {
+    throw new IdentityBindingError(
+      `account '${chosen}' está ligado a ${entry.label} (sub ${sub}) pero no existe en el ` +
+        'registro de cuentas (SOCIAL_ACCOUNTS_FILE); no se sirve (fail-closed).'
+    );
+  }
+  return chosen;
 }

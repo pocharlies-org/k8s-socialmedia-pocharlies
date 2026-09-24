@@ -79,9 +79,7 @@ describe('loadIdentityBindings', () => {
   });
 
   it('fails closed when the file is missing or malformed', () => {
-    expect(() => loadIdentityBindings(path.join(dir, 'nope.yaml'))).toThrow(
-      IdentityBindingError
-    );
+    expect(() => loadIdentityBindings(path.join(dir, 'nope.yaml'))).toThrow(IdentityBindingError);
     fs.writeFileSync(file, 'bindings: {esto: no es una lista}');
     expect(() => loadIdentityBindings(file)).toThrow(/no se puede parsear|lista/);
   });
@@ -110,13 +108,9 @@ describe('resolveBoundAccount (flag ON)', () => {
 
   it('requested account inside the list passes; outside throws naming principal + bounds', () => {
     expect(resolveBoundAccount('personal', { sub: DANIEL }, filePath())).toBe('personal');
-    expect(resolveBoundAccount('professional', { sub: DANIEL }, filePath())).toBe(
-      'professional'
-    );
+    expect(resolveBoundAccount('professional', { sub: DANIEL }, filePath())).toBe('professional');
     expect(resolveBoundAccount('leila', { sub: LEILA }, filePath())).toBe('leila');
-    expect(resolveBoundAccount('professional', { sub: OPERATOR }, filePath())).toBe(
-      'professional'
-    );
+    expect(resolveBoundAccount('professional', { sub: OPERATOR }, filePath())).toBe('professional');
 
     let message = '';
     try {
@@ -140,6 +134,21 @@ describe('resolveBoundAccount (flag ON)', () => {
     expect(resolveBoundAccount(undefined, { sub: DANIEL }, filePath())).toBe('personal');
     // Daniel's first is personal by table order; the service-account likewise.
     expect(resolveBoundAccount(undefined, { sub: OPERATOR }, filePath())).toBe('personal');
+  });
+
+  it('a bound account the registry does not declare is refused (fail-closed)', () => {
+    fs.writeFileSync(
+      file,
+      `bindings:\n  - sub: ${LEILA}\n    label: leila\n    accounts: [retired, leila]\n`
+    );
+    resetIdentityBindingsCache();
+    expect(() => resolveBoundAccount(undefined, { sub: LEILA }, filePath())).toThrow(
+      /no existe en el registro de cuentas/
+    );
+    expect(() => resolveBoundAccount('retired', { sub: LEILA }, filePath())).toThrow(
+      IdentityBindingError
+    );
+    expect(resolveBoundAccount('leila', { sub: LEILA }, filePath())).toBe('leila');
   });
 
   it('carries the canonical forbidden code for the MCP error envelope', () => {

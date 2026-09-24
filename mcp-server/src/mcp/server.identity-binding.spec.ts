@@ -1,3 +1,4 @@
+import { useTestAccounts } from '../domain/test-accounts';
 /**
  * SC-1144 fase 2 — the identity-binding gate as seen from executeCanonicalTool,
  * the single point every canonical tool call passes through.
@@ -34,12 +35,16 @@ function createServer() {
   const server: any = Object.create(MCPServer.prototype);
   server.redisClient = fakeRedis();
   server.logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn() };
-  server.waUrls = {
-    personal: 'http://wa-personal',
-    professional: 'http://wa-professional',
-    leila: 'http://wa-leila',
-  };
-  server.tgUrls = { personal: 'http://tg-personal', professional: 'http://tg-professional' };
+  useTestAccounts({
+    whatsapp: {
+      personal: 'http://wa-personal',
+      professional: 'http://wa-professional',
+      leila: 'http://wa-leila',
+    },
+  });
+  useTestAccounts({
+    telegram: { personal: 'http://tg-personal', professional: 'http://tg-professional' },
+  });
   server.dispatchCanonicalTool = jest.fn(async () => ({ dispatched: true }));
   return server;
 }
@@ -147,9 +152,9 @@ describe('executeCanonicalTool identity gate', () => {
   it('flag ON + no verified sub -> fail-closed even for a request that omits the account', async () => {
     enableBinding();
     const server = createServer();
-    await expect(
-      server.executeCanonicalTool(getProfile, { channel: 'whatsapp' })
-    ).rejects.toThrow(/x-user-sub/);
+    await expect(server.executeCanonicalTool(getProfile, { channel: 'whatsapp' })).rejects.toThrow(
+      /x-user-sub/
+    );
     expect(server.dispatchCanonicalTool).not.toHaveBeenCalled();
   });
 

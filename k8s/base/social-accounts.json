@@ -1,0 +1,47 @@
+[
+  {
+    "channel": "whatsapp",
+    "accountId": "personal",
+    "label": "WhatsApp personal",
+    "connectorUrl": "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001"
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "professional",
+    "label": "WhatsApp professional",
+    "connectorUrl": "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001",
+    "requireInboundBeforeSend": true
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "leila",
+    "label": "WhatsApp leila",
+    "connectorUrl": "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001"
+  },
+  {
+    "channel": "telegram",
+    "accountId": "personal",
+    "label": "Telegram personal",
+    "connectorUrl": "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002",
+    "bridgeUrl": "http://telegram-sync.whatsapp-mcp.svc.cluster.local:3080"
+  },
+  {
+    "channel": "telegram",
+    "accountId": "professional",
+    "label": "Telegram professional",
+    "connectorUrl": "http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002",
+    "bridgeUrl": "http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080"
+  },
+  {
+    "channel": "instagram",
+    "accountId": "skirmshop",
+    "label": "Instagram skirmshopes",
+    "namespace": "professional"
+  },
+  {
+    "channel": "instagram",
+    "accountId": "barbelpapis",
+    "label": "Instagram barbelpapis",
+    "namespace": "personal"
+  }
+]

@@ -1,4 +1,4 @@
-import { accountKey, stripAccount, normalizeAccount, ACCOUNTS } from './account';
+import { accountKey, stripAccount, normalizeAccount, accountList } from './account';
 
 describe('account helpers', () => {
   it('keeps personal ids bare (no backfill of existing rows)', () => {
@@ -25,15 +25,24 @@ describe('account helpers', () => {
 
   it('accountKey is idempotent (never double-prefixes an already-namespaced id)', () => {
     expect(accountKey('professional', 'professional:tg_123')).toBe('professional:tg_123');
-    expect(accountKey('professional', accountKey('professional', 'tg_123'))).toBe('professional:tg_123');
+    expect(accountKey('professional', accountKey('professional', 'tg_123'))).toBe(
+      'professional:tg_123'
+    );
     expect(accountKey('personal', 'tg_123')).toBe('tg_123');
   });
 
   it('round-trips accountKey <-> stripAccount for every account', () => {
-    for (const a of ACCOUNTS) {
+    for (const a of accountList()) {
       const raw = 'tg_999_42';
       expect(stripAccount(accountKey(a, raw))).toEqual({ account: a, id: raw });
     }
+  });
+
+  it('never reads a native JID colon as an account prefix', () => {
+    expect(stripAccount('34660242739:12@s.whatsapp.net')).toEqual({
+      account: 'personal',
+      id: '34660242739:12@s.whatsapp.net',
+    });
   });
 
   it('treats an un-prefixed key as personal', () => {
@@ -48,7 +57,9 @@ describe('account helpers', () => {
     expect(normalizeAccount('personal')).toBe('personal');
     expect(normalizeAccount('professional')).toBe('professional');
     expect(normalizeAccount('leila')).toBe('leila');
-    expect(normalizeAccount('garbage')).toBe('personal');
     expect(normalizeAccount(null)).toBe('personal');
+    // Unknown accounts no longer fall back to personal (NAS fork audit P1).
+    expect(() => normalizeAccount('garbage')).toThrow(/Unknown or disabled account/);
+    expect(() => normalizeAccount('skirmshop')).toThrow(/Unknown or disabled account/);
   });
 });
