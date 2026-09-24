@@ -32,8 +32,8 @@ images:
     newTag: sha-985a199ea567
     digest: sha256:38c141768e5fe10c731616c46fc82276fef9a3ddafabcae6c4ee98a68eb2e11a
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.53
-    digest: sha256:8d325431094bac27225e70dc5376af59a969fd648dc837c234b092a2cc91f05e
+    newTag: v1.3.54
+    digest: sha256:01682afe354211eb64ac3110c3f4ea6a20b18182864889c41fa56983e465bbde
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
