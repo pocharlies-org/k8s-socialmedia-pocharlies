@@ -8,8 +8,8 @@
 #  - whatsapp-pairing  imagen whatsapp-connector, :3001  pool baileys por sub.
 #  - telegram-pairing  imagen telegram-connector, :3002  pool mtcute por sub.
 #
-# social-api -> pools con el HMAC existente (CONNECTOR_SHARED_SECRET, via el
-# envFrom del item `whatsapp-mcp`); el sessionKey va en el cuerpo firmado.
+# social-api -> pools con el HMAC existente (CONNECTOR_SHARED_SECRET, por
+# secretKeyRef del item `whatsapp-mcp`); el sessionKey va en el cuerpo firmado.
 # Persistencia SOLO en el credential store (DB whatsappmcp): los pools llevan
 # SESSION_PATH en emptyDir de memoria, sin PVC (sin segunda copia de credenciales),
 # y strategy Recreate (nunca dos procesos con la misma sesion).
@@ -55,12 +55,20 @@ spec:
             - { name: SOCIAL_API_ALLOWED_AZP, value: "dgx-messages" }
             - { name: WHATSAPP_PAIRING_URL, value: "http://whatsapp-pairing.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: TELEGRAM_PAIRING_URL, value: "http://telegram-pairing.whatsapp-mcp.svc.cluster.local:3002" }
+            # Solo las claves que usa este pod (nunca envFrom: el secreto lleva las
+            # TELEGRAM_SESSION_STRING* de la casa). DB_USER/DB_PASSWORD antes de DATABASE_URL.
+            - name: CONNECTOR_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_PASSWORD } }
+            - name: CREDENTIAL_STORE_MASTER_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CREDENTIAL_STORE_MASTER_KEY, optional: true } }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             # D3/D4: registro y vinculos solo se LEEN (houseAccounts de /social/status).
             - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
             - { name: SOCIAL_IDENTITY_BINDINGS_FILE, value: "/identity/social-identity-bindings.yaml" }
-          # CONNECTOR_SHARED_SECRET (HMAC), DB_USER/DB_PASSWORD y la clave maestra del store.
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 20m, memory: 96Mi }
             limits:   { memory: 384Mi }
@@ -113,8 +121,17 @@ spec:
             - { name: PORT, value: "3001" }
             - { name: SOCIAL_PAIRING_API, value: "off" }
             - { name: SESSION_PATH, value: "/app/pairing-sessions" }
+            # Solo las claves que usa este pod (nunca envFrom: el secreto lleva las
+            # TELEGRAM_SESSION_STRING* de la casa). DB_USER/DB_PASSWORD antes de DATABASE_URL.
+            - name: CONNECTOR_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_PASSWORD } }
+            - name: CREDENTIAL_STORE_MASTER_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CREDENTIAL_STORE_MASTER_KEY, optional: true } }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits:   { memory: 768Mi }   # incluye el emptyDir de memoria (sizeLimit abajo)
@@ -160,8 +177,21 @@ spec:
             - { name: PORT, value: "3002" }
             - { name: SOCIAL_PAIRING_API, value: "off" }
             - { name: SESSION_PATH, value: "/app/pairing-sessions" }
+            # Solo las claves que usa este pod (nunca envFrom: el secreto lleva las
+            # TELEGRAM_SESSION_STRING* de la casa). DB_USER/DB_PASSWORD antes de DATABASE_URL.
+            - name: CONNECTOR_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_PASSWORD } }
+            - name: CREDENTIAL_STORE_MASTER_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CREDENTIAL_STORE_MASTER_KEY, optional: true } }
+            - name: TELEGRAM_API_ID
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: TELEGRAM_API_ID } }
+            - name: TELEGRAM_API_HASH
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: TELEGRAM_API_HASH } }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 30m, memory: 192Mi }
             limits:   { memory: 768Mi }
