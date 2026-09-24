@@ -3324,6 +3324,7 @@ export class MCPServer {
       limit: args.limit || 20,
       includeParticipants: args.includeParticipants !== false,
       account: args.account,
+      channel: 'whatsapp',
     });
 
     return {
