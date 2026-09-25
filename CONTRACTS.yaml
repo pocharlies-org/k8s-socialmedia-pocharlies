@@ -134,12 +134,15 @@ contracts:
       same JWT + Origin + identity gates as http.social-api.pairing-whatsapp.v1
       (401 without a token with WWW-Authenticate: Bearer, 403 for a foreign
       Origin or a `sub`/`sessionKey`/`jid` in the query or body that is not
-      the caller's, 404 {"error":"not_found"} while SOCIAL_PAIRING_API is
-      off). 200 is {channels: {whatsapp: {state}, telegram: {state},
+      the caller's, 503 {"error":"identity_unavailable"} when the JWKS is
+      unreachable (same as http.social-api.pairing-whatsapp.v1), 404
+      {"error":"not_found"} while SOCIAL_PAIRING_API is off). 200 is
+      {channels: {whatsapp: {state}, telegram: {state},
       instagram: {state}}, houseAccounts: [{channel, accountId, label}]}
       where state is one of paired|expired|unpaired|unavailable: whatsapp
       from the pool's state route (row → paired, provider-invalidated during
-      the process's life → expired, no row → unpaired, pool down or store off
+      the process's life → expired, no row → unpaired, pool down, pool not
+      configured, store off, or any non-200 answer from the pool (429/4xx/5xx)
       → unavailable; a pairing in flight — starting/qr — is unpaired, the row
       is written only after the first connection open), telegram is
       `unavailable` until P4b (SC-1229) ships the telegram pool, instagram is
@@ -149,7 +152,8 @@ contracts:
       binding with the account registry (design D4; an unreadable bindings
       table binds nobody → []). Unlike /pairing/* and /me/*, this route
       answers 200 with `unavailable` states while the store is OFF — it is
-      the one route that skips the 503 pairing_unavailable gate (design D7).
+      the one route that skips the 503 pairing_unavailable store gate
+      (design D7).
       The path, the method, the response shape, the four state values
       (including `unavailable`, which SC-1198 consumes) and the store-off
       deviation are contract: changing any is breaking — a new `.v2` entry
