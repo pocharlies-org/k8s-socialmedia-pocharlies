@@ -110,11 +110,11 @@ through from the pool verbatim:
 
 | Code | Body | When |
 |---|---|---|
-| 400 | `{"error":"invalid_json"}` | malformed JSON body (express `entity.parse.failed`) |
+| 400 | `{"error":"invalid_json"}` | malformed JSON body (express `entity.parse.failed`) — **only when the API is on**; with `SOCIAL_PAIRING_API=off` the JSON error handler is not mounted (the off-branch returns before it), so a malformed body yields express's default 400 HTML instead |
 | 401 | `{"error":"unauthorized"}` + `WWW-Authenticate: Bearer` | missing/bad/expired/foreign token, disallowed `azp`, empty `sub` |
 | 403 | `{"error":"forbidden_origin"}` | a **present** `Origin` header outside `SOCIAL_API_ALLOWED_ORIGINS` (empty default). social-api never answers CORS headers — it is in-cluster only; the gate is defense against a browser-driven request, not a cross-origin enabler |
 | 403 | `{"error":"forbidden_identity"}` | `sub`, `sessionKey` or `jid` present in the query or body with a value that is not the caller's own `sub` (equal-to-own is accepted and ignored) |
-| 404 | `{"error":"not_found"}` | `SOCIAL_PAIRING_API` off (everything but `/health`), or an unknown path |
+| 404 | `{"error":"not_found"}` | `SOCIAL_PAIRING_API` off (every well-formed request but `/health`), or an unknown path |
 | 429 | `{"error":"rate_limited", "reason": "start_interval\|daily_starts\|pool_full\|qr_limit", "retryAfterSeconds": N}` + `Retry-After` | passed through from the pool's limits |
 | 503 | `{"error":"identity_unavailable"}` | the JWKS endpoint cannot be reached — fail closed (design D2) |
 | 503 | `{"error":"pairing_unavailable"}` | store off / no master key / no `CONNECTOR_SHARED_SECRET` / the route's pool URL unset or unreachable / any non-200-non-429 answer from the pool |
@@ -125,7 +125,7 @@ One decision per layer, in this order (`mcp-server/src/social-api/app.ts`);
 a request rejected at 2–5 never reaches the pool — no signature is produced,
 no credential row is written:
 
-1. `SOCIAL_PAIRING_API=off` → 404 for everything but `GET /health`
+1. `SOCIAL_PAIRING_API=off` → 404 `not_found` for every well-formed request but `GET /health`; a malformed JSON body throws in `express.json()` before the catch-all and, since the off-branch returns before the JSON error handler is mounted, gets express's default 400 HTML (see the 400 row)
 2. `Origin` outside the allowlist → 403 `forbidden_origin`
 3. no / bad JWT → 401; JWKS unreachable → 503 `identity_unavailable`
 4. foreign `sub`/`sessionKey`/`jid` → 403 `forbidden_identity`
@@ -167,7 +167,7 @@ no credential row is written:
 
 | Flag | Read by | Default | Meaning |
 |---|---|---|---|
-| `SOCIAL_PAIRING_API` | social-api **and both pools** | `off` | must be exactly `on` (trim/lowercase) anywhere it is read. Off: social-api 404s everything but `/health`; the pools 404 everything but their `/health`. The three P3 Deployments ship `replicas: 0` + `off` — inert. |
+| `SOCIAL_PAIRING_API` | social-api **and both pools** | `off` | must be exactly `on` (trim/lowercase) anywhere it is read. Off: social-api 404s every well-formed request but `/health` (a malformed JSON body gets express's default 400 HTML — see Gate order); the pools 404 everything but their `/health`. The three P3 Deployments ship `replicas: 0` + `off` — inert. |
 | `CREDENTIAL_STORE_ENABLED` | shared store (`credentialStoreEnabled`) | off | must be exactly `true`. A usable store is the flag **and** a parseable `CREDENTIAL_STORE_MASTER_KEY` (fail closed on a bad key); otherwise authed pairing routes 503 `pairing_unavailable` and `/social/status` answers `unavailable` states. |
 | `SOCIAL_API_ALLOWED_ORIGINS` | social-api | empty | comma-separated Origin allowlist. Empty = any present `Origin` is 403. Absent header passes (non-browser callers). |
 | `SOCIAL_IDENTITY_BINDING` | mcp-server tool routing (SC-1144) | off | **not** read by social-api: it gates `applyIdentityBinding` on the MCP tools. `GET /social/status` reads the bindings table (`SOCIAL_IDENTITY_BINDINGS_FILE`) for `houseAccounts` regardless of the flag — fail-closed (unreadable table binds nobody → `[]`). |
@@ -194,8 +194,12 @@ Applied by the pools (identical defaults in both,
   rate-limited even when a socket is already live, so a client cannot spin QR
   generation by hammering it.
 - **10 starts per rolling 24 h per sub** (`daily_starts`).
-- Idle pairing sessions are evicted after 10 min; polling (`state`) does **not**
-  renew the idle clock — polling does not park a session.
+- Idle pairing sessions are evicted after 10 min. Polling (`state`) does **not**
+  renew the idle clock on **telegram** — polling does not park a session. On
+  **whatsapp** it does: `status()` writes `lastTouched`, so a client polling
+  `GET /pairing/whatsapp` keeps its session alive and holds one of the pool's 10
+  slots. SC-1243 (PR #87) removes that renewal, after which both channels behave
+  identically.
 - QR stays in memory: the pairing pool builds its clients with `quietQr` (no
   stdout print, no `qr.png` written) and the QR is delivered by **polling
   `GET /pairing/{channel}`, not SSE**.
