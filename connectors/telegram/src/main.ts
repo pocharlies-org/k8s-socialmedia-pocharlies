@@ -1,7 +1,14 @@
 import express from 'express';
+import { PostgresCredentialStore, credentialSessionKeyFromEnv } from '@mcp-socialmedia/shared';
 import { TelegramClientWrapper, TelegramMessage } from './telegram-client';
 import { TelegramEventPublisher, TelegramMessageReceivedEvent } from './events/publisher';
 import { createRouter } from './api/controller';
+import { getPool } from './db-pool';
+import {
+  TelegramCredentialWriteBack,
+  createTelegramCredentialWriteBack,
+  resolveTelegramSession,
+} from './credential-session';
 
 const TELEGRAM_API_ID = parseInt(process.env.TELEGRAM_API_ID || '0', 10);
 const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH || '';
@@ -21,7 +28,35 @@ async function main() {
     process.exit(1);
   }
 
-  if (!TELEGRAM_SESSION_STRING) {
+  // SC-705 part 4 (SC-1145): per-user sessions are keyed by the caller's
+  // Keycloak `sub` (CREDENTIAL_SESSION_KEY = `<sub>` or `<sub>:<cuenta>`,
+  // shared/session-store/credential-session-key.ts). The house accounts
+  // (personal/professional) do NOT set it and keep the exact legacy path —
+  // TELEGRAM_SESSION_STRING, zero store reads/writes, no adoption.
+  const credentialSessionKey = credentialSessionKeyFromEnv();
+  let credentialStore: PostgresCredentialStore | null = null;
+  let credentialWriteBack: TelegramCredentialWriteBack | null = null;
+  let sessionString = TELEGRAM_SESSION_STRING;
+  if (credentialSessionKey) {
+    credentialStore = new PostgresCredentialStore(getPool());
+    const resolved = await resolveTelegramSession(
+      credentialStore,
+      credentialSessionKey,
+      TELEGRAM_SESSION_STRING
+    );
+    sessionString = resolved.sessionString ?? '';
+    console.log(
+      `credential-store: telegram session for ${credentialSessionKey} resolved from ${resolved.source}`
+    );
+    if (!sessionString) {
+      console.error(
+        `No telegram session for ${credentialSessionKey}: no credential-store row and no TELEGRAM_SESSION_STRING — the MTProto pairing gesture for this user is still pending`
+      );
+      process.exit(1);
+    }
+  }
+
+  if (!sessionString) {
     console.error('TELEGRAM_SESSION_STRING is required');
     console.error('Run "pnpm generate-session" to create one');
     process.exit(1);
@@ -30,14 +65,41 @@ async function main() {
   const client = new TelegramClientWrapper({
     apiId: TELEGRAM_API_ID,
     apiHash: TELEGRAM_API_HASH,
-    sessionString: TELEGRAM_SESSION_STRING,
+    sessionString,
+    credentialSessionKey,
   });
+
+  if (credentialSessionKey && credentialStore) {
+    // Write-back on every mtcute persist (session import, per-DC auth-key
+    // creation, update-state sync) — the baileys saveCreds counterpart.
+    credentialWriteBack = createTelegramCredentialWriteBack(
+      credentialStore,
+      credentialSessionKey,
+      () => client.exportSessionString()
+    );
+    client.setSessionPersistHook(() => credentialWriteBack?.schedule());
+    // Revoked session: cancel any in-flight write, then drop the row (a
+    // trailing put must never resurrect a deleted dead credential).
+    client.setSessionInvalidatedHook(async () => {
+      credentialWriteBack?.cancel();
+      await credentialStore.delete(credentialSessionKey, 'telegram');
+    });
+  }
 
   const eventPublisher = new TelegramEventPublisher(NATS_URL, NATS_CA_CERT);
 
   // Setup Express API
   const app = express();
   app.use(express.json({ limit: '25mb' }));
+  // SC-1145 (mirrors whatsapp-web): the mcp-server forwards the verified
+  // caller identity (`x-user-sub`, from the gateway JWT) on every connector
+  // call. Phase 1.5 logs it (observable proof the header traverses
+  // gateway→mcp-server→connector); the phase-2 per-sub pool will route on it.
+  app.use('/api/v1', (req, _res, next) => {
+    const sub = req.headers['x-user-sub'];
+    if (typeof sub === 'string' && sub) console.log(`API request carries x-user-sub=${sub}`);
+    next();
+  });
   app.use('/api/v1', createRouter(client, CONNECTOR_SHARED_SECRET));
 
   // Health check endpoint
@@ -141,20 +203,31 @@ async function main() {
 
   await client.connect();
 
-  // Graceful shutdown
-  process.on('SIGINT', async () => {
-    console.log('Shutting down...');
-    await client.disconnect();
-    await eventPublisher.disconnect();
-    process.exit(0);
-  });
+  // SC-1145: start() imported the session (mtcute persist → scheduled
+  // write-back). Flush so the row exists deterministically before the pod
+  // declares itself live — criterion 2 (persistence after rollout restart)
+  // must not depend on the 2s debounce surviving a fast crash loop.
+  if (credentialWriteBack) {
+    await credentialWriteBack.flush();
+  }
 
-  process.on('SIGTERM', async () => {
+  // Graceful shutdown
+  const shutdown = async (): Promise<void> => {
     console.log('Shutting down...');
+    // Land a pending write-back (≤5s; a hung DB must not block the pod from
+    // dying — the next start re-persists on connect) before disconnecting.
+    if (credentialWriteBack) {
+      await Promise.race([
+        credentialWriteBack.flush(),
+        new Promise(resolve => setTimeout(resolve, 5000).unref?.()),
+      ]);
+    }
     await client.disconnect();
     await eventPublisher.disconnect();
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
 }
 
 main().catch(error => {

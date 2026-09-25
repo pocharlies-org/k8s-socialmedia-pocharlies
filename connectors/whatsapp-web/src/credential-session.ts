@@ -28,34 +28,16 @@ import { join } from 'path';
 import {
   CredentialStore,
   applyBaileysAuthDir,
-  credentialStoreEnabled,
+  createCredentialWriteBack as createSharedCredentialWriteBack,
   serializeBaileysAuthDir,
 } from '@mcp-socialmedia/shared';
 
-/**
- * session_key charset: UUID subs and `<sub>:<account>` fit; path separators
- * and traversal are rejected so the key can never escape the sessionPath
- * root when used as a directory name.
- */
-export const CREDENTIAL_SESSION_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
-
-/**
- * The session_key this process should key its baileys session by, or null
- * when it must run the legacy path (flag off, or no key set — the house
- * accounts). Throws on a malformed key: a typo'd key would silently create a
- * second source of truth.
- */
-export function credentialSessionKeyFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
-  if (!credentialStoreEnabled(env)) return null;
-  const raw = (env.CREDENTIAL_SESSION_KEY || '').trim();
-  if (!raw) return null;
-  if (!CREDENTIAL_SESSION_KEY_RE.test(raw)) {
-    throw new Error(
-      `CREDENTIAL_SESSION_KEY must match ${CREDENTIAL_SESSION_KEY_RE} (a Keycloak sub, optionally '<sub>:<account>')`
-    );
-  }
-  return raw;
-}
+// SC-1145: the session_key convention (regex + env parsing) moved to
+// shared/session-store/credential-session-key.ts so the telegram connector
+// keys its rows by the identical rule — one source of truth for the
+// tech-lead's binding convention. Re-exported here unchanged for this
+// connector's callers and specs.
+export { CREDENTIAL_SESSION_KEY_RE, credentialSessionKeyFromEnv } from '@mcp-socialmedia/shared';
 
 /** Per-sub sessionPath so two per-sub connectors could share a PVC root. */
 export function sessionPathForSub(baseSessionPath: string, sessionKey: string): string {
@@ -94,10 +76,14 @@ export interface CredentialWriteBack {
 }
 
 /**
- * saveCreds → store.put write-back. Debounce coalesces bursts of
- * `creds.update`; the in-flight guard keeps puts ordered (no interleaved
- * serialize of a half-written dir); a trailing run guarantees the LAST
- * saveCreds always reaches the store even if it fires mid-put.
+ * saveCreds → store.put write-back. The choreography (debounce of
+ * `creds.update` bursts, in-flight guard, trailing run, flush) lives in
+ * shared/session-store/credential-write-back.ts — the telegram connector
+ * shares it (SC-1224 architect ruling: two copies had already drifted).
+ * This wrapper only supplies the channel and the auth-dir serializer, and
+ * keeps the narrower handle this connector has always exposed: whatsapp does
+ * NOT call cancel() yet (wiring it into `loggedOut` changes behaviour and is
+ * another story).
  */
 export function createCredentialWriteBack(
   store: CredentialStore,
@@ -106,57 +92,12 @@ export function createCredentialWriteBack(
   logError: (msg: string) => void = msg => console.error(msg),
   debounceMs = 2000
 ): CredentialWriteBack {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let inFlight: Promise<void> | null = null;
-  let pending = false; // a run() was requested while one was in flight
-  let due = false; // schedule() fired but the debounce timer has not run yet
-
-  const run = async (): Promise<void> => {
-    if (inFlight) {
-      pending = true; // trailing run: the last saveCreds must reach the store
-      return inFlight;
-    }
-    inFlight = (async () => {
-      try {
-        const payload = await serializeBaileysAuthDir(authDir);
-        await store.put(sessionKey, 'whatsapp', { ...payload });
-      } catch (e: any) {
-        // Never throw into the baileys socket handler; loud log instead.
-        logError(`credential-store write-back FAILED for ${sessionKey}: ${e?.message || e}`);
-      } finally {
-        inFlight = null;
-        if (pending) {
-          pending = false;
-          await run();
-        }
-      }
-    })();
-    return inFlight;
-  };
-
-  return {
-    schedule(): void {
-      due = true;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        due = false;
-        void run();
-      }, debounceMs);
-      if (typeof timer.unref === 'function') timer.unref();
-    },
-    async flush(): Promise<void> {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      // A scheduled-but-not-yet-fired write, an in-flight put, or a trailing
-      // run must all land before the caller exits. run() chains the trailing
-      // run inside the in-flight promise, so one await covers the burst.
-      if (due || inFlight || pending) {
-        due = false;
-        await run();
-      }
-    },
-  };
+  return createSharedCredentialWriteBack({
+    store,
+    sessionKey,
+    channel: 'whatsapp',
+    getPayload: async () => ({ ...(await serializeBaileysAuthDir(authDir)) }),
+    logError,
+    debounceMs,
+  });
 }
