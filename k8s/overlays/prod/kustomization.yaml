@@ -10,7 +10,7 @@ patches:
   # SC-705 / SC-1214: per-user credential store. WhatsApp keeps the flag OFF
   # (house connectors set no CREDENTIAL_SESSION_KEY); the ON flip is
   # Instagram-only and lives in the second document of
-  # patch-credential-store.yaml (PR 83, stacked on the PR 81 image re-pin).
+  # patch-credential-store.yaml; rollback = revert of that document.
   # ON is prod-only, stg stays OFF.
   - path: patch-credential-store.yaml
 images:
