@@ -7,6 +7,9 @@ resources:
   - generated/connectors.yaml
   - whatsapp-synapse-bridge.yaml
   - networkpolicy.yaml
+  # SC-1197 P3 (SC-1226): API de emparejamientos por sub, inerte (replicas 0, flag off).
+  - social-pairing.yaml
+  - networkpolicy-social-pairing.yaml
 
 # SC-1144 fase 2: la tabla de vinculos sub->cuentas vive en
 # social-identity-bindings.yaml (el fichero checked-in es el trace GitOps: cada

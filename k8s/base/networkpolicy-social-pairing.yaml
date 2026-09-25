@@ -1,0 +1,173 @@
+# SC-1197 P3 (SC-1226) D5 — exposicion de la API de emparejamientos: SOLO in-cluster.
+# - social-api:3020 solo desde ns messages / pods app=dgx-messages (sin IngressRoute).
+# - Los pools (whatsapp-pairing:3001, telegram-pairing:3002) solo desde social-api.
+# - Ninguno de los tres entra en whatsapp-mcp-allow-traefik-http (esa abre el pod
+#   CIDR 10.42.0.0/16 y el tailnet): ni traefik ni el pod CIDR llegan a ellos.
+# Corte efectivo (hallazgo QA H1, cerrado en esta PR): whatsapp-mcp-allow-same-namespace
+# excluye ya a estos tres pods de su podSelector (app NotIn), asi que lo que hay AQUI
+# es la lista completa y minima de lo que puede entrarles — ningun pod de la casa
+# (mcp-sse, conectores) los alcanza. Ver comentario en networkpolicy.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-messages-social-api
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: social-api
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: messages
+          podSelector:
+            matchLabels:
+              app: dgx-messages
+      ports:
+        - protocol: TCP
+          port: 3020
+  policyTypes:
+    - Ingress
+---
+# Una politica por pool, con su unico puerto (hallazgo QA H3: la version conjunta
+# abria 3001 y 3002 a ambos pods). Cada pod solo escucha el suyo; el manifiesto
+# queda siendo el minimo del trafico real de la PR de encendido.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-social-api-whatsapp-pairing
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: whatsapp-pairing
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: social-api
+      ports:
+        - protocol: TCP
+          port: 3001
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-social-api-telegram-pairing
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: telegram-pairing
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: social-api
+      ports:
+        - protocol: TCP
+          port: 3002
+  policyTypes:
+    - Ingress
+---
+# Egress de social-api: DNS, keycloak in-cluster (JWKS; svc :80 -> pod :8080), los
+# pools y Postgres (credential store). Nada mas.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-social-api-egress
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: social-api
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # El CNI de este cluster evalua el egress contra el puerto POST-DNAT (el
+    # containerPort del pod, no el del Service): el gateway de agentes lo sufrio
+    # y lo documenta asi (k8s-agentgateway-pocharlies manifest.yaml, crash-loop
+    # JWKS 2026-07-04; el fix de alli permite 80 Y 8080 "to survive either
+    # shape"). keycloak: svc :80 -> pod :8080. Mismos dos puertos aqui.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+          podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - { protocol: TCP, port: 80 }
+        - { protocol: TCP, port: 8080 }
+    # Un puerto por pool, espejo del ingress (H3).
+    - to:
+        - podSelector: { matchLabels: { app: whatsapp-pairing } }
+      ports:
+        - { protocol: TCP, port: 3001 }
+    - to:
+        - podSelector: { matchLabels: { app: telegram-pairing } }
+      ports:
+        - { protocol: TCP, port: 3002 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+      ports:
+        - { protocol: TCP, port: 5432 }
+  policyTypes:
+    - Egress
+---
+# Egress de los pools: DNS, Postgres (credential store) e internet publico
+# (servidores de WhatsApp / Telegram), como los conectores de la casa; las redes
+# privadas, el pod CIDR y el tailnet quedan fuera del bloque de internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-social-pairing-pools-egress
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - whatsapp-pairing
+          - telegram-pairing
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+  policyTypes:
+    - Egress

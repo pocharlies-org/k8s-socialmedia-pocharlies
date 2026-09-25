@@ -8,13 +8,32 @@ spec:
   policyTypes:
     - Ingress
 ---
+# SC-1197 P3 (SC-1226), hallazgo QA H1 + veredicto architect: los tres pods de la
+# API de emparejamientos (social-api, whatsapp-pairing, telegram-pairing) quedan
+# EXCLUIDOS de esta politica — su unico trafico entrante es el que autorizan las
+# politicas explicitas de networkpolicy-social-pairing.yaml (dgx-messages ->
+# social-api:3020; social-api -> los pools). Ningun pod de la casa (mcp-sse,
+# conectores) puede alcanzarlos por red: antes, al ser las NetworkPolicy aditivas,
+# un compromiso de cualquier pod del ns alcanzaba los pools sin mas barrera que
+# el HMAC, que mcp-sse y los conectores ya comparten.
+# Los pods EXISTENTES no cambian de conectividad ni un byte: `app NotIn [...]`
+# selecciona a todos los que seleccionaba `podSelector: {}` (incluidos los que no
+# llevan etiqueta `app` — un label selector NotIn tambien matchea la clave
+# ausente), y el `from` sigue siendo podSelector {}.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: whatsapp-mcp-allow-same-namespace
   namespace: whatsapp-mcp
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: NotIn
+        values:
+          - social-api
+          - whatsapp-pairing
+          - telegram-pairing
   ingress:
     - from:
         - podSelector: {}
