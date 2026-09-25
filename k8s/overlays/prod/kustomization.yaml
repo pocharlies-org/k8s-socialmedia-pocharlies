@@ -13,21 +13,28 @@ patches:
   # patch-credential-store.yaml; rollback = revert of that document.
   # ON is prod-only, stg stays OFF.
   - path: patch-credential-store.yaml
+  # SC-1197 encendido: SOCIAL_PAIRING_API=on + replicas 1 + CREDENTIAL_STORE_ENABLED
+  # en social-api y los dos pools. Rollback = revert de este fichero y su linea.
+  - path: patch-social-pairing-on.yaml
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
-  # mcp-server is on v1.3.55 (run 36075936408, deploy/prod@7d6c030, pinned by
-  # PR 78): identity-binding gate (SC-1144 fase 2), encrypted credential store
-  # (PR 52), migrate.ts with the `_migrations` ledger and migrations/007+008 —
-  # all behind flags that stay OFF in this overlay (CREDENTIAL_STORE_ENABLED=false,
-  # SOCIAL_IDENTITY_BINDING=off). The PreSync Job whatsapp-mcp-migrate uses this
-  # same image (its `:latest` is rewritten by this block).
-  # telegram-connector alone stays on socialmedia-v4-1c572645: real reaction totals.
-  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: socialmedia-v2-c88dce16
-    digest: sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
-  - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: socialmedia-v4-1c572645
-    digest: sha256:a54d0cd4109b96fe0d1c2c434613be943c6dba50c88ed5db12608c82b77fd2f9
+  # SC-1197 encendido: mcp-server advances v1.3.55 -> v1.3.57 (run
+  # 36135670213, deploy/prod@115c066 — the tip that carries #70..#85: the P1a
+  # baileys pairing pool, the P1b/P2/P4b social-api routes and the SC-1243
+  # status fix). This block rewrites EVERY consumer of the image name, so the
+  # advance also moves the house mcp-server, mcp-sse, the brain-ingest CronJob
+  # and the PreSync migrate Job — the repo's established pin pattern (PRs
+  # 73/76/78 did exactly this). All of them set DATABASE_URL, which the code
+  # requires since SC-1239 C2 (#84), and migrate.ts's `_migrations` ledger
+  # skips what 007/008 already applied.
+  #
+  # whatsapp-connector and telegram-connector are NO LONGER pinned here (were
+  # socialmedia-v2-c88dce16 / socialmedia-v4-1c572645): the encendido needs
+  # the two pairing pools on v1.3.57 while the HOUSE connectors keep their
+  # current digests, and this block cannot tell them apart — it rewrites by
+  # image name, house pods included. The per-deployment pins (house:
+  # byte-identical digests to today, pools: v1.3.57) live in
+  # patch-image.yaml, now the authority for those two names.
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
@@ -41,8 +48,8 @@ images:
     newTag: v1.3.55
     digest: sha256:bf90ef1679fb212969577b2d16efb17bd25c68f24778fb65efa30bb5ee42d90f
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.55
-    digest: sha256:a544d2639e06800252955dcfe96dc9eccf0f257a1cf8f3703997253077c6c23b
+    newTag: v1.3.57
+    digest: sha256:9200e96f8c0dfb860952166ecc18a711d59949c3fc18e4c685bcb8e88f172e72
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

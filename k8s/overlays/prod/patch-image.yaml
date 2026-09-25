@@ -1,3 +1,11 @@
+# SC-1197 encendido: since the `images:` block no longer carries
+# whatsapp-connector / telegram-connector (it rewrites by image name and would
+# have moved the HOUSE connectors together with the pairing pools), this file
+# is the authority for those two names. The house digests below are
+# byte-identical to what runs today (measured 25-09 in the live objects): the
+# flip changes zero bytes for the house connectors. Every Deployment that uses
+# either image name must appear here — an unpatched one would fall back to the
+# base tag (`:latest` / the generator's pin).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -56,8 +64,56 @@ spec:
   template:
     spec:
       containers:
+        # v4-1c572645 was the EFFECTIVE pin via the `images:` block all along
+        # (patches run before the block, so the v3 line that stood here was
+        # dead code); spelled out here now that the block dropped the name.
+        # Same digest as the live pod — zero rollout.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:socialmedia-v3-f0f219bd@sha256:60470b59445d1d93be8c8017fd72112085888ec2459218c950e7a2fc80af4c06
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:socialmedia-v4-1c572645@sha256:a54d0cd4109b96fe0d1c2c434613be943c6dba50c88ed5db12608c82b77fd2f9
+---
+# telegram-connector-professional was pinned ONLY by the `images:` block
+# (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
+# as today.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector-professional
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: telegram-connector
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:socialmedia-v4-1c572645@sha256:a54d0cd4109b96fe0d1c2c434613be943c6dba50c88ed5db12608c82b77fd2f9
+---
+# SC-1197 encendido — the pairing pools run v1.3.57 (run 36135670213,
+# deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
+# connectors/whatsapp-web/src/pairing/main.ts and
+# connectors/telegram/src/pairing/main.ts, plus the social-api routes). The
+# house connectors stay on the pins above.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-pairing
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-pairing
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.57@sha256:4ee6153e431b264c56241b34912f44ee3e2a90c2cc06b60a3b056131bd264893
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-pairing
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: telegram-pairing
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.57@sha256:8594502b214dd8c2e44ab602c88c15e952402831a96e01b3eacc2292ccef6ae8
 ---
 apiVersion: apps/v1
 kind: Deployment
