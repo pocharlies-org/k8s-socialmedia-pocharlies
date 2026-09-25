@@ -11,8 +11,7 @@
     "accountId": "professional",
     "label": "WhatsApp professional",
     "profile": "professional",
-    "connectorUrl": "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001",
-    "requireInboundBeforeSend": true
+    "connectorUrl": "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001"
   },
   {
     "channel": "whatsapp",

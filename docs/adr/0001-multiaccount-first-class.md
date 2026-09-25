@@ -55,6 +55,9 @@ Fecha: 2026-09-24. Estado: aceptado. Contexto: integración del fork NAS de Jord
    Implementado en `scripts/render-connectors.py`: los parámetros por cuenta viven en el bloque
    opcional `deploy` de cada entrada del registro; salida en `k8s/base/generated/` (manifiestos +
    la proyección de runtime del registro, sin `deploy`, que es lo que monta el ConfigMap).
+   *Enmienda 25-09-2026*: la puerta cold-send (`requireInboundBeforeSend`) se **elimina** por
+   decisión de Dani: ningún canal bloquea el primer contacto; los envíos van directos al conector
+   de la cuenta con el jid sin prefijo.
 
 ## Consecuencias
 
