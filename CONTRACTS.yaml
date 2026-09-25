@@ -1,0 +1,69 @@
+# CONTRACTS.yaml — contract surface of k8s-socialmedia-pocharlies.
+#
+# This repo PUBLISHES HTTP routes that other processes call (social-api →
+# whatsapp-pairing, the house QR flow → the whatsapp connector). Those names
+# and shapes are contract: a rename or a shape edit breaks a consumer this
+# repo's own tests cannot see. Created by SC-1225 (SC-1197 P1a, design D6);
+# later parts of SC-1197 (P1b social-api, P2 status, P4b telegram) add their
+# entries in the same push as the surface.
+#
+# The MCP tool contract stays where it is (contracts/socialmedia-tools.*,
+# checked by `pnpm contract:check`); it is not duplicated here.
+#
+# Enforced by the generic checker — k8s-gitops-pocharlies/scripts/check-contracts.py
+# — from the global pre-push hook and as a CI backstop.
+#
+# Lo existente NO muta. Breaking = entrada nueva `.vN+1`, la vieja a
+# `status: deprecated` con `replaced_by` + `remove_after`. Las entradas nunca se
+# borran (retirar = `status: removed`). Un commit que toca superficie de contrato
+# actualiza el registry en el mismo push y lleva el trailer
+# `Contract-Change: <accion> <id>`.
+#
+# Reglas completas y via de excepcion: skill `synapse-contracts`.
+version: 1
+canonical_checkout: /home/dibanez/k8s/k8s-socialmedia-pocharlies
+registry_files:
+  - CONTRACTS.yaml
+contracts:
+  - id: http.whatsapp-pairing.internal-sessions.v1
+    kind: http-route
+    value: /internal/whatsapp/sessions
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/pairing/app.ts
+    status: active
+    note: >-
+      Internal API of the whatsapp-pairing Deployment (whatsapp-connector image,
+      :3001, in-cluster only), consumed by social-api (SC-1197 P1b). Three routes,
+      all POST so the sessionKey travels inside the HMAC-signed body
+      (connectors/whatsapp-web/src/api/auth.ts createHMACAuth: headers
+      x-connector-timestamp + x-connector-signature = sha256=HMAC(secret,
+      "<ts>:<JSON body>"), 5-minute window): /start, /state and /me under this
+      base, each with body {"sessionKey": "<sub>"}. /start and /state answer 200
+      {sessionKey, state, qr, me} with state one of starting|qr|paired|expired|unpaired,
+      qr null or {value, dataUrl, issuedAt, expiresAt}, me null or {id, jid, phone,
+      name}; /me answers 200 {sessionKey, me} or 404 {"error":"not_paired"}. Errors:
+      400 {"error":"invalid_session_key"}; 401 bad or missing signature; 429
+      {"error":"rate_limited", reason: start_interval|daily_starts|pool_full|qr_limit,
+      retryAfterSeconds} with a Retry-After header; 503 {"error":"pairing_unavailable"}
+      when the credential store is off, the master key is missing or no shared secret
+      is set; 404 {"error":"not_found"} for everything but GET /health while
+      SOCIAL_PAIRING_API is off. The base path, the methods, the body field, the state
+      names, the error codes and the 429 reasons are all contract: renaming any of
+      them, or moving the sessionKey out of the signed body, is breaking — a new
+      `http.whatsapp-pairing.internal-sessions.v2` entry beside this one.
+  - id: http.whatsapp-connector.auth-qr
+    kind: http-route
+    value: /auth/qr
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/auth/qr of the house WhatsApp connectors (personal, professional,
+      leila): unauthenticated, 200 {qrCode, expiresAt} (qrCode a PNG data URL,
+      expiresAt ISO) or 404 {"error":"No QR code available"}. Registered by SC-1197
+      (design D6) without changing its code so the per-sub pairing work cannot
+      touch it: per-sub QR lives only on http.whatsapp-pairing.internal-sessions.v1.
+      Path, method, the absence of auth and the response shape are contract;
+      changing any of them is breaking — a new `.v2` entry beside this one.

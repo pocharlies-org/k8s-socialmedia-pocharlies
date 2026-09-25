@@ -436,8 +436,30 @@ export function pnFromLidMessage(msg: WAMessage | undefined | null): LidPnInfo |
   return undefined;
 }
 
+/**
+ * SC-1225: per-instance options. Both default to the legacy behaviour, so a
+ * `new BaileysClient(path, key)` (the house connectors) is unchanged.
+ */
+export interface BaileysClientOptions {
+  /**
+   * When true the QR never leaves memory: no terminal render on stdout and no
+   * `<sessionPath>/qr.png` on disk. The per-sub pairing pool sets it — a QR is
+   * a login credential for someone else's WhatsApp account and must only
+   * reach its owner through the signed pairing API.
+   */
+  quietQr?: boolean;
+  /**
+   * When false the socket only pairs and keeps credentials fresh: no message
+   * or history ingest, no chat/presence handlers, no media-bucket or history
+   * table checks. v1 of the pairing pool does not ingest (SC-1197 D1).
+   */
+  ingest?: boolean;
+}
+
 export class BaileysClient extends EventEmitter {
   private sock: WASocket | null = null;
+  private readonly quietQr: boolean;
+  private readonly ingest: boolean;
   private sessionPath: string;
   // kept for backward compat with the old constructor signature; unused.
   private encryptionKey: Buffer;
@@ -512,9 +534,11 @@ export class BaileysClient extends EventEmitter {
   private placeholderResendCache: CacheStore;
   private historyBackfillRequestedUntil = 0;
 
-  constructor(sessionPath: string, encryptionKey: string) {
+  constructor(sessionPath: string, encryptionKey: string, options: BaileysClientOptions = {}) {
     super();
     this.sessionPath = sessionPath;
+    this.quietQr = options.quietQr === true;
+    this.ingest = options.ingest !== false;
     this.encryptionKey = Buffer.from(encryptionKey, 'utf-8');
     this.logger = pino({
       transport: {
@@ -552,14 +576,16 @@ export class BaileysClient extends EventEmitter {
     try {
       await this.destroyCurrentSocket('before connect');
 
-      try {
-        await ensureMediaBucket();
-      } catch (e: any) {
-        this.logger.warn(
-          `MinIO bucket check failed (auto-download may not work): ${e?.message || e}`
-        );
+      if (this.ingest) {
+        try {
+          await ensureMediaBucket();
+        } catch (e: any) {
+          this.logger.warn(
+            `MinIO bucket check failed (auto-download may not work): ${e?.message || e}`
+          );
+        }
+        await ensureHistoryTables();
       }
-      await ensureHistoryTables();
 
       const authDir = this.authDir();
       await fsp.mkdir(authDir, { recursive: true });
@@ -689,6 +715,8 @@ export class BaileysClient extends EventEmitter {
         this.meJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null;
         this.meName = sock.user?.name || null;
         this.markConnected('connection.update open');
+        // SC-1225: a pairing-only socket (ingest off) touches no DB state.
+        if (!this.ingest) return;
         // Pull current unread/archived/pin state from WhatsApp app-state. This
         // emits chats.update events whose handler persists unread_count +
         // archived to the DB, so the dashboard shows the real badges without
@@ -736,6 +764,10 @@ export class BaileysClient extends EventEmitter {
         this.scheduleReconnect(reason);
       }
     });
+
+    // SC-1225: pairing-only sockets stop here — no message/history/chat
+    // handlers, so nothing is ingested for a per-sub session in v1.
+    if (!this.ingest) return;
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify' && type !== 'append') return;
@@ -959,6 +991,11 @@ export class BaileysClient extends EventEmitter {
     this.ready = false;
     this.lastState = 'QR';
     this.lastQrAt = new Date();
+    if (this.quietQr) {
+      // SC-1225: the QR stays in memory; only the 'qr' event carries it.
+      this.emit('qr', qr);
+      return;
+    }
     qrcodeTerminal.generate(qr, { small: true });
     QRCode.toFile(join(this.sessionPath, 'qr.png'), qr, { width: 400 }).catch(() => {});
     this.logger.warn(

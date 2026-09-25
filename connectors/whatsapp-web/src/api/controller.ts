@@ -501,6 +501,7 @@ export function createRouter(
   });
 
   // Get QR code (no auth required for local dev)
+  // CONTRACT: http.whatsapp-connector.auth-qr — path, no-auth and {qrCode, expiresAt} are frozen
   router.get('/auth/qr', (req: Request, res: Response) => {
     const qr = qrHandler.getCurrentQR();
     if (!qr) {
