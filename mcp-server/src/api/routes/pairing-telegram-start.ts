@@ -1,10 +1,13 @@
 /**
- * SC-1227 (SC-1197 P1b): POST /pairing/whatsapp/start — begin a per-sub
- * WhatsApp pairing on the whatsapp-pairing pool.
+ * SC-1229 (SC-1197 P4b): POST /pairing/telegram/start — begin a per-sub
+ * Telegram (mtcute QR) pairing on the telegram-pairing pool.
  *
  * The sessionKey is the caller's JWT `sub`, never a client-supplied value
  * (identityGuard already rejected any `sub`/`sessionKey`/`jid` in the body or
  * query that differs from it). The pool applies the QR/start limits (429).
+ * The answer is the pool's TelegramPairingStatus: state starting|qr|password|
+ * paired|expired|unpaired — the `password` state is the 2FA step, completed
+ * through POST /pairing/telegram/password.
  */
 import { RequestHandler } from 'express';
 import { IdentityRequest, SocialApiContext } from '../context';
@@ -17,7 +20,7 @@ import {
 
 function handler(ctx: SocialApiContext): RequestHandler {
   return async (req, res) => {
-    const pool = ctx.whatsappPairing;
+    const pool = ctx.telegramPairing;
     const identity = (req as IdentityRequest).identity;
     if (!pool || !identity) {
       respondPairingUnavailable(res);
@@ -30,16 +33,17 @@ function handler(ctx: SocialApiContext): RequestHandler {
         respondPairingStatus(res, err);
         return;
       }
-      ctx.logError(`social-api: /pairing/whatsapp/start failed: ${(err as Error)?.message || err}`);
+      ctx.logError(`social-api: /pairing/telegram/start failed: ${(err as Error)?.message || err}`);
       respondPairingUnavailable(res);
     }
   };
 }
 
-// CONTRACT: http.social-api.pairing-whatsapp.v1
-export const pairingWhatsappStartRoute: RouteSpec = {
+// CONTRACT: http.social-api.pairing-telegram.v1
+export const pairingTelegramStartRoute: RouteSpec = {
   method: 'post',
-  path: '/pairing/whatsapp/start',
+  path: '/pairing/telegram/start',
   auth: true,
+  pool: 'telegram',
   make: handler,
 };

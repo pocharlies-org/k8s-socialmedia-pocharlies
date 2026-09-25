@@ -5,8 +5,9 @@
  * SOCIAL_PAIRING_API, SOCIAL_API_ALLOWED_ORIGINS, SOCIAL_API_JWT_ISSUER,
  * SOCIAL_API_JWKS_URL, SOCIAL_API_JWT_AUDIENCE, SOCIAL_API_ALLOWED_AZP,
  * SOCIAL_API_JWT_CLOCK_TOLERANCE_SECONDS (read in api/auth/keycloak-jwt.ts,
- * default 30 s), WHATSAPP_PAIRING_URL, TELEGRAM_PAIRING_URL (reserved for
- * P4b, unused here),
+ * default 30 s), WHATSAPP_PAIRING_URL, TELEGRAM_PAIRING_URL (wired by
+ * SC-1229 / P4b: the /pairing/telegram* and /me/telegram routes and the
+ * telegram state of /social/status),
  * CONNECTOR_SHARED_SECRET, CREDENTIAL_STORE_ENABLED, CREDENTIAL_STORE_MASTER_KEY,
  * DATABASE_URL and SOCIAL_IDENTITY_BINDINGS_FILE (both read only by the
  * /social/status store and bindings wiring added in SC-1228).
@@ -20,7 +21,7 @@ import {
 } from '@mcp-socialmedia/shared';
 import { jwtVerifierConfigFromEnv } from '../api/auth/keycloak-jwt';
 import { SocialApiContext } from '../api/context';
-import { WhatsappPairingClient } from '../api/whatsapp-pairing-client';
+import { PairingPoolClient } from '../api/pairing-pool-client';
 import { identityBindingsFile } from '../domain/identity-bindings';
 
 /** SOCIAL_PAIRING_API === 'on'. Same reading as the pool (pairing/app.ts). */
@@ -84,7 +85,15 @@ export function contextFromEnv(env: NodeJS.ProcessEnv = process.env): SocialApiC
   const pairingUrl = (env.WHATSAPP_PAIRING_URL || '').trim();
   const pairing =
     apiEnabled && sharedSecret && pairingUrl
-      ? new WhatsappPairingClient(pairingUrl, sharedSecret)
+      ? new PairingPoolClient('whatsapp', pairingUrl, sharedSecret)
+      : null;
+  // SC-1229 (P4b): the telegram pool is a SEPARATE client with a separate
+  // URL — its absence 503s only the telegram routes (RouteSpec.pool), never
+  // the whatsapp ones.
+  const telegramUrl = (env.TELEGRAM_PAIRING_URL || '').trim();
+  const telegramPairing =
+    apiEnabled && sharedSecret && telegramUrl
+      ? new PairingPoolClient('telegram', telegramUrl, sharedSecret)
       : null;
   return {
     apiEnabled,
@@ -92,6 +101,7 @@ export function contextFromEnv(env: NodeJS.ProcessEnv = process.env): SocialApiC
     allowedOrigins: originsFromEnv(env),
     jwt: jwtVerifierConfigFromEnv(env),
     whatsappPairing: pairing,
+    telegramPairing,
     credentialStore: statusCredentialStore(env, storeAvailable),
     identityBindingsPath: identityBindingsFile(env),
     logError: msg => console.error(msg),

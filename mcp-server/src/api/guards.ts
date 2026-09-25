@@ -18,10 +18,13 @@
  *   storeGate    credential store off / no master key / no HMAC secret or pool
  *                URL → 503 pairing_unavailable (D7): the pool is the only
  *                writer of credential rows, and without it nothing works.
+ *                Since SC-1229 it is per-pool: a route checks the pool it
+ *                actually calls (RouteSpec.pool), so a missing telegram pool
+ *                never 503s the whatsapp routes and vice versa.
  */
 import { NextFunction, Response } from 'express';
 import { JwtAuthError, verifyKeycloakJwt } from './auth/keycloak-jwt';
-import { IdentityRequest, SocialApiContext } from './context';
+import { IdentityRequest, PairingPoolName, SocialApiContext } from './context';
 
 const IDENTITY_FIELDS = ['sub', 'sessionKey', 'jid'] as const;
 
@@ -88,9 +91,10 @@ export function identityGuard(ctx: SocialApiContext) {
   };
 }
 
-export function storeGate(ctx: SocialApiContext) {
+export function storeGate(ctx: SocialApiContext, pool: PairingPoolName = 'whatsapp') {
   return (req: IdentityRequest, res: Response, next: NextFunction): void => {
-    if (!ctx.storeAvailable || !ctx.whatsappPairing) {
+    const client = pool === 'telegram' ? ctx.telegramPairing : ctx.whatsappPairing;
+    if (!ctx.storeAvailable || !client) {
       res.status(503).json({ error: 'pairing_unavailable' });
       return;
     }

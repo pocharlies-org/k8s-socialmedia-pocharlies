@@ -8,8 +8,10 @@
  *             for a baileys session: row → paired, provider-invalidated
  *             during the process's life → expired, no row → unpaired;
  *             pool down / store off → unavailable).
- *   telegram  `unavailable` until P4b (SC-1229) ships the telegram pool —
- *             an honest unknown, never a fake `unpaired`.
+ *   telegram  the telegram pool's state route (SC-1229 / P4b), same shape as
+ *             whatsapp: row → paired, provider-invalidated → expired, no row
+ *             → unpaired; pool down / store off / no TELEGRAM_PAIRING_URL →
+ *             unavailable — an honest unknown, never a fake `unpaired`.
  *   instagram `credentialStore.get(sub, 'instagram')` (design D3): row with
  *             `expiresAt` in the past → expired, row → paired, no row →
  *             unpaired, store off or unreadable → unavailable.
@@ -32,7 +34,7 @@ import { getAccounts } from '../../domain/account-registry';
 import { loadIdentityBindings } from '../../domain/identity-bindings';
 import { IdentityRequest, SocialApiContext } from '../context';
 import { RouteSpec } from '../router';
-import { PoolUnreachableError } from '../whatsapp-pairing-client';
+import { PoolUnreachableError } from '../pairing-pool-client';
 
 // CONTRACT: http.social-api.social-status.v1 — the state enum is part of the
 // response contract; a new state is a new `.v2` entry, not a value here.
@@ -53,6 +55,9 @@ const POOL_STATE_TO_STATUS: Record<string, ChannelState> = {
   // first `connection: open`): for a status view the account is not paired.
   starting: 'unpaired',
   qr: 'unpaired',
+  // telegram-only state (SC-1229): the 2FA step of the QR flow, still in
+  // flight → same reading as `qr`.
+  password: 'unpaired',
 };
 
 async function whatsappState(ctx: SocialApiContext, sub: string): Promise<ChannelState> {
@@ -70,6 +75,25 @@ async function whatsappState(ctx: SocialApiContext, sub: string): Promise<Channe
   } catch (err) {
     if (!(err instanceof PoolUnreachableError)) {
       ctx.logError(`social-api: /social/status whatsapp failed: ${(err as Error)?.message || err}`);
+    }
+    return 'unavailable';
+  }
+}
+
+async function telegramState(ctx: SocialApiContext, sub: string): Promise<ChannelState> {
+  if (!ctx.storeAvailable || !ctx.telegramPairing) return 'unavailable';
+  try {
+    const pool = await ctx.telegramPairing.post('state', sub);
+    if (pool.status !== 200) {
+      // Same reading as whatsapp: the pool is the only source for this state
+      // and it is not answering for this sub → say so, never guess.
+      return 'unavailable';
+    }
+    const raw = pool.json.state;
+    return typeof raw === 'string' ? POOL_STATE_TO_STATUS[raw] || 'unavailable' : 'unavailable';
+  } catch (err) {
+    if (!(err instanceof PoolUnreachableError)) {
+      ctx.logError(`social-api: /social/status telegram failed: ${(err as Error)?.message || err}`);
     }
     return 'unavailable';
   }
@@ -123,16 +147,15 @@ function handler(ctx: SocialApiContext): RequestHandler {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
-    const [whatsapp, instagram] = await Promise.all([
+    const [whatsapp, telegram, instagram] = await Promise.all([
       whatsappState(ctx, sub),
+      telegramState(ctx, sub),
       instagramState(ctx, sub),
     ]);
     res.json({
       channels: {
         whatsapp: { state: whatsapp },
-        // No telegram pool exists before P4b (SC-1229); it wires its own
-        // state here when it lands. Until then the answer is `unavailable`.
-        telegram: { state: 'unavailable' as ChannelState },
+        telegram: { state: telegram },
         instagram: { state: instagram },
       },
       houseAccounts: houseAccountsFor(ctx, sub),

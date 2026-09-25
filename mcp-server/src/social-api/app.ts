@@ -28,9 +28,12 @@ export function createSocialApiApp(ctx: SocialApiContext): express.Express {
   const mount = (app: express.Express, route: RouteSpec, ctx: SocialApiContext): void => {
     // SC-1228 (D7): the store gate is per-route, not global — /social/status
     // answers 200 with `unavailable` states while the store is off, the
-    // pairing routes 503. Only authed routes carry it (health answers even
-    // with the store off); every other guard stays global, in order.
-    const chain = route.auth && route.storeRequired !== false ? [storeGate(ctx)] : [];
+    // pairing routes 503. SC-1229: the gate checks the pool of the ROUTE
+    // (route.pool, default whatsapp), never the other one. Only authed
+    // routes carry it (health answers even with the store off); every other
+    // guard stays global, in order.
+    const chain =
+      route.auth && route.storeRequired !== false ? [storeGate(ctx, route.pool ?? 'whatsapp')] : [];
     chain.push(route.make(ctx));
     if (route.method === 'post') app.post(route.path, chain);
     else app.get(route.path, chain);

@@ -53,6 +53,59 @@ contracts:
       names, the error codes and the 429 reasons are all contract: renaming any of
       them, or moving the sessionKey out of the signed body, is breaking — a new
       `http.whatsapp-pairing.internal-sessions.v2` entry beside this one.
+      SC-1229 round 2 (migrate, surface unchanged): social-api's consumer-side
+      request choreography now lives in the shared
+      mcp-server/src/api/pairing-pool-client.ts (PairingPoolClient, 'whatsapp'
+      channel); the consumer-side base-path constant stays in
+      mcp-server/src/api/whatsapp-pairing-client.ts.
+  - id: http.telegram-pairing.internal-sessions.v1
+    kind: http-route
+    value: /internal/telegram/sessions
+    role: provider
+    files:
+      - connectors/telegram/src/pairing/app.ts
+      - mcp-server/src/api/telegram-pairing-client.ts
+    status: active
+    note: >-
+      Internal API of the telegram-pairing Deployment (telegram-connector image,
+      :3002, in-cluster only; SC-1197 P4b), consumed by social-api. The Telegram
+      twin of http.whatsapp-pairing.internal-sessions.v1: same HMAC scheme
+      (headers x-connector-timestamp + x-connector-signature = sha256=HMAC(secret,
+      "<ts>:<JSON body>"), 5-minute window), and because the HMAC covers the
+      BODY only, four routes, all POST so the sessionKey travels inside the
+      signed body: /start, /state and /me under this base, each with body
+      {"sessionKey": "<sub>"}, plus /password with {"sessionKey": "<sub>",
+      "password": "<2FA>"}. /start, /state and /password answer 200
+      {sessionKey, state, qr, me} with state one of
+      starting|qr|password|paired|expired|unpaired — `password` is the 2FA step
+      of the mtcute QR flow, completed through /password, which answers the
+      post-submit state; qr null or {value, dataUrl, issuedAt, expiresAt},
+      me null or {id, username} (Telegram identity, not baileys' {id, jid,
+      phone, name}). /me answers 200 {sessionKey, me} or 404
+      {"error":"not_paired"}. Errors: 400 {"error":"invalid_session_key"}; 400
+      {"error":"invalid_password"} (empty, non-string or over-long password);
+      409 {"error":"password_not_requested"} (the flow is not waiting for a
+      password); 401 bad or missing signature; 429 {"error":"rate_limited",
+      reason: start_interval|daily_starts|pool_full|qr_limit,
+      retryAfterSeconds} with a Retry-After header; 503
+      {"error":"pairing_unavailable"} when the credential store is off, the
+      master key is missing or no shared secret is set; 404
+      {"error":"not_found"} for everything but GET /health while
+      SOCIAL_PAIRING_API is off. The process reads exactly PORT,
+      SOCIAL_PAIRING_API, SESSION_PATH, CONNECTOR_SHARED_SECRET, DB_USER,
+      DB_PASSWORD, CREDENTIAL_STORE_MASTER_KEY, DATABASE_URL, TELEGRAM_API_ID
+      and TELEGRAM_API_HASH — never the house accounts' TELEGRAM_SESSION_STRING*
+      (pinned by app.test.ts). The base path, the methods, the body fields, the
+      state names (including `password`), the error codes and the 429 reasons
+      are all contract: renaming any of them, or moving the sessionKey out of
+      the signed body, is breaking — a new `.v2` entry beside this one.
+      SC-1229 round 2 (migrate, surface unchanged): the consumer-side request
+      choreography is shared with the whatsapp twin in
+      mcp-server/src/api/pairing-pool-client.ts (PairingPoolClient, 'telegram'
+      channel; the consumer-side base-path constant stays in
+      mcp-server/src/api/telegram-pairing-client.ts), and the pool's HMAC gate
+      now verifies through shared's verifyHMACSignature — same scheme and same
+      5-minute window as createHMACAuth, constant-time comparison.
   - id: http.whatsapp-connector.auth-qr
     kind: http-route
     value: /auth/qr
@@ -119,6 +172,60 @@ contracts:
       connectors (controller.ts) is a DIFFERENT, untouched surface (design
       D6). Changing any of this is breaking — a new `.v2` entry beside this
       one.
+  - id: http.social-api.pairing-telegram.v1
+    kind: http-route
+    value: /pairing/telegram
+    role: provider
+    files:
+      - mcp-server/src/api/routes/pairing-telegram-start.ts
+      - mcp-server/src/api/routes/pairing-telegram.ts
+      - mcp-server/src/api/routes/pairing-telegram-password.ts
+    status: active
+    note: >-
+      Telegram pairing surface of the social-api Deployment (SC-1197 P4b): the
+      Telegram twin of http.social-api.pairing-whatsapp.v1, same gates and same
+      error set (Keycloak JWT http.social-api.jwt-audience.v1, Origin,
+      identity, store), but its OWN pool: the store gate and the pool client
+      are per-route (RouteSpec.pool) — a missing TELEGRAM_PAIRING_URL 503s
+      these routes only, never the whatsapp ones. Three routes:
+      POST /pairing/telegram/start begins a per-sub mtcute QR pairing on the
+      telegram-pairing pool, GET /pairing/telegram polls it (QR by polling,
+      not SSE), POST /pairing/telegram/password completes the 2FA step with
+      body {password}. No parameters carry identity: the sessionKey sent to
+      the pool is always the JWT `sub`; a foreign `sub`/`sessionKey` in query
+      or body is 403 {"error":"forbidden_identity"}. 200 is the pool's
+      TelegramPairingStatus verbatim: {sessionKey, state, qr, me} with state
+      starting|qr|password|paired|expired|unpaired, qr null or {value,
+      dataUrl, issuedAt, expiresAt}, me null or {id, username}. Errors beyond
+      the shared set: 400 {"error":"invalid_password"} (missing, empty or
+      over-long body.password), 409 {"error":"password_not_requested"} passed
+      through from the pool when /password is called outside the `password`
+      state, 429 {"error":"rate_limited", reason, retryAfterSeconds} with
+      Retry-After. Paths, methods, the TelegramPairingStatus shape, the
+      `password` state and step, these error codes and the per-pool gate
+      independence are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.social-api.me-telegram.v1
+    kind: http-route
+    value: /me/telegram
+    role: provider
+    files:
+      - mcp-server/src/api/routes/me-telegram.ts
+    status: active
+    note: >-
+      GET /me/telegram of social-api (SC-1197 P4b): the caller's own paired
+      Telegram, keyed by the JWT `sub` through the telegram-pairing pool — a
+      token of A can never return B's identity and nothing is ever listed.
+      Same JWT + Origin + identity gates and the same 401/403/503/404-off
+      error set as http.social-api.pairing-telegram.v1, gated on the TELEGRAM
+      pool (a missing TELEGRAM_PAIRING_URL 503s this route only). After a pool
+      restart the answer comes from the credential-store row without the user
+      re-authorizing (the pool's lazy load). 200 {"id": "<telegram user id>",
+      "username": "<username or null>"} or 404 {"error":"not_paired"}. Path,
+      method, the {id, username} shape and not_paired are contract; the older
+      HMAC'd /api/v1/me of the house telegram connector is a DIFFERENT,
+      untouched surface. Changing any of this is breaking — a new `.v2` entry
+      beside this one.
   - id: http.social-api.social-status.v1
     kind: http-route
     value: /social/status
@@ -144,8 +251,11 @@ contracts:
       the process's life → expired, no row → unpaired, pool down, pool not
       configured, store off, or any non-200 answer from the pool (429/4xx/5xx)
       → unavailable; a pairing in flight — starting/qr — is unpaired, the row
-      is written only after the first connection open), telegram is
-      `unavailable` until P4b (SC-1229) ships the telegram pool, instagram is
+      is written only after the first connection open), telegram from the
+      telegram-pairing pool's state route with the same reading (SC-1197 P4b;
+      its extra `password` state — the 2FA step of the QR flow, still in
+      flight — is likewise unpaired, and a pool not configured is
+      unavailable, never a fake unpaired), instagram is
       store.get(sub): row → paired, row with expiresAt in the past → expired,
       no row → unpaired, store off or unreadable row → unavailable.
       houseAccounts is the read-only intersection of the caller's identity
