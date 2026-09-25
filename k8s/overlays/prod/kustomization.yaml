@@ -12,10 +12,12 @@ patches:
   - path: patch-credential-store.yaml
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
-  # mcp-server moves to v1.3.51 (run 35616735956, deploy/prod@6f0239c): the
-  # identity-binding gate for /social (SC-1144 fase 2, PRs 53+54) plus the
-  # encrypted credential store code from PR 52 — both behind flags that stay
-  # OFF in this overlay (CREDENTIAL_STORE_ENABLED=false, SOCIAL_IDENTITY_BINDING=off).
+  # mcp-server is on v1.3.55 (run 36075936408, deploy/prod@7d6c030, pinned by
+  # PR 78): identity-binding gate (SC-1144 fase 2), encrypted credential store
+  # (PR 52), migrate.ts with the `_migrations` ledger and migrations/007+008 —
+  # all behind flags that stay OFF in this overlay (CREDENTIAL_STORE_ENABLED=false,
+  # SOCIAL_IDENTITY_BINDING=off). The PreSync Job whatsapp-mcp-migrate uses this
+  # same image (its `:latest` is rewritten by this block).
   # telegram-connector alone stays on socialmedia-v4-1c572645: real reaction totals.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
     newTag: socialmedia-v2-c88dce16
@@ -28,9 +30,13 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
     newTag: socialmedia-v2-c88dce16
     digest: sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
+  # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
+  # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
+  # resolution (resolveCredential) + the oauth callback route, still dark:
+  # CREDENTIAL_STORE_ENABLED stays false until the pre-check (C6) PR.
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: sha-985a199ea567
-    digest: sha256:38c141768e5fe10c731616c46fc82276fef9a3ddafabcae6c4ee98a68eb2e11a
+    newTag: v1.3.55
+    digest: sha256:bf90ef1679fb212969577b2d16efb17bd25c68f24778fb65efa30bb5ee42d90f
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: v1.3.55
     digest: sha256:a544d2639e06800252955dcfe96dc9eccf0f257a1cf8f3703997253077c6c23b
