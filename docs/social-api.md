@@ -195,11 +195,9 @@ Applied by the pools (identical defaults in both,
   generation by hammering it.
 - **10 starts per rolling 24 h per sub** (`daily_starts`).
 - Idle pairing sessions are evicted after 10 min. Polling (`state`) does **not**
-  renew the idle clock on **telegram** — polling does not park a session. On
-  **whatsapp** it does: `status()` writes `lastTouched`, so a client polling
-  `GET /pairing/whatsapp` keeps its session alive and holds one of the pool's 10
-  slots. SC-1243 (PR #87) removes that renewal, after which both channels behave
-  identically.
+  renew the idle clock on **either** channel (whatsapp since SC-1243 / PR #87,
+  telegram since P4b), so a client polling `GET /pairing/{channel}` forever
+  cannot park a session past its TTL and hold one of the pool's 10 slots.
 - QR stays in memory: the pairing pool builds its clients with `quietQr` (no
   stdout print, no `qr.png` written) and the QR is delivered by **polling
   `GET /pairing/{channel}`, not SSE**.
