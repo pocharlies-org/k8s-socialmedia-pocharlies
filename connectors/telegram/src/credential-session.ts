@@ -27,6 +27,7 @@
 import {
   CredentialStore,
   RequestActor,
+  createCredentialWriteBack,
   deserializeMtcuteSession,
   resolveCredential,
   serializeMtcuteSession,
@@ -123,13 +124,13 @@ export interface TelegramCredentialWriteBack {
 }
 
 /**
- * mtcute persist → store.put write-back. Same choreography as the baileys
- * one: the debounce coalesces bursts (several DCs' auth keys land in one
- * session export), the in-flight guard keeps puts ordered, a trailing run
- * guarantees the LAST persist always reaches the store, and nothing ever
- * throws into the library hook — a store failure logs loudly; the connector
- * must keep delivering messages. `getSessionString` is
- * `client.exportSession()` behind the wrapper.
+ * mtcute persist → store.put write-back. The choreography (debounce of
+ * persist bursts, in-flight guard, trailing run, flush, cancel) lives in
+ * shared/session-store/credential-write-back.ts — this connector's version
+ * is the body it was extracted from, and the whatsapp connector now shares
+ * it (SC-1224 architect ruling: two copies had already drifted). This
+ * wrapper only supplies the channel and the session export
+ * (`getSessionString` is `client.exportSession()` behind it).
  */
 export function createTelegramCredentialWriteBack(
   store: CredentialStore,
@@ -138,65 +139,12 @@ export function createTelegramCredentialWriteBack(
   logError: (msg: string) => void = msg => console.error(msg),
   debounceMs = 2000
 ): TelegramCredentialWriteBack {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let inFlight: Promise<void> | null = null;
-  let pending = false; // a run() was requested while one was in flight
-  let due = false; // schedule() fired but the debounce timer has not run yet
-
-  const run = async (): Promise<void> => {
-    if (inFlight) {
-      pending = true; // trailing run: the last persist must reach the store
-      return inFlight;
-    }
-    inFlight = (async () => {
-      try {
-        const sessionString = await getSessionString();
-        await store.put(sessionKey, 'telegram', { ...serializeMtcuteSession(sessionString) });
-      } catch (e: any) {
-        // Never throw into the mtcute storage hook; loud log instead.
-        logError(`credential-store write-back FAILED for ${sessionKey}: ${e?.message || e}`);
-      } finally {
-        inFlight = null;
-        if (pending) {
-          pending = false;
-          await run();
-        }
-      }
-    })();
-    return inFlight;
-  };
-
-  return {
-    schedule(): void {
-      due = true;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        due = false;
-        void run();
-      }, debounceMs);
-      if (typeof timer.unref === 'function') timer.unref();
-    },
-    async flush(): Promise<void> {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      // A scheduled-but-not-yet-fired write, an in-flight put, or a trailing
-      // run must all land before the caller exits. run() chains the trailing
-      // run inside the in-flight promise, so one await covers the burst.
-      if (due || inFlight || pending) {
-        due = false;
-        await run();
-      }
-    },
-    cancel(): void {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      due = false;
-      pending = false;
-    },
-  };
+  return createCredentialWriteBack({
+    store,
+    sessionKey,
+    channel: 'telegram',
+    getPayload: async () => ({ ...serializeMtcuteSession(await getSessionString()) }),
+    logError,
+    debounceMs,
+  });
 }
