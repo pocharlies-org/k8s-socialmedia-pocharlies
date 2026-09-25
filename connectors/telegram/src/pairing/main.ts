@@ -16,8 +16,10 @@
  * CREDENTIAL_STORE_MASTER_KEY, DATABASE_URL) plus TELEGRAM_API_ID and
  * TELEGRAM_API_HASH. This process NEVER reads TELEGRAM_SESSION_STRING*:
  * those are the house accounts' sessions and must not reach a per-sub pool
- * (the pod gets them via envFrom for the house image; the pool ignores
- * them — pinned by app.test.ts).
+ * — and they never even arrive: the P3 manifests hand this container its
+ * variables one by one through secretKeyRef (NOT envFrom), so the house
+ * session strings are not part of this pod's env at all (pinned by
+ * app.test.ts).
  */
 import { PostgresCredentialStore } from '@mcp-socialmedia/shared';
 import { getPool } from '../db-pool';
