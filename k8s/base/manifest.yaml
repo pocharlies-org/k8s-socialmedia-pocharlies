@@ -264,11 +264,18 @@ spec:
                 - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
                 - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "10000" }
                 - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
+                # Namespaces e instancia del brain por cuenta: registro de cuentas.
+                - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
                 # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (1Password) via envFrom.
               envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+              volumeMounts:
+                - { name: accounts, mountPath: /accounts, readOnly: true }
               resources:
                 requests: { cpu: 50m, memory: 128Mi }
                 limits:   { memory: 512Mi }
+          volumes:
+            - name: accounts
+              configMap: { name: social-accounts }
 ---
 apiVersion: apps/v1
 kind: Deployment

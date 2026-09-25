@@ -42,6 +42,12 @@ export interface SocialAccount {
    * Defaults to the namespace.
    */
   profile: string;
+  /**
+   * Brain instance this account's messages are ingested into (brain-ingest
+   * job). Every account sharing a DB namespace must agree, because the job
+   * ingests per namespace. Defaults to 'personal'.
+   */
+  brainInstance: string;
   capabilities: Record<string, boolean>;
 }
 
@@ -130,6 +136,10 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     if (channel !== 'instagram' && namespace !== item.accountId) {
       throw new AccountRegistryError(`${key}: a ${channel} account is its own namespace`);
     }
+    const brainInstance = item.brainInstance ?? 'personal';
+    if (typeof brainInstance !== 'string' || !ID_RE.test(brainInstance)) {
+      throw new AccountRegistryError(`${key}: brainInstance must be an account-style id`);
+    }
     const profile = item.profile ?? namespace;
     if (typeof profile !== 'string' || !ID_RE.test(profile)) {
       throw new AccountRegistryError(`${key}: profile must be an account-style id`);
@@ -159,6 +169,7 @@ export function parseAccounts(value: unknown): SocialAccount[] {
       bridgeUrl: httpUrl(item.bridgeUrl, 'bridgeUrl', key),
       namespace,
       profile,
+      brainInstance,
       capabilities: { ...DEFAULT_CAPABILITIES[channel], ...(item.capabilities || {}) },
     } as SocialAccount;
   });
@@ -171,6 +182,16 @@ export function parseAccounts(value: unknown): SocialAccount[] {
         `instagram:${a.accountId}: namespace '${a.namespace}' is not a declared account`
       );
     }
+  }
+  const instanceByNamespace = new Map<string, string>();
+  for (const a of accounts) {
+    const seenInstance = instanceByNamespace.get(a.namespace);
+    if (seenInstance && seenInstance !== a.brainInstance) {
+      throw new AccountRegistryError(
+        `namespace '${a.namespace}' mixes brainInstance '${seenInstance}' and '${a.brainInstance}'`
+      );
+    }
+    instanceByNamespace.set(a.namespace, a.brainInstance);
   }
   if (!namespaces.has('personal')) {
     throw new AccountRegistryError("registry must declare the 'personal' namespace (bare ids)");
@@ -188,6 +209,7 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       channel: 'whatsapp',
       accountId: 'professional',
       connectorUrl: env.WHATSAPP_PROFESSIONAL_URL || 'http://whatsapp-connector-professional:3001',
+      brainInstance: 'skirmshop',
     },
     {
       channel: 'whatsapp',
@@ -205,8 +227,14 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       accountId: 'professional',
       connectorUrl: env.TELEGRAM_PROFESSIONAL_URL || 'http://telegram-connector-professional:3002',
       bridgeUrl: env.TELEGRAM_BRIDGE_PROFESSIONAL_URL || 'http://telegram-sync-professional:3080',
+      brainInstance: 'skirmshop',
     },
-    { channel: 'instagram', accountId: 'skirmshop', namespace: 'professional' },
+    {
+      channel: 'instagram',
+      accountId: 'skirmshop',
+      namespace: 'professional',
+      brainInstance: 'skirmshop',
+    },
     { channel: 'instagram', accountId: 'barbelpapis', namespace: 'personal' },
   ]);
 }
@@ -289,4 +317,9 @@ export function declaredAccountIds(): Set<string> {
 /** Primary key of the account in social_accounts: '<channel>:<accountId>'. */
 export function socialAccountId(channel: AccountChannel, accountId: string): string {
   return `${channel}:${accountId}`;
+}
+
+/** Brain instance for a DB namespace (brain-ingest). Undeclared → undefined. */
+export function brainInstanceForNamespace(namespace: string): string | undefined {
+  return getAccounts(undefined, true).find(a => a.namespace === namespace)?.brainInstance;
 }

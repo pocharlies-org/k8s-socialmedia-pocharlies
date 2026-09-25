@@ -4,21 +4,24 @@
     "accountId": "personal",
     "label": "WhatsApp personal",
     "profile": "personal",
-    "connectorUrl": "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001"
+    "connectorUrl": "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001",
+    "brainInstance": "personal"
   },
   {
     "channel": "whatsapp",
     "accountId": "professional",
     "label": "WhatsApp professional",
     "profile": "professional",
-    "connectorUrl": "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001"
+    "connectorUrl": "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001",
+    "brainInstance": "skirmshop"
   },
   {
     "channel": "whatsapp",
     "accountId": "leila",
     "label": "WhatsApp leila",
     "profile": "leila",
-    "connectorUrl": "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001"
+    "connectorUrl": "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001",
+    "brainInstance": "personal"
   },
   {
     "channel": "telegram",
@@ -26,7 +29,8 @@
     "label": "Telegram personal",
     "profile": "personal",
     "connectorUrl": "http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002",
-    "bridgeUrl": "http://telegram-sync.whatsapp-mcp.svc.cluster.local:3080"
+    "bridgeUrl": "http://telegram-sync.whatsapp-mcp.svc.cluster.local:3080",
+    "brainInstance": "personal"
   },
   {
     "channel": "telegram",
@@ -34,20 +38,23 @@
     "label": "Telegram professional",
     "profile": "professional",
     "connectorUrl": "http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002",
-    "bridgeUrl": "http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080"
+    "bridgeUrl": "http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080",
+    "brainInstance": "skirmshop"
   },
   {
     "channel": "instagram",
     "accountId": "skirmshop",
     "label": "Instagram skirmshopes",
     "profile": "professional",
-    "namespace": "professional"
+    "namespace": "professional",
+    "brainInstance": "skirmshop"
   },
   {
     "channel": "instagram",
     "accountId": "barbelpapis",
     "label": "Instagram barbelpapis",
     "profile": "personal",
-    "namespace": "personal"
+    "namespace": "personal",
+    "brainInstance": "personal"
   }
 ]

@@ -6,7 +6,7 @@
 import { Pool } from 'pg';
 import pino from 'pino';
 import {
-  ACCOUNTS,
+  ingestNamespaces,
   Account,
   Cursor,
   ensureLiveCursorTable,
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   const pool = new Pool({ connectionString: DATABASE_URL, max: 4 });
   try {
     await ensureLiveCursorTable(pool);
-    for (const account of ACCOUNTS) {
+    for (const account of ingestNamespaces()) {
       await ingestAccount(pool, account);
     }
   } finally {

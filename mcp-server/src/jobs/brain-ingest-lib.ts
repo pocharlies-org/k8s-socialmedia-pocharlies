@@ -1,7 +1,17 @@
 import { Pool } from 'pg';
+import { accountNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
 
-export const ACCOUNTS = ['personal', 'professional', 'leila'] as const;
-export type Account = (typeof ACCOUNTS)[number];
+/** A DB namespace of the account registry (the legacy `account` column). */
+export type Account = string;
+
+/**
+ * Namespaces to ingest: every namespace declared in the account registry
+ * (k8s/base/social-accounts.json), so a new account is ingested without a code
+ * change. Each namespace carries its WhatsApp, Telegram and Instagram rows.
+ */
+export function ingestNamespaces(): Account[] {
+  return accountNamespaces();
+}
 export type Platform = 'whatsapp' | 'telegram' | 'instagram';
 
 export interface Cursor {
@@ -50,11 +60,11 @@ function assertCursorTableName(table: string): void {
   }
 }
 
+/** Brain instance of a namespace: the registry's `brainInstance`. */
 export function instanceForAccount(account: Account): string {
-  // 'leila' (SC-1144 fase 2) ingesta en la instancia 'personal' — su PVC arranca
-  // vacío y no hay mensajes hasta que el operador la empareje; si el CTO decide
-  // otra instancia, es un cambio de una línea aquí.
-  return account === 'professional' ? 'skirmshop' : 'personal';
+  const instance = brainInstanceForNamespace(account);
+  if (!instance) throw new Error(`namespace '${account}' is not declared in the account registry`);
+  return instance;
 }
 
 export function sourceId(platform: string, waMessageId: string): string {
