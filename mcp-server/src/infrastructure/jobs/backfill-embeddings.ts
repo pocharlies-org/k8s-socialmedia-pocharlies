@@ -9,8 +9,13 @@ const logger = pino({
   },
 });
 
-const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to start the embeddings backfill job without an explicit database connection'
+  );
+}
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'not-used';
 const BATCH_SIZE = parseInt(process.env.BACKFILL_EMBEDDINGS_BATCH_SIZE || '100', 10);

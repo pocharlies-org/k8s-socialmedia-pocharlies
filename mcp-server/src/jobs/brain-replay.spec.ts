@@ -2,7 +2,11 @@ import { replayOptionsFromEnv } from './brain-replay';
 
 describe('brain replay options', () => {
   it('defaults to dry-run and requires no live cursor mutation', () => {
-    const opts = replayOptionsFromEnv({ RUN_ID: 'audit-20260609', SINCE: '2026-01-01T00:00:00Z' });
+    const opts = replayOptionsFromEnv({
+      DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
+      RUN_ID: 'audit-20260609',
+      SINCE: '2026-01-01T00:00:00Z',
+    });
 
     expect(opts.dryRun).toBe(true);
     expect(opts.runId).toBe('audit-20260609');
@@ -12,6 +16,7 @@ describe('brain replay options', () => {
 
   it('can target one account and platform for windowed replay', () => {
     const opts = replayOptionsFromEnv({
+      DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
       RUN_ID: 'personal-telegram-1',
       ACCOUNT: 'personal',
       PLATFORM: 'telegram',
@@ -26,5 +31,9 @@ describe('brain replay options', () => {
     expect(opts.platform).toBe('telegram');
     expect(opts.until).toBe('2026-06-01T00:00:00Z');
     expect(opts.limit).toBe(500);
+  });
+
+  it('refuses to run without DATABASE_URL (SC-1239 C2: no baked-in fallback)', () => {
+    expect(() => replayOptionsFromEnv({ RUN_ID: 'no-db' })).toThrow(/DATABASE_URL is unset/);
   });
 });

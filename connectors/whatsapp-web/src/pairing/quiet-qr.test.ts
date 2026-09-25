@@ -3,6 +3,7 @@
  * on disk — only on the in-memory 'qr' event. The control case (default
  * options, the house connectors) proves the probe would catch a leak.
  */
+import '../test-env';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { access, mkdtemp } from 'node:fs/promises';

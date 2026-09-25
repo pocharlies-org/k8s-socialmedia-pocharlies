@@ -17,6 +17,7 @@
  *
  * Run: pnpm --filter @mcp-socialmedia/connector test
  */
+import './test-env';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import pg from 'pg';

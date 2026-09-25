@@ -4,8 +4,13 @@ import Redis, { RedisOptions } from 'ioredis';
 import * as fs from 'fs';
 import { MCPServer } from './server';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to start the MCP server without an explicit database connection'
+  );
+}
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const REDIS_TLS_CA = process.env.REDIS_TLS_CA;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
