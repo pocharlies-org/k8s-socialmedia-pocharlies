@@ -119,6 +119,41 @@ contracts:
       connectors (controller.ts) is a DIFFERENT, untouched surface (design
       D6). Changing any of this is breaking — a new `.v2` entry beside this
       one.
+  - id: http.social-api.social-status.v1
+    kind: http-route
+    value: /social/status
+    role: provider
+    files:
+      - mcp-server/src/api/routes/social-status.ts
+    status: active
+    note: >-
+      GET /social/status of social-api (SC-1197 P2, design D3): the CALLER's
+      own channel states, keyed by the JWT `sub` — nothing is ever listed or
+      enumerated and the body carries no identifiers (no jid, no username, no
+      sessionKey), so a token of A can never leak anything of B. Behind the
+      same JWT + Origin + identity gates as http.social-api.pairing-whatsapp.v1
+      (401 without a token with WWW-Authenticate: Bearer, 403 for a foreign
+      Origin or a `sub`/`sessionKey`/`jid` in the query or body that is not
+      the caller's, 404 {"error":"not_found"} while SOCIAL_PAIRING_API is
+      off). 200 is {channels: {whatsapp: {state}, telegram: {state},
+      instagram: {state}}, houseAccounts: [{channel, accountId, label}]}
+      where state is one of paired|expired|unpaired|unavailable: whatsapp
+      from the pool's state route (row → paired, provider-invalidated during
+      the process's life → expired, no row → unpaired, pool down or store off
+      → unavailable; a pairing in flight — starting/qr — is unpaired, the row
+      is written only after the first connection open), telegram is
+      `unavailable` until P4b (SC-1229) ships the telegram pool, instagram is
+      store.get(sub): row → paired, row with expiresAt in the past → expired,
+      no row → unpaired, store off or unreadable row → unavailable.
+      houseAccounts is the read-only intersection of the caller's identity
+      binding with the account registry (design D4; an unreadable bindings
+      table binds nobody → []). Unlike /pairing/* and /me/*, this route
+      answers 200 with `unavailable` states while the store is OFF — it is
+      the one route that skips the 503 pairing_unavailable gate (design D7).
+      The path, the method, the response shape, the four state values
+      (including `unavailable`, which SC-1198 consumes) and the store-off
+      deviation are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
   - id: http.social-api.jwt-audience.v1
     kind: allowlist
     value: social-api

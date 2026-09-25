@@ -7,6 +7,8 @@
  *   3. no / bad JWT → 401 (WWW-Authenticate: Bearer); JWKS down → 503
  *   4. sub/sessionKey/jid ajeno en cuerpo o query → 403
  *   5. store off / no secret / no pool URL → 503 pairing_unavailable
+ *      (per-route since SC-1228: /social/status opts out and answers 200
+ *      with `unavailable` states instead — design D7)
  *   6. the route itself, proxying the pool over the connector HMAC
  *
  * A request rejected at 2-5 never reaches the pool: no signature is produced,
@@ -24,8 +26,14 @@ export function createSocialApiApp(ctx: SocialApiContext): express.Express {
   app.use(express.json({ limit: '4kb' }));
 
   const mount = (app: express.Express, route: RouteSpec, ctx: SocialApiContext): void => {
-    if (route.method === 'post') app.post(route.path, route.make(ctx));
-    else app.get(route.path, route.make(ctx));
+    // SC-1228 (D7): the store gate is per-route, not global — /social/status
+    // answers 200 with `unavailable` states while the store is off, the
+    // pairing routes 503. Only authed routes carry it (health answers even
+    // with the store off); every other guard stays global, in order.
+    const chain = route.auth && route.storeRequired !== false ? [storeGate(ctx)] : [];
+    chain.push(route.make(ctx));
+    if (route.method === 'post') app.post(route.path, chain);
+    else app.get(route.path, chain);
   };
 
   for (const route of ROUTES.filter(r => !r.auth)) mount(app, route, ctx);
@@ -40,7 +48,6 @@ export function createSocialApiApp(ctx: SocialApiContext): express.Express {
   app.use(originGuard(ctx));
   app.use(jwtGuard(ctx));
   app.use(identityGuard(ctx));
-  app.use(storeGate(ctx));
 
   for (const route of ROUTES.filter(r => r.auth)) mount(app, route, ctx);
 

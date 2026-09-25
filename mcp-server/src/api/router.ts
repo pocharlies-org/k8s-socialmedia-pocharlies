@@ -12,12 +12,20 @@ import { healthRoute } from './routes/health';
 import { meWhatsappRoute } from './routes/me-whatsapp';
 import { pairingWhatsappRoute } from './routes/pairing-whatsapp';
 import { pairingWhatsappStartRoute } from './routes/pairing-whatsapp-start';
+import { socialStatusRoute } from './routes/social-status';
 
 export interface RouteSpec {
   method: 'get' | 'post';
   path: string;
   /** false = answers even with SOCIAL_PAIRING_API=off and without a JWT. */
   auth: boolean;
+  /**
+   * false = the storeGate does NOT run in front of this route (SC-1228,
+   * design D7): /social/status answers 200 with everything `unavailable`
+   * while the store is off, instead of the 503 the pairing routes give.
+   * Default true.
+   */
+  storeRequired?: boolean;
   make: (ctx: SocialApiContext) => RequestHandler;
 }
 
@@ -26,4 +34,5 @@ export const ROUTES: RouteSpec[] = [
   pairingWhatsappStartRoute,
   pairingWhatsappRoute,
   meWhatsappRoute,
+  socialStatusRoute,
 ];

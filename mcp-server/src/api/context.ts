@@ -4,9 +4,13 @@
  * Everything the routes and the guards need is decided once, in main.ts, from
  * the env the P3 manifests hand the container (k8s/base/social-pairing.yaml);
  * tests build the same object with a local JWKS and a fake pool. No module
- * below src/api/ reads process.env by itself.
+ * below src/api/ reads process.env by itself — the one exception is the
+ * account registry (`domain/account-registry.ts`), which keeps its own
+ * SOCIAL_ACCOUNTS_FILE + mtime reload so a ConfigMap edit applies without a
+ * restart, exactly as it does for the MCP routing that shares the module.
  */
 import { Request } from 'express';
+import { CredentialStore } from '@mcp-socialmedia/shared';
 import { JwtVerifierConfig, VerifiedIdentity } from './auth/keycloak-jwt';
 import { WhatsappPairingClient } from './whatsapp-pairing-client';
 
@@ -25,6 +29,19 @@ export interface SocialApiContext {
   jwt: JwtVerifierConfig;
   /** Null when the HMAC secret or WHATSAPP_PAIRING_URL is missing → 503. */
   whatsappPairing: WhatsappPairingClient | null;
+  /**
+   * SC-1228 (P2): READ-ONLY credential store, used by /social/status for the
+   * caller's own Instagram row (design D3: `store.get(sub)`). Null when the
+   * store is off or the master key is missing — status then reports
+   * `unavailable`, it never 503s and never writes: pairing rows are written
+   * by the whatsapp-pairing pool only.
+   */
+  credentialStore: CredentialStore | null;
+  /**
+   * SC-1228 (P2): SOCIAL_IDENTITY_BINDINGS_FILE — the sub→accounts table,
+   * read for the caller's own `sub` only, to build `houseAccounts` (D4).
+   */
+  identityBindingsPath: string;
   logError: (msg: string) => void;
 }
 
