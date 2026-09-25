@@ -250,6 +250,15 @@ def render_whatsapp(account):
                     "middlewares": [{"name": "connector-public-api-deny", "namespace": NAMESPACE}],
                     "services": backend,
                 },
+                # QR page / image / renew button pair the session: Keycloak
+                # login also on the LAN. The rest of the host (HMAC-signed
+                # /api/v1 used by synapse, /status) stays reachable.
+                {
+                    "match": f"Host(`{host}`) && PathPrefix(`/qr`)",
+                    "kind": "Rule",
+                    "middlewares": [{"name": "sso-chain", "namespace": "keycloak"}],
+                    "services": copy.deepcopy(backend),
+                },
                 {"match": f"Host(`{host}`)", "kind": "Rule", "services": copy.deepcopy(backend)},
             ],
             "tls": {"store": {"name": "default", "namespace": "traefik-lan"}},

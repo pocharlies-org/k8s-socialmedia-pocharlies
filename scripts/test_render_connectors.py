@@ -55,6 +55,13 @@ class RenderConnectorsTest(unittest.TestCase):
         self.assertEqual(env["CONNECTOR_ACCOUNT"], "acme")
         self.assertEqual(env["WA_QR_PUBLIC_URL"], "https://whatsapp-acme.lan.e-dani.com/qr/page")
         self.assertNotIn("ALLOW_WEB_RENEW", env)  # unauthenticated renew is opt-in
+        # LAN: /api/public denied, /qr* behind Keycloak, the rest open (HMAC /api/v1).
+        lan = next(d for d in yaml.safe_load_all(manifest) if d and d["kind"] == "IngressRoute")
+        mws = {r["match"]: [m["name"] for m in r.get("middlewares", [])] for r in lan["spec"]["routes"]}
+        host = "Host(`whatsapp-acme.lan.e-dani.com`)"
+        self.assertEqual(mws[f"{host} && PathPrefix(`/api/public`)"], ["connector-public-api-deny"])
+        self.assertEqual(mws[f"{host} && PathPrefix(`/qr`)"], ["sso-chain"])
+        self.assertEqual(mws[host], [])
 
     def test_new_telegram_account_renders_pair(self):
         manifest, _ = rc.render([{"channel": "telegram", "accountId": "acme", "connectorUrl": None}])
