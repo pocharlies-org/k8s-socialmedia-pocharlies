@@ -132,6 +132,32 @@ test('tope de 10 sesiones vivas: la 11.ª → 429 pool_full; el desalojo por ina
   assert.equal(pool.size(), 1);
 });
 
+test('SC-1243: sondear con status() no renueva lastTouched — la sesión a medias caduca por inactividad', async () => {
+  const { pool, factory, clock } = await makePool();
+  await pool.start(A);
+  const sock = factory.last(A);
+  sock.emitQr('2@ref-one');
+
+  // C1: the poll still serves state + QR + caducidad, exactly as before.
+  const st = await pool.status(A);
+  assert.equal(st.state, 'qr');
+  assert.ok(st.qr);
+  assert.equal(st.qr.value, '2@ref-one');
+  assert.equal(Date.parse(st.qr.expiresAt) - Date.parse(st.qr.issuedAt), 20_000);
+
+  // C2: repeated polling across the whole idle window — no other interaction
+  // — must NOT keep the half-done session alive. 10 polls × 60 001 ms >
+  // idleMs (600 000).
+  for (let i = 0; i < 10; i++) {
+    clock.advance(60_001);
+    assert.equal((await pool.status(A)).state, 'qr');
+  }
+  assert.equal(await pool.evictIdle(), 1, 'idle eviction sweeps the polled-but-abandoned session');
+  assert.equal(pool.size(), 0);
+  assert.equal(sock.disconnects, 1);
+  assert.deepEqual(await pool.status(A), { sessionKey: A, state: 'unpaired', qr: null, me: null });
+});
+
 test('criterio 1d: tras connection open simulado hay exactamente 1 fila para A y 0 para un sub inventado', async () => {
   const { pool, store, factory } = await makePool();
   await pool.start(A);
