@@ -579,8 +579,13 @@ spec:
 # precondition that made the original deferral necessary (a failing PreSync
 # blocks the whole `socialmedia` sync).
 # ArgoCD PreSync hook: executes BEFORE the workloads sync (the credential
-# store must find table 007 once PR-2 turns CREDENTIAL_STORE_ENABLED on),
-# runs under a fresh generated name each sync, self-deletes on success.
+# store must find table 007 once PR-2 turns CREDENTIAL_STORE_ENABLED on).
+# Fixed metadata.name: the Job is removed before each new sync and again on
+# success — hook-delete-policy BeforeHookCreation,HookSucceeded, the company
+# pattern (only HookSucceeded/HookFailed/BeforeHookCreation are valid values;
+# anything else ArgoCD drops falls back to BeforeHookCreation, so a completed
+# Job would linger and mark the app OutOfSync). ttlSecondsAfterFinished: 3600
+# as backstop.
 # Image = mcp-server (ships src + tsx); the prod overlay `images:` pin
 # rewrites its tag+digest exactly as for the mcp-server Deployment. The
 # $(DB_USER)/$(DB_PASSWORD) expansion in DATABASE_URL is done by the kubelet
@@ -592,7 +597,7 @@ metadata:
   namespace: whatsapp-mcp
   annotations:
     argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: Succeeded
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 3
   activeDeadlineSeconds: 300
