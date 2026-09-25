@@ -10,10 +10,7 @@ import { RequestHandler } from 'express';
 import { IdentityRequest, SocialApiContext } from '../context';
 import { RouteSpec } from '../router';
 import { respondMeTelegram } from '../telegram-pairing-client';
-import {
-  PoolUnreachableError,
-  respondPairingUnavailable,
-} from '../whatsapp-pairing-client';
+import { PoolUnreachableError, respondPairingUnavailable } from '../whatsapp-pairing-client';
 
 function handler(ctx: SocialApiContext): RequestHandler {
   return async (req, res) => {

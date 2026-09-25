@@ -87,7 +87,10 @@ export class TelegramPairingClient {
  * passed through as the pool's own body, 429 passes the rate-limit body +
  * Retry-After through; anything else → 503.
  */
-export function respondPairingPassword(res: Response, pool: PoolResponse | PoolUnreachableError): void {
+export function respondPairingPassword(
+  res: Response,
+  pool: PoolResponse | PoolUnreachableError
+): void {
   if (pool instanceof PoolUnreachableError) {
     respondPairingUnavailable(res);
     return;

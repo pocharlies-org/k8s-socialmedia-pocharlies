@@ -15,10 +15,7 @@ import { RequestHandler } from 'express';
 import { IdentityRequest, SocialApiContext } from '../context';
 import { RouteSpec } from '../router';
 import { respondPairingPassword } from '../telegram-pairing-client';
-import {
-  PoolUnreachableError,
-  respondPairingUnavailable,
-} from '../whatsapp-pairing-client';
+import { PoolUnreachableError, respondPairingUnavailable } from '../whatsapp-pairing-client';
 
 /** Same bound the pool applies (Telegram's own limit is far below this). */
 const MAX_PASSWORD_LENGTH = 1024;
@@ -32,11 +29,7 @@ function handler(ctx: SocialApiContext): RequestHandler {
       return;
     }
     const password = (req.body as { password?: unknown } | undefined)?.password;
-    if (
-      typeof password !== 'string' ||
-      password === '' ||
-      password.length > MAX_PASSWORD_LENGTH
-    ) {
+    if (typeof password !== 'string' || password === '' || password.length > MAX_PASSWORD_LENGTH) {
       res.status(400).json({ error: 'invalid_password' });
       return;
     }
