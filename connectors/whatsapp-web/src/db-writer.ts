@@ -744,6 +744,74 @@ export async function storeMessageKey(data: MessageKeyData): Promise<void> {
   );
 }
 
+/** Upper bound of read receipts sent by one markAsRead. */
+export const MARK_READ_MAX_KEYS = 100;
+
+export interface StoredMessageKey {
+  /** Bare WhatsApp message id (the prefix is stripped). */
+  id: string;
+  remoteJid: string;
+  fromMe: boolean;
+  participant?: string;
+}
+
+/**
+ * Keys of the inbound messages of a chat still to be read: not deleted, status
+ * not 'read', and newer than the chat's read watermark — our last outbound
+ * message or the last inbound one already read, whichever is later. Without
+ * the watermark every inbound row would qualify (messages.status defaults to
+ * 'sent' and is rarely updated for inbound), so a markAsRead would walk the
+ * whole history back in batches. A tombstone chat id reads its canonical chat.
+ * Newest first, at most `limit`.
+ */
+export async function getUnreadMessageKeysForChat(
+  chatId: string,
+  limit: number = MARK_READ_MAX_KEYS
+): Promise<StoredMessageKey[]> {
+  const pool = getPool();
+  const result = await pool.query(
+    `WITH conv AS (
+       SELECT COALESCE((SELECT merged_into FROM conversations WHERE id = $1), $1) AS id
+     ), mark AS (
+       SELECT MAX(m.wa_timestamp) AS ts
+         FROM messages m, conv
+        WHERE m.conversation_id = conv.id
+          AND (m.direction = 'OUTBOUND' OR m.status = 'read')
+     )
+     SELECT k.wa_message_id, k.remote_jid, k.from_me, k.participant_jid
+       FROM conv
+       JOIN whatsapp_message_keys k ON k.conversation_id = conv.id
+       JOIN messages m ON m.wa_message_id = k.wa_message_id
+       CROSS JOIN mark
+      WHERE m.account = $2
+        AND m.platform = 'whatsapp'
+        AND m.direction = 'INBOUND'
+        AND m.status IS DISTINCT FROM 'read'
+        AND NOT COALESCE(m.is_deleted, FALSE)
+        AND (mark.ts IS NULL OR m.wa_timestamp > mark.ts)
+      ORDER BY k.message_timestamp_ms DESC
+      LIMIT $3`,
+    [accountKey(chatId), connectorAccount(), Math.max(1, Math.min(limit, 1000))]
+  );
+  return result.rows.map(row => ({
+    id: stripAccountKey(String(row.wa_message_id)),
+    remoteJid: String(row.remote_jid),
+    fromMe: !!row.from_me,
+    participant: row.participant_jid || undefined,
+  }));
+}
+
+/** Record that read receipts went out for these (bare) message ids. */
+export async function markMessagesRead(waMessageIds: string[]): Promise<void> {
+  if (!waMessageIds.length) return;
+  const pool = getPool();
+  await pool.query(
+    `UPDATE messages SET status = 'read', status_at = now()
+      WHERE wa_message_id = ANY($1::text[]) AND account = $2 AND status IS DISTINCT FROM 'read'`,
+    [waMessageIds.map(id => accountKey(id)), connectorAccount()]
+  );
+}
+
 export async function recordHistorySyncProgress(data: {
   conversationId: string;
   oldestMessageId?: string | null;

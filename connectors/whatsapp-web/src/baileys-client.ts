@@ -65,7 +65,15 @@ import {
   setConversationState,
   setMessageStatus,
   setConversationWaChatId,
+  getUnreadMessageKeysForChat,
+  markMessagesRead,
 } from './db-writer';
+import {
+  DurablePayloadSource,
+  getRawWAMessage,
+  MessageUnavailableError,
+  storeRawWAMessage,
+} from './durable-message-store';
 import {
   appendCompanyToDisplayName,
   displayNameOrPhone,
@@ -1218,6 +1226,13 @@ export class BaileysClient extends EventEmitter {
         `message key persist failed for ${waMessage.waMessageId}: ${e?.message || e}`
       )
     );
+    // Also for an already-stored row (msgId null): a history replay after a
+    // relink backfills the payloads of the recent window.
+    await this.persistDurablePayload(
+      msg,
+      waMessage.conversationId,
+      options.source === 'baileys_history_sync' ? 'history' : 'live'
+    );
 
     if (!msgId) return { inserted: false, waMessage };
 
@@ -1421,27 +1436,55 @@ export class BaileysClient extends EventEmitter {
 
   /**
    * Build a baileys-compatible "quoted" message from a wa_message_id we've
-   * seen before (cached at ingest time). Returns undefined if we don't have
-   * the original — baileys will still send, just without the quote bubble.
+   * seen before: process memory first, then the durable copy (survives
+   * restarts). Returns undefined if we don't have the original — a text reply
+   * still sends, just without the quote bubble.
    */
   private async buildQuotedFromId(
     replyToMessageId: string | undefined,
     chatJid: string
   ): Promise<WAMessage | undefined> {
     if (!replyToMessageId) return undefined;
-    const cachedKey = this.keyCache.get(replyToMessageId);
+    const id = stripAccountKey(replyToMessageId);
+    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    if (!original?.message) return undefined;
+    return {
+      ...original,
+      key: { ...original.key, id, remoteJid: chatJid },
+    } as WAMessage;
+  }
+
+  /** Full WAMessage (key + content) from the in-memory caches. */
+  private memoryMessage(messageId: string): WAMessage | undefined {
+    const cachedKey = this.keyCache.get(messageId);
     const messageProto =
-      this.retryMessageCache.get<proto.IMessage>(replyToMessageId) ||
+      this.retryMessageCache.get<proto.IMessage>(messageId) ||
       (cachedKey
         ? this.retryMessageCache.get<proto.IMessage>(
-            this.retryMessageCacheKey(cachedKey.chatJid, replyToMessageId)
+            this.retryMessageCacheKey(cachedKey.chatJid, messageId)
           )
         : undefined);
     if (!cachedKey || !messageProto) return undefined;
-    return {
-      key: { ...cachedKey.key, id: replyToMessageId, remoteJid: chatJid },
-      message: messageProto,
-    } as WAMessage;
+    return { key: { ...cachedKey.key, id: messageId }, message: messageProto } as WAMessage;
+  }
+
+  /** Durable copy of a message; never consulted by a pairing-only socket. */
+  private async durableMessage(messageId: string): Promise<WAMessage | undefined> {
+    if (!this.ingest) return undefined;
+    return getRawWAMessage(messageId);
+  }
+
+  /**
+   * Persist the raw message for quote/forward/retry after a restart. SC-1225:
+   * a pairing-only socket (ingest off) writes nothing.
+   */
+  private async persistDurablePayload(
+    msg: WAMessage | undefined,
+    conversationId: string,
+    source: DurablePayloadSource
+  ): Promise<void> {
+    if (!this.ingest || !msg?.key?.id) return;
+    await storeRawWAMessage(msg, conversationId, source);
   }
 
   async sendMessage(
@@ -1518,6 +1561,11 @@ export class BaileysClient extends EventEmitter {
       if (sent?.key) {
         this.rememberKey(messageId || '', sent.key, raw);
         this.rememberMessageForRetry(sent.key, sent.message);
+        await this.persistDurablePayload(
+          sent,
+          this.normalizeJid(sent.key.remoteJid || raw),
+          'sent'
+        );
       }
       return messageId || undefined;
     } catch (e: any) {
@@ -1551,6 +1599,11 @@ export class BaileysClient extends EventEmitter {
           if (retried?.key) {
             this.rememberKey(messageId || '', retried.key, raw);
             this.rememberMessageForRetry(retried.key, retried.message);
+            await this.persistDurablePayload(
+              retried,
+              this.normalizeJid(retried.key.remoteJid || raw),
+              'sent'
+            );
           }
           return messageId || undefined;
         } catch (retryError: any) {
@@ -1671,6 +1724,16 @@ export class BaileysClient extends EventEmitter {
   ): Promise<void> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
+    // A media reply whose quoted message is unknown is rejected (before the
+    // file is fetched) instead of going out as an unrelated, unquoted media.
+    const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
+    if (options?.replyToMessageId && !quoted) {
+      throw new MessageUnavailableError(
+        `Quoted message ${options.replyToMessageId} is unavailable (not in memory nor in the durable store); send the media without replyTo`,
+        422,
+        'quoted_message_unavailable'
+      );
+    }
     let buf: Buffer;
     let contentType = '';
     try {
@@ -1700,11 +1763,11 @@ export class BaileysClient extends EventEmitter {
         caption,
       };
 
-    const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
     const sent = await this.sock.sendMessage(raw, payload, quoted ? { quoted } : undefined);
     if (sent?.key?.id) {
       this.rememberKey(sent.key.id, sent.key, raw);
       this.rememberMessageForRetry(sent.key, sent.message);
+      await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || raw), 'sent');
     }
   }
 
@@ -1724,6 +1787,7 @@ export class BaileysClient extends EventEmitter {
     if (sent?.key) {
       this.rememberKey(messageId || '', sent.key, raw);
       this.rememberMessageForRetry(sent.key, sent.message);
+      await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || raw), 'sent');
     }
     return messageId || undefined;
   }
@@ -1745,17 +1809,43 @@ export class BaileysClient extends EventEmitter {
     this.logger.info(`Reacted with ${emoji} to ${messageId}`);
   }
 
-  async forwardMessage(chatId: string, messageId: string, _toChatId: string): Promise<void> {
+  /**
+   * Real WhatsApp forward: `sendMessage(to, { forward: original })` with the
+   * original WAMessage from memory or the durable store. The source is found
+   * by its (account-scoped) message id; `chatId` only names it in errors.
+   * Returns the id of the new message.
+   */
+  async forwardMessage(
+    chatId: string,
+    messageId: string,
+    toChatId: string
+  ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
-    const cached = this.keyCache.get(messageId);
-    if (!cached)
-      throw new Error(`forwardMessage: message ${messageId} not available (key cache miss)`);
-    // We need the original WAMessage to forward content; Baileys forward
-    // signature is sendMessage(jid, { forward: WAMessage }).
-    // We don't keep the full WAMessage, only the key — so we re-send the cached body if any.
-    throw new Error(
-      'forwardMessage: not supported without full WAMessage cache; ask Claude to plumb message store if you need this'
-    );
+    if (!this.isConnected())
+      throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
+    const id = stripAccountKey(messageId);
+    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    if (!original?.message) {
+      throw new MessageUnavailableError(
+        `forwardMessage: message ${id} of ${chatId} is unavailable (not in memory nor in the durable store)`,
+        404,
+        'message_unavailable'
+      );
+    }
+    const rawTarget = this.toRawJid(toChatId);
+    const sent = await this.sock.sendMessage(rawTarget, { forward: original });
+    const sentId = sent?.key?.id;
+    if (sent?.key) {
+      this.rememberKey(sentId || '', sent.key, rawTarget);
+      this.rememberMessageForRetry(sent.key, sent.message);
+      await this.persistDurablePayload(
+        sent,
+        this.normalizeJid(sent.key.remoteJid || rawTarget),
+        'sent'
+      );
+    }
+    this.logger.info(`Forwarded ${id} to ${rawTarget}${sentId ? ` id=${sentId}` : ''}`);
+    return sentId || undefined;
   }
 
   async deleteMessage(chatId: string, messageId: string): Promise<void> {
@@ -1773,27 +1863,45 @@ export class BaileysClient extends EventEmitter {
   async markAsRead(chatId: string): Promise<void> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
-    // Read latest known key for that chat from the BD.
-    const pool = getPool();
-    // messages.conversation_id is stored namespaced (see accountKey); the caller
-    // hands us a bare chatId, so namespace it or professional reads zero rows.
-    const r = await pool.query(
-      `SELECT wa_message_id FROM messages WHERE conversation_id = $1 ORDER BY wa_timestamp DESC LIMIT 1`,
-      [accountKey(chatId)]
-    );
-    const stored = r.rows[0]?.wa_message_id as string | undefined;
-    if (!stored) return;
-    // wa_message_id is stored namespaced; the keyCache and the WhatsApp message
-    // key both speak the BARE id, so strip the prefix back off before use.
-    const lastId = stripAccountKey(stored);
-    const cached = this.keyCache.get(lastId);
-    const key = cached?.key ||
-      (await this.reconstructKeyFromDb(lastId, chatId)) || {
-        remoteJid: raw,
-        id: lastId,
-        fromMe: false,
-      };
-    await this.sock.readMessages([key]);
+    // Read receipts for every unread inbound message of the chat (bounded by
+    // the read watermark, see getUnreadMessageKeysForChat), so each sender
+    // sees their message read — not only the author of the latest one.
+    const unread = await getUnreadMessageKeysForChat(chatId);
+    if (unread.length) {
+      await this.sock.readMessages(
+        unread.map(k => ({
+          id: k.id,
+          remoteJid: k.remoteJid,
+          fromMe: k.fromMe,
+          participant: k.participant,
+        }))
+      );
+      await markMessagesRead(unread.map(k => k.id)).catch(e =>
+        this.logger.warn(`markAsRead: read status persist failed: ${e?.message || e}`)
+      );
+    } else {
+      // Nothing pending: read the latest known key for that chat, as before.
+      const pool = getPool();
+      // messages.conversation_id is stored namespaced (see accountKey); the caller
+      // hands us a bare chatId, so namespace it or professional reads zero rows.
+      const r = await pool.query(
+        `SELECT wa_message_id FROM messages WHERE conversation_id = $1 ORDER BY wa_timestamp DESC LIMIT 1`,
+        [accountKey(chatId)]
+      );
+      const stored = r.rows[0]?.wa_message_id as string | undefined;
+      if (!stored) return;
+      // wa_message_id is stored namespaced; the keyCache and the WhatsApp message
+      // key both speak the BARE id, so strip the prefix back off before use.
+      const lastId = stripAccountKey(stored);
+      const cached = this.keyCache.get(lastId);
+      const key = cached?.key ||
+        (await this.reconstructKeyFromDb(lastId, chatId)) || {
+          remoteJid: raw,
+          id: lastId,
+          fromMe: false,
+        };
+      await this.sock.readMessages([key]);
+    }
     const norm = this.normalizeJid(raw);
     const chat = this.chatStore.get(norm);
     if (chat) chat.unreadCount = 0;
@@ -2471,6 +2579,22 @@ export class BaileysClient extends EventEmitter {
         `WhatsApp retry message cache hit remoteJid=${remoteJid || 'unknown'} messageId=${messageId}`
       );
       return cached;
+    }
+
+    // Durable copy: the exact content we sent/received, even after a restart.
+    const durable = await this.durableMessage(messageId);
+    if (durable?.message) {
+      this.logger.debug(
+        `WhatsApp retry message durable hit remoteJid=${remoteJid || 'unknown'} messageId=${messageId}`
+      );
+      this.retryMessageCache.set(messageId, durable.message);
+      if (remoteJid) {
+        this.retryMessageCache.set(
+          this.retryMessageCacheKey(remoteJid, messageId),
+          durable.message
+        );
+      }
+      return durable.message;
     }
 
     const reconstructed = await this.reconstructMessageForRetryFromDb(messageId);

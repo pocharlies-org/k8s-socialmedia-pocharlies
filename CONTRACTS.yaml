@@ -121,6 +121,28 @@ contracts:
       touch it: per-sub QR lives only on http.whatsapp-pairing.internal-sessions.v1.
       Path, method, the absence of auth and the response shape are contract;
       changing any of them is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-forward.v1
+    kind: http-route
+    value: /messages/forward
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/forward of the house WhatsApp connectors, consumed by
+      the MCP tool social_forward_message (mcp-server/src/mcp/server.ts
+      handleForwardMessage). HMAC-signed (x-connector-timestamp +
+      x-connector-signature, same scheme as every connector route), body
+      {chatId, messageId, toChatId}: the source is found by messageId (bare or
+      account-namespaced) in process memory or in whatsapp_message_payloads
+      (migration 009); chatId only names it in errors. Answers 200
+      {forwarded: true, messageId} (the id of the new message), 403 when
+      ENABLE_SENDING is not true, 400 on a missing field, 404
+      {error, failureClass: "message_unavailable"} when the original is not
+      known, 500 {error} otherwise. Registered by fase 3 / PR-1, when forwarding
+      started to work (before it always answered 500). The path, the body
+      fields, the 200 shape and the 404 failureClass are contract: changing any
+      is breaking — a new `.v2` entry beside this one.
   - id: http.social-api.pairing-whatsapp.v1
     kind: http-route
     value: /pairing/whatsapp
