@@ -165,8 +165,9 @@ Flow (Instagram API with Instagram Login — Meta's standard OAuth, per the CTO 
    `instagram_business_basic` + `instagram_business_content_publish`, short-lived
    HMAC-signed `state` carrying the sub). The link is plain tool output — no new screen.
 2. The user approves in the browser; Instagram redirects to
-   `GET /oauth/instagram/callback` on the connector (public path rule on
-   `whatsapp.e-dani.com`). Code → short-lived token → 60-day long-lived exchange
+   `GET /oauth/instagram/callback` on the connector (exact-path rule on
+   `whatsapp.e-dani.com` at the edge, mirrored for LAN/tailnet by
+   `lan-instagram-callback` in k8s-infra — SC-1254). Code → short-lived token → 60-day long-lived exchange
    (`graph.instagram.com/v21.0/access_token?grant_type=ig_exchange_token`) runs
    server-side; tokens under 5.184.000 s of `expires_in` are refused.
 3. The credential lands via `store.put` under `session_key = <sub>` (or
