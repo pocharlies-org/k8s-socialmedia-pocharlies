@@ -31,6 +31,7 @@ contracts:
     role: provider
     files:
       - connectors/whatsapp-web/src/pairing/app.ts
+      - mcp-server/src/api/whatsapp-pairing-client.ts
     status: active
     note: >-
       Internal API of the whatsapp-pairing Deployment (whatsapp-connector image,
@@ -67,3 +68,77 @@ contracts:
       touch it: per-sub QR lives only on http.whatsapp-pairing.internal-sessions.v1.
       Path, method, the absence of auth and the response shape are contract;
       changing any of them is breaking — a new `.v2` entry beside this one.
+  - id: http.social-api.pairing-whatsapp.v1
+    kind: http-route
+    value: /pairing/whatsapp
+    role: provider
+    files:
+      - mcp-server/src/api/routes/pairing-whatsapp-start.ts
+      - mcp-server/src/api/routes/pairing-whatsapp.ts
+    status: active
+    note: >-
+      WhatsApp pairing surface of the social-api Deployment (mcp-server image,
+      :3020, in-cluster only — ns messages / app dgx-messages via the
+      whatsapp-mcp-allow-messages-social-api netpol; no IngressRoute). Two
+      routes, both behind the Keycloak JWT verifier
+      (http.social-api.jwt-audience.v1) and the hardening guards:
+      POST /pairing/whatsapp/start begins a pairing for the caller,
+      GET /pairing/whatsapp polls it (QR by polling, not SSE). No parameters
+      carry identity: the sessionKey sent to the pool is always the JWT `sub`;
+      a `sub`, `sessionKey` or `jid` in the query or body with a different
+      value is 403 {"error":"forbidden_identity"}, a present Origin outside
+      SOCIAL_API_ALLOWED_ORIGINS (empty default) is 403
+      {"error":"forbidden_origin"}, no CORS headers are ever answered. 200 is
+      the pool's PairingStatus verbatim: {sessionKey, state, qr, me} with
+      state starting|qr|paired|expired|unpaired, qr null or {value, dataUrl,
+      issuedAt, expiresAt}, me null or {id, jid, phone, name}. Errors: 401
+      {"error":"unauthorized"} with WWW-Authenticate: Bearer; 429 passed
+      through from the pool {"error":"rate_limited", reason,
+      retryAfterSeconds} with Retry-After; 503 {"error":"identity_unavailable"}
+      (JWKS unreachable) or {"error":"pairing_unavailable"} (store off, no
+      HMAC secret, pool down); 404 {"error":"not_found"} while
+      SOCIAL_PAIRING_API is off or on unknown paths; 400
+      {"error":"invalid_json"} on a malformed body. Paths, methods, the
+      PairingStatus shape, these error codes and the 401/403/503 gates are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.social-api.me-whatsapp.v1
+    kind: http-route
+    value: /me/whatsapp
+    role: provider
+    files:
+      - mcp-server/src/api/routes/me-whatsapp.ts
+    status: active
+    note: >-
+      GET /me/whatsapp of social-api: the caller's own paired WhatsApp, keyed
+      by the JWT `sub` through the pool — a token of A can never return B's
+      jid and nothing is ever listed. Same JWT + Origin + identity + store
+      gates and the same 401/403/503/404-off error set as
+      http.social-api.pairing-whatsapp.v1. 200 {"jid": "<device-less user
+      jid>"} or 404 {"error":"not_paired"}. Path, method, the {jid} shape and
+      not_paired are contract; the older HMAC'd /api/v1/me of the house
+      connectors (controller.ts) is a DIFFERENT, untouched surface (design
+      D6). Changing any of this is breaking — a new `.v2` entry beside this
+      one.
+  - id: http.social-api.jwt-audience.v1
+    kind: allowlist
+    value: social-api
+    role: provider
+    files:
+      - mcp-server/src/api/auth/keycloak-jwt.ts
+    status: active
+    note: >-
+      The token identity contract of social-api (design D2): every request to
+      /pairing/* and /me/* must carry Authorization: Bearer <JWT> verified
+      against SOCIAL_API_JWKS_URL (default in-cluster Keycloak realm edani),
+      iss = SOCIAL_API_JWT_ISSUER
+      (https://auth-next.e-dani.com/realms/edani), RS256 only, typ=Bearer,
+      clockTolerance 30 s, `aud` CONTAINING this value ("social-api" — needs
+      the Audience mapper on the dgx-messages client, SC-1198 historia 0),
+      and `azp` in SOCIAL_API_ALLOWED_AZP (default dgx-messages). The `sub`
+      claim is the sessionKey of every pairing operation; no header-carried
+      identity is ever read (x-user-sub is not an input — SC-1144). A bad
+      token is 401 with WWW-Authenticate: Bearer; an unreachable JWKS is 503
+      (fail closed). The audience string, the issuer, the algorithm set and
+      the "never read x-user-sub" rule are contract: a second audience is a
+      new value, retiring or renaming this one is breaking — a new `.v2`
+      entry beside this one.
