@@ -5,7 +5,7 @@
  * Only `social-api` calls it (in-cluster, no IngressRoute). It never sees a
  * JWT: social-api verifies the user, derives `sessionKey = sub` and signs the
  * request body with the connector HMAC (same scheme the house connector
- * verifies in src/api/controller.ts, via shared's generateHMACSignature).
+ * verifies in src/api/controller.ts, via shared's verifyHMACSignature).
  * Because the HMAC covers the BODY only, every route is a POST carrying
  * `{ "sessionKey": "<sub>" }` — a sessionKey in the path or query would be
  * outside the signature. /password adds `password` to that signed body.
@@ -27,7 +27,7 @@ import express, { NextFunction, Request, Response } from 'express';
 import {
   credentialMasterKeyFromEnv,
   credentialStoreEnabled,
-  generateHMACSignature,
+  verifyHMACSignature,
 } from '@mcp-socialmedia/shared';
 import {
   InvalidPasswordError,
@@ -120,10 +120,12 @@ export interface TelegramPairingAppOptions {
 }
 
 /**
- * Verify the connector HMAC exactly like the house middleware
- * (api/controller.ts authMiddleware / whatsapp createHMACAuth):
- * sha256=HMAC(secret, "<ts>:<JSON body>"), 5-minute window, over the PARSED
- * body — the sessionKey (and the password) travel inside the signature.
+ * Verify the connector HMAC with shared's verifyHMACSignature — the same
+ * scheme the house middleware enforces (api/controller.ts authMiddleware /
+ * whatsapp createHMACAuth): sha256=HMAC(secret, "<ts>:<JSON body>"), 5-minute
+ * window, constant-time comparison, over the PARSED body — the sessionKey
+ * (and the password) travel inside the signature (SC-1229 round 2: this was
+ * a third copy of that logic, comparing with !==).
  */
 function hmacMiddleware(sharedSecret: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -133,14 +135,7 @@ function hmacMiddleware(sharedSecret: string) {
       res.status(401).json({ error: 'Missing authentication headers' });
       return;
     }
-    const requestTime = parseInt(timestamp, 10);
-    const now = Math.floor(Date.now() / 1000);
-    if (!Number.isFinite(requestTime) || Math.abs(now - requestTime) > 300) {
-      res.status(401).json({ error: 'Request timestamp too old or too far in future' });
-      return;
-    }
-    const expected = generateHMACSignature(req.body ?? {}, requestTime, sharedSecret);
-    if (signature !== expected) {
+    if (!verifyHMACSignature(req.body ?? {}, parseInt(timestamp, 10), signature, sharedSecret)) {
       res.status(401).json({ error: 'Invalid signature' });
       return;
     }

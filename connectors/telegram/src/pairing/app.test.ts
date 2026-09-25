@@ -83,7 +83,10 @@ test('flag off → todo 404 salvo /health', async () => {
     assert.equal(health.status, 200);
     assert.equal((await json(health)).pairingApi, 'off');
     for (const path of ['/start', '/state', '/me', '/password']) {
-      const r = await fetch(`${base}${INTERNAL_TELEGRAM_SESSIONS_BASE}${path}`, signed({ sessionKey: A }));
+      const r = await fetch(
+        `${base}${INTERNAL_TELEGRAM_SESSIONS_BASE}${path}`,
+        signed({ sessionKey: A })
+      );
       assert.equal(r.status, 404);
       assert.deepEqual(await r.json(), { error: 'not_found' });
     }
@@ -116,11 +119,35 @@ test('sin firma HMAC válida → 401 (sin cabeceras, secreto ajeno, cuerpo alter
   }
 });
 
+test('firma correcta pero de hace 301 s → 401 (la ventana de 5 min la pone shared)', async () => {
+  const { base, close, factory } = await serve();
+  try {
+    const url = `${base}${INTERNAL_TELEGRAM_SESSIONS_BASE}/start`;
+    const oldTs = Math.floor(Date.now() / 1000) - 301;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-connector-timestamp': String(oldTs),
+        'x-connector-signature': generateHMACSignature({ sessionKey: A }, oldTs, SECRET),
+      },
+      body: JSON.stringify({ sessionKey: A }),
+    });
+    assert.equal(r.status, 401);
+    assert.equal(factory.clients.length, 0);
+  } finally {
+    await close();
+  }
+});
+
 test('store apagado → 503 pairing_unavailable (tras la firma)', async () => {
   const { base, close } = await serve({ storeAvailable: false, pool: null });
   try {
     for (const path of ['/start', '/state', '/me', '/password']) {
-      const r = await fetch(`${base}${INTERNAL_TELEGRAM_SESSIONS_BASE}${path}`, signed({ sessionKey: A }));
+      const r = await fetch(
+        `${base}${INTERNAL_TELEGRAM_SESSIONS_BASE}${path}`,
+        signed({ sessionKey: A })
+      );
       assert.equal(r.status, 503);
       assert.deepEqual(await r.json(), { error: 'pairing_unavailable' });
     }
@@ -135,7 +162,10 @@ test('store apagado → 503 pairing_unavailable (tras la firma)', async () => {
 test('sin secreto compartido → 503 pairing_unavailable (no se puede verificar)', async () => {
   const { base, close } = await serve({ sharedSecret: null });
   try {
-    const r = await fetch(`${base}${INTERNAL_TELEGRAM_SESSIONS_BASE}/start`, signed({ sessionKey: A }));
+    const r = await fetch(
+      `${base}${INTERNAL_TELEGRAM_SESSIONS_BASE}/start`,
+      signed({ sessionKey: A })
+    );
     assert.equal(r.status, 503);
   } finally {
     await close();
@@ -236,7 +266,10 @@ test('config del entorno: solo las variables aprobadas; TELEGRAM_SESSION_STRING*
   assert.equal(pairingApiEnabledFromEnv({ SOCIAL_PAIRING_API: 'on' }), true);
   assert.equal(pairingStoreAvailable({}), false);
   assert.equal(
-    pairingStoreAvailable({ CREDENTIAL_STORE_ENABLED: 'true', CREDENTIAL_STORE_MASTER_KEY: MASTER_KEY }),
+    pairingStoreAvailable({
+      CREDENTIAL_STORE_ENABLED: 'true',
+      CREDENTIAL_STORE_MASTER_KEY: MASTER_KEY,
+    }),
     true
   );
 
