@@ -37,8 +37,7 @@ type SignKey = Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
 import { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import { SocialApiContext } from '../api/context';
 import { jwtVerifierConfigFromEnv } from '../api/auth/keycloak-jwt';
-import { TelegramPairingClient } from '../api/telegram-pairing-client';
-import { WhatsappPairingClient } from '../api/whatsapp-pairing-client';
+import { PairingPoolClient } from '../api/pairing-pool-client';
 import { createSocialApiApp } from './app';
 
 const ISS = 'https://auth-next.e-dani.com/realms/edani';
@@ -118,13 +117,28 @@ const fakeStore = new FakeCredentialStore();
 
 /** Instagram rows keyed by sub (payload shaped by the instagram adapter). */
 const IG = {
-  [A]: { accessToken: 'ig-token-a', businessAccountId: '17841', username: 'ana_ig', expiresAt: Date.now() + 86_400_000 },
-  [B]: { accessToken: 'ig-token-b', businessAccountId: '17842', username: 'bea_ig', expiresAt: Date.now() + 86_400_000 },
+  [A]: {
+    accessToken: 'ig-token-a',
+    businessAccountId: '17841',
+    username: 'ana_ig',
+    expiresAt: Date.now() + 86_400_000,
+  },
+  [B]: {
+    accessToken: 'ig-token-b',
+    businessAccountId: '17842',
+    username: 'bea_ig',
+    expiresAt: Date.now() + 86_400_000,
+  },
 };
 fakeStore.rows.set(`${A}:instagram`, IG[A]);
 fakeStore.rows.set(`${B}:instagram`, IG[B]);
 // expired token, legacy row without expiresAt, and a foreign-shaped row:
-fakeStore.rows.set('igexpired:instagram', { accessToken: 'x', businessAccountId: '1', username: 'zoe_ig', expiresAt: Date.now() - 1000 });
+fakeStore.rows.set('igexpired:instagram', {
+  accessToken: 'x',
+  businessAccountId: '1',
+  username: 'zoe_ig',
+  expiresAt: Date.now() - 1000,
+});
 fakeStore.rows.set('iglegacy:instagram', { accessToken: 'x', businessAccountId: '1' });
 fakeStore.rows.set('igbroken:instagram', { notAToken: true });
 
@@ -196,8 +210,7 @@ async function startFakePool(): Promise<Server> {
       const channel = match[1] as 'whatsapp' | 'telegram';
       const route = match[2];
       // /password is a telegram-only route (the whatsapp pool 404s it).
-      if (channel === 'whatsapp' && route === 'password')
-        return send(404, { error: 'not_found' });
+      if (channel === 'whatsapp' && route === 'password') return send(404, { error: 'not_found' });
       const raw = Buffer.concat(chunks).toString('utf-8');
       let body: { sessionKey?: unknown };
       try {
@@ -322,8 +335,18 @@ async function serve(overrides: Partial<SocialApiContext> = {}): Promise<void> {
       allowedAzp: ['dgx-messages'],
       clockToleranceSeconds: 30,
     },
-    whatsappPairing: new WhatsappPairingClient(`http://127.0.0.1:${poolPort}`, SECRET, 5000),
-    telegramPairing: new TelegramPairingClient(`http://127.0.0.1:${poolPort}`, SECRET, 5000),
+    whatsappPairing: new PairingPoolClient(
+      'whatsapp',
+      `http://127.0.0.1:${poolPort}`,
+      SECRET,
+      5000
+    ),
+    telegramPairing: new PairingPoolClient(
+      'telegram',
+      `http://127.0.0.1:${poolPort}`,
+      SECRET,
+      5000
+    ),
     credentialStore: fakeStore,
     identityBindingsPath: bindingsFile,
     logError: () => {},
@@ -651,7 +674,10 @@ describe('social-api gates (flag off, store off)', () => {
     expect(tgStart.json).toEqual({ error: 'not_found' });
     const tgMe = await call('GET', '/me/telegram', { bearer });
     expect(tgMe.status).toBe(404);
-    const tgPw = await call('POST', '/pairing/telegram/password', { bearer, body: { password: 'x' } });
+    const tgPw = await call('POST', '/pairing/telegram/password', {
+      bearer,
+      body: { password: 'x' },
+    });
     expect(tgPw.status).toBe(404);
     expect(poolCalls).toHaveLength(0);
   });
@@ -756,7 +782,9 @@ describe('social-api GET /social/status (SC-1228)', () => {
     const none = await call('GET', '/social/status', { bearer: await token({ sub: C }) });
     expect(chan(none).whatsapp).toEqual({ state: 'unpaired' });
     expect(chan(none).instagram).toEqual({ state: 'unpaired' });
-    const expired = await call('GET', '/social/status', { bearer: await token({ sub: 'expiredwa' }) });
+    const expired = await call('GET', '/social/status', {
+      bearer: await token({ sub: 'expiredwa' }),
+    });
     expect(chan(expired).whatsapp).toEqual({ state: 'expired' });
     const inFlight = await call('GET', '/social/status', { bearer: await token({ sub: 'qrsub' }) });
     expect(chan(inFlight).whatsapp).toEqual({ state: 'unpaired' });
@@ -767,7 +795,9 @@ describe('social-api GET /social/status (SC-1228)', () => {
     expect(chan(paired).telegram).toEqual({ state: 'paired' });
     const none = await call('GET', '/social/status', { bearer: await token({ sub: C }) });
     expect(chan(none).telegram).toEqual({ state: 'unpaired' });
-    const expired = await call('GET', '/social/status', { bearer: await token({ sub: 'expiredtg' }) });
+    const expired = await call('GET', '/social/status', {
+      bearer: await token({ sub: 'expiredtg' }),
+    });
     expect(chan(expired).telegram).toEqual({ state: 'expired' });
     const qr = await call('GET', '/social/status', { bearer: await token({ sub: 'qrtg' }) });
     expect(chan(qr).telegram).toEqual({ state: 'unpaired' });
@@ -779,9 +809,13 @@ describe('social-api GET /social/status (SC-1228)', () => {
   it('instagram states: expiresAt past → expired, legacy row → paired, broken row → unavailable', async () => {
     const past = await call('GET', '/social/status', { bearer: await token({ sub: 'igexpired' }) });
     expect(chan(past).instagram).toEqual({ state: 'expired' });
-    const legacy = await call('GET', '/social/status', { bearer: await token({ sub: 'iglegacy' }) });
+    const legacy = await call('GET', '/social/status', {
+      bearer: await token({ sub: 'iglegacy' }),
+    });
     expect(chan(legacy).instagram).toEqual({ state: 'paired' });
-    const broken = await call('GET', '/social/status', { bearer: await token({ sub: 'igbroken' }) });
+    const broken = await call('GET', '/social/status', {
+      bearer: await token({ sub: 'igbroken' }),
+    });
     expect(chan(broken).instagram).toEqual({ state: 'unavailable' });
   });
 
@@ -790,7 +824,9 @@ describe('social-api GET /social/status (SC-1228)', () => {
     expect(down.status).toBe(200);
     expect(chan(down).whatsapp).toEqual({ state: 'unavailable' });
     expect(chan(down).instagram).toEqual({ state: 'unpaired' });
-    const limited = await call('GET', '/social/status', { bearer: await token({ sub: 'pool429' }) });
+    const limited = await call('GET', '/social/status', {
+      bearer: await token({ sub: 'pool429' }),
+    });
     expect(chan(limited).whatsapp).toEqual({ state: 'unavailable' });
     // no pool URL configured at all
     await serve({ whatsappPairing: null });
@@ -926,7 +962,9 @@ describe('social-api telegram pairing routes (SC-1229)', () => {
   });
 
   it('GET /pairing/telegram polls the states, including the password step', async () => {
-    const pw = await call('GET', '/pairing/telegram', { bearer: await token({ sub: 'passwordtg' }) });
+    const pw = await call('GET', '/pairing/telegram', {
+      bearer: await token({ sub: 'passwordtg' }),
+    });
     expect(pw.status).toBe(200);
     expect(pw.json.state).toBe('password');
     const paired = await call('GET', '/pairing/telegram', { bearer: await token({ sub: A }) });
@@ -975,12 +1013,7 @@ describe('social-api telegram pairing routes (SC-1229)', () => {
     // social-api's own validation runs BEFORE the pool: missing, empty and
     // over-long passwords are 400 invalid_password with zero NEW pool calls.
     const before = poolCalls.length;
-    for (const body of [
-      {},
-      { password: '' },
-      { password: 'x'.repeat(1025) },
-      { password: 123 },
-    ]) {
+    for (const body of [{}, { password: '' }, { password: 'x'.repeat(1025) }, { password: 123 }]) {
       const bad = await call('POST', '/pairing/telegram/password', {
         bearer: await token({ sub: A }),
         body,
@@ -1007,7 +1040,10 @@ describe('social-api telegram pairing routes (SC-1229)', () => {
 
   it('identity gates: foreign sessionKey/sub in body → 403 with zero pool calls; own sub accepted', async () => {
     const bearer = await token({ sub: A });
-    const foreign = await call('POST', '/pairing/telegram/start', { bearer, body: { sessionKey: B } });
+    const foreign = await call('POST', '/pairing/telegram/start', {
+      bearer,
+      body: { sessionKey: B },
+    });
     expect(foreign.status).toBe(403);
     expect(foreign.json).toEqual({ error: 'forbidden_identity' });
     const foreignQuery = await call('GET', '/pairing/telegram?sessionKey=' + B, { bearer });

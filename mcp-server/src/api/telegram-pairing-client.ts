@@ -1,85 +1,29 @@
 /**
- * SC-1229 (SC-1197 P4b): the client `social-api` uses to reach the
- * `telegram-pairing` pool — the Telegram twin of whatsapp-pairing-client.ts.
+ * SC-1229 (SC-1197 P4b) — what is Telegram's own in the social-api →
+ * telegram-pairing pool surface. Since SC-1229 round 2 the request
+ * choreography and the generic status/limit mapping live once in
+ * pairing-pool-client.ts (PairingPoolClient); this file keeps the base-path
+ * constant of the consumption contract and the two answers that belong to
+ * the mtcute QR flow: the 409 passthrough of /password and the
+ * { id, username } shape of /me/telegram.
  *
- * Same connector HMAC (shared's generateHMACSignature, the exact scheme the
- * pool verifies), same POST-only shape so the `sessionKey` travels inside
- * the signed body; /password additionally carries `password` in that signed
- * body. The generic status/limit mapping is imported from the whatsapp
- * client — one source of truth for the 503/429 choreography; this file adds
- * only the two telegram-specific answers (the /password 409 passthrough and
- * the {id, username} shape of /me/telegram).
- *
- * Like its twin, this client is constructed ONLY when TELEGRAM_PAIRING_URL
- * and the HMAC secret are set; the routes answer 503 pairing_unavailable
- * without it, and the storeGate checks THIS client for the telegram routes
- * (never the whatsapp one — architect note on the SC-1228 storeGate).
+ * Like its whatsapp twin, the client is constructed ONLY when
+ * TELEGRAM_PAIRING_URL and the HMAC secret are set; the routes answer
+ * 503 pairing_unavailable without it, and the storeGate checks the client of
+ * the ROUTE's pool (never the other one — architect note on the SC-1228
+ * storeGate).
  */
 import { Response } from 'express';
-import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import {
   PoolResponse,
   PoolUnreachableError,
   respondPairingUnavailable,
-} from './whatsapp-pairing-client';
+} from './pairing-pool-client';
 
 // CONTRACT: http.telegram-pairing.internal-sessions.v1 — consumer side. The
 // base path and the POST-only shape come from that entry; if the pool ever
 // moves them, that is a breaking change for this file.
-const INTERNAL_TELEGRAM_SESSIONS_BASE = '/internal/telegram/sessions';
-
-export type TelegramPoolRoute = 'start' | 'state' | 'me' | 'password';
-
-export class TelegramPairingClient {
-  constructor(
-    private readonly baseUrl: string,
-    private readonly sharedSecret: string,
-    private readonly timeoutMs = 10_000
-  ) {}
-
-  /**
-   * POST { sessionKey, ...extra } to
-   * `<TELEGRAM_PAIRING_URL>/internal/telegram/sessions/<route>` signed with
-   * the connector HMAC. Returns the raw status/body for the route handler to
-   * map; throws PoolUnreachableError on transport failure.
-   */
-  async post(
-    route: TelegramPoolRoute,
-    sessionKey: string,
-    extra: Record<string, unknown> = {}
-  ): Promise<PoolResponse> {
-    const body = { sessionKey, ...extra };
-    const timestamp = Math.floor(Date.now() / 1000);
-    const signature = generateHMACSignature(body, timestamp, this.sharedSecret);
-
-    let res: globalThis.Response;
-    try {
-      res = await fetch(`${this.baseUrl}${INTERNAL_TELEGRAM_SESSIONS_BASE}/${route}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Connector-Signature': signature,
-          'X-Connector-Timestamp': String(timestamp),
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-    } catch (err) {
-      throw new PoolUnreachableError(
-        `telegram-pairing ${route} unreachable: ${(err as Error)?.message || err}`
-      );
-    }
-
-    let json: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = await res.json();
-      if (parsed && typeof parsed === 'object') json = parsed as Record<string, unknown>;
-    } catch {
-      // non-JSON body: keep {} and let the status mapping decide
-    }
-    return { status: res.status, json, retryAfter: res.headers.get('retry-after') };
-  }
-}
+export const INTERNAL_TELEGRAM_SESSIONS_BASE = '/internal/telegram/sessions';
 
 /**
  * Map a pool answer for POST /pairing/telegram/password: 200 passes the

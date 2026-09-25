@@ -53,6 +53,11 @@ contracts:
       names, the error codes and the 429 reasons are all contract: renaming any of
       them, or moving the sessionKey out of the signed body, is breaking — a new
       `http.whatsapp-pairing.internal-sessions.v2` entry beside this one.
+      SC-1229 round 2 (migrate, surface unchanged): social-api's consumer-side
+      request choreography now lives in the shared
+      mcp-server/src/api/pairing-pool-client.ts (PairingPoolClient, 'whatsapp'
+      channel); the consumer-side base-path constant stays in
+      mcp-server/src/api/whatsapp-pairing-client.ts.
   - id: http.telegram-pairing.internal-sessions.v1
     kind: http-route
     value: /internal/telegram/sessions
@@ -94,6 +99,13 @@ contracts:
       state names (including `password`), the error codes and the 429 reasons
       are all contract: renaming any of them, or moving the sessionKey out of
       the signed body, is breaking — a new `.v2` entry beside this one.
+      SC-1229 round 2 (migrate, surface unchanged): the consumer-side request
+      choreography is shared with the whatsapp twin in
+      mcp-server/src/api/pairing-pool-client.ts (PairingPoolClient, 'telegram'
+      channel; the consumer-side base-path constant stays in
+      mcp-server/src/api/telegram-pairing-client.ts), and the pool's HMAC gate
+      now verifies through shared's verifyHMACSignature — same scheme and same
+      5-minute window as createHMACAuth, constant-time comparison.
   - id: http.whatsapp-connector.auth-qr
     kind: http-route
     value: /auth/qr

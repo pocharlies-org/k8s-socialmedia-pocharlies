@@ -10,7 +10,7 @@ import {
   PoolUnreachableError,
   respondPairingStatus,
   respondPairingUnavailable,
-} from '../whatsapp-pairing-client';
+} from '../pairing-pool-client';
 
 function handler(ctx: SocialApiContext): RequestHandler {
   return async (req, res) => {

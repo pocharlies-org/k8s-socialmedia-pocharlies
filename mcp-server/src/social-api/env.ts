@@ -21,8 +21,7 @@ import {
 } from '@mcp-socialmedia/shared';
 import { jwtVerifierConfigFromEnv } from '../api/auth/keycloak-jwt';
 import { SocialApiContext } from '../api/context';
-import { TelegramPairingClient } from '../api/telegram-pairing-client';
-import { WhatsappPairingClient } from '../api/whatsapp-pairing-client';
+import { PairingPoolClient } from '../api/pairing-pool-client';
 import { identityBindingsFile } from '../domain/identity-bindings';
 
 /** SOCIAL_PAIRING_API === 'on'. Same reading as the pool (pairing/app.ts). */
@@ -86,7 +85,7 @@ export function contextFromEnv(env: NodeJS.ProcessEnv = process.env): SocialApiC
   const pairingUrl = (env.WHATSAPP_PAIRING_URL || '').trim();
   const pairing =
     apiEnabled && sharedSecret && pairingUrl
-      ? new WhatsappPairingClient(pairingUrl, sharedSecret)
+      ? new PairingPoolClient('whatsapp', pairingUrl, sharedSecret)
       : null;
   // SC-1229 (P4b): the telegram pool is a SEPARATE client with a separate
   // URL — its absence 503s only the telegram routes (RouteSpec.pool), never
@@ -94,7 +93,7 @@ export function contextFromEnv(env: NodeJS.ProcessEnv = process.env): SocialApiC
   const telegramUrl = (env.TELEGRAM_PAIRING_URL || '').trim();
   const telegramPairing =
     apiEnabled && sharedSecret && telegramUrl
-      ? new TelegramPairingClient(telegramUrl, sharedSecret)
+      ? new PairingPoolClient('telegram', telegramUrl, sharedSecret)
       : null;
   return {
     apiEnabled,

@@ -34,7 +34,7 @@ import { getAccounts } from '../../domain/account-registry';
 import { loadIdentityBindings } from '../../domain/identity-bindings';
 import { IdentityRequest, SocialApiContext } from '../context';
 import { RouteSpec } from '../router';
-import { PoolUnreachableError } from '../whatsapp-pairing-client';
+import { PoolUnreachableError } from '../pairing-pool-client';
 
 // CONTRACT: http.social-api.social-status.v1 — the state enum is part of the
 // response contract; a new state is a new `.v2` entry, not a value here.
