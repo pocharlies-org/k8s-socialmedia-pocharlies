@@ -12,7 +12,8 @@
  *   jwks  in-cluster Keycloak certs endpoint         (SOCIAL_API_JWKS_URL)
  *   aud   must CONTAIN 'social-api'                  (SOCIAL_API_JWT_AUDIENCE)
  *   azp   must be in the allowlist                   (SOCIAL_API_ALLOWED_AZP)
- *   alg   RS256 only, typ=Bearer, clockTolerance 30 s
+ *   alg   RS256 only, clockTolerance 30 s. The JOSE `typ` header is NOT
+ *         checked — see the note at NO_TYP_CHECK below.
  *
  * `createRemoteJWKSet` lives at module level (one cache per JWKS URL, never
  * rebuilt per request): cooldownDuration 30 s and cacheMaxAge 10 min — the
@@ -36,7 +37,15 @@ export const DEFAULT_ALLOWED_AZP = 'dgx-messages';
 const JWKS_COOLDOWN_MS = 30_000; // no new HTTP request for 30 s after a good fetch
 const JWKS_CACHE_MAX_AGE_MS = 600_000; // refetch once the cache is 10 min old
 const DEFAULT_CLOCK_TOLERANCE_SECONDS = 30;
-const EXPECTED_TYP = 'Bearer';
+
+// NO_TYP_CHECK: the JOSE `typ` header is deliberately NOT verified. The live
+// Keycloak of the `edani` realm (26.6.2) issues access tokens with
+// `typ: "JWT"` by default — measured 2026-09-25 with a client_credentials
+// token against /realms/edani/.../token (header {"alg":"RS256","typ":"JWT",
+// "kid":...}). Pinning typ to "Bearer" would 401 every real token. Token
+// identity is pinned by what actually matters: RS256 signatures verified
+// against the realm's own JWKS, plus iss, aud and azp claims and exp.
+// (architect verdict on PR #79, SC-1227 round 2.)
 
 export interface JwtVerifierConfig {
   issuer: string;
@@ -139,10 +148,10 @@ export async function verifyKeycloakJwt(
 
   let payload: Awaited<ReturnType<typeof jwtVerify>>['payload'];
   try {
+    // No `typ` option on purpose — see NO_TYP_CHECK above.
     ({ payload } = await jwtVerify(token, remoteJwkSet(cfg.jwksUrl), {
       issuer: cfg.issuer,
       audience: cfg.audience,
-      typ: EXPECTED_TYP,
       clockTolerance: cfg.clockToleranceSeconds,
       algorithms: ['RS256'],
     }));

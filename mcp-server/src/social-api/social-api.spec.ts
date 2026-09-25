@@ -222,7 +222,9 @@ async function token(overrides: TokenOverrides = {}): Promise<string> {
     .setProtectedHeader({
       alg: 'RS256',
       kid: overrides.key === 'other' ? 'other-key' : KID,
-      ...(overrides.typ === null ? {} : { typ: overrides.typ ?? 'Bearer' }),
+      // typ 'JWT': what the live edani realm (Keycloak 26.6.2) puts in its
+      // access tokens — measured 2026-09-25. The verifier does not check typ.
+      ...(overrides.typ === null ? {} : { typ: overrides.typ ?? 'JWT' }),
     })
     .setIssuer(overrides.iss ?? ISS)
     .setAudience(overrides.aud ?? 'social-api')
@@ -305,9 +307,17 @@ describe('social-api JWT verifier (local JWKS)', () => {
     expect(missing.status).toBe(401);
   });
 
-  it('typ other than Bearer → 401', async () => {
-    const r = await call('GET', '/me/whatsapp', { bearer: await token({ typ: 'JWT' }) });
-    expect(r.status).toBe(401);
+  // The JOSE `typ` header is NOT part of the identity contract: the live
+  // edani realm signs its access tokens with typ 'JWT' (Keycloak 26.6.2,
+  // measured 2026-09-25), so imposing 'Bearer' would reject every real token.
+  // Identity is fixed by RS256 against the realm JWKS + iss + aud + azp + exp.
+  it('typ header is not imposed: the realm value JWT is accepted, as is Bearer', async () => {
+    const realm = await call('GET', '/me/whatsapp', { bearer: await token({ typ: 'JWT' }) });
+    expect(realm.status).toBe(200);
+    const legacy = await call('GET', '/me/whatsapp', { bearer: await token({ typ: 'Bearer' }) });
+    expect(legacy.status).toBe(200);
+    const absent = await call('GET', '/me/whatsapp', { bearer: await token({ typ: null }) });
+    expect(absent.status).toBe(200);
   });
 
   it('token signed by a key absent from the JWKS → 401', async () => {

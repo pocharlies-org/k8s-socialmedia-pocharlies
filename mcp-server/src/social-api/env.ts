@@ -4,7 +4,9 @@
  * with the P3 manifests (k8s/base/social-pairing.yaml, branch sc1197-p3-k8s):
  * SOCIAL_PAIRING_API, SOCIAL_API_ALLOWED_ORIGINS, SOCIAL_API_JWT_ISSUER,
  * SOCIAL_API_JWKS_URL, SOCIAL_API_JWT_AUDIENCE, SOCIAL_API_ALLOWED_AZP,
- * WHATSAPP_PAIRING_URL, TELEGRAM_PAIRING_URL (reserved for P4b, unused here),
+ * SOCIAL_API_JWT_CLOCK_TOLERANCE_SECONDS (read in api/auth/keycloak-jwt.ts,
+ * default 30 s), WHATSAPP_PAIRING_URL, TELEGRAM_PAIRING_URL (reserved for
+ * P4b, unused here),
  * CONNECTOR_SHARED_SECRET, CREDENTIAL_STORE_ENABLED, CREDENTIAL_STORE_MASTER_KEY.
  */
 import { credentialMasterKeyFromEnv, credentialStoreEnabled } from '@mcp-socialmedia/shared';

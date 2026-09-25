@@ -131,8 +131,11 @@ contracts:
       /pairing/* and /me/* must carry Authorization: Bearer <JWT> verified
       against SOCIAL_API_JWKS_URL (default in-cluster Keycloak realm edani),
       iss = SOCIAL_API_JWT_ISSUER
-      (https://auth-next.e-dani.com/realms/edani), RS256 only, typ=Bearer,
-      clockTolerance 30 s, `aud` CONTAINING this value ("social-api" — needs
+      (https://auth-next.e-dani.com/realms/edani), RS256 only, clockTolerance
+      30 s — the JOSE `typ` header is NOT checked (the live edani realm emits
+      typ=JWT: Keycloak 26.6.2 default, measured 2026-09-25; pinning
+      typ=Bearer would 401 every real token — architect verdict on PR #79),
+      `aud` CONTAINING this value ("social-api" — needs
       the Audience mapper on the dgx-messages client, SC-1198 historia 0),
       and `azp` in SOCIAL_API_ALLOWED_AZP (default dgx-messages). The `sub`
       claim is the sessionKey of every pairing operation; no header-carried
