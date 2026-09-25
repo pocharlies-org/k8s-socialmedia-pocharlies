@@ -48,10 +48,19 @@ function parsePlatform(value: string | undefined): Platform | undefined {
   throw new Error(`invalid PLATFORM: ${value}`);
 }
 
+/** SC-1239 C2: no hardcoded fallback — name the missing variable, don't dial a default. */
+function requireDatabaseUrl(env: NodeJS.ProcessEnv): string {
+  if (!env.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL is unset: refusing to run brain-replay without an explicit database connection'
+    );
+  }
+  return env.DATABASE_URL;
+}
+
 export function replayOptionsFromEnv(env: NodeJS.ProcessEnv): ReplayOptions {
   return {
-    databaseUrl:
-      env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp',
+    databaseUrl: requireDatabaseUrl(env),
     brainUrl: env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local',
     apiKey: env.BRAIN_API_KEY || '',
     batch: parseInt(env.BATCH || env.BRAIN_INGEST_BATCH || '500', 10),

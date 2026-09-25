@@ -81,11 +81,16 @@ export async function runMigrations(
 }
 
 async function migrate(): Promise<void> {
-  const client = new Client({
-    connectionString:
-      process.env.DATABASE_URL ||
-      'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp',
-  });
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    // SC-1239 C2: no hardcoded fallback — an unconfigured migration run must
+    // name the missing variable, not migrate some default database.
+    console.error(
+      'DATABASE_URL is unset: refusing to run migrations without an explicit database connection'
+    );
+    process.exit(1);
+  }
+  const client = new Client({ connectionString });
 
   try {
     await client.connect();

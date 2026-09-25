@@ -8,8 +8,13 @@ import { MessageIngestionService } from './application/message-ingestion.service
 import { InstagramIngestionService } from './application/instagram-ingestion.service';
 import { EmbeddingJob } from './infrastructure/jobs/embedding-job';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to start the ingestion service without an explicit database connection'
+  );
+}
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-change-in-production';

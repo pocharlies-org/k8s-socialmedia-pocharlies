@@ -5,9 +5,16 @@
 import pg from 'pg';
 import { WhatsAppCustomerAllowlistStatus, WhatsAppCustomerTokenStatus } from './contact-sync';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  'postgresql://whatsappmcp:whatsappmcp_dgx_2026@postgres:5432/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback. This connector writes every incoming
+// message straight to Postgres, so a missing DATABASE_URL is a fatal config
+// error — fail at startup naming the variable, instead of silently dialling a
+// connection string baked into the image.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to start the whatsapp-web connector without an explicit database connection'
+  );
+}
 
 // Which WhatsApp account this connector instance serves. 'personal' keeps ids
 // bare (compat with the pre-existing single-account corpus); 'professional'
