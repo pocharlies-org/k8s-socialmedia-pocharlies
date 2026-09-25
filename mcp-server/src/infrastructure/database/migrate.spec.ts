@@ -71,6 +71,7 @@ const ALL_FILES = [
   '006_unread_digest_sessions.sql',
   '007_user_channel_credentials.sql',
   '008_multiaccount_first_class.sql',
+  '009_whatsapp_message_payloads.sql',
 ];
 
 describe('migrate.ts _migrations ledger', () => {

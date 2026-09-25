@@ -31,6 +31,10 @@ El MCP enruta cada call a una de tres cuentas de WhatsApp (y dos de Telegram):
 
 DB scoping (migración 002): los ids de la cuenta `personal` no llevan prefijo (compat con ~449k filas existentes); los de `professional` van prefijados `professional:` y los de `leila` `leila:`. La columna `account` está indexada para filtros rápidos.
 
+### Payloads duraderos de WhatsApp (fase 3 / PR-1, migración 009)
+
+El conector guarda el WAMessage crudo (key + contenido, BufferJSON, sin miniaturas ni material de claves) en `whatsapp_message_payloads` con los mismos ids namespaced que `messages` (`connectors/whatsapp-web/src/durable-message-store.ts`). Lo usan: citar al responder, `/api/v1/messages/forward` (reenvío real `{ forward }`, 404 `message_unavailable` si no hay original) y el `getMessage` de reintentos de Baileys — memoria primero, luego la copia duradera. Se guarda tráfico vivo y envíos propios; history-sync solo si es más reciente que `DURABLE_PAYLOAD_HISTORY_DAYS` (7 por defecto, 0 = nunca); tope `DURABLE_PAYLOAD_MAX_BYTES` (256 KiB). Sin la tabla (009 sin aplicar) falla en blando: un log y comportamiento en memoria, re-sondea cada 5 min. La pool de emparejamiento (`ingest: false`) nunca la toca. Sin retención todavía.
+
 ### Vínculos de identidad por usuario (SC-1144 fase 2, bandera OFF)
 
 Un usuario verificado solo puede tocar las cuentas ligadas a su `sub` de Keycloak. La tabla vive en GitOps: `k8s/base/social-identity-bindings.yaml` (misma forma y misma postura fail-closed que `backends/workspace/identity-bindings.yaml` de k8s-agentgateway-pocharlies), montada en el pod `mcp-sse` como ConfigMap de nombre estático en `/identity/` — el código (`mcp-server/src/domain/identity-bindings.ts`) **relee el fichero cuando cambia (stat mtime+size), así editar un vínculo no reinicia el pod**.

@@ -10,7 +10,7 @@
     "start": "node --import tsx src/main.ts",
     "start:pairing": "node --import tsx src/pairing/main.ts",
     "lint": "pnpm --filter @mcp-socialmedia/shared run build && eslint src --ext .ts",
-    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/db-writer.test.ts src/read-paths.test.ts src/lid-pn.test.ts src/signal-log-scrub.test.ts src/audio-attachments.test.ts src/events/publisher.test.ts src/credential-session.test.ts src/pairing/session-pool.test.ts src/pairing/app.test.ts src/pairing/quiet-qr.test.ts"
+    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/db-writer.test.ts src/read-paths.test.ts src/lid-pn.test.ts src/signal-log-scrub.test.ts src/audio-attachments.test.ts src/events/publisher.test.ts src/credential-session.test.ts src/pairing/session-pool.test.ts src/pairing/app.test.ts src/pairing/quiet-qr.test.ts src/durable-message-store.test.ts src/durable-paths.test.ts"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
