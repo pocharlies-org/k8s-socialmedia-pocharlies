@@ -12,7 +12,11 @@
 import { Request } from 'express';
 import { CredentialStore } from '@mcp-socialmedia/shared';
 import { JwtVerifierConfig, VerifiedIdentity } from './auth/keycloak-jwt';
+import { TelegramPairingClient } from './telegram-pairing-client';
 import { WhatsappPairingClient } from './whatsapp-pairing-client';
+
+/** Which pool a route depends on (SC-1229): the storeGate checks its own. */
+export type PairingPoolName = 'whatsapp' | 'telegram';
 
 export interface SocialApiContext {
   /** SOCIAL_PAIRING_API === 'on'. Off: 404 for everything but /health (D7). */
@@ -29,6 +33,13 @@ export interface SocialApiContext {
   jwt: JwtVerifierConfig;
   /** Null when the HMAC secret or WHATSAPP_PAIRING_URL is missing → 503. */
   whatsappPairing: WhatsappPairingClient | null;
+  /**
+   * SC-1229 (P4b): the telegram-pairing pool client. Null when the HMAC
+   * secret or TELEGRAM_PAIRING_URL is missing → the /pairing/telegram* and
+   * /me/telegram routes 503; the whatsapp routes are unaffected (the
+   * storeGate checks the pool of the ROUTE, never the other one).
+   */
+  telegramPairing: TelegramPairingClient | null;
   /**
    * SC-1228 (P2): READ-ONLY credential store, used by /social/status for the
    * caller's own Instagram row (design D3: `store.get(sub)`). Null when the
