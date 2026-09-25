@@ -112,6 +112,27 @@ register another set of Socialmedia tool wrappers.
 
 Other canonical operations arrive from this MCP contract through Tool Search.
 
+## Pairing API (per-user, outside the MCP contract)
+
+The tools above act on the configured house accounts (`personal`,
+`professional`, `leila` — see `CLAUDE.md`); pairing a user's own WhatsApp or
+Telegram device is not an MCP tool. It is a separate REST surface,
+`social-api`: every request is keyed by the `sub` claim of a Keycloak JWT, the
+session is served by a per-sub pool (`whatsapp-pairing`, `telegram-pairing`)
+reached over the internal connector HMAC, and credentials persist only in the
+per-user credential store. Routes, JWT contract, flags, QR limits and the
+`/social/status` states are documented in
+[docs/social-api.md](docs/social-api.md); the surface is registered in
+`CONTRACTS.yaml` as `http.social-api.pairing-whatsapp.v1`,
+`http.social-api.me-whatsapp.v1`, `http.social-api.pairing-telegram.v1`,
+`http.social-api.me-telegram.v1`, `http.social-api.social-status.v1` and
+`http.social-api.jwt-audience.v1`.
+
+`GET /social/status` is the read-only bridge between the two surfaces: it
+answers the caller's own channel states plus the house accounts bound to its
+identity — the same bindings (`SOCIAL_IDENTITY_BINDING`) the MCP routing
+enforces per `accountId`.
+
 ## Regeneration and validation
 
 ```bash
