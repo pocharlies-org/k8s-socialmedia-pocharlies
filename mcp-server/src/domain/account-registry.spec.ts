@@ -153,6 +153,21 @@ describe('account registry', () => {
     expect(() => parseAccounts(entries)).toThrow(error);
   });
 
+  it('rejects a namespace split across brain instances', () => {
+    expect(() =>
+      parseAccounts([
+        wa('personal'),
+        wa('professional', { brainInstance: 'skirmshop' }),
+        {
+          channel: 'instagram',
+          accountId: 'shop',
+          namespace: 'professional',
+          brainInstance: 'personal',
+        },
+      ])
+    ).toThrow(/mixes brainInstance/);
+  });
+
   it('defaults profile to the namespace', () => {
     const [personal, leila] = parseAccounts([wa('personal'), wa('leila', { profile: 'family' })]);
     expect(personal.profile).toBe('personal');

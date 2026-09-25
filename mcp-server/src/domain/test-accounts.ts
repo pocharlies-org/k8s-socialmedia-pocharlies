@@ -24,6 +24,10 @@ export function useTestAccounts(maps: {
   const namespaces = new Set([...Object.keys(state.whatsapp), ...Object.keys(state.telegram)]);
   namespaces.add('personal');
   const entries: unknown[] = [];
+  // Same brain routing as prod: the professional namespace feeds 'skirmshop'.
+  const brain = (ns: string) => ({
+    brainInstance: ns === 'professional' ? 'skirmshop' : 'personal',
+  });
   const wa = { personal: 'http://wa-personal', ...state.whatsapp };
   for (const [accountId, connectorUrl] of Object.entries(wa)) {
     if (accountId !== 'personal' && !(accountId in state.whatsapp)) continue;
@@ -31,6 +35,7 @@ export function useTestAccounts(maps: {
       channel: 'whatsapp',
       accountId,
       connectorUrl,
+      ...brain(accountId),
     });
   }
   for (const [accountId, connectorUrl] of Object.entries(state.telegram)) {
@@ -38,11 +43,17 @@ export function useTestAccounts(maps: {
       channel: 'telegram',
       accountId,
       connectorUrl,
+      ...brain(accountId),
       ...(state.bridge[accountId] ? { bridgeUrl: state.bridge[accountId] } : {}),
     });
   }
   if (namespaces.has('professional')) {
-    entries.push({ channel: 'instagram', accountId: 'skirmshop', namespace: 'professional' });
+    entries.push({
+      channel: 'instagram',
+      accountId: 'skirmshop',
+      namespace: 'professional',
+      ...brain('professional'),
+    });
   }
   entries.push({ channel: 'instagram', accountId: 'barbelpapis', namespace: 'personal' });
   if (!file) {

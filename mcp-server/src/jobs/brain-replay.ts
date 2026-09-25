@@ -7,7 +7,7 @@
 import { Pool } from 'pg';
 import pino from 'pino';
 import {
-  ACCOUNTS,
+  ingestNamespaces,
   Account,
   Platform,
   Cursor,
@@ -37,8 +37,8 @@ export interface ReplayOptions {
 }
 
 function parseAccount(value: string | undefined): Account[] {
-  if (!value) return [...ACCOUNTS];
-  if ((ACCOUNTS as readonly string[]).includes(value ?? '')) return [value as Account];
+  if (!value) return ingestNamespaces();
+  if (ingestNamespaces().includes(value)) return [value];
   throw new Error(`invalid ACCOUNT: ${value}`);
 }
 

@@ -12,7 +12,8 @@
       "lanIngress": "whatsapp-lan",
       "lanHost": "whatsapp.lan.e-dani.com",
       "qrPublicUrl": "https://whatsapp.e-dani.com/qr/page"
-    }
+    },
+    "brainInstance": "personal"
   },
   {
     "channel": "whatsapp",
@@ -26,7 +27,8 @@
       "qrPublicUrl": "https://whatsapp-pro.e-dani.com/qr/page",
       "emitAudioAttachments": true,
       "allowWebRenew": true
-    }
+    },
+    "brainInstance": "skirmshop"
   },
   {
     "channel": "whatsapp",
@@ -37,7 +39,8 @@
     "deploy": {
       "emitAudioAttachments": true,
       "allowWebRenew": true
-    }
+    },
+    "brainInstance": "personal"
   },
   {
     "channel": "telegram",
@@ -52,7 +55,8 @@
       "connectorAccountEnv": false,
       "sessionSecretKey": null,
       "syncMemoryLimit": "4Gi"
-    }
+    },
+    "brainInstance": "personal"
   },
   {
     "channel": "telegram",
@@ -61,20 +65,23 @@
     "profile": "professional",
     "connectorUrl": "http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002",
     "bridgeUrl": "http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080",
-    "deploy": {}
+    "deploy": {},
+    "brainInstance": "skirmshop"
   },
   {
     "channel": "instagram",
     "accountId": "skirmshop",
     "label": "Instagram skirmshopes",
     "profile": "professional",
-    "namespace": "professional"
+    "namespace": "professional",
+    "brainInstance": "skirmshop"
   },
   {
     "channel": "instagram",
     "accountId": "barbelpapis",
     "label": "Instagram barbelpapis",
     "profile": "personal",
-    "namespace": "personal"
+    "namespace": "personal",
+    "brainInstance": "personal"
   }
 ]
