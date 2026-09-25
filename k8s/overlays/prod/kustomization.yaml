@@ -7,8 +7,11 @@ patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
   - path: patch-nodepool.yaml
-  # SC-705 phase 1.5: CREDENTIAL_STORE_ENABLED=false in this PR (the patch
-  # keeps it OFF until PR2 re-pins the image; ON is prod-only, stg stays OFF).
+  # SC-705 / SC-1214: per-user credential store. WhatsApp keeps the flag OFF
+  # (house connectors set no CREDENTIAL_SESSION_KEY); the ON flip is
+  # Instagram-only and lives in the second document of
+  # patch-credential-store.yaml (PR 83, stacked on the PR 81 image re-pin).
+  # ON is prod-only, stg stays OFF.
   - path: patch-credential-store.yaml
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
