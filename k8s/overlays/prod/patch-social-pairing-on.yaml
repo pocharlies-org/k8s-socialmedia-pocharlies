@@ -1,0 +1,84 @@
+# SC-1197 — PR de encendido de la API de emparejamientos sociales por sub.
+#
+# Unica PR de volteo (asi lo decidio el plan: 10-plan.md, "El encendido es una
+# PR aparte"): SOCIAL_PAIRING_API=on + replicas: 1 + CREDENTIAL_STORE_ENABLED
+# "true" en los tres pods nuevos (social-api, whatsapp-pairing,
+# telegram-pairing), y re-pin de las imagenes de los dos pools a v1.3.57
+# (patch-image.yaml), que es la que trae los entrypoints de P1a/P1b/P4b.
+# Rollback = revert de este fichero y de su linea en el `patches:` del
+# kustomization (deja los tres deployments otra vez a 0, off e inertes; el
+# re-pin de mcp-server en el `images:` puede quedarse: es el patron de pins del
+# repo y no enciende nada por si solo).
+#
+# Cero bytes en los conectores de la casa: whatsapp-connector conserva su
+# CREDENTIAL_STORE_ENABLED "false" explicito (patch-credential-store.yaml),
+# telegram-connector y telegram-connector-professional no ganan el flag (lo
+# siguen teniendo ausente = OFF) y su imagen no cambia de digest, y el volteo
+# de instagram-connector (SC-1214 C8) no se toca. Lo que cambia de imagen son
+# SOLO los tres pods nuevos: social-api (mcp-server v1.3.55 -> v1.3.57, el
+# mismo avance que llevan los pins de mcp-server por el repo) y los dos pools,
+# que suben de pin por primera vez.
+#
+# CREDENTIAL_STORE_ENABLED=true es OBLIGATORIO para que el encendido funcione,
+# no opcional: con el flag off, `pairingStoreAvailable()` (mcp-server/src/
+# social-api/env.ts) hace que social-api conteste 503 pairing_unavailable en
+# todas las rutas (diseno D7), y los pools no escriben ni leen la tabla
+# `user_channel_credentials` (ya creada en prod por el Job PreSync
+# whatsapp-mcp-migrate — medida 25-09: 007 y 008 en el ledger `_migrations`).
+# La clave maestra CREDENTIAL_STORE_MASTER_KEY existe en whatsapp-mcp-secrets
+# (ExternalSecret Ready=True; instagram ya corre con el store ON con la misma
+# clave del item 1Password `whatsapp-mcp`).
+#
+# SOCIAL_API_ALLOWED_ORIGINS se queda VACIO (lo que entrega la base): el
+# diseno lo fija asi (10-plan.md: "Origin fuera de SOCIAL_API_ALLOWED_ORIGINS
+# (vacia) = 403; sin CORS"). social-api no tiene IngressRoute — solo se le
+# llama in-cluster desde ns `messages` / app `dgx-messages` (netpol
+# whatsapp-mcp-allow-messages-social-api), y una llamada server-to-server no
+# lleva cabecera Origin, asi que la allowlist vacia no bloquea al unico
+# llamador legitimo y si rechaza cualquier request impulsada desde navegador.
+# Ver CONTRACTS.yaml (http.social-api.pairing-whatsapp.v1) y el spec de
+# guards: "social-api never answers CORS headers".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: social-api
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: social-api
+          env:
+            - { name: SOCIAL_PAIRING_API, value: "on" }
+            - { name: CREDENTIAL_STORE_ENABLED, value: "true" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-pairing
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: whatsapp-pairing
+          env:
+            - { name: SOCIAL_PAIRING_API, value: "on" }
+            - { name: CREDENTIAL_STORE_ENABLED, value: "true" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-pairing
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: telegram-pairing
+          env:
+            - { name: SOCIAL_PAIRING_API, value: "on" }
+            - { name: CREDENTIAL_STORE_ENABLED, value: "true" }
