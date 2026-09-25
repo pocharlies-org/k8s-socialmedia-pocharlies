@@ -18,12 +18,14 @@ const B = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
 const INVENTED = 'ffffffff-9999-4999-8999-ffffffffffff';
 const settle = () => new Promise(resolve => setTimeout(resolve, 25));
 
-function makePool(overrides: {
-  store?: MemoryStore;
-  factory?: FakeTelegramFactory;
-  clock?: Clock;
-  limits?: Record<string, number>;
-} = {}) {
+function makePool(
+  overrides: {
+    store?: MemoryStore;
+    factory?: FakeTelegramFactory;
+    clock?: Clock;
+    limits?: Record<string, number>;
+  } = {}
+) {
   const store = overrides.store ?? new MemoryStore();
   const factory = overrides.factory ?? new FakeTelegramFactory();
   const clock = overrides.clock ?? new Clock();
@@ -268,4 +270,29 @@ test('evictIdle cierra sockets inactivos; la fila sigue respondiendo paired sin 
   assert.equal(cold.state, 'paired');
   assert.equal(cold.me, null);
   assert.equal(factory2.clients.length, 0, 'status nunca abre socket');
+});
+
+test('sondear /state no aparca la sesion: una espera en password pasa idleMs y evictIdle la expulsa', async () => {
+  // SC-1229 round 2 (mismo criterio que C1 de SC-1243): el estado `password`
+  // espera al usuario sin limite de tiempo. Si status() renovara lastTouched,
+  // un cliente que sondea en bucle aparcaria la sesion para siempre y una de
+  // las 10 plazas del pool quedaria ocupada sin nadie que empareje.
+  const { pool, store, factory, clock } = makePool({ limits: { idleMs: 60_000 } });
+  await pool.start(A);
+  factory.last(A).emitQr();
+  factory.last(A).scanned();
+  const asked = factory.last(A).requestPassword();
+  asked.catch(() => {}); // al expulsarla, drop() rechaza al waiter: nadie la espera aqui
+  assert.equal((await pool.status(A)).state, 'password');
+
+  // mas de idleMs de sondeos seguidos NO renuevan la sesion
+  for (let i = 0; i < 5; i++) {
+    clock.advance(15_000);
+    assert.equal((await pool.status(A)).state, 'password');
+  }
+
+  assert.equal(await pool.evictIdle(), 1, 'la plaza se libera');
+  assert.equal(factory.last(A).disconnects, 1);
+  assert.equal(store.rowsFor(A, 'telegram'), 0, 'un 2FA no completado no deja fila');
+  assert.equal((await pool.status(A)).state, 'unpaired');
 });

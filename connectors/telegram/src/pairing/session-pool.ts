@@ -270,12 +270,18 @@ export class TelegramSessionPool {
    * start is allowed. A row without a live socket is `paired` (the row is
    * only ever written after a completed authorization); `me` may be null
    * until something reads it (see me()).
+   *
+   * READING does not extend the session's idle life (SC-1229 round 2, same
+   * criterion as C1 of SC-1243): the `password` state waits for the user
+   * without a bound, so a client that polls /state in a loop could otherwise
+   * park a session forever and hold one of the 10 slots. Only start,
+   * submitPassword and me renew lastTouched; evictIdle closes a flow nobody
+   * has acted on for idleMs.
    */
   async status(sessionKey: string): Promise<TelegramPairingStatus> {
     assertSessionKey(sessionKey);
     const live = this.sessions.get(sessionKey);
     if (live) {
-      live.lastTouched = this.now();
       return this.statusOf(live);
     }
     const exhaustedAt = this.qrExhausted.get(sessionKey);
