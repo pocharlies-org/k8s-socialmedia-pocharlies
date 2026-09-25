@@ -10,13 +10,23 @@
  * list → 401; valid token → 200 with qr + caducidad; foreign Origin → 403;
  * foreign sub in body or query → 403; unreachable JWKS → 503; /me/whatsapp
  * of A never returns B's jid; flag off → 404 except /health.
+ *
+ * SC-1228 (P2) extends this harness for GET /social/status: an in-memory
+ * fake credential store (reads counted, writes impossible), the fake pool
+ * answering expired/qr states for reserved sessionKeys, and a temp identity-
+ * bindings file — A/B isolation, the four channel states, store-off → 200
+ * with everything `unavailable`, and the same 401/403/404 gates.
  */
 import { createHmac } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 
 type SignKey = Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
+import { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import { SocialApiContext } from '../api/context';
 import { jwtVerifierConfigFromEnv } from '../api/auth/keycloak-jwt';
 import { WhatsappPairingClient } from '../api/whatsapp-pairing-client';
@@ -57,6 +67,62 @@ let appBase = '';
 const poolCalls: Array<{ route: string; sessionKey: string; signatureOk: boolean }> = [];
 /** What the fake pool would persist as credential rows: only paired subs. */
 const storeRows = new Set<string>(Object.keys(PAIRED));
+
+/**
+ * SC-1228: the in-memory credential store social-api reads for /social/status
+ * (Instagram only — the whatsapp state comes from the pool). Reads are
+ * counted for the "sin JWT → cero lecturas" assertion; writes THROW: this
+ * process must never touch a row (the pool is the only writer).
+ */
+class FakeCredentialStore implements CredentialStore {
+  readonly rows = new Map<string, Record<string, unknown>>();
+  readonly reads: Array<{ sessionKey: string; channel: CredentialChannel }> = [];
+  key(sessionKey: string, channel: CredentialChannel): string {
+    return `${sessionKey}:${channel}`;
+  }
+  async get(sessionKey: string, channel: CredentialChannel): Promise<StoredCredential | null> {
+    this.reads.push({ sessionKey, channel });
+    const payload = this.rows.get(this.key(sessionKey, channel));
+    if (!payload) return null;
+    return { sessionKey, channel, payload, updatedAt: new Date() };
+  }
+  async put(): Promise<void> {
+    throw new Error('social-api must never write a credential row');
+  }
+  async delete(): Promise<void> {
+    throw new Error('social-api must never delete a credential row');
+  }
+}
+const fakeStore = new FakeCredentialStore();
+
+/** Instagram rows keyed by sub (payload shaped by the instagram adapter). */
+const IG = {
+  [A]: { accessToken: 'ig-token-a', businessAccountId: '17841', username: 'ana_ig', expiresAt: Date.now() + 86_400_000 },
+  [B]: { accessToken: 'ig-token-b', businessAccountId: '17842', username: 'bea_ig', expiresAt: Date.now() + 86_400_000 },
+};
+fakeStore.rows.set(`${A}:instagram`, IG[A]);
+fakeStore.rows.set(`${B}:instagram`, IG[B]);
+// expired token, legacy row without expiresAt, and a foreign-shaped row:
+fakeStore.rows.set('igexpired:instagram', { accessToken: 'x', businessAccountId: '1', username: 'zoe_ig', expiresAt: Date.now() - 1000 });
+fakeStore.rows.set('iglegacy:instagram', { accessToken: 'x', businessAccountId: '1' });
+fakeStore.rows.set('igbroken:instagram', { notAToken: true });
+
+/** Identity bindings table for houseAccounts (format of the mounted ConfigMap). */
+const bindingsDir = mkdtempSync(join(tmpdir(), 'social-status-bindings-'));
+const bindingsFile = join(bindingsDir, 'social-identity-bindings.yaml');
+writeFileSync(
+  bindingsFile,
+  [
+    'bindings:',
+    `  - sub: ${A}`,
+    '    label: Ana',
+    '    accounts: [professional, skirmshop]',
+    `  - sub: ${B}`,
+    '    label: Bea',
+    '    accounts: [personal]',
+    '',
+  ].join('\n')
+);
 
 function qrPayload(): Record<string, unknown> {
   const now = Date.now();
@@ -135,6 +201,12 @@ async function startFakePool(): Promise<Server> {
         return send(200, { sessionKey, me });
       }
       if (route === 'state') {
+        // SC-1228 reserved sessionKeys: the states the fake pool cannot
+        // reach through PAIRED alone (provider-invalidated, pairing in flight).
+        if (sessionKey === 'expiredwa')
+          return send(200, { sessionKey, state: 'expired', qr: null, me: null });
+        if (sessionKey === 'qrsub')
+          return send(200, { sessionKey, state: 'qr', qr: qrPayload(), me: null });
         const me = PAIRED[sessionKey];
         if (me) return send(200, { sessionKey, state: 'paired', qr: null, me });
         return send(200, { sessionKey, state: 'unpaired', qr: null, me: null });
@@ -174,6 +246,7 @@ afterAll(async () => {
 
 afterEach(() => {
   poolCalls.length = 0;
+  fakeStore.reads.length = 0;
 });
 
 async function serve(overrides: Partial<SocialApiContext> = {}): Promise<void> {
@@ -193,6 +266,8 @@ async function serve(overrides: Partial<SocialApiContext> = {}): Promise<void> {
       clockToleranceSeconds: 30,
     },
     whatsappPairing: new WhatsappPairingClient(`http://127.0.0.1:${poolPort}`, SECRET, 5000),
+    credentialStore: fakeStore,
+    identityBindingsPath: bindingsFile,
     logError: () => {},
     ...overrides,
   };
@@ -254,6 +329,11 @@ async function call(
     /* no body */
   }
   return { status: res.status, json, headers: res.headers };
+}
+
+/** Nested access for the /social/status assertions (json.channels is unknown). */
+function chan(r: { json: Record<string, unknown> }): Record<string, { state: string }> {
+  return r.json.channels as Record<string, { state: string }>;
 }
 
 describe('social-api JWT verifier (local JWKS)', () => {
@@ -527,6 +607,161 @@ describe('social-api gates (flag off, store off)', () => {
     const r = await call('GET', '/nope', { bearer: await token() });
     expect(r.status).toBe(404);
     expect(r.json).toEqual({ error: 'not_found' });
+  });
+});
+
+describe('social-api GET /social/status (SC-1228)', () => {
+  beforeAll(async () => {
+    await serve();
+  });
+
+  it('A and B: each token sees only its own channels, zero identifiers in the body', async () => {
+    const ra = await call('GET', '/social/status', { bearer: await token({ sub: A }) });
+    expect(ra.status).toBe(200);
+    expect(ra.json.channels).toEqual({
+      whatsapp: { state: 'paired' },
+      telegram: { state: 'unavailable' },
+      instagram: { state: 'paired' },
+    });
+    const rb = await call('GET', '/social/status', { bearer: await token({ sub: B }) });
+    expect(rb.status).toBe(200);
+
+    // grep-level isolation: no identifier of B anywhere in A's body, and
+    // vice versa — not even the caller's own sub or a jid key (structural:
+    // the response carries states and house account names, nothing else).
+    const bodyA = JSON.stringify(ra.json);
+    const bodyB = JSON.stringify(rb.json);
+    expect(bodyA).not.toContain(PAIRED[B].jid);
+    expect(bodyA).not.toContain(IG[B].username);
+    expect(bodyA).not.toContain(B);
+    expect(bodyB).not.toContain(PAIRED[A].jid);
+    expect(bodyB).not.toContain(IG[A].username);
+    expect(bodyB).not.toContain(A);
+    expect(bodyA).not.toContain('jid');
+    expect(bodyA).not.toContain(A);
+
+    // every read was keyed by the caller's own sub, nothing was listed
+    expect(poolCalls.map(c => [c.route, c.sessionKey])).toEqual([
+      ['state', A],
+      ['state', B],
+    ]);
+    expect(fakeStore.reads).toEqual([
+      { sessionKey: A, channel: 'instagram' },
+      { sessionKey: B, channel: 'instagram' },
+    ]);
+  });
+
+  it('whatsapp states: no row → unpaired, provider-invalidated → expired, pairing in flight → unpaired', async () => {
+    const none = await call('GET', '/social/status', { bearer: await token({ sub: C }) });
+    expect(chan(none).whatsapp).toEqual({ state: 'unpaired' });
+    expect(chan(none).instagram).toEqual({ state: 'unpaired' });
+    const expired = await call('GET', '/social/status', { bearer: await token({ sub: 'expiredwa' }) });
+    expect(chan(expired).whatsapp).toEqual({ state: 'expired' });
+    const inFlight = await call('GET', '/social/status', { bearer: await token({ sub: 'qrsub' }) });
+    expect(chan(inFlight).whatsapp).toEqual({ state: 'unpaired' });
+  });
+
+  it('instagram states: expiresAt past → expired, legacy row → paired, broken row → unavailable', async () => {
+    const past = await call('GET', '/social/status', { bearer: await token({ sub: 'igexpired' }) });
+    expect(chan(past).instagram).toEqual({ state: 'expired' });
+    const legacy = await call('GET', '/social/status', { bearer: await token({ sub: 'iglegacy' }) });
+    expect(chan(legacy).instagram).toEqual({ state: 'paired' });
+    const broken = await call('GET', '/social/status', { bearer: await token({ sub: 'igbroken' }) });
+    expect(chan(broken).instagram).toEqual({ state: 'unavailable' });
+  });
+
+  it('pool down → whatsapp unavailable only; store stays independent', async () => {
+    const down = await call('GET', '/social/status', { bearer: await token({ sub: 'pool503' }) });
+    expect(down.status).toBe(200);
+    expect(chan(down).whatsapp).toEqual({ state: 'unavailable' });
+    expect(chan(down).instagram).toEqual({ state: 'unpaired' });
+    const limited = await call('GET', '/social/status', { bearer: await token({ sub: 'pool429' }) });
+    expect(chan(limited).whatsapp).toEqual({ state: 'unavailable' });
+    // no pool URL configured at all
+    await serve({ whatsappPairing: null });
+    const unconfigured = await call('GET', '/social/status', { bearer: await token({ sub: A }) });
+    expect(unconfigured.status).toBe(200);
+    expect(chan(unconfigured).whatsapp).toEqual({ state: 'unavailable' });
+    expect(chan(unconfigured).instagram).toEqual({ state: 'paired' });
+    await serve();
+  });
+
+  it('store off → 200 with every channel unavailable, not 503, and zero reads (D7)', async () => {
+    await serve({ storeAvailable: false, credentialStore: null });
+    const r = await call('GET', '/social/status', { bearer: await token({ sub: A }) });
+    expect(r.status).toBe(200);
+    expect(r.json.channels).toEqual({
+      whatsapp: { state: 'unavailable' },
+      telegram: { state: 'unavailable' },
+      instagram: { state: 'unavailable' },
+    });
+    expect(poolCalls).toHaveLength(0);
+    expect(fakeStore.reads).toHaveLength(0);
+    // the pairing routes still 503 with the store off (P1b behavior kept)
+    const pairing = await call('GET', '/pairing/whatsapp', { bearer: await token({ sub: A }) });
+    expect(pairing.status).toBe(503);
+    await serve();
+  });
+
+  it('houseAccounts: exactly the registry accounts bound to the caller', async () => {
+    // Bindings are by accountId, channel-agnostic (same semantics as
+    // resolveBoundAccount): 'professional' covers whatsapp AND telegram.
+    const ra = await call('GET', '/social/status', { bearer: await token({ sub: A }) });
+    expect(ra.json.houseAccounts).toEqual([
+      { channel: 'whatsapp', accountId: 'professional', label: 'professional' },
+      { channel: 'telegram', accountId: 'professional', label: 'professional' },
+      { channel: 'instagram', accountId: 'skirmshop', label: 'skirmshop' },
+    ]);
+    const rb = await call('GET', '/social/status', { bearer: await token({ sub: B }) });
+    expect(rb.json.houseAccounts).toEqual([
+      { channel: 'whatsapp', accountId: 'personal', label: 'personal' },
+      { channel: 'telegram', accountId: 'personal', label: 'personal' },
+    ]);
+    const rc = await call('GET', '/social/status', { bearer: await token({ sub: C }) });
+    expect(rc.json.houseAccounts).toEqual([]);
+  });
+
+  it('unreadable bindings table → houseAccounts [] fail-closed, status still 200', async () => {
+    await serve({ identityBindingsPath: join(bindingsDir, 'missing.yaml') });
+    const r = await call('GET', '/social/status', { bearer: await token({ sub: A }) });
+    expect(r.status).toBe(200);
+    expect(r.json.houseAccounts).toEqual([]);
+    expect(chan(r).whatsapp).toEqual({ state: 'paired' });
+    await serve();
+  });
+
+  it('gates: no JWT → 401 with zero pool calls and zero store reads; foreign Origin → 403; foreign sub/sessionKey in query → 403; flag off → 404', async () => {
+    const noAuth = await call('GET', '/social/status');
+    expect(noAuth.status).toBe(401);
+    expect(noAuth.headers.get('www-authenticate')).toBe('Bearer');
+    expect(poolCalls).toHaveLength(0);
+    expect(fakeStore.reads).toHaveLength(0);
+
+    const origin = await call('GET', '/social/status', {
+      bearer: await token({ sub: A }),
+      origin: 'https://evil.example',
+    });
+    expect(origin.status).toBe(403);
+    expect(origin.json).toEqual({ error: 'forbidden_origin' });
+
+    const foreignSub = await call('GET', `/social/status?sub=${B}`, {
+      bearer: await token({ sub: A }),
+    });
+    expect(foreignSub.status).toBe(403);
+    expect(foreignSub.json).toEqual({ error: 'forbidden_identity' });
+    const foreignKey = await call('GET', `/social/status?sessionKey=${B}`, {
+      bearer: await token({ sub: A }),
+    });
+    expect(foreignKey.status).toBe(403);
+
+    expect(poolCalls).toHaveLength(0);
+    expect(fakeStore.reads).toHaveLength(0);
+
+    await serve({ apiEnabled: false, whatsappPairing: null, credentialStore: null });
+    const off = await call('GET', '/social/status', { bearer: await token({ sub: A }) });
+    expect(off.status).toBe(404);
+    expect(off.json).toEqual({ error: 'not_found' });
+    await serve();
   });
 });
 
