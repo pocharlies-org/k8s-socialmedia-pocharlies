@@ -110,15 +110,20 @@ spec:
 # SC-1194 P1: the Instagram Login OAuth callback path on whatsapp.e-dani.com
 # routes to instagram-connector:3003.
 # SC-1254 (2026-09-25, measured by SRE): the traefik-edge pods run with
-# hostNetwork, so their connections arrive from the NODE IP (e.g. sauvage at
-# 100.109.183.9) and the namespaceSelector alone never matches — the public
-# callback got 502'd by the default-deny. The two ipBlocks below are the exact
-# mirror of the already-approved sibling whatsapp-mcp-allow-traefik-http (which
-# serves whatsapp-connector:3001 the same way): 100.64.0.0/10 is the tailnet
-# CGNAT range (where the edge nodes live) and 10.42.0.0/16 the pod CIDR.
+# hostNetwork, so their connections arrive from the NODE IP and the
+# namespaceSelector alone never matches — the public callback got 502'd by the
+# default-deny. This is NOT a mirror of the sibling whatsapp-mcp-allow-traefik-
+# http: the security verdict on SC-1254 (nota-security-netpol-instagram-callback.md
+# attached to the issue) rejected the sibling's broad ranges (tailnet /10 +
+# pod-CIDR /16) — port 3003 also serves the unauthenticated connector API and
+# x-user-sub is forgeable. Instead: a per-node /32 allowlist of exactly the
+# hosts running the traefik-edge DaemonSet (hostNetwork source): sauvage plus
+# the three ks5 control-plane nodes. CAVEAT: if traefik-edge moves to another
+# node, its tailnet IP must be added here — a stale /32 silently 502s the
+# public callback again.
 # traefik-lan is NOT hostNetwork (regular pod on ubuntu), so its namespaceSelector
-# keeps carrying the LAN path. Security verdict on this widening tracked in
-# SC-1254 C4.
+# keeps carrying the LAN path — mirrored by the now-merged k8s-infra route
+# lan-instagram-callback (PR 191, commit 5bcfb28).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -137,9 +142,13 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: traefik-edge
         - ipBlock:
-            cidr: 100.64.0.0/10
+            cidr: 100.109.183.9/32  # sauvage — public callback arrives with this source IP
         - ipBlock:
-            cidr: 10.42.0.0/16
+            cidr: 100.107.21.89/32  # ks5-cp-1
+        - ipBlock:
+            cidr: 100.71.117.127/32 # ks5-cp-2
+        - ipBlock:
+            cidr: 100.75.189.75/32  # ks5-cp-3
       ports:
         - protocol: TCP
           port: 3003
