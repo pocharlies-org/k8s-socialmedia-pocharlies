@@ -13,6 +13,7 @@ RUN npm install -g pnpm@11.17.0 tsx@4.23.1 \
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.json ./
+COPY patches ./patches
 COPY connectors/tsconfig.json ./connectors/tsconfig.json
 COPY connectors/whatsapp-synapse-bridge/package.json connectors/whatsapp-synapse-bridge/tsconfig.json ./connectors/whatsapp-synapse-bridge/
 COPY shared/package.json shared/tsconfig.json ./shared/

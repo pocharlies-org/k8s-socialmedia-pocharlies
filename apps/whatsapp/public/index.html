@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#161717">
+  <title>SocialMedia</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/assistant-ui.css">
+  <script src="/app.js" defer></script>
+</head>
+<body data-theme="dark">
+  <main class="app-shell">
+    <aside class="app-rail" aria-label="Navegacion principal">
+      <nav id="account-rail" class="rail-top rail-accounts" aria-label="Cuentas de WhatsApp"></nav>
+      <div class="rail-bottom">
+        <details class="rail-settings">
+          <summary class="rail-icon" aria-label="Ajustes" title="Ajustes"><svg viewBox="0 0 24 24" focusable="false"><path d="m9.7 3.5.5 1.9a7.2 7.2 0 0 0-1.8 1l-1.8-1-1.6 1.6 1 1.8a7.2 7.2 0 0 0-1 1.8l-1.9.5v2.2l1.9.5a7.2 7.2 0 0 0 1 1.8l-1 1.8 1.6 1.6 1.8-1a7.2 7.2 0 0 0 1.8 1l-.5 1.9h2.2l.5-1.9a7.2 7.2 0 0 0 1.8-1l1.8 1 1.6-1.6-1-1.8a7.2 7.2 0 0 0 1-1.8l1.9-.5v-2.2l-1.9-.5a7.2 7.2 0 0 0-1-1.8l1-1.8-1.6-1.6-1.8 1a7.2 7.2 0 0 0-1.8-1l.5-1.9z"/><circle cx="12" cy="12" r="2.5"/></svg></summary>
+          <div class="rail-popover">
+            <p class="rail-popover-title">Preferencias</p>
+            <label>Cuenta
+              <select id="account" aria-label="Cuenta de WhatsApp"></select>
+            </label>
+            <label>Tema
+              <select id="theme" aria-label="Tema">
+                <option value="dark">Oscuro</option>
+                <option value="system">Sistema</option>
+                <option value="light">Claro</option>
+              </select>
+            </label>
+          </div>
+        </details>
+      </div>
+    </aside>
+
+    <aside class="chat-sidebar" aria-label="Conversaciones">
+      <header class="chat-sidebar-header">
+        <h1>SocialMedia</h1>
+      </header>
+      <label class="search">
+        <span class="sr-only">Buscar chats</span>
+        <span class="search-icon" aria-hidden="true"></span>
+        <input id="search" type="search" placeholder="Buscar o empezar un chat" autocomplete="off">
+      </label>
+      <span id="chat-count" class="badge" aria-hidden="true">0</span>
+      <p id="chat-status" class="muted"></p>
+      <div id="chats" class="chat-list"></div>
+    </aside>
+
+    <section class="conversation" aria-label="Chat actual">
+      <header class="conversation-header">
+        <button id="back" class="mobile-back" type="button" aria-label="Volver a los chats"><svg viewBox="0 0 24 24" focusable="false"><path d="m15 5-7 7 7 7"/></svg></button>
+        <div class="conversation-contact">
+          <span class="conversation-avatar" aria-hidden="true">S</span>
+          <span class="conversation-contact-copy">
+            <span id="chat-title">SocialMedia</span>
+            <span id="chat-subtitle">Selecciona un chat para empezar</span>
+          </span>
+        </div>
+        <div class="conversation-actions">
+          <button id="ai-toggle" class="header-icon" type="button" aria-expanded="false" aria-controls="ai-panel" aria-label="Abrir Social Media Agent" title="Abrir Social Media Agent">
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="m12 3 1.7 6.3L20 11l-6.3 1.7L12 19l-1.7-6.3L4 11l6.3-1.7z"/><path d="m19 17 .6 2.4L22 20l-2.4.6L19 23l-.6-2.4L16 20l2.4-.6z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="messages" class="messages" role="log" aria-label="Mensajes">
+        <div class="welcome">
+          <span class="welcome-mark" aria-hidden="true"><svg viewBox="0 0 48 48" focusable="false"><path d="M11 13.5A6.5 6.5 0 0 1 17.5 7h13A6.5 6.5 0 0 1 37 13.5v12a6.5 6.5 0 0 1-6.5 6.5H23l-8 5.5V32h-.5A6.5 6.5 0 0 1 8 25.5v-12A6.5 6.5 0 0 1 14.5 7"/><path d="M17 18h14M17 24h9"/></svg></span>
+          <h2>SocialMedia</h2>
+          <p>Selecciona un chat para empezar.</p>
+        </div>
+      </div>
+
+      <div id="error" class="notice error" role="alert" hidden></div>
+      <div id="sending-notice" class="notice" hidden>El envio esta desactivado en el servidor. Puedes consultar tus conversaciones.</div>
+      <div id="recording-area" class="recording-area" hidden>
+        <span id="recording-status"></span>
+        <audio id="recording-preview" controls hidden></audio>
+        <button id="recording-stop" type="button">Terminar grabacion</button>
+        <button id="recording-send" type="button" hidden>Enviar audio</button>
+        <button id="recording-cancel" type="button">Cancelar</button>
+      </div>
+
+      <form id="composer" class="composer">
+        <input id="attachment" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,audio/ogg,audio/webm,audio/mpeg,audio/mp4,audio/wav,audio/x-wav,.pdf,.docx,.xlsx,.pptx,.zip,.txt" hidden>
+        <div id="attachment-preview" class="composer-attachment" hidden>
+          <img id="attachment-thumbnail" class="composer-attachment-image" alt="" hidden>
+          <span id="attachment-label" class="composer-attachment-label"></span>
+          <button id="attachment-remove" class="composer-attachment-remove" type="button" aria-label="Quitar archivo adjunto">Quitar</button>
+        </div>
+        <button id="attach" class="composer-icon" type="button" aria-label="Adjuntar archivo" title="Adjuntar archivo"><svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button id="suggest" class="composer-icon composer-suggest" type="button" aria-label="Proponer mensaje" title="Proponer mensaje"><svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="m11 4 1.3 4.7L17 10l-4.7 1.3L11 16l-1.3-4.7L5 10l4.7-1.3z"/><path d="M18 14l.7 2.3L21 17l-2.3.7L18 20l-.7-2.3L15 17l2.3-.7z"/></svg></button>
+        <label class="message-input">
+          <span class="sr-only">Escribe un mensaje</span>
+          <textarea id="message" rows="1" placeholder="Escribe un mensaje" spellcheck="true"></textarea>
+        </label>
+        <button id="record" class="composer-icon" type="button" aria-label="Grabar nota de voz" title="Grabar nota de voz"><svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg></button>
+        <button id="send" class="composer-icon send-icon" type="submit" aria-label="Enviar mensaje" title="Enviar mensaje"><svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8zM7 12h13"/></svg><span class="sr-only">Enviar</span></button>
+      </form>
+    </section>
+
+    <aside id="ai-panel" class="ai-panel" aria-label="Social Media Agent" hidden>
+      <header class="ai-panel-header">
+        <div class="ai-panel-contact">
+          <span class="ai-panel-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m12 3 1.7 6.3L20 11l-6.3 1.7L12 19l-1.7-6.3L4 11l6.3-1.7z"/><path d="m19 17 .6 2.4L22 20l-2.4.6L19 23l-.6-2.4L16 20l2.4-.6z"/></svg></span>
+          <span class="ai-panel-copy">
+            <h2 id="ai-panel-title">Social Media Agent</h2>
+            <span id="ai-panel-subtitle">Selecciona un chat para consultar</span>
+          </span>
+        </div>
+        <button id="ai-close" class="header-icon" type="button" aria-label="Cerrar Social Media Agent" title="Cerrar Social Media Agent"><svg viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </header>
+      <div id="ai-root" class="ai-root"></div>
+    </aside>
+  </main>
+</body>
+</html>

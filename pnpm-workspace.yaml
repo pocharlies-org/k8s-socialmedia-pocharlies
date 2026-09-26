@@ -46,3 +46,9 @@ allowBuilds:
   better-sqlite3: false
   # Postinstall is just a funding notice.
   '@nestjs/core': false
+
+patchedDependencies:
+  '@whiskeysockets/baileys@7.0.0-rc13': patches/@whiskeysockets__baileys@7.0.0-rc13.patch
+
+# Service Docker builds include only their own workspace packages.
+allowUnusedPatches: true

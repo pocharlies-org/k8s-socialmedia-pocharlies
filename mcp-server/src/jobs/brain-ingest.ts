@@ -6,7 +6,7 @@
 import { Pool } from 'pg';
 import pino from 'pino';
 import {
-  ACCOUNTS,
+  accounts,
   Account,
   Cursor,
   ensureLiveCursorTable,
@@ -22,8 +22,7 @@ const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: t
 
 const DATABASE_URL =
   process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp';
-const BRAIN_URL =
-  process.env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local';
+const BRAIN_URL = process.env.BRAIN_URL || '';
 const BRAIN_API_KEY = process.env.BRAIN_API_KEY || '';
 const BATCH = parseInt(process.env.BRAIN_INGEST_BATCH || '500', 10);
 const MAX_ROWS = parseInt(process.env.BRAIN_INGEST_MAX_ROWS || '0', 10);
@@ -93,13 +92,15 @@ async function ingestAccount(pool: Pool, account: Account): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (process.env.BRAIN_ENABLED !== 'true' || !process.env.BRAIN_URL)
+    throw new Error('Brain job requires BRAIN_ENABLED=true and BRAIN_URL');
   if (!BRAIN_API_KEY && !DRY_RUN) {
     logger.warn('BRAIN_API_KEY not set — pushes will be unauthenticated (brain may reject)');
   }
   const pool = new Pool({ connectionString: DATABASE_URL, max: 4 });
   try {
     await ensureLiveCursorTable(pool);
-    for (const account of ACCOUNTS) {
+    for (const account of accounts()) {
       await ingestAccount(pool, account);
     }
   } finally {

@@ -16,7 +16,7 @@ describe('brain ingest lib', () => {
 
   it('routes account and platform to Brain instance and adapter', () => {
     expect(instanceForAccount('personal')).toBe('personal');
-    expect(instanceForAccount('professional')).toBe('skirmshop');
+    expect(instanceForAccount('professional')).toBe('professional');
     expect(adapterForPlatform('telegram')).toBe('telegram');
     expect(adapterForPlatform('instagram')).toBe('instagram');
     expect(adapterForPlatform('whatsapp')).toBe('whatsapp');

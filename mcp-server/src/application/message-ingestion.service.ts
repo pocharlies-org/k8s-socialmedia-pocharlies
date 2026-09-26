@@ -27,7 +27,7 @@ export class MessageIngestionService {
     try {
       // Account scoping: ids for non-personal accounts are namespaced so two
       // accounts talking to the same contact don't merge. Personal stays bare.
-      const account = normalizeAccount(event.account);
+      const account = normalizeAccount(event.account, 'whatsapp');
       const convId = accountKey(account, event.conversationId);
       const senderId = accountKey(account, event.senderWaId);
       const wamId = accountKey(account, event.waMessageId);

@@ -1,0 +1,65 @@
+[
+  {
+    "channel": "whatsapp",
+    "accountId": "personal",
+    "label": "Personal",
+    "connectorUrl": "http://wa-personal",
+    "enabled": true,
+    "secretEnv": "TEST_PERSONAL_SECRET"
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "secondary",
+    "label": "Secondary",
+    "connectorUrl": "http://wa-secondary",
+    "enabled": true,
+    "secretEnv": "TEST_SECONDARY_SECRET"
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "arbitrary_3",
+    "label": "Third",
+    "connectorUrl": "http://wa-third",
+    "enabled": true,
+    "secretEnv": "TEST_THIRD_SECRET"
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "disabled",
+    "label": "Disabled",
+    "connectorUrl": "http://wa-disabled",
+    "enabled": false
+  },
+  {
+    "channel": "instagram",
+    "accountId": "instagram",
+    "label": "Instagram",
+    "connectorUrl": "http://ig",
+    "enabled": true,
+    "secretEnv": "TEST_IG_SECRET"
+  },
+  {
+    "channel": "instagram",
+    "accountId": "other_ig",
+    "label": "Other Instagram",
+    "connectorUrl": "http://ig-other",
+    "enabled": true,
+    "secretEnv": "TEST_IG_SECRET"
+  },
+  {
+    "channel": "instagram",
+    "accountId": "personal",
+    "label": "Shared account ID",
+    "connectorUrl": "http://ig-personal",
+    "enabled": true,
+    "secretEnv": "TEST_IG_SECRET"
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "instagram",
+    "label": "Channel name as account",
+    "connectorUrl": "http://wa-channel-name",
+    "enabled": true,
+    "secretEnv": "TEST_THIRD_SECRET"
+  }
+]

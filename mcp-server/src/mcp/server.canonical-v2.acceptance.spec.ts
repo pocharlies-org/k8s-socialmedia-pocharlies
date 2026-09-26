@@ -395,6 +395,35 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       );
     });
 
+    test.each(['social_create_draft', 'social_list_drafts'])(
+      '%s rejects a target prefixed for another account before its handler',
+      async toolName => {
+        const server = createServer();
+        server.handleDraftReply = jest.fn(async (args: unknown) => legacy(args));
+        server.handleListDrafts = jest.fn(async (args: unknown) => legacy(args));
+        const wrong = await server.executeCanonicalTool(definition(toolName), {
+          channel: 'whatsapp',
+          accountId: 'professional',
+          target: 'personal:123456789-987654321@g.us',
+        });
+        expectStructuredError(wrong, 'invalid_request');
+        expect(server.handleDraftReply).not.toHaveBeenCalled();
+        expect(server.handleListDrafts).not.toHaveBeenCalled();
+
+        const valid = await server.executeCanonicalTool(definition(toolName), {
+          channel: 'whatsapp',
+          accountId: 'professional',
+          target: 'professional:123456789-987654321@g.us',
+        });
+        expect(valid.structuredContent).toMatchObject({ ok: true });
+        const handler = toolName === 'social_create_draft'
+          ? server.handleDraftReply : server.handleListDrafts;
+        expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+          chatId: 'professional:123456789-987654321@g.us',
+        }));
+      }
+    );
+
     test('does not approve a draft through another account selector', async () => {
       const server = createServer();
       server.draftService = {
@@ -1245,6 +1274,9 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       server.draftService = {
         getDraftById: jest.fn(async () => draft),
         markAsSent: jest.fn(async () => undefined),
+      };
+      server.dbClient = {
+        query: jest.fn(async () => ({ rows: [{ id: draft.conversationId }] })),
       };
       const previousFetch = global.fetch;
       const previousEnableSending = process.env.ENABLE_SENDING;

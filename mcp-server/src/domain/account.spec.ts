@@ -1,45 +1,28 @@
-import { accountKey, stripAccount, normalizeAccount, ACCOUNTS } from './account';
+import { join } from 'node:path';
+import { accountKey, stripAccount, normalizeAccount } from './account';
+import { parseAccounts, requireAccount } from './account-registry';
 
-describe('account helpers', () => {
-  it('keeps personal ids bare (no backfill of existing rows)', () => {
-    expect(accountKey('personal', '34660242739@s.whatsapp.net')).toBe('34660242739@s.whatsapp.net');
-    expect(accountKey('personal', 'tg_123')).toBe('tg_123');
+beforeAll(() => { process.env.SOCIAL_ACCOUNTS_FILE = join(__dirname, 'accounts.fixture.json'); });
+
+describe('registry account isolation', () => {
+  test('preserves personal legacy IDs and native device JID colons', () => {
+    expect(accountKey('personal', '123:4@s.whatsapp.net')).toBe('123:4@s.whatsapp.net');
+    expect(stripAccount('123:4@s.whatsapp.net').id).toBe('123:4@s.whatsapp.net');
   });
-
-  it('namespaces professional ids', () => {
-    expect(accountKey('professional', 'tg_123')).toBe('professional:tg_123');
-    expect(accountKey('professional', '3EB0ABC')).toBe('professional:3EB0ABC');
+  test('round trips an arbitrary third account and does not collide', () => {
+    expect(accountKey('arbitrary_3', 'same')).toBe('arbitrary_3:same');
+    expect(accountKey('secondary', 'same')).not.toBe(accountKey('arbitrary_3', 'same'));
+    expect(stripAccount(accountKey('arbitrary_3', 'same'))).toEqual({ account: 'arbitrary_3', id: 'same' });
+    expect(accountKey('arbitrary_3', 'arbitrary_3:same')).toBe('arbitrary_3:same');
+    expect(() => accountKey('secondary', 'arbitrary_3:same')).toThrow('Cross-account');
   });
-
-  it('does NOT collide across accounts for the same raw id', () => {
-    expect(accountKey('personal', 'x')).not.toBe(accountKey('professional', 'x'));
+  test('rejects unknown, disabled and wrong-channel selectors', () => {
+    for (const value of ['unknown', 'disabled', null]) expect(() => normalizeAccount(value)).toThrow();
+    expect(() => requireAccount('instagram', 'secondary')).toThrow();
   });
-
-  it('accountKey is idempotent (never double-prefixes an already-namespaced id)', () => {
-    expect(accountKey('professional', 'professional:tg_123')).toBe('professional:tg_123');
-    expect(accountKey('professional', accountKey('professional', 'tg_123'))).toBe('professional:tg_123');
-    expect(accountKey('personal', 'tg_123')).toBe('tg_123');
-  });
-
-  it('round-trips accountKey <-> stripAccount for every account', () => {
-    for (const a of ACCOUNTS) {
-      const raw = 'tg_999_42';
-      expect(stripAccount(accountKey(a, raw))).toEqual({ account: a, id: raw });
-    }
-  });
-
-  it('treats an un-prefixed key as personal', () => {
-    expect(stripAccount('34660242739@s.whatsapp.net')).toEqual({
-      account: 'personal',
-      id: '34660242739@s.whatsapp.net',
-    });
-  });
-
-  it('normalizeAccount defaults to personal and validates', () => {
-    expect(normalizeAccount(undefined)).toBe('personal');
-    expect(normalizeAccount('personal')).toBe('personal');
-    expect(normalizeAccount('professional')).toBe('professional');
-    expect(normalizeAccount('garbage')).toBe('personal');
-    expect(normalizeAccount(null)).toBe('personal');
+  test('validates registry IDs and duplicate entries', () => {
+    expect(() => parseAccounts([{ channel: 'whatsapp', accountId: 'bad:name' }])).toThrow();
+    const a = requireAccount('whatsapp', 'personal');
+    expect(() => parseAccounts([a, a])).toThrow('Duplicate');
   });
 });

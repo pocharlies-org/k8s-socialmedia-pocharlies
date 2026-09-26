@@ -1,4 +1,4 @@
-FROM harbor.lan.e-dani.com/cache/library/node:22-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Debian security updates. The release pipeline refuses any image that still
 # carries a fixable HIGH/CRITICAL finding.
@@ -14,6 +14,7 @@ WORKDIR /app
 
 # Baileys is a pure Node.js WebSocket client — no Chromium/Puppeteer needed.
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.json ./
+COPY patches ./patches
 COPY connectors/whatsapp-web/package.json connectors/whatsapp-web/tsconfig.json ./connectors/whatsapp-web/
 COPY shared/package.json shared/tsconfig.json ./shared/
 

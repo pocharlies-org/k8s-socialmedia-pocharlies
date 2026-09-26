@@ -45,7 +45,7 @@ export class DatabaseRepository {
        ON CONFLICT (id) DO NOTHING`,
       [
         waChatId,
-        rawWaChatId ?? waChatId,
+        accountKey(account, rawWaChatId ?? waChatId),
         type,
         name,
         type === ConversationType.GROUP,
@@ -205,6 +205,7 @@ export class DatabaseRepository {
        JOIN conversations c ON cp.conversation_id = c.id
        WHERE (p.name ILIKE $1 OR p.push_name ILIKE $1 OR p.id ILIKE $1 OR p.phone ILIKE $1)
          AND c.account = $3
+         AND EXISTS (SELECT 1 FROM messages scope WHERE scope.conversation_id = c.id AND scope.account = $3 AND scope.platform = 'whatsapp')
        ORDER BY c.last_message_at DESC NULLS LAST
        LIMIT $2`,
       [searchPattern, limit, normalizeAccount(account)]
@@ -246,7 +247,7 @@ export class DatabaseRepository {
       `SELECT c.*,
               COALESCE(c.type, CASE WHEN c.is_group THEN 'GROUP' ELSE 'INDIVIDUAL' END) as conv_type,
               (SELECT COUNT(*) FROM messages m
-                WHERE m.conversation_id = c.id
+                WHERE m.conversation_id = c.id AND m.account = $3 AND m.platform = 'whatsapp'
                   AND (m.is_deleted IS NULL OR m.is_deleted = false)) as message_count
        FROM conversations c
        WHERE ($1::VARCHAR IS NULL OR COALESCE(c.type, CASE WHEN c.is_group THEN 'GROUP' ELSE 'INDIVIDUAL' END) = $1)
@@ -256,6 +257,7 @@ export class DatabaseRepository {
                          WHERE cp.conversation_id = c.id
                          AND (p.name ILIKE $2 OR p.push_name ILIKE $2 OR p.id ILIKE $2)))
          AND c.account = $3
+         AND EXISTS (SELECT 1 FROM messages scope WHERE scope.conversation_id = c.id AND scope.account = $3 AND scope.platform = 'whatsapp')
        ORDER BY c.last_message_at DESC NULLS LAST
        LIMIT $4`,
       [type || null, searchPattern, account, limit]
@@ -350,6 +352,7 @@ export class DatabaseRepository {
        JOIN conversations c ON m.conversation_id = c.id
        WHERE m.sender_wa_id = $1
          AND (m.is_deleted IS NULL OR m.is_deleted = false)
+         AND m.account = $6 AND c.account = $6 AND m.platform = 'whatsapp'
          AND ($2::TEXT IS NULL OR m.conversation_id = $2)
          AND ($3::TIMESTAMP IS NULL OR m.wa_timestamp >= $3)
          AND ($4::TIMESTAMP IS NULL OR m.wa_timestamp <= $4)
@@ -361,6 +364,7 @@ export class DatabaseRepository {
         from || null,
         to || null,
         limit,
+        acc,
       ]
     );
 

@@ -86,14 +86,14 @@ CREATE INDEX idx_attachments_storage_key ON attachments(storage_key);
 CREATE TABLE message_embeddings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  embedding vector(1536) NOT NULL,
+  embedding vector(4096) NOT NULL,
   model VARCHAR(100) NOT NULL,
   chunk_index INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_message_embeddings_vector ON message_embeddings 
-  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- Sin indice ANN: pgvector (ivfflat/hnsw) limita a 2000 dimensiones y
+-- qwen3-embedding-8b emite 4096. Busqueda exacta por escaneo secuencial.
 CREATE INDEX idx_message_embeddings_message ON message_embeddings(message_id);
 
 -- Draft Replies

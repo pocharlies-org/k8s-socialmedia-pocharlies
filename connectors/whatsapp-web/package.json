@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node --import tsx src/main.ts",
     "lint": "eslint src --ext .ts",
-    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/db-writer.test.ts src/read-paths.test.ts src/lid-pn.test.ts src/signal-log-scrub.test.ts src/audio-attachments.test.ts src/events/publisher.test.ts"
+    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/send-idempotency.test.ts src/archive-snapshot.test.ts src/archive-group-names.test.ts src/archive-persistence.test.ts src/archive-client.test.ts src/db-writer.test.ts src/read-paths.test.ts src/lid-pn.test.ts src/signal-log-scrub.test.ts src/audio-attachments.test.ts src/events/publisher.test.ts src/api/access.test.ts src/api/controller-security.test.ts src/ui-path.test.ts src/media-channel.test.ts src/media-send.test.ts src/url-config.test.ts src/whatsapp-capabilities.test.ts src/poll-votes.test.ts src/presence-cache.test.ts src/durable-message-store.test.ts src/capabilities-client.test.ts"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

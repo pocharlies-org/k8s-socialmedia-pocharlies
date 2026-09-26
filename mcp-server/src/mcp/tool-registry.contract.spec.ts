@@ -15,6 +15,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_continue_digest',
   'social_create_draft',
   'social_delete_message',
+  'social_deliver_current_chat',
   'social_discover_business',
   'social_forward_message',
   'social_get_conversation',
@@ -37,8 +38,10 @@ const EXPECTED_TOOL_NAMES = [
   'social_manage_session',
   'social_mark_read',
   'social_publish_content',
+  'social_read_current_chat',
   'social_resolve_target',
   'social_search_messages',
+  'social_send_current_chat',
   'social_send_draft',
   'social_send_message',
   'social_start_digest',
@@ -52,6 +55,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_continue_digest: 'internalWrite',
   social_create_draft: 'internalWrite',
   social_delete_message: 'destructive',
+  social_deliver_current_chat: 'externalWrite',
   social_discover_business: 'read',
   social_forward_message: 'externalWrite',
   social_get_conversation: 'read',
@@ -74,9 +78,11 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_manage_session: 'externalWrite',
   social_mark_read: 'externalWrite',
   social_publish_content: 'externalWrite',
+  social_read_current_chat: 'read',
   social_resolve_target: 'read',
   social_search_messages: 'read',
   social_send_draft: 'externalWrite',
+  social_send_current_chat: 'internalWrite',
   social_send_message: 'externalWrite',
   social_start_digest: 'internalWrite',
   social_summarize: 'compute',
@@ -227,6 +233,12 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: true,
     openWorldHint: true,
   },
+  social_read_current_chat: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
   social_manage_chat: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -280,6 +292,18 @@ const EXPECTED_ANNOTATIONS: Record<
     destructiveHint: true,
     idempotentHint: false,
     openWorldHint: true,
+  },
+  social_send_current_chat: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  social_deliver_current_chat: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
   },
   social_send_message: {
     readOnlyHint: false,
@@ -400,11 +424,11 @@ describe('Socialmedia v2 tool contract', () => {
     readFileSync(manifestPath, 'utf8')
   ) as ContractManifest;
 
-  it('contains exactly the 34 canonical tools in deterministic order', () => {
+  it('contains exactly the 37 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(34);
+    expect(new Set(names).size).toBe(37);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -425,13 +449,21 @@ describe('Socialmedia v2 tool contract', () => {
     }
   });
 
-  it('requires explicit channel and accountId on every write operation', () => {
+  it('requires explicit selectors on generic writes and a capability on current-chat send', () => {
     const writes = SOCIAL_TOOL_REGISTRY.filter(
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(15);
+    expect(writes).toHaveLength(17);
     for (const tool of writes) {
+      if (tool.name === 'social_deliver_current_chat') {
+        expect(requiredFields(tool)).toEqual(['capability', 'text']);
+        continue;
+      }
+      if (tool.name === 'social_send_current_chat') {
+        expect(requiredFields(tool)).toEqual(['capability', 'text', 'idempotencyKey']);
+        continue;
+      }
       expect(requiredFields(tool)).toEqual(
         expect.arrayContaining(['channel', 'accountId'])
       );

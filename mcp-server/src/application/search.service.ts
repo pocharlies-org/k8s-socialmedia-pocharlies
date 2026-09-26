@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 import OpenAI from 'openai';
 import pino from 'pino';
-import { accountKey, type Account } from '../domain/account';
+import { getAccounts } from '../domain/account-registry';
+import { accountKey, normalizeAccount, stripAccount, type Account } from '../domain/account';
 
 export interface SearchResult {
   messageId: string;
@@ -23,19 +24,21 @@ export interface SearchOptions {
   limit?: number;
   /** Account scope (personal|professional). Defaults to personal. */
   account?: Account;
-  platform?: 'whatsapp' | 'telegram';
+  platform?: 'whatsapp' | 'telegram' | 'instagram';
 }
 
 export class SearchService {
   private openai: OpenAI;
   private dbClient: Pool;
   private logger: pino.Logger;
-  private readonly EMBEDDING_MODEL = 'text-embedding-3-small';
+  private readonly EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
 
   constructor(openaiApiKey: string, dbClient: Pool, _encryptionKey: string, llmBaseUrl?: string) {
     this.openai = new OpenAI({
       apiKey: openaiApiKey || 'sk-placeholder',
-      ...(llmBaseUrl && { baseURL: llmBaseUrl }),
+      ...((process.env.EMBEDDING_BASE_URL || llmBaseUrl) && {
+        baseURL: process.env.EMBEDDING_BASE_URL || llmBaseUrl,
+      }),
     });
     this.dbClient = dbClient;
     this.logger = pino({
@@ -44,6 +47,24 @@ export class SearchService {
         options: { colorize: true },
       },
     });
+  }
+
+  private indexKeys(scopes: ReturnType<typeof getAccounts>, id: string, kind: string): string[] {
+    return [
+      ...new Set(
+        scopes.flatMap(scope => {
+          if (scope.channel === 'instagram') {
+            const prefix = `instagram:${scope.accountId}:`;
+            if (id.startsWith('instagram:')) return id.startsWith(prefix) ? [id] : [];
+            if (stripAccount(id).id !== id) return [];
+            return [`${prefix}${kind}${id}`];
+          }
+          const parsed = stripAccount(id);
+          if (parsed.id !== id && parsed.account !== scope.accountId) return [];
+          return [accountKey(scope.accountId, id)];
+        })
+      ),
+    ];
   }
 
   /**
@@ -70,15 +91,15 @@ export class SearchService {
     const params: unknown[] = [query];
     let paramIndex = 2;
 
+    const scopes = getAccounts(options.platform).filter(
+      a => !options.account || a.accountId === normalizeAccount(options.account, options.platform)
+    );
+    sql += ` AND (m.platform || ':' || m.account) = ANY($${paramIndex++}::text[])`;
+    params.push(scopes.map(a => `${a.channel}:${a.accountId}`));
+
     if (chatId) {
-      if (options.account) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(accountKey(options.account, chatId));
-      } else {
-        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push([chatId, accountKey('professional', chatId)]);
-      }
-      paramIndex++;
+      sql += ` AND m.conversation_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, chatId, 'thread_'));
     }
 
     if (from) {
@@ -94,19 +115,13 @@ export class SearchService {
     }
 
     if (sender) {
-      if (options.account) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(accountKey(options.account, sender));
-      } else {
-        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push([sender, accountKey('professional', sender)]);
-      }
-      paramIndex++;
+      sql += ` AND m.sender_wa_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, sender, 'sender:'));
     }
 
     if (options.account) {
       sql += ` AND m.account = $${paramIndex}`;
-      params.push(options.account);
+      params.push(normalizeAccount(options.account, options.platform));
       paramIndex++;
     }
     if (options.platform) {
@@ -142,6 +157,7 @@ export class SearchService {
     const response = await this.openai.embeddings.create({
       model: this.EMBEDDING_MODEL,
       input: query,
+      encoding_format: 'float',
     });
 
     const queryEmbedding = response.data[0].embedding;
@@ -166,15 +182,15 @@ export class SearchService {
     const params: unknown[] = [embeddingVector];
     let paramIndex = 2;
 
+    const scopes = getAccounts(options.platform).filter(
+      a => !options.account || a.accountId === normalizeAccount(options.account, options.platform)
+    );
+    sql += ` AND (m.platform || ':' || m.account) = ANY($${paramIndex++}::text[])`;
+    params.push(scopes.map(a => `${a.channel}:${a.accountId}`));
+
     if (chatId) {
-      if (options.account) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(accountKey(options.account, chatId));
-      } else {
-        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push([chatId, accountKey('professional', chatId)]);
-      }
-      paramIndex++;
+      sql += ` AND m.conversation_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, chatId, 'thread_'));
     }
 
     if (from) {
@@ -190,19 +206,13 @@ export class SearchService {
     }
 
     if (sender) {
-      if (options.account) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(accountKey(options.account, sender));
-      } else {
-        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push([sender, accountKey('professional', sender)]);
-      }
-      paramIndex++;
+      sql += ` AND m.sender_wa_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, sender, 'sender:'));
     }
 
     if (options.account) {
       sql += ` AND m.account = $${paramIndex}`;
-      params.push(options.account);
+      params.push(normalizeAccount(options.account, options.platform));
       paramIndex++;
     }
     if (options.platform) {

@@ -8,12 +8,13 @@
  * 5-MCP split happens, this code moves to mcps/instagram/ and shares a
  * `@mcp-socialmedia/core` repository with the others.
  */
+import { requireAccount } from '../domain/account-registry';
 import { Pool } from 'pg';
 import pino from 'pino';
 
 export interface InstagramEvent {
   platform: 'instagram';
-  account: string; // 'skirmshop' | 'barbelpapis'
+  account: string;
   eventType: 'dm' | 'comment' | 'mention' | 'story_mention' | 'media' | 'unknown';
   senderId: string;
   senderUsername?: string;
@@ -37,7 +38,7 @@ export class InstagramIngestionService {
 
   async handleEvent(event: InstagramEvent): Promise<void> {
     try {
-      const account = routeInstagramAccount(event.account);
+      const account = requireAccount('instagram', event.account).accountId;
       // DM events have a real message id and conversation; comments/mentions are
       // attached to a media post and we synthesise a conversation key per post.
       const ts = new Date(event.timestamp || new Date().toISOString());
@@ -50,50 +51,50 @@ export class InstagramIngestionService {
       let content = event.text || '';
 
       if (event.eventType === 'dm') {
-        convId = `ig_${event.account}_thread_${event.conversationId || event.senderId}`;
+        convId = `instagram:${event.account}:thread_${event.conversationId || event.senderId}`;
         convName = event.senderUsername || event.senderId;
         convType = 'INDIVIDUAL';
         messageType = 'TEXT';
         waMessageId = event.messageId
-          ? `ig_${event.account}_${event.messageId}`
-          : `ig_${event.account}_${event.senderId}_${ts.getTime()}`;
+          ? `instagram:${event.account}:${event.messageId}`
+          : `instagram:${event.account}:${event.senderId}_${ts.getTime()}`;
       } else if (event.eventType === 'comment') {
-        convId = `ig_${event.account}_post_${event.mediaId || 'unknown'}`;
+        convId = `instagram:${event.account}:post_${event.mediaId || 'unknown'}`;
         convName = `Post ${event.mediaId || ''}`.trim();
         convType = 'GROUP'; // comments stream — multiple users contribute
         messageType = 'COMMENT';
         waMessageId = event.messageId
-          ? `ig_${event.account}_comment_${event.messageId}`
-          : `ig_${event.account}_comment_${event.senderId}_${ts.getTime()}`;
+          ? `instagram:${event.account}:comment_${event.messageId}`
+          : `instagram:${event.account}:comment_${event.senderId}_${ts.getTime()}`;
       } else if (event.eventType === 'mention') {
-        convId = `ig_${event.account}_mentions`;
+        convId = `instagram:${event.account}:mentions`;
         convName = 'Mentions';
         convType = 'GROUP';
         messageType = 'MENTION';
-        waMessageId = `ig_${event.account}_mention_${event.mediaId || event.senderId}_${ts.getTime()}`;
+        waMessageId = `instagram:${event.account}:mention_${event.mediaId || event.senderId}_${ts.getTime()}`;
         content = content || `mention by @${event.senderUsername || event.senderId}`;
       } else if (event.eventType === 'story_mention') {
-        convId = `ig_${event.account}_story_mentions`;
+        convId = `instagram:${event.account}:story_mentions`;
         convName = 'Story mentions';
         convType = 'GROUP';
         messageType = 'STORY_MENTION';
-        waMessageId = `ig_${event.account}_story_${event.mediaId || event.senderId}_${ts.getTime()}`;
+        waMessageId = `instagram:${event.account}:story_${event.mediaId || event.senderId}_${ts.getTime()}`;
         content = content || `story mention by @${event.senderUsername || event.senderId}`;
       } else if (event.eventType === 'media') {
-        convId = `ig_${event.account}_media`;
+        convId = `instagram:${event.account}:media`;
         convName = `Instagram ${event.account} media`;
         convType = 'GROUP';
         messageType = 'MEDIA';
         waMessageId = event.mediaId
-          ? `ig_${event.account}_media_${event.mediaId}`
-          : `ig_${event.account}_media_${ts.getTime()}`;
+          ? `instagram:${event.account}:media_${event.mediaId}`
+          : `instagram:${event.account}:media_${ts.getTime()}`;
         content = content || `instagram media ${event.mediaId || ''}`.trim();
       } else {
         this.logger.debug(`Skipping unknown IG event type: ${event.eventType}`);
         return;
       }
 
-      const senderWaId = `ig_${event.senderId}`;
+      const senderWaId = `instagram:${event.account}:sender:${event.senderId}`;
       const isGroup = convType === 'GROUP';
       const senderName = event.senderUsername || null;
 
@@ -107,7 +108,7 @@ export class InstagramIngestionService {
 
       await this.dbClient.query(
         `INSERT INTO conversations (id, name, is_group, type, wa_chat_id, last_message_at, account)
-         VALUES ($1, $2, $3, $4, $1, $5, $6)
+         VALUES ($1::text, $2, $3, $4, $1::text, $5, $6)
          ON CONFLICT (id) DO UPDATE SET
            name = COALESCE(EXCLUDED.name, conversations.name),
            account = EXCLUDED.account,
@@ -118,7 +119,7 @@ export class InstagramIngestionService {
 
       await this.dbClient.query(
         `INSERT INTO participants (id, name, push_name, last_seen, account)
-         VALUES ($1, $2, $2, now(), $3)
+         VALUES ($1, $2::text, $2::text, now(), $3)
          ON CONFLICT (id) DO UPDATE SET
            name = COALESCE(EXCLUDED.name, participants.name),
            account = EXCLUDED.account,
@@ -155,10 +156,7 @@ export class InstagramIngestionService {
       }
     } catch (error) {
       this.logger.error(`Failed to ingest IG event: ${error}`);
+      throw error;
     }
   }
-}
-
-function routeInstagramAccount(instagramAccount: string): 'personal' | 'professional' {
-  return instagramAccount === 'skirmshop' ? 'professional' : 'personal';
 }

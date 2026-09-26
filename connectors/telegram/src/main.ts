@@ -1,4 +1,5 @@
 import express from 'express';
+import { dashboardUrl } from './dashboard-notifier';
 import { TelegramClientWrapper, TelegramMessage } from './telegram-client';
 import { TelegramEventPublisher, TelegramMessageReceivedEvent } from './events/publisher';
 import { createRouter } from './api/controller';
@@ -14,6 +15,7 @@ const CONNECTOR_SHARED_SECRET =
   process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
 
 async function main() {
+  dashboardUrl();
   // Validate required configuration
   if (!TELEGRAM_API_ID || !TELEGRAM_API_HASH) {
     console.error('TELEGRAM_API_ID and TELEGRAM_API_HASH are required');

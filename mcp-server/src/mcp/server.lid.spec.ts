@@ -1,9 +1,11 @@
 import {
   isLidJid,
   normalizeDirectWhatsAppJid,
-  resolveProfessionalSendTarget,
+  resolveProfessionalSendTarget as resolveAccountSendTarget,
   MCPServer,
 } from './server';
+
+const resolveProfessionalSendTarget = (id: unknown, evidence = {}) => resolveAccountSendTarget(id, evidence, 'professional');
 
 describe('isLidJid', () => {
   it('detects bare @lid and @hosted.lid jids', () => {
@@ -40,6 +42,10 @@ describe('normalizeDirectWhatsAppJid (legacy phone behavior unchanged)', () => {
     );
   });
 
+  it('drops a PN device suffix without treating the device number as part of the phone', () => {
+    expect(normalizeDirectWhatsAppJid('34660242739:2@s.whatsapp.net')).toBe('34660242739@s.whatsapp.net');
+  });
+
   it('prefixes a 9-digit Spanish mobile with 34', () => {
     expect(normalizeDirectWhatsAppJid('660242739')).toBe('34660242739@s.whatsapp.net');
   });
@@ -47,11 +53,15 @@ describe('normalizeDirectWhatsAppJid (legacy phone behavior unchanged)', () => {
   it('rejects group jids and out-of-range ids', () => {
     expect(normalizeDirectWhatsAppJid('123456789-987654321@g.us')).toBeNull();
     expect(normalizeDirectWhatsAppJid('123')).toBeNull();
+    expect(normalizeDirectWhatsAppJid('198517716955152@lid')).toBeNull();
+    expect(normalizeDirectWhatsAppJid('198517716955152@hosted.lid')).toBeNull();
+    expect(normalizeDirectWhatsAppJid('198517716955152@unknown')).toBeNull();
+    expect(normalizeDirectWhatsAppJid('foreign:35796658668')).toBeNull();
   });
 });
 
 describe('resolveProfessionalSendTarget', () => {
-  it('keeps a bare @lid under the @lid key but marks it as missing phone evidence', () => {
+  it('keeps a bare @lid under the @lid key', () => {
     expect(resolveProfessionalSendTarget('198517716955152@lid')).toEqual({
       lookupKey: 'professional:198517716955152@lid',
       lookupKeys: ['professional:198517716955152@lid'],
@@ -75,24 +85,23 @@ describe('resolveProfessionalSendTarget', () => {
     });
   });
 
-  it('uses trusted phone evidence to turn an @lid send into a phone-number send jid', () => {
+  it('ignores caller phone evidence for an @lid destination', () => {
     expect(
       resolveProfessionalSendTarget('198517716955152@lid', {
+        phone: '35796658668',
+        phoneE164: '+35796658668',
         manualOpenUrl: 'https://wa.me/35796658668?text=hello',
       })
     ).toEqual({
       lookupKey: 'professional:198517716955152@lid',
-      lookupKeys: [
-        'professional:198517716955152@lid',
-        'professional:35796658668@s.whatsapp.net',
-      ],
-      sendJid: '35796658668@s.whatsapp.net',
-      sourceLidJid: '198517716955152@lid',
-      phoneE164: '+35796658668',
-      phoneWaJid: '35796658668@c.us',
-      manualOpenUrl: 'https://wa.me/35796658668?text=hello',
-      phoneEvidenceSource: 'manualOpenUrl',
+      lookupKeys: ['professional:198517716955152@lid'],
+      sendJid: '198517716955152@lid',
     });
+  });
+
+  it('rejects a destination prefixed for another account', () => {
+    expect(resolveProfessionalSendTarget('personal:198517716955152@lid')).toBeNull();
+    expect(resolveProfessionalSendTarget('personal:35796658668@s.whatsapp.net')).toBeNull();
   });
 
   it('(b) normalizes a bare phone to @s.whatsapp.net under the professional key', () => {
@@ -131,54 +140,42 @@ describe('requireProfessionalInboundChat gate (DB-backed)', () => {
       server,
       call: (
         chatId: string,
-        evidence: { phone?: string; phoneE164?: string; manualOpenUrl?: string } = {}
+        evidence: { phone?: string; phoneE164?: string; manualOpenUrl?: string } = {},
+        account = 'professional'
       ) =>
         (
           server as unknown as {
             requireProfessionalInboundChat: (
               id: string,
-              evidence?: { phone?: string; phoneE164?: string; manualOpenUrl?: string }
+              evidence?: { phone?: string; phoneE164?: string; manualOpenUrl?: string },
+              account?: string
             ) => Promise<string>;
           }
-        ).requireProfessionalInboundChat(chatId, evidence),
+        ).requireProfessionalInboundChat(chatId, evidence, account),
       query: (server as unknown as { dbClient: { query: jest.Mock } }).dbClient.query,
     };
   }
 
-  it('@lid without trusted phone evidence stays blocked before touching the DB', async () => {
-    const { call, query } = gateWith(async () => ({
-      rows: [{ id: 'professional:198517716955152@lid' }],
-    }));
-    await expect(call('198517716955152@lid')).rejects.toThrow(/require trusted phone evidence/);
-    expect(query).not.toHaveBeenCalled();
+  it('@lid with inbound sends to the same LID despite conflicting caller phone fields', async () => {
+    const { call, query } = gateWith(async () => ({ rows: [{ id: 'professional:198517716955152@lid' }] }));
+    await expect(call('198517716955152@lid', {
+      phone: '11111111111', phoneE164: '+22222222222', manualOpenUrl: 'https://wa.me/33333333333',
+    })).resolves.toBe('198517716955152@lid');
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('m.direction = \'INBOUND\''), [
+      ['professional:198517716955152@lid'], 'professional', null,
+    ]);
+    expect(query.mock.calls[0][0]).not.toContain('wa_chat_id');
   });
 
-  it('@lid plus trusted phone evidence and inbound history sends to the phone-number jid', async () => {
-    const { call, query } = gateWith(async (sql) => {
-      if (/SELECT c\.id/.test(sql)) return { rows: [{ id: 'professional:198517716955152@lid' }] };
-      return { rows: [] };
-    });
-    await expect(call('198517716955152@lid', { phoneE164: '+35796658668' })).resolves.toBe(
-      '35796658668@s.whatsapp.net'
-    );
-    expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining('c.wa_chat_id = $1'), [
-      'professional:198517716955152@lid',
-    ]);
-    expect(query).toHaveBeenNthCalledWith(2, expect.stringContaining('UPDATE conversations'), [
-      'professional:198517716955152@lid',
-      'professional:35796658668@s.whatsapp.net',
-      expect.any(String),
-    ]);
-  });
-
-  it('@lid plus phone still blocks when neither the LID nor phone has inbound history', async () => {
+  it('@lid without inbound blocks even when caller supplies a phone with its own inbound', async () => {
     const { call, query } = gateWith(async () => ({ rows: [] }));
     await expect(call('198517716955152@lid', { phone: '35796658668' })).rejects.toThrow(
       /only allowed after the customer has sent an inbound message/
     );
-    expect(query).toHaveBeenCalledWith(expect.any(String), ['professional:198517716955152@lid']);
+    expect(query).toHaveBeenCalledTimes(1);
     expect(query).toHaveBeenCalledWith(expect.any(String), [
-      'professional:35796658668@s.whatsapp.net',
+      ['professional:198517716955152@lid'], 'professional', null,
     ]);
   });
 
@@ -188,18 +185,63 @@ describe('requireProfessionalInboundChat gate (DB-backed)', () => {
     }));
     await expect(call('34660242739')).resolves.toBe('34660242739@s.whatsapp.net');
     expect(query).toHaveBeenCalledWith(expect.any(String), [
-      'professional:34660242739@s.whatsapp.net',
+      ['professional:34660242739@s.whatsapp.net', 'professional:34660242739@c.us'],
+      'professional', '+34660242739',
     ]);
   });
 
-  it('bare phone with an inbound LID conversation found through wa_chat_id is allowed', async () => {
+  it('bare phone routes to an inbound LID with provider PN metadata, even without wa_chat_id', async () => {
     const { call, query } = gateWith(async (sql, params) => {
-      expect(sql).toContain('c.wa_chat_id = $1');
-      expect(params).toEqual(['professional:35796658668@s.whatsapp.net']);
+      expect(sql).toContain("m.metadata->>'senderPnE164' = $3");
+      expect(sql).not.toContain('wa_chat_id');
+      expect(params).toEqual([
+        ['professional:35796658668@s.whatsapp.net', 'professional:35796658668@c.us'],
+        'professional', '+35796658668',
+      ]);
       return { rows: [{ id: 'professional:79723233333251@lid' }] };
     });
-    await expect(call('35796658668')).resolves.toBe('35796658668@s.whatsapp.net');
+    await expect(call('35796658668')).resolves.toBe('79723233333251@lid');
     expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers an exact PN inbound over a LID metadata match', async () => {
+    const { call } = gateWith(async () => ({ rows: [
+      { id: 'professional:79723233333251@lid' },
+      { id: 'professional:35796658668@s.whatsapp.net' },
+    ] }));
+    await expect(call('35796658668')).resolves.toBe('35796658668@s.whatsapp.net');
+  });
+
+  it('blocks an ambiguous PN mapped by inbound messages from two LIDs', async () => {
+    const { call } = gateWith(async () => ({ rows: [
+      { id: 'professional:79723233333251@lid' },
+      { id: 'professional:88888888888888@lid' },
+    ] }));
+    await expect(call('35796658668')).rejects.toThrow(/only allowed after/);
+  });
+
+  it('bare phone rejects a LID whose only mapping is wa_chat_id', async () => {
+    const { call, query } = gateWith(async () => ({ rows: [] }));
+    await expect(call('35796658668')).rejects.toThrow(/only allowed after/);
+    expect(query.mock.calls[0][0]).not.toContain('wa_chat_id');
+  });
+
+  it('does not use another account inbound for the same LID or PN', async () => {
+    const { call, query } = gateWith(async (_sql, params) => ({
+      rows: params[1] === 'personal' && (params[0] as string[]).includes('198517716955152@lid')
+        ? [{ id: '198517716955152@lid' }]
+        : [],
+    }));
+    await expect(call('198517716955152@lid', {}, 'professional')).rejects.toThrow(/only allowed after/);
+    await expect(call('35796658668', {}, 'professional')).rejects.toThrow(/only allowed after/);
+    await expect(call('198517716955152@lid', {}, 'personal')).resolves.toBe('198517716955152@lid');
+    expect(query.mock.calls.map(([, params]) => params[1])).toEqual(['professional', 'professional', 'personal']);
+    expect(query.mock.calls[0][1][0]).toEqual(['professional:198517716955152@lid']);
+    expect(query.mock.calls[1][1][0]).toEqual([
+      'professional:35796658668@s.whatsapp.net', 'professional:35796658668@c.us',
+    ]);
+    expect(query.mock.calls[0][0]).toContain('m.account = $2');
+    expect(query.mock.calls[0][0]).toContain('c.account = $2');
   });
 
   it('bare phone with NO inbound throws the guard error with a wa.me manual fallback', async () => {
@@ -257,7 +299,7 @@ describe('handleSendMessage professional @lid + phone fallback behavior', () => 
     };
   }
 
-  it('preserves manual fallback when the connector rejects the verified phone destination', async () => {
+  it('does not offer a caller-supplied PN fallback when the connector rejects a LID', async () => {
     process.env.ENABLE_SENDING = 'true';
     delete process.env.EMERGENCY_DISABLE_SENDING;
     const fetchMock = jest.fn(async (_url: unknown, init: any) => ({
@@ -275,7 +317,7 @@ describe('handleSendMessage professional @lid + phone fallback behavior', () => 
     }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const { send } = sendServer(async (sql) => {
+    const { send, logger } = sendServer(async (sql) => {
       if (/SELECT c\.id/.test(sql)) return { rows: [{ id: 'professional:198517716955152@lid' }] };
       return { rows: [] };
     });
@@ -288,9 +330,79 @@ describe('handleSendMessage professional @lid + phone fallback behavior', () => 
         text: 'safe test body',
         account: 'professional',
       })
-    ).rejects.toThrow(/Manual fallback: open https:\/\/wa\.me\/35796658668/);
+    ).rejects.toThrow(/account restricted/);
 
     const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
-    expect(body.conversationId).toBe('35796658668@s.whatsapp.net');
+    expect(body.conversationId).toBe('198517716955152@lid');
+    expect(logger.error.mock.calls[0][0]).not.toContain('Manual fallback:');
+  });
+});
+
+describe('approved draft inbound gate', () => {
+  const originalEnableSending = process.env.ENABLE_SENDING;
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    if (originalEnableSending === undefined) delete process.env.ENABLE_SENDING;
+    else process.env.ENABLE_SENDING = originalEnableSending;
+    global.fetch = originalFetch;
+  });
+
+  function draftServer(conversationId: string, inbound: boolean) {
+    const server = Object.create(MCPServer.prototype) as any;
+    const draft = { conversationId, content: 'draft body', status: 'APPROVED' };
+    const query = jest.fn(async () => ({ rows: inbound ? [{ id: conversationId }] : [] }));
+    server.dbClient = { query };
+    server.draftService = { getDraftById: jest.fn(async () => draft), markAsSent: jest.fn() };
+    server.waUrl = jest.fn(() => 'http://wa-professional');
+    server.secretForUrl = jest.fn(() => 'test-secret');
+    server.authHeaders = jest.fn(() => ({}));
+    return { server, query };
+  }
+
+  it('blocks an approved professional LID draft without inbound before connector fetch', async () => {
+    process.env.ENABLE_SENDING = 'true';
+    delete process.env.EMERGENCY_DISABLE_SENDING;
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { server, query } = draftServer('professional:198517716955152@lid', false);
+    await expect(server.handleSendApprovedReply({ sendToken: 'send-draft-123', account: 'professional' }))
+      .rejects.toThrow(/only allowed after the customer has sent an inbound message/);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(server.draftService.markAsSent).not.toHaveBeenCalled();
+  });
+
+  it('sends an approved professional LID draft to the same LID after inbound', async () => {
+    process.env.ENABLE_SENDING = 'true';
+    delete process.env.EMERGENCY_DISABLE_SENDING;
+    const fetchMock = jest.fn(async (_url: unknown, _init: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { server, query } = draftServer('professional:198517716955152@lid', true);
+    await server.handleSendApprovedReply({ sendToken: 'send-draft-123', account: 'professional' });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).conversationId).toBe('198517716955152@lid');
+  });
+
+  it('keeps approved group drafts outside the direct-chat gate', async () => {
+    process.env.ENABLE_SENDING = 'true';
+    delete process.env.EMERGENCY_DISABLE_SENDING;
+    const fetchMock = jest.fn(async (_url: unknown, _init: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { server, query } = draftServer('professional:123456789-987654321@g.us', false);
+    await server.handleSendApprovedReply({ sendToken: 'send-draft-123', account: 'professional' });
+    expect(query).not.toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).conversationId).toBe('123456789-987654321@g.us');
+  });
+
+  it('keeps approved personal drafts outside the professional inbound gate', async () => {
+    process.env.ENABLE_SENDING = 'true';
+    delete process.env.EMERGENCY_DISABLE_SENDING;
+    const fetchMock = jest.fn(async (_url: unknown, _init: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { server, query } = draftServer('198517716955152@lid', false);
+    await server.handleSendApprovedReply({ sendToken: 'send-draft-123', account: 'personal' });
+    expect(query).not.toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).conversationId).toBe('198517716955152@lid');
   });
 });

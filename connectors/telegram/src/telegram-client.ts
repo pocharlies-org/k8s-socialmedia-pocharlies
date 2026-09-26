@@ -1,12 +1,4 @@
-import {
-  TelegramClient,
-  MemoryStorage,
-  InputMedia,
-  Message,
-  Peer,
-  User,
-  Chat,
-} from '@mtcute/node';
+import { TelegramClient, MemoryStorage, InputMedia, Message, Peer, Chat } from '@mtcute/node';
 import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
 import pino from 'pino';
@@ -726,11 +718,9 @@ export class TelegramClientWrapper extends EventEmitter {
     forwardCount: number = 0
   ): Promise<any> {
     if (!this.connected) throw new Error('Not connected');
-    const missing = await this.client.addChatMembers(
-      toMtcutePeer(chatId),
-      members,
-      { forwardCount }
-    );
+    const missing = await this.client.addChatMembers(toMtcutePeer(chatId), members, {
+      forwardCount,
+    });
     return { chatId, membersRequested: members.length, missing };
   }
 
@@ -1060,11 +1050,7 @@ export class TelegramClientWrapper extends EventEmitter {
     const effectiveReplyTo = options?.replyTo ?? options?.threadId;
     const sendParams: CommonSendParams | undefined =
       effectiveReplyTo !== undefined ? { replyTo: effectiveReplyTo } : undefined;
-    const messages = await this.client.sendMediaGroup(
-      toMtcutePeer(chatId),
-      medias,
-      sendParams
-    );
+    const messages = await this.client.sendMediaGroup(toMtcutePeer(chatId), medias, sendParams);
     return messages.map(message => message.id);
   }
 

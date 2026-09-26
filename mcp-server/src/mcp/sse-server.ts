@@ -14,6 +14,13 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { MCPServer } from './server';
+import { publicPage } from './public-page';
+import {
+  activateCurrentChatTurn,
+  revokeCurrentChatTurn,
+  listCurrentChatProposals,
+  consumeCurrentChatProposal,
+} from './current-chat-proposals';
 
 const DATABASE_URL =
   process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp';
@@ -28,6 +35,7 @@ const CONNECTOR_SHARED_SECRET =
 const CONNECTOR_URL = process.env.CONNECTOR_URL || 'http://whatsapp-connector:3001';
 const SSE_PORT = parseInt(process.env.MCP_SSE_PORT || '3010', 10);
 const AUTH_TOKEN = process.env.MCP_SSE_AUTH_TOKEN || '';
+const LANDING_PAGE = publicPage();
 
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.SSE_HEARTBEAT_MS || '30000', 10);
 const SESSION_MAX_AGE_MS = parseInt(process.env.SSE_MAX_AGE_MS || `${6 * 3600 * 1000}`, 10);
@@ -240,6 +248,87 @@ async function main() {
           streamableSessions: streamableSessions.size,
         })
       );
+      return;
+    }
+
+    if (url.pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(req.method === 'HEAD' ? undefined : LANDING_PAGE);
+      return;
+    }
+
+    if (url.pathname.startsWith('/internal/hermes/')) {
+      const secret = process.env.HERMES_CHAT_TOOL_SECRET;
+      if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+        res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+      const reply = (status: number, body: unknown) => {
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(body));
+      };
+      try {
+        if (req.method === 'POST' && url.pathname === '/internal/hermes/turns/activate') {
+          const body = (await readJsonBody(req)) as Record<string, unknown>;
+          await activateCurrentChatTurn(
+            redisClient,
+            body?.account as string,
+            body?.chat as string,
+            body?.turn as string,
+            body?.ttl as number
+          );
+          reply(200, { ok: true });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/internal/hermes/turns/revoke') {
+          const body = (await readJsonBody(req)) as Record<string, unknown>;
+          await revokeCurrentChatTurn(
+            redisClient,
+            body?.account as string,
+            body?.chat as string,
+            body?.turn as string
+          );
+          reply(200, { ok: true });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/internal/hermes/proposals') {
+          const proposals = await listCurrentChatProposals(
+            redisClient,
+            url.searchParams.get('account') || '',
+            url.searchParams.get('chat') || ''
+          );
+          reply(200, { proposals });
+          return;
+        }
+        const match = /^\/internal\/hermes\/proposals\/([0-9a-f-]{36})\/consume$/.exec(
+          url.pathname
+        );
+        const rejected = /^\/internal\/hermes\/proposals\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if ((req.method === 'POST' && match) || (req.method === 'DELETE' && rejected)) {
+          if (match && process.env.EMERGENCY_DISABLE_SENDING === 'true') {
+            reply(503, { error: 'Sending is emergency disabled' });
+            return;
+          }
+          const body = (await readJsonBody(req)) as Record<string, unknown>;
+          const proposal = await consumeCurrentChatProposal(
+            redisClient,
+            (match || rejected)![1],
+            body?.account as string,
+            body?.chat as string,
+            body?.turn as string
+          );
+          reply(proposal ? 200 : 404, proposal ? { proposal } : { error: 'Not found' });
+          return;
+        }
+        reply(404, { error: 'Not found' });
+      } catch {
+        reply(400, { error: 'Invalid current-chat request' });
+      }
       return;
     }
 

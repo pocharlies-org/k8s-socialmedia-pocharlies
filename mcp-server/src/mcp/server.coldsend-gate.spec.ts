@@ -44,7 +44,7 @@ function serverWith(queryImpl: QueryImpl) {
   };
 }
 
-const hasInbound: QueryImpl = async () => ({ rows: [{ id: 'professional:x' }] });
+const hasInbound: QueryImpl = async (_sql, params) => ({ rows: [{ id: (params[0] as string[])[0] }] });
 const noInbound: QueryImpl = async () => ({ rows: [] });
 
 describe('handleSendFile cold-send gate (professional)', () => {
@@ -85,16 +85,24 @@ describe('handleSendFile cold-send gate (professional)', () => {
     );
   });
 
-  it('blocks a @lid media send without trusted phone evidence, even when an inbound exists', async () => {
+  it('sends media to the original @lid when that LID has inbound', async () => {
     const { sendFile, connectorCall, query } = serverWith(hasInbound);
-    await expect(
-      sendFile({
-        conversationId: '198517716955152@lid',
-        fileUrl: 'http://f/x.jpg',
-        account: 'professional',
-      })
-    ).rejects.toThrow(/require trusted phone evidence/);
-    expect(query).not.toHaveBeenCalled();
+    await sendFile({
+      conversationId: '198517716955152@lid',
+      fileUrl: 'http://f/x.jpg',
+      account: 'professional',
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional', 'POST', '/api/v1/messages/media/send',
+      { conversationId: '198517716955152@lid', fileUrl: 'http://f/x.jpg' }
+    );
+  });
+
+  it('blocks a cold @lid media send before calling the connector', async () => {
+    const { sendFile, connectorCall } = serverWith(noInbound);
+    await expect(sendFile({ conversationId: '198517716955152@lid', fileUrl: 'http://f/x.jpg', account: 'professional' }))
+      .rejects.toThrow(/only allowed after/);
     expect(connectorCall).not.toHaveBeenCalled();
   });
 
@@ -194,7 +202,9 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
     });
     // The gate is keyed on the DESTINATION, not the source chat.
     expect(query).toHaveBeenCalledWith(expect.any(String), [
-      'professional:34660242739@s.whatsapp.net',
+      ['professional:34660242739@s.whatsapp.net', 'professional:34660242739@c.us'],
+      'professional',
+      '+34660242739',
     ]);
     expect(connectorCall).toHaveBeenCalledWith(
       'http://wa-professional',
@@ -229,17 +239,26 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
     );
   });
 
-  it('blocks a @lid forward destination without trusted phone evidence', async () => {
+  it('forwards to the original @lid when that destination has inbound', async () => {
     const { forward, connectorCall, query } = serverWith(hasInbound);
-    await expect(
-      forward({
-        chatId: 'professional:source@s.whatsapp.net',
-        messageId: 'm1',
-        toChatId: '198517716955152@lid',
-        account: 'professional',
-      })
-    ).rejects.toThrow(/require trusted phone evidence/);
-    expect(query).not.toHaveBeenCalled();
+    await forward({
+      chatId: 'professional:source@s.whatsapp.net',
+      messageId: 'm1',
+      toChatId: '198517716955152@lid',
+      account: 'professional',
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional', 'POST', '/api/v1/messages/forward',
+      { chatId: 'professional:source@s.whatsapp.net', messageId: 'm1', toChatId: '198517716955152@lid' }
+    );
+  });
+
+  it('blocks a cold @lid forward destination before calling the connector', async () => {
+    const { forward, connectorCall } = serverWith(noInbound);
+    await expect(forward({ chatId: 'professional:source@s.whatsapp.net', messageId: 'm1',
+      toChatId: '198517716955152@lid', account: 'professional' }))
+      .rejects.toThrow(/only allowed after/);
     expect(connectorCall).not.toHaveBeenCalled();
   });
 
@@ -303,7 +322,7 @@ describe('handleForwardMessage cold-send gate (professional)', () => {
         toChatId: '34660242739',
         account: 'PROFESSIONAL',
       })
-    ).rejects.toThrow("WhatsApp account 'PROFESSIONAL' is not configured");
+    ).rejects.toThrow("Unknown or disabled account: PROFESSIONAL");
     expect(query).not.toHaveBeenCalled();
     expect(connectorCall).not.toHaveBeenCalled();
   });

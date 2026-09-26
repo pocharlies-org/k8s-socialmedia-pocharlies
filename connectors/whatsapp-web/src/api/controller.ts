@@ -1,7 +1,10 @@
+import { createConnectorAccess, secretEquals } from './access';
 import express, { Request, Response } from 'express';
 import { createHash } from 'crypto';
 import {
   BaileysClient,
+  ProfilePictureDownloadError,
+  ProfilePictureTimeoutError,
   classifyWhatsAppSendFailure,
   WhatsAppSendFailureClass,
 } from '../baileys-client';
@@ -23,6 +26,15 @@ import {
   normalizePhoneForWhatsApp,
   WhatsAppContactSeedInput,
 } from '../contact-sync';
+import { CapabilityError } from '../whatsapp-capabilities';
+import {
+  claimSendAttempt,
+  confirmTextSend,
+  reserveMediaSend,
+  reserveTextSend,
+  reserveVoiceSend,
+  SendAlreadyClaimedError,
+} from '../send-idempotency';
 
 function statusForSendFailure(
   failureClass: WhatsAppSendFailureClass | 'disabled_sending' | 'invalid_request'
@@ -41,6 +53,19 @@ function statusForSendFailure(
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || String(error);
   return String(error);
+}
+
+function capabilityErrorResponse(res: Response, error: unknown): void {
+  if (error instanceof CapabilityError) {
+    res.status(error.status).json({
+      ok: false,
+      error: { code: error.code, message: error.message, details: error.details || undefined },
+    });
+    return;
+  }
+  res
+    .status(500)
+    .json({ ok: false, error: { code: 'CONNECTOR_ERROR', message: errorMessage(error) } });
 }
 
 function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
@@ -111,7 +136,7 @@ function createManualOpenAuth(
   return (req, res, next): void => {
     const authz = req.headers.authorization || '';
     const bearer = authz.startsWith('Bearer ') ? authz.slice('Bearer '.length).trim() : '';
-    if (adminToken && bearer && bearer === adminToken) {
+    if (adminToken && bearer && secretEquals(bearer, adminToken)) {
       next();
       return;
     }
@@ -279,10 +304,11 @@ export function createRouter(
   sharedSecret: string
 ): express.Router {
   const router = express.Router();
+  router.use(createConnectorAccess(sharedSecret));
   const auth = createHMACAuth(sharedSecret);
   const manualOpenAuth = createManualOpenAuth(auth, sharedSecret);
 
-  // Health check (no auth required)
+  // Detailed health requires authentication; access middleware provides anonymous liveness.
   router.get('/health', (_req: Request, res: Response) => {
     const qr = qrHandler.getCurrentQR();
     const connected = client.isConnected();
@@ -500,7 +526,7 @@ export function createRouter(
     })();
   });
 
-  // Get QR code (no auth required for local dev)
+  // QR access is protected by the router access middleware.
   router.get('/auth/qr', (req: Request, res: Response) => {
     const qr = qrHandler.getCurrentQR();
     if (!qr) {
@@ -533,7 +559,8 @@ export function createRouter(
     void (async (): Promise<void> => {
       let requestConversationId: unknown;
       let requestContent: unknown;
-      let requestSendToken: unknown;
+      let attemptedMessageId: string | undefined;
+      let reservedMessageId: string | undefined;
       try {
         const body = req.body as {
           sendToken?: string;
@@ -542,11 +569,18 @@ export function createRouter(
           replyToMessageId?: string;
         };
         const { sendToken, conversationId, content, replyToMessageId } = body;
-        requestSendToken = sendToken;
         requestConversationId = conversationId;
         requestContent = content;
 
-        if (!sendToken || !conversationId || !content) {
+        if (
+          typeof sendToken !== 'string' ||
+          !sendToken.trim() ||
+          sendToken.length > 200 ||
+          typeof conversationId !== 'string' ||
+          !conversationId ||
+          typeof content !== 'string' ||
+          !content
+        ) {
           console.warn(
             `WhatsApp send rejected failureClass=invalid_request conversationId=${conversationId || ''}`
           );
@@ -557,8 +591,6 @@ export function createRouter(
           return;
         }
 
-        // In production, validate sendToken here
-        // For now, we'll just check if sending is enabled
         if (process.env.ENABLE_SENDING !== 'true') {
           console.warn(
             `WhatsApp send blocked failureClass=disabled_sending conversationId=${conversationId}`
@@ -593,16 +625,74 @@ export function createRouter(
           return;
         }
 
-        const messageId = await client.sendMessage(conversationId, content, { replyToMessageId });
+        let reservation;
+        try {
+          reservation = await reserveTextSend({
+            token: sendToken,
+            conversationId,
+            content,
+            replyToMessageId,
+          });
+        } catch (error) {
+          if (errorMessage(error) === 'Invalid sendToken') {
+            res.status(400).json({ error: 'Invalid sendToken', failureClass: 'invalid_request' });
+            return;
+          }
+          throw error;
+        }
+        if (reservation.state === 'conflict') {
+          res.status(409).json({
+            error: 'sendToken was already used for a different message',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (reservation.state === 'pending') {
+          res.status(409).json({
+            error: 'Send outcome is uncertain; check message history before a new send',
+            failureClass: 'send_outcome_uncertain',
+            messageId: reservation.messageId,
+          });
+          return;
+        }
+        if (reservation.state === 'sent') {
+          res.json({
+            messageId: reservation.messageId,
+            sentAt: reservation.sentAt,
+            deduplicated: true,
+          });
+          return;
+        }
+        reservedMessageId = reservation.messageId;
+        const messageId = await client.sendMessage(conversationId, content, {
+          replyToMessageId,
+          messageId: reservation.messageId,
+          beforeSend: async () => {
+            await claimSendAttempt(sendToken, reservation.messageId);
+            attemptedMessageId = reservation.messageId;
+          },
+        });
+        if (messageId !== reservation.messageId) {
+          throw new Error(`Baileys returned unexpected message ID: ${messageId || 'missing'}`);
+        }
+        const sentAt = await confirmTextSend(sendToken, messageId);
         console.info(
           `WhatsApp send ok conversationId=${conversationId} messageId=${messageId || ''}`
         );
 
         res.json({
           messageId,
-          sentAt: new Date().toISOString(),
+          sentAt,
         });
       } catch (error) {
+        if (error instanceof SendAlreadyClaimedError) {
+          res.status(409).json({
+            error: 'Send outcome is uncertain; check message history before a new send',
+            failureClass: 'send_outcome_uncertain',
+            messageId: reservedMessageId,
+          });
+          return;
+        }
         const failureClass = classifyWhatsAppSendFailure(error);
         const details = (error as any)?.details || {};
         console.error(
@@ -620,7 +710,7 @@ export function createRouter(
             const manualRequest = await enqueueManualOpenFromSendFailure(
               details.normalizedJid || details.rawJid || requestConversationId,
               requestContent,
-              requestSendToken,
+              undefined,
               details
             );
             if (manualRequest) fallback.manualRequest = manualRequest;
@@ -634,6 +724,7 @@ export function createRouter(
           actionable: details.actionable,
           details,
           fallback,
+          ...(attemptedMessageId ? { messageId: attemptedMessageId, outcomeUncertain: true } : {}),
         });
       }
     })();
@@ -642,16 +733,29 @@ export function createRouter(
   // Send a voice note (requires auth) — {conversationId, audioBase64, mimeType}
   router.post('/messages/audio', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
+      let attemptedMessageId: string | undefined;
+      let reservedMessageId: string | undefined;
       try {
         const body = req.body as {
           conversationId?: string;
           audioBase64?: string;
           mimeType?: string;
+          sendToken?: string;
+          sourceDigest?: string;
+          sourceMimeType?: string;
         };
-        const { conversationId, audioBase64, mimeType } = body;
+        const { conversationId, audioBase64, mimeType, sendToken, sourceDigest, sourceMimeType } =
+          body;
 
-        if (!conversationId || !audioBase64) {
-          res.status(400).json({ error: 'Missing conversationId or audioBase64' });
+        if (
+          !conversationId ||
+          !audioBase64 ||
+          (sendToken !== undefined &&
+            (typeof sendToken !== 'string' || !sendToken.trim() || sendToken.length > 200))
+        ) {
+          res
+            .status(400)
+            .json({ error: 'Missing or invalid conversationId, audioBase64, or sendToken' });
           return;
         }
         if (
@@ -672,21 +776,77 @@ export function createRouter(
           return;
         }
 
+        const voiceMimeType = mimeType || 'audio/ogg; codecs=opus';
+        const reservation = sendToken
+          ? await reserveVoiceSend({
+              token: sendToken,
+              conversationId,
+              audioBase64,
+              mimeType: voiceMimeType,
+              sourceDigest,
+              sourceMimeType,
+            })
+          : undefined;
+        if (reservation?.state === 'conflict') {
+          res.status(409).json({
+            error: 'sendToken was already used for a different message',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (reservation?.state === 'pending') {
+          res.status(409).json({
+            error: 'Send outcome is uncertain; check message history before a new send',
+            failureClass: 'send_outcome_uncertain',
+            messageId: reservation.messageId,
+          });
+          return;
+        }
+        if (reservation?.state === 'sent') {
+          res.json({
+            messageId: reservation.messageId,
+            sentAt: reservation.sentAt,
+            deduplicated: true,
+          });
+          return;
+        }
+        reservedMessageId = reservation?.messageId;
         const buf = Buffer.from(audioBase64, 'base64');
         const messageId = await client.sendVoice(
           conversationId,
           buf,
-          mimeType || 'audio/ogg; codecs=opus'
+          voiceMimeType,
+          reservation?.messageId,
+          reservation
+            ? async () => {
+                await claimSendAttempt(sendToken!, reservation.messageId);
+                attemptedMessageId = reservation.messageId;
+              }
+            : undefined
         );
+        if (reservation && messageId !== reservation.messageId)
+          throw new Error('Baileys returned unexpected voice message ID');
+        const sentAt = reservation
+          ? await confirmTextSend(sendToken!, messageId!)
+          : new Date().toISOString();
         console.info(
           `WhatsApp voice sent conversationId=${conversationId} messageId=${messageId || ''}`
         );
-        res.json({ messageId, sentAt: new Date().toISOString() });
+        res.json({ messageId, sentAt });
       } catch (error) {
+        if (error instanceof SendAlreadyClaimedError) {
+          res.status(409).json({
+            error: 'Send outcome is uncertain; check message history before a new send',
+            failureClass: 'send_outcome_uncertain',
+            messageId: reservedMessageId,
+          });
+          return;
+        }
         const failureClass = classifyWhatsAppSendFailure(error);
         res.status(statusForSendFailure(failureClass)).json({
           error: `Failed to send voice: ${errorMessage(error)}`,
           failureClass,
+          ...(attemptedMessageId ? { messageId: attemptedMessageId, outcomeUncertain: true } : {}),
         });
       }
     })();
@@ -706,7 +866,10 @@ export function createRouter(
           return;
         }
 
-        if (process.env.ENABLE_SENDING !== 'true') {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
           res.status(403).json({ error: 'Sending is disabled' });
           return;
         }
@@ -828,14 +991,54 @@ export function createRouter(
     })();
   });
 
+  router.post(
+    '/chats/archive-snapshot/preview',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          res.json({ ok: true, ...(await client.previewArchiveSnapshot()) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.post(
+    '/chats/archive-snapshot/apply',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          res.json({ ok: true, ...(await client.syncArchiveSnapshot()) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
   // Get group info
+  router.post('/chats/start', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const phone = typeof req.body?.phone === 'string' ? req.body.phone : '';
+        const chat = await client.startChat(phone);
+        res.status(201).json({ ok: true, chat });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
   router.get('/groups/:id/info', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
         const info = await client.getGroupInfo(req.params.id);
         res.json(info);
       } catch (e) {
-        res.status(500).json({ error: String(e) });
+        capabilityErrorResponse(res, e);
       }
     })();
   });
@@ -847,7 +1050,7 @@ export function createRouter(
         const participants = await client.getGroupParticipants(req.params.id);
         res.json({ participants });
       } catch (e) {
-        res.status(500).json({ error: String(e) });
+        capabilityErrorResponse(res, e);
       }
     })();
   });
@@ -867,6 +1070,14 @@ export function createRouter(
           contentType: 'image/jpeg',
         });
       } catch (e) {
+        if (e instanceof ProfilePictureTimeoutError) {
+          res.status(504).json({ error: 'WhatsApp profile picture timed out' });
+          return;
+        }
+        if (e instanceof ProfilePictureDownloadError) {
+          res.status(502).json({ error: e.message });
+          return;
+        }
         res.status(500).json({ error: String(e) });
       }
     })();
@@ -921,39 +1132,181 @@ export function createRouter(
   // Send file/media
   router.post('/messages/media/send', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
+      let attemptedMessageId: string | undefined;
+      let reservedMessageId: string | undefined;
       try {
-        if (process.env.ENABLE_SENDING !== 'true') {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
-        const { conversationId, fileUrl, caption, asSticker, kind, replyTo } = req.body as {
+        const {
+          conversationId,
+          fileUrl,
+          fileName,
+          caption,
+          asSticker,
+          kind,
+          replyTo,
+          sendToken,
+          sourceDigest,
+          sourceMimeType,
+        } = req.body as {
           conversationId?: string;
           fileUrl?: string;
+          fileName?: string;
           caption?: string;
           asSticker?: boolean;
           kind?: string;
           replyTo?: string;
+          sendToken?: string;
+          sourceDigest?: string;
+          sourceMimeType?: string;
         };
-        if (!conversationId || !fileUrl) {
-          res.status(400).json({ error: 'Missing conversationId or fileUrl' });
+        if (
+          !conversationId ||
+          !fileUrl ||
+          (sendToken !== undefined &&
+            (typeof sendToken !== 'string' || !sendToken.trim() || sendToken.length > 200))
+        ) {
+          res
+            .status(400)
+            .json({ error: 'Missing or invalid conversationId, fileUrl, or sendToken' });
           return;
         }
-        await client.sendFile(conversationId, fileUrl, caption, {
+        const options = {
           asSticker: !!asSticker || kind === 'sticker',
+          asGif: kind === 'gif',
           replyToMessageId: optionalString(replyTo),
+          fileName: optionalString(fileName),
+        };
+        const reservation = sendToken
+          ? await reserveMediaSend({
+              token: sendToken,
+              conversationId,
+              fileUrl,
+              fileName: options.fileName,
+              caption,
+              asSticker: options.asSticker,
+              asGif: options.asGif,
+              replyToMessageId: options.replyToMessageId,
+              sourceDigest,
+              sourceMimeType,
+            })
+          : undefined;
+        if (reservation?.state === 'conflict') {
+          res.status(409).json({
+            error: 'sendToken was already used for a different message',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (reservation?.state === 'pending') {
+          res.status(409).json({
+            error: 'Send outcome is uncertain; check message history before a new send',
+            failureClass: 'send_outcome_uncertain',
+            messageId: reservation.messageId,
+          });
+          return;
+        }
+        if (reservation?.state === 'sent') {
+          res.json({
+            sent: true,
+            messageId: reservation.messageId,
+            sentAt: reservation.sentAt,
+            deduplicated: true,
+          });
+          return;
+        }
+        reservedMessageId = reservation?.messageId;
+        const messageId = await client.sendFile(conversationId, fileUrl, caption, {
+          ...options,
+          messageId: reservation?.messageId,
+          beforeSend: reservation
+            ? async () => {
+                await claimSendAttempt(sendToken!, reservation.messageId);
+                attemptedMessageId = reservation.messageId;
+              }
+            : undefined,
         });
-        res.json({ sent: true, sentAt: new Date().toISOString() });
+        if (reservation && messageId !== reservation.messageId)
+          throw new Error('Baileys returned unexpected media message ID');
+        const sentAt = reservation
+          ? await confirmTextSend(sendToken!, messageId!)
+          : new Date().toISOString();
+        res.json({ sent: true, messageId, sentAt });
       } catch (e) {
-        res.status(500).json({ error: String(e) });
+        if (e instanceof SendAlreadyClaimedError) {
+          res.status(409).json({
+            error: 'Send outcome is uncertain; check message history before a new send',
+            failureClass: 'send_outcome_uncertain',
+            messageId: reservedMessageId,
+          });
+          return;
+        }
+        const failureClass = classifyWhatsAppSendFailure(e);
+        res.status(statusForSendFailure(failureClass)).json({
+          error: errorMessage(e),
+          failureClass,
+          ...(attemptedMessageId ? { messageId: attemptedMessageId, outcomeUncertain: true } : {}),
+        });
       }
     })();
   });
+
+  for (const [path, kind] of [
+    ['/messages/sticker', 'sticker'],
+    ['/messages/gif', 'gif'],
+  ] as const) {
+    router.post(path, auth, (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (
+            process.env.ENABLE_SENDING !== 'true' ||
+            process.env.EMERGENCY_DISABLE_SENDING === 'true'
+          ) {
+            res.status(403).json({
+              ok: false,
+              error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+            });
+            return;
+          }
+          const body = (req.body || {}) as {
+            conversationId?: string;
+            fileUrl?: string;
+            caption?: string;
+            fileName?: string;
+            replyTo?: string;
+          };
+          if (!body.conversationId || !body.fileUrl)
+            throw new CapabilityError(
+              'INVALID_CAPABILITY_INPUT',
+              'conversationId and fileUrl are required'
+            );
+          const messageId = await client.sendFile(body.conversationId, body.fileUrl, body.caption, {
+            asSticker: kind === 'sticker',
+            asGif: kind === 'gif',
+            fileName: optionalString(body.fileName),
+            replyToMessageId: optionalString(body.replyTo),
+          });
+          res.json({ ok: true, messageId, sent: true, kind });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    });
+  }
 
   // Forward message
   router.post('/messages/forward', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
-        if (process.env.ENABLE_SENDING !== 'true') {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
@@ -962,25 +1315,57 @@ export function createRouter(
           res.status(400).json({ error: 'Missing chatId, messageId, or toChatId' });
           return;
         }
-        await client.forwardMessage(chatId, messageId, toChatId);
-        res.json({ forwarded: true });
+        const forwardedMessageId = await client.forwardMessage(chatId, messageId, toChatId);
+        res.json({ ok: true, forwarded: true, messageId: forwardedMessageId });
       } catch (e) {
-        res.status(500).json({ error: String(e) });
+        capabilityErrorResponse(res, e);
       }
     })();
   });
 
   // Delete message
   router.delete(
+    '/messages/:chatId/:msgId/for-me',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (
+            process.env.ENABLE_SENDING !== 'true' ||
+            process.env.EMERGENCY_DISABLE_SENDING === 'true'
+          ) {
+            res.status(403).json({
+              ok: false,
+              error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+            });
+            return;
+          }
+          await client.deleteMessageForMe(req.params.chatId, req.params.msgId);
+          res.json({ ok: true, deletedForMe: true, messageId: req.params.msgId });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.delete(
     '/messages/:chatId/:msgId',
     auth,
     (req: AuthenticatedRequest, res: Response): void => {
       void (async () => {
         try {
+          if (
+            process.env.ENABLE_SENDING !== 'true' ||
+            process.env.EMERGENCY_DISABLE_SENDING === 'true'
+          ) {
+            res.status(403).json({ error: 'Sending disabled' });
+            return;
+          }
           await client.deleteMessage(req.params.chatId, req.params.msgId);
-          res.json({ deleted: true });
+          res.json({ ok: true, deleted: true, messageId: req.params.msgId });
         } catch (e) {
-          res.status(500).json({ error: String(e) });
+          capabilityErrorResponse(res, e);
         }
       })();
     }
@@ -997,5 +1382,494 @@ export function createRouter(
       }
     })();
   });
+
+  router.post('/messages/edit', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const body = req.body as {
+          conversationId?: string;
+          chatId?: string;
+          messageId?: string;
+          content?: string;
+        };
+        const chatId = body.conversationId || body.chatId;
+        if (!chatId || !body.messageId || !body.content) {
+          res.status(400).json({
+            ok: false,
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'conversationId, messageId, and content are required',
+            },
+          });
+          return;
+        }
+        const messageId = await client.editMessage(chatId, body.messageId, body.content);
+        res.json({ ok: true, messageId, edited: true });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.patch(
+    '/messages/:chatId/:msgId',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (
+            process.env.ENABLE_SENDING !== 'true' ||
+            process.env.EMERGENCY_DISABLE_SENDING === 'true'
+          ) {
+            res.status(403).json({
+              ok: false,
+              error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+            });
+            return;
+          }
+          const content = optionalString((req.body || {}).content || (req.body || {}).text);
+          if (!content) {
+            res.status(400).json({
+              ok: false,
+              error: { code: 'INVALID_REQUEST', message: 'content is required' },
+            });
+            return;
+          }
+          const messageId = await client.editMessage(req.params.chatId, req.params.msgId, content);
+          res.json({ ok: true, messageId, edited: true });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.post('/chats/:chatId/modify', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const action = optionalString(body.action);
+        if (!action) {
+          res
+            .status(400)
+            .json({ ok: false, error: { code: 'INVALID_REQUEST', message: 'action is required' } });
+          return;
+        }
+        const ids = Array.isArray(body.messageIds)
+          ? (body.messageIds
+              .map(id => (typeof id === 'string' ? { id } : id))
+              .filter(item => item && typeof item.id === 'string') as Array<{
+              id: string;
+              fromMe?: boolean;
+            }>)
+          : [];
+        const value = body.value ?? body.enabled ?? body.durationMs;
+        const result = await client.modifyChat(req.params.chatId, action, value, ids);
+        res.json({ ok: true, data: result });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/groups/create', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const body = (req.body || {}) as { subject?: string; participants?: string[] };
+        const result = await client.createGroup(
+          body.subject || '',
+          Array.isArray(body.participants) ? body.participants : []
+        );
+        res.status(201).json({ ok: true, data: result });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/groups/:id/update', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const result = await client.updateGroup(req.params.id, req.body || {});
+        res.json({ ok: true, data: result });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post(
+    '/groups/:id/participants',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (
+            process.env.ENABLE_SENDING !== 'true' ||
+            process.env.EMERGENCY_DISABLE_SENDING === 'true'
+          ) {
+            res.status(403).json({
+              ok: false,
+              error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+            });
+            return;
+          }
+          const body = (req.body || {}) as {
+            action?: 'add' | 'remove' | 'promote' | 'demote';
+            participants?: string[];
+          };
+          const result = await client.updateGroupParticipants(
+            req.params.id,
+            Array.isArray(body.participants) ? body.participants : [],
+            body.action as any
+          );
+          res.json({ ok: true, data: result });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.get('/contacts', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const contacts = await client.listContacts(Number(req.query.limit || 500));
+        res.json({ ok: true, contacts });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/contacts/create', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const result = await client.createContact(req.body || {});
+        res.status(201).json({ ok: true, data: result });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/contacts', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        res.status(201).json({ ok: true, data: await client.createContact(req.body || {}) });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/contacts/share', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const body = (req.body || {}) as Record<string, unknown>;
+        const chatId = optionalString(body.conversationId || body.chatId);
+        if (!chatId)
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'conversationId is required');
+        const messageId = await client.shareContact(chatId, {
+          displayName: optionalString(body.displayName) || '',
+          phone: optionalString(body.phone) || '',
+          organization: optionalString(body.organization),
+          email: optionalString(body.email),
+        });
+        res.json({ ok: true, messageId, sent: true });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/messages/poll', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const body = (req.body || {}) as Record<string, unknown>;
+        const chatId = optionalString(body.conversationId || body.chatId);
+        if (!chatId)
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'conversationId is required');
+        const messageId = await client.sendPoll(chatId, {
+          name: optionalString(body.name) || '',
+          values: Array.isArray(body.values) ? body.values.map(String) : [],
+          selectableCount:
+            body.selectableCount === undefined ? undefined : Number(body.selectableCount),
+        });
+        res.json({ ok: true, messageId, sent: true });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/messages/poll/vote', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const body = (req.body || {}) as Record<string, unknown>;
+        const chatId = optionalString(body.conversationId || body.chatId);
+        if (!chatId)
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'conversationId is required');
+        const pollMessageId = optionalString(body.pollMessageId || body.messageId);
+        if (!pollMessageId)
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'pollMessageId is required');
+        const messageId = await client.sendPollVote(chatId, {
+          pollMessageId,
+          options: body.options,
+        });
+        res.json({ ok: true, messageId: messageId ?? null, sent: true });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/messages/poll/results', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const chatId = optionalString(body.conversationId || body.chatId);
+        if (!chatId)
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'conversationId is required');
+        if (!Array.isArray(body.pollMessageIds) || body.pollMessageIds.length === 0)
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'pollMessageIds is required');
+        if (body.pollMessageIds.length > 50)
+          throw new CapabilityError(
+            'INVALID_CAPABILITY_INPUT',
+            'At most 50 pollMessageIds are allowed per request'
+          );
+        const pollMessageIds: string[] = [];
+        for (const value of body.pollMessageIds) {
+          const id = optionalString(value);
+          if (id) pollMessageIds.push(id);
+        }
+        if (!pollMessageIds.length)
+          throw new CapabilityError(
+            'INVALID_CAPABILITY_INPUT',
+            'pollMessageIds must contain non-empty ids'
+          );
+        const polls = await client.getPollResults(chatId, pollMessageIds);
+        res.json({ ok: true, polls });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/messages/event', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
+          res.status(403).json({
+            ok: false,
+            error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+          });
+          return;
+        }
+        const body = (req.body || {}) as Record<string, unknown>;
+        const chatId = optionalString(body.conversationId || body.chatId);
+        const startDate = new Date(String(body.startDate || ''));
+        const locationValue =
+          body.location && typeof body.location === 'object' && !Array.isArray(body.location)
+            ? (body.location as Record<string, unknown>)
+            : undefined;
+        if (!chatId)
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'conversationId is required');
+        const messageId = await client.sendEvent(chatId, {
+          name: optionalString(body.name) || '',
+          description: optionalString(body.description),
+          startDate,
+          endDate: body.endDate ? new Date(String(body.endDate)) : undefined,
+          location: locationValue
+            ? {
+                degreesLatitude: Number(locationValue.degreesLatitude),
+                degreesLongitude: Number(locationValue.degreesLongitude),
+                ...(optionalString(locationValue.name)
+                  ? { name: optionalString(locationValue.name) }
+                  : {}),
+              }
+            : undefined,
+          call: body.call === 'audio' || body.call === 'video' ? body.call : undefined,
+          isCancelled: body.isCancelled === undefined ? undefined : Boolean(body.isCancelled),
+          extraGuestsAllowed:
+            body.extraGuestsAllowed === undefined ? undefined : Boolean(body.extraGuestsAllowed),
+        });
+        res.json({ ok: true, messageId, sent: true });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.get('/chats/:chatId/presence', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const data = await client.getPresence(
+          req.params.chatId,
+          optionalString(req.query.participant)
+        );
+        res.json({ ok: true, data });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/chats/:chatId/presence', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = (req.body || {}) as { action?: string; status?: any };
+        if (body.action === 'subscribe') {
+          res.json({ ok: true, data: await client.subscribePresence(req.params.chatId) });
+          return;
+        }
+        res.json({ ok: true, data: await client.updatePresence(req.params.chatId, body.status) });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.get('/privacy', auth, (_req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        res.json({ ok: true, data: await client.getPrivacySettings() });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/privacy', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = (req.body || {}) as { field?: string; value?: string };
+        if (!body.field || body.value === undefined || body.value === null || body.value === '') {
+          throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'field and value are required');
+        }
+        if (body.field === 'defaultDisappearing') {
+          res.json({ ok: true, data: await client.setDefaultDisappearing(Number(body.value)) });
+          return;
+        }
+        res.json({ ok: true, data: await client.updatePrivacy(body.field, body.value) });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.get(
+    '/chats/:chatId/disappearing',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          res.json({ ok: true, data: await client.getDisappearing(req.params.chatId) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.post(
+    '/chats/:chatId/disappearing',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          const expiration = (req.body || {}).expiration;
+          if (typeof expiration !== 'number' && typeof expiration !== 'boolean')
+            throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'expiration is required');
+          res.json({ ok: true, data: await client.setDisappearing(req.params.chatId, expiration) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
   return router;
 }

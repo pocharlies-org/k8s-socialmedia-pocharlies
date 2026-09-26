@@ -18,9 +18,31 @@ permissions:
   actions: read
 
 jobs:
+  whatsapp-app:
+    runs-on: ${{ github.repository_owner == 'pocharlies-org' && 'arc-k8s' || 'ubuntu-latest' }}
+    defaults:
+      run:
+        working-directory: apps/whatsapp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/whatsapp/package-lock.json
+      - name: Install media test dependencies
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    runs-on: arc-k8s
+    runs-on: ${{ github.repository_owner == 'pocharlies-org' && 'arc-k8s' || 'ubuntu-latest' }}
     env:
       RUN_S3_INTEGRATION: "1"
       S3_ENDPOINT: http://127.0.0.1:9000
@@ -71,9 +93,14 @@ jobs:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@main
     with:
-      runner: arc-k8s
+      runner: ${{ github.repository_owner == 'pocharlies-org' && 'arc-k8s' || 'ubuntu-latest' }}
       node_version: "22"
       pnpm_version: "11.17.0"
+      # En pull_request, github.repository_owner es el dueño de la base, así que también
+      # es 'pocharlies-org' en PRs de fork: esas ejecuciones no reciben secretos de Harbor
+      # (las imágenes base del proxy-cache contestan 401). Se construye solo cuando el
+      # commit de cabecera está en este repo: push al tronco y PRs internos.
+      run_docker_build: ${{ github.repository_owner == 'pocharlies-org' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       docker_build_timeout: 12m
       kustomize_paths: k8s/overlays/stg k8s/overlays/prod
       images: |

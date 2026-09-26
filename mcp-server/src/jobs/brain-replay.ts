@@ -7,7 +7,7 @@
 import { Pool } from 'pg';
 import pino from 'pino';
 import {
-  ACCOUNTS,
+  accounts,
   Account,
   Platform,
   Cursor,
@@ -37,8 +37,8 @@ export interface ReplayOptions {
 }
 
 function parseAccount(value: string | undefined): Account[] {
-  if (!value) return [...ACCOUNTS];
-  if (value === 'personal' || value === 'professional') return [value];
+  if (!value) return accounts();
+  if (accounts().includes(value)) return [value];
   throw new Error(`invalid ACCOUNT: ${value}`);
 }
 
@@ -52,7 +52,7 @@ export function replayOptionsFromEnv(env: NodeJS.ProcessEnv): ReplayOptions {
   return {
     databaseUrl:
       env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp',
-    brainUrl: env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local',
+    brainUrl: env.BRAIN_URL || '',
     apiKey: env.BRAIN_API_KEY || '',
     batch: parseInt(env.BATCH || env.BRAIN_INGEST_BATCH || '500', 10),
     limit: parseInt(env.LIMIT || env.BRAIN_INGEST_MAX_ROWS || '0', 10),

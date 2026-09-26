@@ -1,0 +1,30 @@
+[
+  {
+    "channel": "whatsapp",
+    "accountId": "personal",
+    "label": "WhatsApp personal",
+    "connectorUrl": "http://whatsapp-personal:3001",
+    "enabled": true,
+    "requireInboundBeforeSend": true,
+    "secretEnv": "WA_PERSONAL_SECRET",
+    "sessionPath": "/volume2/docker/social-media/src/connectors/whatsapp-web/session-data"
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "secondary",
+    "label": "WhatsApp secondary",
+    "connectorUrl": "http://whatsapp-secondary:3001",
+    "enabled": true,
+    "requireInboundBeforeSend": true,
+    "secretEnv": "WA_SECONDARY_SECRET"
+  },
+  {
+    "channel": "instagram",
+    "accountId": "instagram",
+    "label": "Instagram",
+    "connectorUrl": "http://instagram-connector:3003",
+    "enabled": true,
+    "requireInboundBeforeSend": true,
+    "secretEnv": "INSTAGRAM_SECRET"
+  }
+]

@@ -1,4 +1,4 @@
-FROM harbor.lan.e-dani.com/cache/library/node:22-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Debian security updates. The release pipeline refuses any image that still
 # carries a fixable HIGH/CRITICAL finding.
@@ -15,6 +15,7 @@ WORKDIR /app
 # Install pnpm and tsx globally
 # Copy package files
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.json ./
+COPY patches ./patches
 COPY mcp-server/package.json mcp-server/tsconfig.json ./mcp-server/
 COPY shared/package.json shared/tsconfig.json ./shared/
 

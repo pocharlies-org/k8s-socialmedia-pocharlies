@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 
-export const ACCOUNTS = ['personal', 'professional'] as const;
-export type Account = (typeof ACCOUNTS)[number];
+import { getAccounts } from '../domain/account-registry';
+export const accounts = () => [...new Set(getAccounts().map(a => a.accountId))];
+export type Account = string;
 export type Platform = 'whatsapp' | 'telegram' | 'instagram';
 
 export interface Cursor {
@@ -51,7 +52,7 @@ function assertCursorTableName(table: string): void {
 }
 
 export function instanceForAccount(account: Account): string {
-  return account === 'professional' ? 'skirmshop' : 'personal';
+  return account;
 }
 
 export function sourceId(platform: string, waMessageId: string): string {
@@ -76,22 +77,11 @@ export function adapterForPlatform(platform: string): string {
 }
 
 export async function ensureLiveCursorTable(pool: Pool): Promise<void> {
-  await pool.query(`
-    DO $$
-    DECLARE col_type text;
-    BEGIN
-      SELECT data_type INTO col_type FROM information_schema.columns
-        WHERE table_name = 'brain_ingest_cursor' AND column_name = 'last_id';
-      IF col_type IS NOT NULL AND col_type <> 'bigint' THEN
-        DROP TABLE brain_ingest_cursor;
-      END IF;
-    END $$;
-  `);
   await pool.query(
     `CREATE TABLE IF NOT EXISTS brain_ingest_cursor (
        account          text PRIMARY KEY,
        last_created_at  timestamptz NOT NULL,
-       last_id          bigint,
+       last_id          uuid,
        updated_at       timestamptz NOT NULL DEFAULT now()
      )`
   );
@@ -104,7 +94,7 @@ export async function ensureReplayCursorTable(pool: Pool): Promise<void> {
        account          text NOT NULL,
        platform         text NOT NULL,
        last_created_at  timestamptz NOT NULL,
-       last_id          bigint,
+       last_id          uuid,
        updated_at       timestamptz NOT NULL DEFAULT now(),
        PRIMARY KEY (run_id, account, platform)
      )`
@@ -188,7 +178,7 @@ export async function fetchBatch(
     `m.account = $1`,
     `m.is_deleted = false`,
     `m.content IS NOT NULL AND btrim(m.content) <> ''`,
-    `(m.created_at, m.id) > ($2::timestamptz, COALESCE($3::bigint, 0::bigint))`,
+    `(m.created_at, m.id) > ($2::timestamptz, COALESCE($3::uuid, 0::uuid))`,
   ];
   if (opts.platform) {
     params.push(opts.platform);

@@ -7,7 +7,7 @@ describe('brain replay options', () => {
     expect(opts.dryRun).toBe(true);
     expect(opts.runId).toBe('audit-20260609');
     expect(opts.since).toBe('2026-01-01T00:00:00Z');
-    expect(opts.accounts).toEqual(['personal', 'professional']);
+    expect(opts.accounts).toEqual(['personal', 'professional', 'skirmshop', 'barbelpapis']);
   });
 
   it('can target one account and platform for windowed replay', () => {

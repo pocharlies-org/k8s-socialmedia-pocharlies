@@ -1,4 +1,7 @@
+import { qrPageUrl, dashboardUrl, whatsappSocketOptions } from './url-config';
 import express from 'express';
+import { createUiPath } from './ui-path';
+import { createConnectorAccess } from './api/access';
 import { BaileysClient, WhatsAppMessage } from './baileys-client';
 import { QRHandler } from './qr-handler';
 import { EventPublisher } from './events/publisher';
@@ -24,13 +27,13 @@ const ENCRYPTION_KEY =
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const PORT = parseInt(process.env.PORT || '3001', 10);
-const CONNECTOR_SHARED_SECRET =
-  process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
-// When true, the public /qr/page renders a "Generate new QR" button wired to an
-// unauthenticated POST /qr/renew. Only enable on LAN-only deployments (e.g. the
-// professional connector at whatsapp-pro.e-dani.com) — never on the
-// internet-exposed personal page, where anyone with the URL could disconnect.
+const CONNECTOR_SHARED_SECRET = process.env.CONNECTOR_SHARED_SECRET || '';
+// Browser renewal requires configured UI credentials and this explicit opt-in.
 const ALLOW_WEB_RENEW = process.env.ALLOW_WEB_RENEW === 'true';
+const uiPath = createUiPath();
+const publicQrUrl = qrPageUrl();
+dashboardUrl();
+whatsappSocketOptions();
 
 function isKnownUndiciStreamAbort(error: unknown): boolean {
   const err = error as any;
@@ -57,18 +60,19 @@ async function main(): Promise<void> {
 
   const app = express();
   app.use(express.json({ limit: '15mb' })); // large enough for base64 voice notes
+  app.use(createConnectorAccess(CONNECTOR_SHARED_SECRET));
   app.use('/api/v1', createRouter(client, qrHandler, CONNECTOR_SHARED_SECRET));
 
   app.get('/', (_req, res) => {
-    res.redirect(302, '/qr/page');
+    res.redirect(302, uiPath('/qr/page'));
   });
 
   app.get('/manual-open', (_req, res) => {
-    res.redirect(302, '/api/v1/manual-open/page');
+    res.redirect(302, uiPath('/api/v1/manual-open/page'));
   });
 
   app.get('/manual-open/page', (_req, res) => {
-    res.redirect(302, '/api/v1/manual-open/page');
+    res.redirect(302, uiPath('/api/v1/manual-open/page'));
   });
 
   // Live QR endpoint — serves QR as PNG image from memory
@@ -102,7 +106,7 @@ async function renewQr() {
   const msg = document.getElementById('renew-msg');
   btn.disabled = true; msg.textContent = 'Regenerating QR...';
   try {
-    const r = await fetch('/qr/renew', { method: 'POST' });
+    const r = await fetch('${uiPath('/qr/renew')}', { method: 'POST' });
     const d = await r.json().catch(() => ({}));
     msg.textContent = r.ok ? 'New QR coming in a few seconds — scan it.' : ('Error: ' + (d.error || r.status));
   } catch (e) { msg.textContent = 'Error: ' + e; }
@@ -124,7 +128,7 @@ button:disabled{opacity:.5;cursor:default}
 <script>
 async function checkStatus() {
   try {
-    const res = await fetch('/status');
+    const res = await fetch('${uiPath('/status')}');
     const data = await res.json();
     if (data.connected) {
       document.getElementById('qr-section').style.display = 'none';
@@ -132,7 +136,7 @@ async function checkStatus() {
       return;
     }
   } catch(e) {}
-  document.getElementById('qr-img').src = '/qr?' + Date.now();
+  document.getElementById('qr-img').src = '${uiPath('/qr')}?' + Date.now();
   setTimeout(checkStatus, 3000);
 }
 window.onload = checkStatus;
@@ -140,7 +144,7 @@ window.onload = checkStatus;
 </head><body>
 <div id="qr-section">
   <h2>Scan with WhatsApp</h2>
-  <img id="qr-img" src="/qr" onerror="this.style.opacity='0.3'" />
+  <img id="qr-img" src="${uiPath('/qr')}" onerror="this.style.opacity='0.3'" />
   <p class="waiting">Waiting for scan... (auto-refreshes every 3s)</p>
   ${renewButton}
 </div>
@@ -152,10 +156,7 @@ ${renewScript}
 </body></html>`);
   });
 
-  // Manual QR renew (LAN-only pages; gated by ALLOW_WEB_RENEW). Lets a human force
-  // a fresh QR when the socket is wedged/INITIALIZING instead of waiting for the
-  // watchdog. Same effect as MCP social_manage_session(action=renewQr) but without the HMAC secret, so it
-  // MUST stay disabled on the internet-exposed personal connector.
+  // Authenticated browser renewal is additionally gated by ALLOW_WEB_RENEW.
   app.post('/qr/renew', async (_req, res) => {
     if (!ALLOW_WEB_RENEW) {
       res.status(403).json({ error: 'Web renew disabled (set ALLOW_WEB_RENEW=true)' });
@@ -183,7 +184,7 @@ ${renewScript}
 
   app.listen(PORT, () => {
     console.log(`WhatsApp Connector API listening on port ${PORT}`);
-    console.log(`QR page: http://localhost:${PORT}/qr/page`);
+    console.log(`QR page: ${publicQrUrl}`);
   });
 
   // NATS is optional

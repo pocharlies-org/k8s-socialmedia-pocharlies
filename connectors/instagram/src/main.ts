@@ -1,22 +1,16 @@
-/**
- * Instagram Connector — Multi-account Express server with webhook + NATS publisher + API proxy.
- * Part of the mcpservers-lab monorepo.
- *
- * Accounts are configured via env vars:
- *   INSTAGRAM_ACCOUNTS=skirmshop,barbelpapis
- *   INSTAGRAM_SKIRMSHOP_ACCESS_TOKEN=...
- *   INSTAGRAM_SKIRMSHOP_BUSINESS_ACCOUNT_ID=...
- *   INSTAGRAM_BARBELPAPIS_ACCESS_TOKEN=...
- *   INSTAGRAM_BARBELPAPIS_BUSINESS_ACCOUNT_ID=...
- *
- * Backwards-compatible: if INSTAGRAM_ACCOUNTS is not set, falls back to
- * single-account mode using INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_BUSINESS_ACCOUNT_ID.
- */
+import { instagramMeUrl } from './url-config';
+/** Instagram connector with explicit registry accounts and isolated API authentication. */
 
 import express from 'express';
-import pino from 'pino';
-import { InstagramAPI, InstagramConfig } from './instagram-api';
 import { createWebhookRouter } from './webhook';
+import { webhookAuthorization } from './webhook-access';
+import { loadConfiguredAccounts, accountAuthorization, secretMatches } from './account-access';
+import pino from 'pino';
+import {
+  discoverFacebookInstagramAccount,
+  InstagramAPI,
+  InstagramConfig,
+} from './instagram-api';
 import { InstagramEventPublisher } from './publisher';
 
 const logger = pino({
@@ -26,9 +20,6 @@ const logger = pino({
 const PORT = parseInt(process.env.PORT || '3003', 10);
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
-const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'instagram-verify-token';
-const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID || '';
-const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || '';
 
 export interface AccountEntry {
   name: string;
@@ -36,68 +27,9 @@ export interface AccountEntry {
   config: InstagramConfig;
 }
 
-function loadAccounts(): Map<string, AccountEntry> {
-  const accounts = new Map<string, AccountEntry>();
-  const accountList = process.env.INSTAGRAM_ACCOUNTS;
-
-  if (accountList) {
-    // Multi-account mode
-    for (const raw of accountList.split(',')) {
-      const name = raw.trim().toLowerCase();
-      const prefix = `INSTAGRAM_${name.toUpperCase()}_`;
-      const accessToken = process.env[`${prefix}ACCESS_TOKEN`] || '';
-      const businessAccountId = process.env[`${prefix}BUSINESS_ACCOUNT_ID`] || '';
-
-      if (!accessToken) {
-        logger.warn({ account: name }, `Skipping account — no ${prefix}ACCESS_TOKEN`);
-        continue;
-      }
-
-      const config: InstagramConfig = {
-        accessToken,
-        businessAccountId,
-        appId: process.env[`${prefix}APP_ID`] || FACEBOOK_APP_ID,
-        appSecret: process.env[`${prefix}APP_SECRET`] || FACEBOOK_APP_SECRET,
-        fbAccessToken: process.env[`${prefix}FB_ACCESS_TOKEN`] || undefined,
-      };
-      accounts.set(name, { name, api: new InstagramAPI(config), config });
-      logger.info(
-        { account: name, businessAccountId, hasFbToken: !!config.fbAccessToken },
-        'Loaded account'
-      );
-    }
-  } else {
-    // Legacy single-account mode
-    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN || '';
-    const businessAccountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '';
-    if (!accessToken) {
-      logger.error('No accounts configured. Set INSTAGRAM_ACCOUNTS or INSTAGRAM_ACCESS_TOKEN.');
-      process.exit(1);
-    }
-    const config: InstagramConfig = {
-      accessToken,
-      businessAccountId,
-      appId: FACEBOOK_APP_ID,
-      appSecret: FACEBOOK_APP_SECRET,
-      fbAccessToken: process.env.INSTAGRAM_FB_ACCESS_TOKEN || undefined,
-    };
-    accounts.set('default', { name: 'default', api: new InstagramAPI(config), config });
-    logger.info(
-      { businessAccountId, hasFbToken: !!config.fbAccessToken },
-      'Loaded single account (legacy mode)'
-    );
-  }
-
-  if (accounts.size === 0) {
-    logger.error('No valid accounts configured');
-    process.exit(1);
-  }
-
-  return accounts;
-}
-
 async function main(): Promise<void> {
-  const accounts = loadAccounts();
+  const configured = loadConfiguredAccounts();
+  const accounts = new Map([...configured].map(([name, entry]) => [name, { ...entry, api: new InstagramAPI(entry.config) }]));
 
   // Build a reverse lookup: accountId → account name (for webhook routing)
   // We register BOTH id formats because Meta uses different IDs depending on API version:
@@ -105,12 +37,13 @@ async function main(): Promise<void> {
   //   - IG User ID (e.g. 17841444094675941) — Instagram Business Login webhooks
   const bizIdToAccount = new Map<string, string>();
   for (const [name, entry] of accounts) {
+    if (!entry.ready) continue;
     if (entry.config.businessAccountId) {
       bizIdToAccount.set(entry.config.businessAccountId, name);
     }
     // Fetch the Instagram User ID (user_id) from /me and register it too
     try {
-      const meUrl = `https://graph.instagram.com/v21.0/me?fields=id,user_id&access_token=${entry.config.accessToken}`;
+      const meUrl = instagramMeUrl(entry.config.accessToken);
       const res = await fetch(meUrl);
       if (res.ok) {
         const data = (await res.json()) as { id?: string; user_id?: string };
@@ -124,6 +57,35 @@ async function main(): Promise<void> {
           { account: name, id: data.id, user_id: data.user_id },
           'Registered Instagram IDs for routing'
         );
+      } else if (entry.config.fbAccessToken) {
+        try {
+          const facebookAccount = await discoverFacebookInstagramAccount(
+            entry.config.fbAccessToken,
+            entry.config.businessAccountId
+          );
+          if (facebookAccount) {
+            entry.api.setFacebookPrimary(facebookAccount.id);
+            bizIdToAccount.set(facebookAccount.id, name);
+            logger.info(
+              {
+                account: name,
+                instagramUserId: facebookAccount.id,
+                username: facebookAccount.username,
+              },
+              'Using Facebook Login system-user token after Instagram Login token validation failed'
+            );
+          } else {
+            logger.warn(
+              { account: name, status: res.status },
+              'Instagram Login token invalid and Facebook Login account could not be resolved'
+            );
+          }
+        } catch (facebookError) {
+          logger.warn(
+            { account: name, status: res.status, err: String(facebookError) },
+            'Instagram Login token invalid and Facebook Login fallback failed'
+          );
+        }
       } else {
         logger.warn({ account: name, status: res.status }, 'Failed to fetch IG IDs from /me');
       }
@@ -139,49 +101,28 @@ async function main(): Promise<void> {
   await publisher.connect();
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ verify: (req, _res, buffer) => {
+    (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+  } }));
 
-  // Webhook routes — shared endpoint, routes by business account ID in payload
-  app.use(
-    '/',
-    createWebhookRouter(WEBHOOK_VERIFY_TOKEN, bizIdToAccount, (account, event) => {
-      publisher.publish(account, event);
-    })
-  );
+  const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN || '';
+  app.use('/webhook', webhookAuthorization(configured, bizIdToAccount, verifyToken));
+  app.use(createWebhookRouter(verifyToken, bizIdToAccount, (account, event) => {
+    publisher.publish(account, event);
+  }));
 
-  // Health check — all accounts
-  app.get('/health', async (_req, res) => {
-    const results: Record<string, unknown> = {};
-    for (const [name, entry] of accounts) {
-      try {
-        const profile = await entry.api.getProfile();
-        results[name] = {
-          status: 'ok',
-          username: profile.username,
-          followers: profile.followers_count,
-        };
-      } catch (error) {
-        results[name] = { status: 'degraded', error: String(error) };
-      }
-    }
-    res.json({ status: 'ok', platform: 'instagram', accounts: results });
-  });
-
-  // List available accounts
-  app.get('/api/v1/accounts', (_req, res) => {
-    const list = [...accounts.entries()].map(([name, entry]) => ({
-      name,
-      businessAccountId: entry.config.businessAccountId,
-    }));
+  app.get('/health', (_req, res) => { res.json({ status: 'alive' }); });
+  app.get('/api/v1/accounts', (req, res) => {
+    const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
+    const list = [...configured.values()].filter(entry => secretMatches(token, entry.secret)).map(entry => ({ name: entry.name, status: entry.ready ? 'configured' : 'setup-required' }));
+    if (!list.length) { res.status(401).json({ error: 'Authentication required' }); return; }
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ accounts: list });
   });
+  app.use('/api/v1/:account', accountAuthorization(configured));
 
-  // Helper to resolve account from route param
   function getAccount(name: string): AccountEntry | undefined {
-    return (
-      accounts.get(name.toLowerCase()) ||
-      (accounts.size === 1 ? accounts.values().next().value : undefined)
-    );
+    return accounts.get(name);
   }
 
   // === Per-account API routes ===
