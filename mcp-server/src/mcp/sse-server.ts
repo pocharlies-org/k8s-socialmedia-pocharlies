@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { writeNoSessionResponse } from './session-errors';
 import { randomUUID } from 'node:crypto';
 import { MCPServer } from './server';
 import { actorFromHeaders, runWithRequestActor } from '@mcp-socialmedia/shared';
@@ -297,16 +298,11 @@ async function main() {
           return;
         }
 
-        // No (valid) session: only an `initialize` request may open one.
+        // No (valid) session: only an `initialize` request may open one. A dead
+        // session id gets 404 (not 400) so spec-compliant clients re-initialize
+        // instead of retrying the zombie id forever — see session-errors.ts.
         if (!isInitializeRequest(body)) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              error: { code: -32000, message: 'Bad Request: no valid session id' },
-              id: null,
-            })
-          );
+          writeNoSessionResponse(res, sid);
           return;
         }
 
@@ -344,8 +340,7 @@ async function main() {
       if (req.method === 'GET' || req.method === 'DELETE') {
         const session = sid ? streamableSessions.get(sid) : undefined;
         if (!session) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid or missing mcp-session-id' }));
+          writeNoSessionResponse(res, sid);
           return;
         }
         if (req.method === 'DELETE') {
