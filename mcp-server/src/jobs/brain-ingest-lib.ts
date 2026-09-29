@@ -256,7 +256,7 @@ export async function pushToBrain(
   opts: PushRetryOpts = {}
 ): Promise<number> {
   const now = opts.now ?? Date.now;
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
   const maxAttempts = envInt('BRAIN_PUSH_RETRIES', 8);
   const maxDelay = envInt('BRAIN_PUSH_RETRY_MAX_DELAY_MS', 30000);
   const budget = pushBudgetMs();
