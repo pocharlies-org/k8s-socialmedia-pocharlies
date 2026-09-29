@@ -24,6 +24,7 @@ import {
   WhatsAppContactSeedInput,
 } from '../contact-sync';
 import { MessageUnavailableError } from '../durable-message-store';
+import { MessageMutationError } from '../message-mutations';
 import {
   claimSendAttempt,
   confirmSend,
@@ -91,6 +92,52 @@ function optionalObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+/**
+ * Edits and deletes go out to WhatsApp: the same two kill switches as sends.
+ * Answers 403 and returns true when sending is off.
+ */
+function rejectWhenSendingDisabled(res: Response): boolean {
+  const disabled = process.env.ENABLE_SENDING !== 'true';
+  if (!disabled && process.env.EMERGENCY_DISABLE_SENDING !== 'true') return false;
+  res.status(statusForSendFailure('disabled_sending')).json({
+    error: disabled ? 'Sending is disabled' : 'Sending is emergency disabled',
+    failureClass: 'disabled_sending',
+  });
+  return true;
+}
+
+/** Optional `actor` of a mutation body: who asked, for the record (≤ 200 chars). */
+function actorFromBody(value: unknown): string | undefined {
+  const actor = typeof value === 'string' ? value.trim() : '';
+  return actor ? actor.slice(0, 200) : undefined;
+}
+
+/** Error of an edit/delete → status + failureClass (same classes as sends). */
+function mutationErrorResponse(res: Response, error: unknown, what: string): void {
+  if (error instanceof MessageUnavailableError || error instanceof MessageMutationError) {
+    res.status(error.status).json({
+      error: error.message,
+      failureClass: error.failureClass,
+      ...(error instanceof MessageMutationError && error.code ? { code: error.code } : {}),
+    });
+    return;
+  }
+  const failureClass = classifyWhatsAppSendFailure(error);
+  res.status(statusForSendFailure(failureClass)).json({
+    error: `Failed to ${what}: ${errorMessage(error)}`,
+    failureClass,
+  });
+}
+
+function rejectWhenDisconnected(client: BaileysClient, res: Response): boolean {
+  if (client.isConnected()) return false;
+  res.status(statusForSendFailure('disconnected')).json({
+    error: `WhatsApp is not connected (state=${client.getCachedState() || 'unknown'})`,
+    failureClass: 'disconnected',
+  });
+  return true;
 }
 
 function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
@@ -1146,7 +1193,10 @@ export function createRouter(
   router.post('/messages/forward', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
-        if (process.env.ENABLE_SENDING !== 'true') {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
@@ -1167,17 +1217,81 @@ export function createRouter(
     })();
   });
 
-  // Delete message
+  // Edit one of our own text messages (fase 3 / PR-3).
+  // CONTRACT: http.whatsapp-connector.messages-edit.v1 — body {chatId, messageId, content}, 200 {edited, messageId, editId, editedAt}
+  router.post('/messages/edit', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenSendingDisabled(res)) return;
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.chatId ?? body.conversationId);
+        const messageId = optionalString(body.messageId);
+        const content = typeof body.content === 'string' ? body.content : '';
+        if (!chatId || !messageId || !content.trim()) {
+          res.status(400).json({
+            error: 'Missing chatId, messageId or content',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.editMessage(chatId, messageId, content, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ edited: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'edit message');
+      }
+    })();
+  });
+
+  // Delete for everyone (revoke) or, with forMe: true, only for this account.
+  // CONTRACT: http.whatsapp-connector.messages-delete.v1 — body {chatId, messageId, forMe?}, 200 {deleted, scope, messageId, deletedAt}
+  router.post('/messages/delete', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenSendingDisabled(res)) return;
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.chatId ?? body.conversationId);
+        const messageId = optionalString(body.messageId);
+        if (
+          !chatId ||
+          !messageId ||
+          (body.forMe !== undefined && typeof body.forMe !== 'boolean')
+        ) {
+          res.status(400).json({
+            error: 'Missing chatId or messageId (forMe must be a boolean)',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const request = { actor: actorFromBody(body.actor) };
+        const forMe = body.forMe === true;
+        const result = forMe
+          ? await client.deleteMessageForMe(chatId, messageId, request)
+          : await client.deleteMessage(chatId, messageId, request);
+        res.json({ deleted: true, scope: forMe ? 'me' : 'everyone', ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'delete message');
+      }
+    })();
+  });
+
+  // Legacy delete for everyone (path params are not covered by the HMAC:
+  // prefer POST /messages/delete). Same gate and behaviour.
   router.delete(
     '/messages/:chatId/:msgId',
     auth,
     (req: AuthenticatedRequest, res: Response): void => {
       void (async () => {
         try {
-          await client.deleteMessage(req.params.chatId, req.params.msgId);
-          res.json({ deleted: true });
+          if (rejectWhenSendingDisabled(res)) return;
+          if (rejectWhenDisconnected(client, res)) return;
+          const result = await client.deleteMessage(req.params.chatId, req.params.msgId);
+          res.json({ deleted: true, scope: 'everyone', ...result });
         } catch (e) {
-          res.status(500).json({ error: String(e) });
+          mutationErrorResponse(res, e, 'delete message');
         }
       })();
     }

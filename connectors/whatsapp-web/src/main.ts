@@ -246,14 +246,18 @@ ${renewScript}
     eventPublisher.publishMessageReceived(event);
   });
 
-  client.on('message-update', (update: { waMessageId: string; updateType: string }) => {
-    eventPublisher.publishMessageUpdated({
-      eventType: EventType.MESSAGE_UPDATED,
-      waMessageId: update.waMessageId,
-      updateType: update.updateType as 'EDITED' | 'DELETED',
-      updatedAt: new Date().toISOString(),
-    });
-  });
+  client.on(
+    'message-update',
+    (update: { waMessageId: string; updateType: string; newContent?: string }) => {
+      eventPublisher.publishMessageUpdated({
+        eventType: EventType.MESSAGE_UPDATED,
+        waMessageId: update.waMessageId,
+        updateType: update.updateType as 'EDITED' | 'DELETED',
+        newContent: update.newContent,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  );
 
   client.on(
     'chat-update',

@@ -53,11 +53,20 @@ export interface MessageReceivedEvent {
   fromMe?: boolean;
 }
 
+/**
+ * A message changed in WhatsApp: EDITED (newContent = the new text) or
+ * DELETED (revoked for everyone). Emitted for contacts' and our own edits and
+ * revokes. "Delete for me" is NOT a MessageUpdated: it only changes this
+ * account's view (messages.metadata.deleted_for_me) and is never published.
+ */
 export interface MessageUpdatedEvent {
   eventType: EventType.MESSAGE_UPDATED;
+  /** Bare WhatsApp id; `account` says whose. */
   waMessageId: string;
   updateType: 'EDITED' | 'DELETED';
   newContent?: string;
+  /** Owning account: 'personal' | 'professional' | 'leila'. Defaults to 'personal'. */
+  account?: string;
   updatedAt: string; // ISO timestamp
 }
 

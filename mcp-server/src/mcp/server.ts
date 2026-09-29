@@ -4077,13 +4077,32 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
+  /**
+   * Delete for everyone (revoke) through the connector's POST /messages/delete
+   * (fase 3 / PR-3): ids travel inside the HMAC-signed body, the connector
+   * rebuilds the real key from its durable copies, applies ENABLE_SENDING and
+   * flags the row (content kept). messageId may be bare or namespaced to this
+   * account; another account's id is refused like a foreign target.
+   */
   private async handleDeleteMessage(args: { chatId: string; messageId: string; account?: string }) {
+    const account = normalizeAccount(args.account);
+    const parsed = stripAccount(args.messageId);
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId belongs to the ${parsed.account} WhatsApp namespace but accountId is '${account}'`
+      );
+    }
+    const actor = getRequestActor();
     const data = await this.connectorCall(
       this.waUrl(args.account),
-      'DELETE',
-      `/api/v1/messages/${encodeURIComponent(
-        bareWhatsAppJid(args.chatId)
-      )}/${encodeURIComponent(args.messageId)}`
+      'POST',
+      '/api/v1/messages/delete',
+      {
+        chatId: bareWhatsAppJid(args.chatId),
+        messageId: parsed.id,
+        ...(actor.name || actor.sub ? { actor: actor.name || actor.sub } : {}),
+      }
     );
     return this.jsonResponse(data);
   }

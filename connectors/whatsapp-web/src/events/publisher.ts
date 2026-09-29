@@ -304,7 +304,10 @@ export class EventPublisher {
   }
 
   publishMessageUpdated(event: MessageUpdatedEvent): void {
-    this.emit(event, `wu:${event.waMessageId}:${event.updateType}`);
+    // Same account tag as MessageReceived: the bare waMessageId alone does not
+    // say whose message it is.
+    const tagged: MessageUpdatedEvent = { ...event, account: event.account ?? this.account };
+    this.emit(tagged, `wu:${tagged.waMessageId}:${tagged.updateType}`);
   }
 
   publishChatUpdated(event: ChatUpdatedEvent): void {

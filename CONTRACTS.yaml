@@ -142,7 +142,69 @@ contracts:
       known, 500 {error} otherwise. Registered by fase 3 / PR-1, when forwarding
       started to work (before it always answered 500). The path, the body
       fields, the 200 shape and the 404 failureClass are contract: changing any
-      is breaking — a new `.v2` entry beside this one.
+      is breaking — a new `.v2` entry beside this one. Fase 3 / PR-3 (additive):
+      EMERGENCY_DISABLE_SENDING=true also answers the 403, like every send.
+  - id: http.whatsapp-connector.messages-edit.v1
+    kind: http-route
+    value: /messages/edit
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/edit of the house WhatsApp connectors (fase 3 /
+      PR-3), consumed by dgx-messages (/messages → Editar). HMAC-signed (same
+      scheme as every connector route), body {chatId, messageId, content,
+      actor?} (`conversationId` accepted for chatId; messageId bare or
+      account-namespaced; actor ≤ 200 chars, recorded, never auth). Edits one
+      of OUR OWN TEXT messages: the key is rebuilt from memory,
+      whatsapp_message_payloads, whatsapp_message_keys or the messages row
+      (restart-proof); the chat comes from that key. Answers 200 {edited: true,
+      messageId, editId, editedAt} (messageId = the bare edited message, editId
+      = the id of the edit stanza). Errors {error, failureClass}: 403
+      disabled_sending (ENABLE_SENDING not true or EMERGENCY_DISABLE_SENDING),
+      400 invalid_request (missing or blank field), 503 disconnected, 404
+      message_unavailable (unknown message), 422 not_own_message / not_editable
+      (not ours, not text, already deleted) / rejected_by_whatsapp (WhatsApp's
+      own limits — e.g. its time window — refused it; `code` carries the ack
+      error), other send failure classes as /messages/send. DB effect (no
+      migration): content = new text, is_edited = true, the replaced text
+      appended to metadata.edit_history [{content, replaced_at, source,
+      actor?}] and metadata.edited_at — nothing is lost; NATS MessageUpdated
+      EDITED with newContent. The path, the body fields, the 200 shape and the
+      failureClass values are contract: changing any is breaking — a new `.v2`
+      entry beside this one.
+  - id: http.whatsapp-connector.messages-delete.v1
+    kind: http-route
+    value: /messages/delete
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/delete of the house WhatsApp connectors (fase 3 /
+      PR-3), consumed by the MCP social_delete_message
+      (mcp-server/src/mcp/server.ts handleDeleteMessage) and dgx-messages
+      (/messages → Eliminar para todos / para mí). HMAC-signed, ids inside the
+      signed body: {chatId, messageId, forMe?, actor?} (forMe a boolean,
+      default false). forMe false = delete for everyone (revoke): our own
+      messages, or anyone's in a group where WhatsApp lets us as admin (a
+      contact's 1:1 message is 422 not_own_message); DB is_deleted = true,
+      status = 'deleted', metadata.deleted_at, CONTENT KEPT; NATS MessageUpdated
+      DELETED. forMe true = delete for me: WhatsApp app-state deleteForMe with
+      the key and the original timestamp from the durable copies (media on the
+      phone left alone); DB metadata.deleted_for_me = true (+ _at), is_deleted
+      untouched; NOT published on NATS (a view flag of this account). Answers
+      200 {deleted: true, scope: "everyone" | "me", messageId, deletedAt}.
+      Errors {error, failureClass}: 403 disabled_sending, 400 invalid_request,
+      503 disconnected, 404 message_unavailable (unknown message, or no
+      timestamp for delete for me), 422 not_own_message / rejected_by_whatsapp
+      (with `code`). The older DELETE /api/v1/messages/:chatId/:msgId stays as
+      an alias of forMe false with the same gate and answers (its path ids are
+      not covered by the HMAC — new callers use this route). The path, the
+      body fields, the scope values, the 200 shape and the failureClass values
+      are contract: changing any is breaking — a new `.v2` entry beside this
+      one.
   - id: http.whatsapp-connector.send-idempotency.v1
     kind: http-route
     value: Idempotency-Key

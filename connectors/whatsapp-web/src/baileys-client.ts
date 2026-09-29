@@ -19,6 +19,7 @@ import {
   WASocket,
   WAMessage,
   WAMessageKey,
+  WAMessageUpdate,
   proto,
   isJidGroup,
   jidEncode,
@@ -73,7 +74,16 @@ import {
   getRawWAMessage,
   MessageUnavailableError,
   storeRawWAMessage,
+  unixSeconds,
 } from './durable-message-store';
+import {
+  loadStoredMessage,
+  markMessageDeletedForMe,
+  markMessageEdited,
+  markMessageRevoked,
+  MessageMutationError,
+  StoredMessage,
+} from './message-mutations';
 import { maybeRunRetention } from './retention';
 import {
   appendCompanyToDisplayName,
@@ -346,6 +356,31 @@ function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: b
 // in memory.
 const KEY_CACHE_MAX = 2000;
 
+/**
+ * How long our own edit/revoke/delete-for-me keeps the echo WhatsApp sends
+ * back (messages.update / messages.delete) away from the inbound path: the
+ * explicit call persists it, after WhatsApp accepted it.
+ */
+const OWN_MUTATION_ECHO_MS = 30_000;
+
+/** Options of the outbound edit/delete calls. */
+export interface MessageMutationRequest {
+  /** Who asked (dgx-messages user, MCP caller); recorded in metadata. */
+  actor?: string;
+}
+
+/** A message we can edit or delete: its real WhatsApp key and what we stored of it. */
+interface MutationTarget {
+  /** Bare WhatsApp id. */
+  id: string;
+  key: WAMessageKey;
+  chatJid: string;
+  timestampSeconds?: number;
+  /** true/false when known from the row or the payload, undefined when unknown. */
+  isText?: boolean;
+  stored?: StoredMessage;
+}
+
 // ---------------------------------------------------------------------------
 // LID → phone-number (PN) extraction
 //
@@ -571,6 +606,9 @@ export class BaileysClient extends EventEmitter {
   private presenceSubscribed = new Set<string>();
   private groupMetaCache = new Map<string, GroupMetadata>(); // by raw JID
   private keyCache = new Map<string, { key: WAMessageKey; chatJid: string }>(); // by waMessageId
+  // `<kind>:<bare id>` of our own edits/revokes/deletes-for-me whose echo the
+  // inbound handlers must leave alone (see OWN_MUTATION_ECHO_MS).
+  private ownMutations = new Map<string, ReturnType<typeof setTimeout> | null>();
   private immediateSendFailureWaiters = new Map<string, (failure: ImmediateSendFailure) => void>();
   private recentImmediateSendFailures = new Map<
     string,
@@ -975,14 +1013,8 @@ export class BaileysClient extends EventEmitter {
         const waMessageId = u.key.id;
         const stubParams = (u.update as any)?.messageStubParameters;
         const ackErrorCode = Array.isArray(stubParams) ? String(stubParams[0] || '') : undefined;
-        // Detect deletions
-        const stub = u.update?.messageStubType;
-        const isDeleted =
-          stub === proto.WebMessageInfo.StubType.REVOKE || u.update?.message === null;
-        if (isDeleted) {
-          this.emit('message-update', { waMessageId, updateType: 'DELETED' });
-          void setMessageStatus(waMessageId, 'deleted').catch(() => {});
-        }
+        // Revokes and edits (fase 3 / PR-3).
+        void this.handleInboundMutation(u);
         // Track delivery state from WhatsApp servers (the green ticks).
         const st: number | undefined = (u.update as any)?.status;
         if (typeof st === 'number') {
@@ -1004,6 +1036,12 @@ export class BaileysClient extends EventEmitter {
           }
         }
       }
+    });
+
+    // "Delete for me" done on our phone (or another linked device) arrives as
+    // an app-state sync action. Same flag as deleteMessageForMe; no bus event.
+    sock.ev.on('messages.delete', item => {
+      void this.handleDeleteForMeSync(item);
     });
 
     // Receipts from individual recipients (group "✓✓ for everyone" or read).
@@ -1935,16 +1973,342 @@ export class BaileysClient extends EventEmitter {
     return sentId || undefined;
   }
 
-  async deleteMessage(chatId: string, messageId: string): Promise<void> {
-    if (!this.sock) throw new Error('Client not initialized');
-    const cached = this.keyCache.get(messageId);
-    let key: WAMessageKey | null = cached?.key || null;
-    if (!key) {
-      const fallback = await this.reconstructKeyFromDb(messageId, chatId).catch(() => null);
-      if (!fallback) throw new Error(`deleteMessage: ${messageId} not found`);
-      key = fallback;
+  // ---------------------------------------------------------------------------
+  // Edit / delete (fase 3 / PR-3). Persistence: message-mutations.ts.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Edit one of our own text messages. WhatsApp's time window is WhatsApp's:
+   * an edit it refuses comes back as a MessageMutationError
+   * (`rejected_by_whatsapp`) and nothing is written.
+   */
+  async editMessage(
+    chatId: string,
+    messageId: string,
+    content: string,
+    request: MessageMutationRequest = {}
+  ): Promise<{ messageId: string; editId?: string; editedAt: string }> {
+    const sock = this.connectedSocket();
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new MessageMutationError('editMessage: content is required', 400, 'invalid_request');
     }
-    await this.sock.sendMessage(this.toRawJid(chatId), { delete: key });
+    const target = await this.resolveMutationTarget(chatId, messageId, 'editMessage');
+    if (!target.key.fromMe) {
+      throw new MessageMutationError(
+        `editMessage: ${target.id} was not sent by this account; WhatsApp only lets the author edit`,
+        422,
+        'not_own_message'
+      );
+    }
+    if (target.stored?.isDeleted) {
+      throw new MessageMutationError(`editMessage: ${target.id} was deleted`, 422, 'not_editable');
+    }
+    if (target.isText !== true) {
+      throw new MessageMutationError(
+        `editMessage: ${target.id} is not a text message (only text can be edited here)`,
+        422,
+        'not_editable'
+      );
+    }
+    return this.withOwnMutation('edit', target.id, async () => {
+      const sent = await sock.sendMessage(target.chatJid, { text: content, edit: target.key });
+      await this.throwIfMutationRejected(sent?.key?.id, 'edit', target.id);
+      const editedAt = new Date();
+      if (this.ingest) {
+        await this.persistMutation('edit', target.id, () =>
+          markMessageEdited(target.id, content, {
+            source: 'connector',
+            actor: request.actor,
+            at: editedAt,
+          })
+        );
+      }
+      this.emit('message-update', {
+        waMessageId: target.id,
+        updateType: 'EDITED',
+        newContent: content,
+      });
+      this.logger.info(`Edited ${target.id} in ${target.chatJid}`);
+      return {
+        messageId: target.id,
+        editId: sent?.key?.id || undefined,
+        editedAt: editedAt.toISOString(),
+      };
+    });
+  }
+
+  /**
+   * Delete for everyone (revoke). Our own messages, or someone else's in a
+   * group (WhatsApp checks we are admin). The row keeps its content.
+   */
+  async deleteMessage(
+    chatId: string,
+    messageId: string,
+    request: MessageMutationRequest = {}
+  ): Promise<{ messageId: string; deletedAt: string }> {
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(chatId, messageId, 'deleteMessage');
+    if (!target.key.fromMe && !isJidGroup(target.chatJid)) {
+      throw new MessageMutationError(
+        `deleteMessage: ${target.id} was not sent by this account; only the author can delete it for everyone`,
+        422,
+        'not_own_message'
+      );
+    }
+    return this.withOwnMutation('revoke', target.id, async () => {
+      const sent = await sock.sendMessage(target.chatJid, { delete: target.key });
+      await this.throwIfMutationRejected(sent?.key?.id, 'delete', target.id);
+      const deletedAt = new Date();
+      if (this.ingest) {
+        await this.persistMutation('delete', target.id, () =>
+          markMessageRevoked(target.id, {
+            source: 'connector',
+            actor: request.actor,
+            at: deletedAt,
+          })
+        );
+      }
+      this.emit('message-update', { waMessageId: target.id, updateType: 'DELETED' });
+      this.logger.info(`Deleted ${target.id} for everyone in ${target.chatJid}`);
+      return { messageId: target.id, deletedAt: deletedAt.toISOString() };
+    });
+  }
+
+  /**
+   * Delete for me: an app-state patch keyed by the message key AND its
+   * timestamp, both rebuilt from the durable copies after a restart. Media on
+   * the phone is left alone (deleteMedia: false). Local to this account: no
+   * MessageUpdated event (see MessageUpdatedEvent).
+   */
+  async deleteMessageForMe(
+    chatId: string,
+    messageId: string,
+    request: MessageMutationRequest = {}
+  ): Promise<{ messageId: string; deletedAt: string }> {
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(chatId, messageId, 'deleteMessageForMe');
+    if (!target.timestampSeconds) {
+      throw new MessageUnavailableError(
+        `deleteMessageForMe: the timestamp of ${target.id} is unknown (WhatsApp needs it)`,
+        404,
+        'message_unavailable'
+      );
+    }
+    return this.withOwnMutation('forme', target.id, async () => {
+      await sock.chatModify(
+        {
+          deleteForMe: {
+            deleteMedia: false,
+            key: target.key,
+            timestamp: target.timestampSeconds!,
+          },
+        },
+        target.chatJid
+      );
+      const deletedAt = new Date();
+      if (this.ingest) {
+        await this.persistMutation('delete-for-me', target.id, () =>
+          markMessageDeletedForMe(target.id, {
+            source: 'connector',
+            actor: request.actor,
+            at: deletedAt,
+          })
+        );
+      }
+      this.logger.info(`Deleted ${target.id} for me in ${target.chatJid}`);
+      return { messageId: target.id, deletedAt: deletedAt.toISOString() };
+    });
+  }
+
+  private connectedSocket(): WASocket {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!this.isConnected())
+      throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
+    return this.sock;
+  }
+
+  /**
+   * The real WhatsApp key of a message we have seen (bare or namespaced id):
+   * memory, then the durable payload (PR-1), then whatsapp_message_keys, then
+   * the messages row — so it survives restarts. The chat comes from the key,
+   * not from the request: a merged conversation keeps the jid WhatsApp used.
+   * A pairing-only socket (ingest off) only has its memory. Unknown → 404.
+   */
+  private async resolveMutationTarget(
+    chatId: string,
+    messageId: string,
+    action: string
+  ): Promise<MutationTarget> {
+    const id = stripAccountKey(String(messageId || '').trim());
+    if (!id)
+      throw new MessageMutationError(`${action}: messageId is required`, 400, 'invalid_request');
+    const cached = this.keyCache.get(id);
+    const memory = this.memoryMessage(id);
+    const stored = this.ingest ? await loadStoredMessage(id) : undefined;
+    const durable = memory ? undefined : await this.durableMessage(id);
+    const fallbackJid = chatId ? this.toRawJid(stripAccountKey(chatId)) : '';
+
+    let key: WAMessageKey | undefined = cached?.key || durable?.key;
+    if (!key && stored?.key) {
+      key = {
+        remoteJid: stored.key.remoteJid,
+        fromMe: stored.key.fromMe,
+        participant: stored.key.participant,
+      };
+    }
+    if (!key && stored) {
+      const remoteJid =
+        (stored.conversationId && this.toRawJid(stripAccountKey(stored.conversationId))) ||
+        fallbackJid;
+      key = {
+        remoteJid,
+        fromMe: stored.direction === 'OUTBOUND',
+        participant:
+          isJidGroup(remoteJid) && stored.senderWaId
+            ? this.toRawJid(stripAccountKey(stored.senderWaId))
+            : undefined,
+      };
+    }
+    const chatJid = key?.remoteJid || cached?.chatJid || fallbackJid;
+    if (!key || !chatJid) {
+      throw new MessageUnavailableError(
+        `${action}: message ${id} of ${chatId || 'an unknown chat'} is unavailable (not in memory nor in the database)`,
+        404,
+        'message_unavailable'
+      );
+    }
+
+    const content = (memory || durable)?.message;
+    let isText: boolean | undefined;
+    if (stored) isText = stored.messageType === 'TEXT';
+    else if (content) isText = !!(content.conversation || content.extendedTextMessage);
+
+    return {
+      id,
+      key: { ...key, id, remoteJid: key.remoteJid || chatJid },
+      chatJid,
+      timestampSeconds:
+        unixSeconds(durable?.messageTimestamp) ||
+        stored?.key?.timestampSeconds ||
+        stored?.waTimestampSeconds,
+      isText,
+      stored,
+    };
+  }
+
+  /**
+   * Keep the echo of our own mutation away from the inbound handlers while it
+   * is in flight and for OWN_MUTATION_ECHO_MS after (Baileys may flush it late).
+   */
+  private async withOwnMutation<T>(
+    kind: 'edit' | 'revoke' | 'forme',
+    id: string,
+    run: () => Promise<T>
+  ): Promise<T> {
+    const flag = `${kind}:${id}`;
+    const previous = this.ownMutations.get(flag);
+    if (previous) clearTimeout(previous);
+    this.ownMutations.set(flag, null);
+    try {
+      return await run();
+    } finally {
+      const timer = setTimeout(() => this.ownMutations.delete(flag), OWN_MUTATION_ECHO_MS);
+      timer.unref?.();
+      this.ownMutations.set(flag, timer);
+    }
+  }
+
+  private isOwnMutation(kind: 'edit' | 'revoke' | 'forme', id: string): boolean {
+    return this.ownMutations.has(`${kind}:${id}`);
+  }
+
+  /** WhatsApp answered the edit/revoke stanza with an error ack (time window, not allowed…). */
+  private async throwIfMutationRejected(
+    stanzaId: string | null | undefined,
+    what: 'edit' | 'delete',
+    id: string
+  ): Promise<void> {
+    const failure = stanzaId ? await this.waitForImmediateSendFailure(stanzaId) : undefined;
+    if (!failure) return;
+    throw new MessageMutationError(
+      `WhatsApp rejected the ${what} of ${id}${failure.code ? ` (ack error ${failure.code})` : ''}`,
+      422,
+      'rejected_by_whatsapp',
+      failure.code
+    );
+  }
+
+  /** WhatsApp already has it: a DB failure is reported as such, never as a send failure. */
+  private async persistMutation(
+    what: string,
+    id: string,
+    write: () => Promise<boolean>
+  ): Promise<void> {
+    try {
+      await write();
+    } catch (e: any) {
+      throw new Error(`${what} of ${id} reached WhatsApp but was not saved: ${e?.message || e}`);
+    }
+  }
+
+  /**
+   * messages.update: a revoke or an edit made by a contact or on our phone.
+   * The echo of our own mutation is skipped — the explicit call persists it
+   * once WhatsApp accepted it.
+   */
+  private async handleInboundMutation(u: WAMessageUpdate): Promise<void> {
+    const waMessageId = u.key?.id;
+    if (!this.ingest || !waMessageId) return;
+    const stub = u.update?.messageStubType;
+    const isRevoke = stub === proto.WebMessageInfo.StubType.REVOKE || u.update?.message === null;
+    if (isRevoke && !this.isOwnMutation('revoke', waMessageId)) {
+      await this.recordInboundRevoke(waMessageId);
+    }
+    // Baileys unwraps MESSAGE_EDIT protocol messages into this shape.
+    const editedPayload = (u.update as any)?.message?.editedMessage?.message as
+      proto.IMessage | undefined;
+    if (editedPayload && !this.isOwnMutation('edit', waMessageId)) {
+      await this.recordInboundEdit(u.key, editedPayload);
+    }
+  }
+
+  /** messages.delete with keys = "delete for me" synced from our phone. */
+  private async handleDeleteForMeSync(
+    item: { keys: WAMessageKey[] } | { jid: string; all: true }
+  ): Promise<void> {
+    if (!this.ingest || !('keys' in item)) return;
+    for (const key of item.keys || []) {
+      if (!key?.id || this.isOwnMutation('forme', key.id)) continue;
+      await markMessageDeletedForMe(key.id, { source: 'whatsapp' }).catch(e =>
+        this.logger.warn(`delete-for-me persist failed for ${key.id}: ${e?.message || e}`)
+      );
+    }
+  }
+
+  /** A contact (or our phone) revoked a message: flag the row, keep its content. */
+  private async recordInboundRevoke(waMessageId: string): Promise<void> {
+    await markMessageRevoked(waMessageId, { source: 'whatsapp' }).catch(e =>
+      this.logger.warn(`revoke persist failed for ${waMessageId}: ${e?.message || e}`)
+    );
+    this.emit('message-update', { waMessageId, updateType: 'DELETED' });
+  }
+
+  /** A contact (or our phone) edited a message: new text, the old one to edit_history. */
+  private async recordInboundEdit(key: WAMessageKey, editedPayload: proto.IMessage): Promise<void> {
+    const waMessageId = key.id || '';
+    const edited = this.convertMessage({ key, message: editedPayload } as WAMessage);
+    const content = edited?.content;
+    if (!waMessageId || typeof content !== 'string') {
+      this.logger.warn(`edit of ${waMessageId} carries no text; row left as is`);
+      return;
+    }
+    try {
+      await markMessageEdited(waMessageId, content, { source: 'whatsapp' });
+    } catch (e: any) {
+      this.logger.warn(`edit persist failed for ${waMessageId}: ${e?.message || e}`);
+      return;
+    }
+    this.emit('message-update', { waMessageId, updateType: 'EDITED', newContent: content });
   }
 
   async markAsRead(chatId: string): Promise<void> {
