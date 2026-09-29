@@ -47,12 +47,12 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.55
     digest: sha256:bf90ef1679fb212969577b2d16efb17bd25c68f24778fb65efa30bb5ee42d90f
-  # fase 3 (PR-1 #95 + PR-2 #108): v1.3.64 (run 36568095620, deploy/prod@f94f272)
-  # lleva las migraciones 009 (payloads duraderos) y 010 (whatsapp_send_attempts),
-  # que aplica el Job PreSync migrate; el resto de mcp-server = v1.3.60 + #95/#108.
+  # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
+  # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
+  # por POST /messages/delete). Sin migraciones nuevas.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.64
-    digest: sha256:6be130f533c4c03fd4370026e5199ec7112bb8af74b4a04152f5c32d830c059e
+    newTag: v1.3.65
+    digest: sha256:3e34611d46bcb7ebc7cfc7331d183372c7d82cf98a713523aabc20eda4298eed
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
