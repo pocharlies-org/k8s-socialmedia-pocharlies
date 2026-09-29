@@ -153,7 +153,9 @@ contracts:
     status: active
     note: >-
       POST /api/v1/messages/edit of the house WhatsApp connectors (fase 3 /
-      PR-3), consumed by dgx-messages (/messages → Editar). HMAC-signed (same
+      PR-3), consumed by dgx-messages (/messages → Editar) and by the MCP tool
+      social_edit_message (mcp-server/src/mcp/server.ts handleEditMessage;
+      added later, surface unchanged). HMAC-signed (same
       scheme as every connector route), body {chatId, messageId, content,
       actor?} (`conversationId` accepted for chatId; messageId bare or
       account-namespaced; actor ≤ 200 chars, recorded, never auth). Edits one

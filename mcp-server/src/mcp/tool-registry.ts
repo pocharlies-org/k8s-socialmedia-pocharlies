@@ -680,6 +680,27 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     idempotent: true,
   }),
   tool({
+    name: 'social_edit_message',
+    title: 'Edit message',
+    description:
+      'Replace the text of one of our own sent text messages where supported (WhatsApp). ' +
+      'The previous text is kept in the message history.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'messages.edit',
+    handler: 'editMessage',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        messageId: { type: 'string', minLength: 1 },
+        message: { type: 'string', minLength: 1 },
+      },
+      ['channel', 'accountId', 'target', 'messageId', 'message']
+    ),
+    idempotent: true,
+    destructive: true,
+  }),
+  tool({
     name: 'social_mark_read',
     title: 'Mark conversation read',
     description: 'Advance read state for a provider conversation or message.',

@@ -671,6 +671,8 @@ export class MCPServer {
         return this.canonicalForwardMessage(args);
       case 'deleteMessage':
         return this.canonicalDeleteMessage(args);
+      case 'editMessage':
+        return this.canonicalEditMessage(args);
       case 'markRead':
         return this.canonicalMarkRead(args);
       case 'createDraft':
@@ -1922,6 +1924,22 @@ export class MCPServer {
     throw this.canonicalError(
       'unsupported_capability',
       'Instagram DM deletion is not supported by the deployed connector'
+    );
+  }
+
+  private async canonicalEditMessage(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') {
+      return this.handleEditMessage({
+        chatId: this.whatsAppProviderTarget(args),
+        messageId: this.string(args, 'messageId'),
+        content: this.string(args, 'message'),
+        account: this.account(args),
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      `Message editing is not supported by the deployed ${channelName} connector`
     );
   }
 
@@ -4085,26 +4103,63 @@ export class MCPServer {
    * account; another account's id is refused like a foreign target.
    */
   private async handleDeleteMessage(args: { chatId: string; messageId: string; account?: string }) {
-    const account = normalizeAccount(args.account);
-    const parsed = stripAccount(args.messageId);
-    if (parsed.account !== 'personal' && parsed.account !== account) {
-      throw this.canonicalError(
-        'invalid_request',
-        `messageId belongs to the ${parsed.account} WhatsApp namespace but accountId is '${account}'`
-      );
-    }
-    const actor = getRequestActor();
     const data = await this.connectorCall(
       this.waUrl(args.account),
       'POST',
       '/api/v1/messages/delete',
       {
         chatId: bareWhatsAppJid(args.chatId),
-        messageId: parsed.id,
-        ...(actor.name || actor.sub ? { actor: actor.name || actor.sub } : {}),
+        messageId: this.bareWhatsAppMessageId(args.messageId, args.account),
+        ...this.connectorActor(),
       }
     );
     return this.jsonResponse(data);
+  }
+
+  /**
+   * Edit one of our own text messages through the connector's POST
+   * /messages/edit (fase 3 / PR-3). Same id rules as handleDeleteMessage; the
+   * connector applies ENABLE_SENDING, rebuilds the key and keeps the replaced
+   * text in metadata.edit_history. WhatsApp's own limits (its edit window)
+   * come back as 422 rejected_by_whatsapp.
+   */
+  private async handleEditMessage(args: {
+    chatId: string;
+    messageId: string;
+    content: string;
+    account?: string;
+  }) {
+    const data = await this.connectorCall(
+      this.waUrl(args.account),
+      'POST',
+      '/api/v1/messages/edit',
+      {
+        chatId: bareWhatsAppJid(args.chatId),
+        messageId: this.bareWhatsAppMessageId(args.messageId, args.account),
+        content: args.content,
+        ...this.connectorActor(),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /** messageId bare or namespaced to `account`; another account's id is refused like a foreign target. */
+  private bareWhatsAppMessageId(messageId: string, accountArg?: string): string {
+    const account = normalizeAccount(accountArg);
+    const parsed = stripAccount(messageId);
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId belongs to the ${parsed.account} WhatsApp namespace but accountId is '${account}'`
+      );
+    }
+    return parsed.id;
+  }
+
+  /** The caller recorded by the connector (never used for auth). */
+  private connectorActor(): { actor?: string } {
+    const actor = getRequestActor();
+    return actor.name || actor.sub ? { actor: actor.name || actor.sub } : {};
   }
 
   private async handleGetMe(args?: { account?: string }) {
