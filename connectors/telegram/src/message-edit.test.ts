@@ -91,6 +91,9 @@ test('mensaje desconocido → 404 message_unavailable (también chat inaccesible
   const api = new FakeApi();
   api.stored = null;
   await rejects(editOwnTextMessage(api, CHAT, 42, 'x'), 404, 'message_unavailable');
+  class MtPeerNotFoundError extends Error {}
+  api.getError = new MtPeerNotFoundError('Peer @nadie is not found');
+  await rejects(editOwnTextMessage(api, '@nadie', 42, 'x'), 404, 'message_unavailable');
   api.getError = rpc(400, 'CHANNEL_INVALID');
   await rejects(
     editOwnTextMessage(api, CHAT, 42, 'x'),

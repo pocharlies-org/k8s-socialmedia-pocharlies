@@ -438,8 +438,9 @@ contracts:
       (ENABLE_SENDING set to anything but "true", or
       EMERGENCY_DISABLE_SENDING=true — unset ENABLE_SENDING means on: the
       Telegram connectors never had that switch), 400 invalid_request
-      (missing or blank field, non-numeric messageId, MESSAGE_EMPTY), 503
-      disconnected, 404 message_unavailable (unknown message or chat), 422
+      (missing or blank field, chatId neither a numeric id nor a username,
+      non-numeric messageId, MESSAGE_EMPTY), 503
+      disconnected, 404 message_unavailable (unknown message, chat or peer), 422
       not_own_message (not ours; MESSAGE_ID_INVALID / MESSAGE_AUTHOR_REQUIRED
       in `code`) / not_editable (not text, service message) /
       rejected_by_telegram (Telegram's own rules — e.g.
@@ -474,8 +475,9 @@ contracts:
       row [<account>:]tg_<chat>_<msg> of account_id telegram:<account>:
       content = new text, is_edited = true, the replaced text appended to
       metadata.edit_history [{content, replaced_at, source, actor?}],
-      metadata.edited_at; idempotent (same text = no-op), never on VOICE/AUDIO
-      rows (their content is the transcription). The pairing pool
+      metadata.edited_at; idempotent (same text = no-op), an editedAt older
+      than the recorded metadata.edited_at never overwrites it, never on
+      VOICE/AUDIO rows (their content is the transcription). The pairing pool
       (telegram-pairing) never publishes it. The subject, the field names and
       the source values are contract: changing any is breaking — a new `.v2`
       entry beside this one.

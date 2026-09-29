@@ -227,8 +227,10 @@ def social_account_id() -> str:
 # metadata.edit_history [{content, replaced_at, source, actor?}] (oldest
 # first) and metadata.edited_at = the last edit. On the right-hand side of
 # SET, `content` / `metadata` are the OLD values. Idempotent: the same text
-# again (our edit + Telegram's echo, a replay) matches no row. Voice/audio rows
-# are never touched: their content is the transcription, not a caption.
+# again (our edit + Telegram's echo, a replay) matches no row. An edit older
+# than the recorded one (edited_at, same ISO form, compared as text) never
+# overwrites it. Voice/audio rows are never touched: their content is the
+# transcription, not a caption.
 MARK_EDITED_SQL = """
 UPDATE messages
    SET content = $3::text,
@@ -243,6 +245,7 @@ UPDATE messages
  WHERE wa_message_id = $1::text AND account_id = $2::text AND platform = 'telegram'
    AND COALESCE(message_type, 'TEXT') NOT IN ('VOICE', 'AUDIO')
    AND content IS DISTINCT FROM $3::text
+   AND (metadata->>'edited_at' IS NULL OR metadata->>'edited_at' <= $4::text)
 RETURNING id
 """
 

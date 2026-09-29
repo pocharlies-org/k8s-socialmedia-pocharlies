@@ -194,6 +194,8 @@ test('cuerpo inválido → 400 invalid_request; sin firma → 401', async () => 
     { chatId: String(CHAT), messageId: 'tg_1_42', content: 'x' },
     { chatId: String(CHAT), messageId: -3, content: 'x' },
     { chatId: String(CHAT), messageId: 42, content: '   ' },
+    { chatId: 'tg_-1001', messageId: 42, content: 'x' },
+    { chatId: '../../x', messageId: 42, content: 'x' },
   ]) {
     const r = await post(base, body);
     assert.equal(r.status, 400, JSON.stringify(body));

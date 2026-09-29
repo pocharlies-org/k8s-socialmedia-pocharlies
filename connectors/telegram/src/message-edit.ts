@@ -106,6 +106,13 @@ function rpcError(e: unknown): { code: number; text: string; seconds?: number } 
   };
 }
 
+/** mtcute's MtPeerNotFoundError (its `name` stays "Error"; the class name does not). */
+function isPeerNotFound(e: unknown): boolean {
+  return (
+    (e as { constructor?: { name?: string } } | null)?.constructor?.name === 'MtPeerNotFoundError'
+  );
+}
+
 /** A failed messages.editMessage → status + failureClass (+ Telegram's code). */
 export function classifyEditError(e: unknown): MessageMutationError {
   if (e instanceof MessageMutationError) return e;
@@ -175,6 +182,13 @@ export async function loadEditableMessage(
   } catch (e) {
     const rpc = rpcError(e);
     // An unknown/inaccessible chat is "we cannot see that message".
+    if (isPeerNotFound(e)) {
+      throw new MessageMutationError(
+        `Chat ${chatId} is not known to this account`,
+        404,
+        'message_unavailable'
+      );
+    }
     if (rpc && rpc.code === 400) {
       throw new MessageMutationError(
         `Message ${messageId} is not available in chat ${chatId} (${rpc.text})`,

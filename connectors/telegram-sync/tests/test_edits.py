@@ -157,6 +157,12 @@ def test_mark_message_edited_shape_and_idempotency(monkeypatch):
             "content": "texto nuevo", "replaced_at": "2026-09-29T11:00:00.000Z", "source": "telegram",
         }
 
+        # An older edit arriving late never overwrites the newer one.
+        assert await db.mark_message_edited(
+            pool, -1001234567890, 42, "vieja", "2026-09-29T10:30:00.000Z", "telegram"
+        ) is None
+        assert (await _row(pool, "tg_-1001234567890_42"))[0] == "tercera"
+
         # Voice rows keep their transcription; unknown rows are a no-op.
         assert await db.mark_message_edited(
             pool, -1001234567890, 43, "caption", "2026-09-29T10:00:00.000Z", "telegram"

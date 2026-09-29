@@ -43,6 +43,9 @@ function authMiddleware(
   };
 }
 
+/** A Telegram peer as the edit route takes it: marked numeric id or (@)username. */
+const TELEGRAM_PEER_RE = /^(?:-?\d{1,20}|@?[A-Za-z][A-Za-z0-9_]{3,63})$/;
+
 /** Optional `actor` of a mutation body: who asked, for the record (≤ 200 chars). */
 function actorFromBody(value: unknown): string | undefined {
   const actor = typeof value === 'string' ? value.trim() : '';
@@ -741,9 +744,10 @@ export function createRouter(
             : '';
         const messageId = parseTopicId(body.messageId);
         const content = typeof body.content === 'string' ? body.content : '';
-        if (!chatId || messageId === null || !content.trim()) {
+        if (!TELEGRAM_PEER_RE.test(chatId) || messageId === null || !content.trim()) {
           res.status(400).json({
-            error: 'Missing chatId, messageId (positive integer) or content',
+            error:
+              'Missing chatId (Telegram id or @username), messageId (positive integer) or content',
             failureClass: 'invalid_request',
           });
           return;
