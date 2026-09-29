@@ -411,3 +411,32 @@ contracts:
       the "never read x-user-sub" rule are contract: a second audience is a
       new value, retiring or renaming this one is breaking — a new `.v2`
       entry beside this one.
+  - id: http.whatsapp-connector.messages-react.v1
+    kind: http-route
+    value: /messages/react
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/react of the house WhatsApp connectors, consumed by
+      dgx-messages (dgx_messages/routes_messages.py react_message, /messages →
+      reaction picker; also the older copy in dgx-infra's dashboard). Registered
+      by fase 3 / PR-4 (the route predates the registry). HMAC-signed (same
+      scheme as every connector route), body {conversationId, messageId, emoji}
+      (`chatId` accepted for conversationId; messageId bare or
+      account-namespaced; emoji a string, "" or null = remove our reaction).
+      The key is rebuilt from memory, whatsapp_message_payloads,
+      whatsapp_message_keys or the messages row (restart-proof); the chat comes
+      from that key. Answers 200 {reacted: true, emoji, messageId (as sent by
+      the caller), reactionId, reactedAt}. Errors {error, failureClass}: 403
+      disabled_sending (ENABLE_SENDING not true or EMERGENCY_DISABLE_SENDING),
+      400 invalid_request, 503 disconnected, 404 message_unavailable (unknown
+      message — before PR-4 this answered 200 without sending anything), other
+      send failure classes as /messages/send (before PR-4 every failure was a
+      500 {error}). DB effect (ingest only): the reaction is recorded in
+      whatsapp_message_reactions (migration 011; one current row per reactor,
+      removal = removed flag), the echo from WhatsApp keeps feeding
+      messages.reactions as before; no NATS event. The path, the body fields,
+      the 200 shape and the failureClass values are contract: changing any is
+      breaking — a new `.v2` entry beside this one.

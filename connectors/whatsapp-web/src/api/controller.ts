@@ -95,8 +95,8 @@ function optionalObject(value: unknown): Record<string, unknown> {
 }
 
 /**
- * Edits and deletes go out to WhatsApp: the same two kill switches as sends.
- * Answers 403 and returns true when sending is off.
+ * Edits, deletes and reactions go out to WhatsApp: the same two kill switches
+ * as sends. Answers 403 and returns true when sending is off.
  */
 function rejectWhenSendingDisabled(res: Response): boolean {
   const disabled = process.env.ENABLE_SENDING !== 'true';
@@ -114,7 +114,7 @@ function actorFromBody(value: unknown): string | undefined {
   return actor ? actor.slice(0, 200) : undefined;
 }
 
-/** Error of an edit/delete → status + failureClass (same classes as sends). */
+/** Error of an edit/delete/reaction → status + failureClass (same classes as sends). */
 function mutationErrorResponse(res: Response, error: unknown, what: string): void {
   if (error instanceof MessageUnavailableError || error instanceof MessageMutationError) {
     res.status(error.status).json({
@@ -887,35 +887,37 @@ export function createRouter(
     })();
   });
 
-  // React to a message (requires auth)
+  // React to a message ('' removes our reaction). Fase 3 / PR-4: same gate
+  // as every send, the key survives restarts, an unknown message is a 404
+  // instead of a silent 200, and the reaction is recorded.
+  // CONTRACT: http.whatsapp-connector.messages-react.v1 — body {conversationId, messageId, emoji}, 200 {reacted, emoji, messageId, reactedAt}
   router.post('/messages/react', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
       try {
-        const body = req.body as { conversationId?: string; messageId?: string; emoji?: string };
-        const { conversationId, messageId, emoji } = body;
-
-        // Empty `emoji` is a valid signal to REMOVE the reaction. Baileys
-        // accepts `{ react: { text: '', key } }` for un-react.
-        if (!conversationId || !messageId) {
-          res.status(400).json({ error: 'Missing conversationId or messageId' });
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId);
+        const emoji = body.emoji ?? '';
+        if (!chatId || !messageId || typeof emoji !== 'string') {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId (emoji must be a string)',
+            failureClass: 'invalid_request',
+          });
           return;
         }
-
-        if (process.env.ENABLE_SENDING !== 'true') {
-          res.status(403).json({ error: 'Sending is disabled' });
-          return;
-        }
-
-        await client.reactToMessage(conversationId, messageId, emoji || '');
-
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.reactToMessage(chatId, messageId, emoji);
         res.json({
           reacted: true,
-          emoji: emoji || '',
+          emoji: result.emoji,
+          // As before: the id the caller sent (bare or namespaced).
           messageId,
-          reactedAt: new Date().toISOString(),
+          reactionId: result.reactionId,
+          reactedAt: result.reactedAt,
         });
       } catch (error) {
-        res.status(500).json({ error: 'Failed to react: ' + String(error) });
+        mutationErrorResponse(res, error, 'react');
       }
     })();
   });

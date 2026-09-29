@@ -84,6 +84,7 @@ import {
   MessageMutationError,
   StoredMessage,
 } from './message-mutations';
+import { reactionTime, storeMessageReaction } from './message-reactions';
 import { maybeRunRetention } from './retention';
 import {
   appendCompanyToDisplayName,
@@ -1318,6 +1319,9 @@ export class BaileysClient extends EventEmitter {
       waMessage.conversationId,
       options.source === 'baileys_history_sync' ? 'history' : 'live'
     );
+    // Before the msgId check: prod folds REACTION inserts into the target's
+    // messages.reactions and skips the row, so msgId is always null for them.
+    if (waMessage.messageType === 'REACTION') await this.persistReaction(msg, waMessage);
 
     if (!msgId) return { inserted: false, waMessage };
 
@@ -1572,6 +1576,27 @@ export class BaileysClient extends EventEmitter {
     // Hourly, in the background: purge expired payloads and send attempts.
     void maybeRunRetention();
     await storeRawWAMessage(msg, conversationId, source);
+  }
+
+  /**
+   * A reaction seen on the socket (a contact, our phone, the echo of our own
+   * react) → whatsapp_message_reactions. The reactor is the message sender:
+   * our own jid when fromMe. SC-1225: a pairing-only socket writes nothing.
+   */
+  private async persistReaction(msg: WAMessage, waMessage: WhatsAppMessage): Promise<void> {
+    const reaction = msg.message?.reactionMessage;
+    const target = reaction?.key?.id;
+    if (!this.ingest || !target) return;
+    await storeMessageReaction({
+      targetMessageId: target,
+      conversationId: waMessage.conversationId,
+      reactorJid: waMessage.senderWaId,
+      emoji: reaction.text || '',
+      // Raw: a key that never said stays unknown instead of reading as a contact.
+      fromMe: msg.key.fromMe ?? null,
+      reactionMessageId: msg.key.id || undefined,
+      reactedAt: reactionTime(reaction.senderTimestampMs, unixSeconds(msg.messageTimestamp)),
+    });
   }
 
   /**
@@ -1917,21 +1942,41 @@ export class BaileysClient extends EventEmitter {
     return messageId || undefined;
   }
 
-  async reactToMessage(chatId: string, messageId: string, emoji: string): Promise<void> {
-    if (!this.sock) throw new Error('Client not initialized');
-    const cached = this.keyCache.get(messageId);
-    let key: WAMessageKey | null = cached?.key || null;
-    if (!key) {
-      // Reconstruct from BD: we need fromMe / participant. Best effort.
-      const fallback = await this.reconstructKeyFromDb(messageId, chatId).catch(() => null);
-      if (!fallback) {
-        this.logger.warn(`reactToMessage: message ${messageId} not found in key cache nor DB`);
-        return;
-      }
-      key = fallback;
+  /**
+   * React to a message ('' removes our reaction). The key comes from memory,
+   * the durable payload, whatsapp_message_keys or the messages row (so it
+   * survives restarts); an unknown message is a 404 message_unavailable, never
+   * a silent success. The reaction is recorded (ingest only) once WhatsApp has
+   * it; its echo later lands on the same row.
+   */
+  async reactToMessage(
+    chatId: string,
+    messageId: string,
+    emoji: string
+  ): Promise<{ messageId: string; reactionId?: string; emoji: string; reactedAt: string }> {
+    const sock = this.connectedSocket();
+    const text = typeof emoji === 'string' ? emoji.trim() : '';
+    const target = await this.resolveMutationTarget(chatId, messageId, 'reactToMessage');
+    const sent = await sock.sendMessage(target.chatJid, { react: { text, key: target.key } });
+    const reactedAt = reactionTime(sent?.message?.reactionMessage?.senderTimestampMs) || new Date();
+    if (this.ingest && this.meJid) {
+      await storeMessageReaction({
+        targetMessageId: target.id,
+        conversationId: this.normalizeJid(target.chatJid),
+        reactorJid: this.normalizeJid(this.meJid),
+        emoji: text,
+        fromMe: true,
+        reactionMessageId: sent?.key?.id || undefined,
+        reactedAt,
+      });
     }
-    await this.sock.sendMessage(this.toRawJid(chatId), { react: { text: emoji, key } });
-    this.logger.info(`Reacted with ${emoji} to ${messageId}`);
+    this.logger.info(`Reacted with ${text || '(removed)'} to ${target.id}`);
+    return {
+      messageId: target.id,
+      reactionId: sent?.key?.id || undefined,
+      emoji: text,
+      reactedAt: reactedAt.toISOString(),
+    };
   }
 
   /**
