@@ -143,6 +143,37 @@ contracts:
       started to work (before it always answered 500). The path, the body
       fields, the 200 shape and the 404 failureClass are contract: changing any
       is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.send-idempotency.v1
+    kind: http-route
+    value: Idempotency-Key
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+      - connectors/whatsapp-web/src/send-idempotency.ts
+    status: active
+    note: >-
+      Opt-in send idempotency on POST /api/v1/messages/send, /messages/media/send
+      and /messages/audio of the house WhatsApp connectors (fase 3 / PR-2),
+      consumed by the MCP social_send_message (mcp-server/src/mcp/server.ts sends
+      one derived key per WhatsApp sub-operation). Only an explicit key turns it
+      on: header `Idempotency-Key` and/or body field `idempotencyKey` (same value
+      if both; a string of at most 200 characters, blank = absent; otherwise 400
+      {error, failureClass: "invalid_request"}). NEVER keyed on sendToken, which
+      callers reuse (synapse, dgx-messages, skirmshop-labels): without a key the
+      three routes answer exactly what they answered before. With a key, scoped
+      to (connector account, sha256(key)) for WA_SEND_ATTEMPT_RETENTION_DAYS (7)
+      in whatsapp_send_attempts (migration 010): the same key with the same
+      request answers the recorded outcome without sending again, plus
+      `deduplicated: true` (text/audio {messageId, sentAt}; media {sent, sentAt,
+      messageId} — media answers messageId only under a key); the same key with
+      a different request is 409 {error, failureClass: "idempotency_key_reused"};
+      an earlier attempt whose outcome is unknown (crash or timeout after the
+      network send) is 409 {error, failureClass: "send_outcome_uncertain",
+      messageId}. The WhatsApp message id is derived from (account, key)
+      (`3EB0` + 18 hex). While the table is missing the key is ignored and the
+      send goes out. The header/field names, the replay semantics, the two 409
+      failureClass values and the no-key-is-legacy rule are contract: changing
+      any is breaking — a new `.v2` entry beside this one.
   - id: http.social-api.pairing-whatsapp.v1
     kind: http-route
     value: /pairing/whatsapp

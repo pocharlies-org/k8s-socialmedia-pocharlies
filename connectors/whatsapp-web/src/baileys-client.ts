@@ -74,6 +74,7 @@ import {
   MessageUnavailableError,
   storeRawWAMessage,
 } from './durable-message-store';
+import { maybeRunRetention } from './retention';
 import {
   appendCompanyToDisplayName,
   displayNameOrPhone,
@@ -1530,13 +1531,28 @@ export class BaileysClient extends EventEmitter {
     source: DurablePayloadSource
   ): Promise<void> {
     if (!this.ingest || !msg?.key?.id) return;
+    // Hourly, in the background: purge expired payloads and send attempts.
+    void maybeRunRetention();
     await storeRawWAMessage(msg, conversationId, source);
   }
 
+  /**
+   * Whether this client owns DB state (live ingest, durable payloads, send
+   * idempotency). false for the per-sub pairing pool (SC-1225).
+   */
+  isIngestEnabled(): boolean {
+    return this.ingest;
+  }
+
+  /**
+   * `messageId` overrides Baileys' random id (idempotent sends) and is reused
+   * by the group repair retry; `beforeSend` runs once, after every preflight
+   * and right before the message goes to the network (the idempotency claim).
+   */
   async sendMessage(
     chatId: string,
     content: string,
-    options?: { replyToMessageId?: string }
+    options?: { replyToMessageId?: string; messageId?: string; beforeSend?: () => Promise<void> }
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     if (!this.isConnected())
@@ -1580,11 +1596,13 @@ export class BaileysClient extends EventEmitter {
       });
     }
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
+    await options?.beforeSend?.();
     try {
       const sent = await this.sendTextWithTimeout(raw, content, timeoutMs, {
         useCachedGroupMetadata: isGroup ? false : undefined,
         useUserDevicesCache: isGroup ? false : undefined,
         quoted,
+        messageId: options?.messageId,
       });
       const messageId = sent?.key?.id;
       this.logger.info(
@@ -1633,10 +1651,13 @@ export class BaileysClient extends EventEmitter {
           this.logger.info(
             `Retrying WhatsApp group send after repair rawJid=${raw} normalizedJid=${normalized} groupSubject="${repair.groupSubject}" participants=${repair.participantCount} devices=${repair.deviceCount}`
           );
+          // Same id as the first attempt: if that one did go out, WhatsApp
+          // already holds this message id and the retry is not a new message.
           const retried = await this.sendTextWithTimeout(raw, content, timeoutMs, {
             useCachedGroupMetadata: false,
             useUserDevicesCache: false,
             quoted,
+            messageId: options?.messageId,
           });
           const messageId = retried?.key?.id;
           this.logger.info(
@@ -1766,8 +1787,14 @@ export class BaileysClient extends EventEmitter {
     chatId: string,
     fileUrl: string,
     caption?: string,
-    options?: { asSticker?: boolean; replyToMessageId?: string }
-  ): Promise<void> {
+    options?: {
+      asSticker?: boolean;
+      replyToMessageId?: string;
+      /** Same contract as sendMessage's messageId / beforeSend. */
+      messageId?: string;
+      beforeSend?: () => Promise<void>;
+    }
+  ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
     // A media reply whose quoted message is unknown is rejected (before the
@@ -1809,26 +1836,40 @@ export class BaileysClient extends EventEmitter {
         caption,
       };
 
-    const sent = await this.sock.sendMessage(raw, payload, quoted ? { quoted } : undefined);
+    await options?.beforeSend?.();
+    const sendOptions =
+      quoted || options?.messageId
+        ? {
+            ...(quoted ? { quoted } : {}),
+            ...(options?.messageId ? { messageId: options.messageId } : {}),
+          }
+        : undefined;
+    const sent = await this.sock.sendMessage(raw, payload, sendOptions);
     if (sent?.key?.id) {
       this.rememberKey(sent.key.id, sent.key, raw);
       this.rememberMessageForRetry(sent.key, sent.message);
       await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || raw), 'sent');
     }
+    return sent?.key?.id || undefined;
   }
 
   /** Send an Ogg/Opus clip as a WhatsApp voice note (PTT). */
   async sendVoice(
     chatId: string,
     audio: Buffer,
-    mimetype = 'audio/ogg; codecs=opus'
+    mimetype = 'audio/ogg; codecs=opus',
+    /** Same contract as sendMessage's messageId / beforeSend. */
+    options?: { messageId?: string; beforeSend?: () => Promise<void> }
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     if (!this.isConnected())
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
     const raw = this.toRawJid(chatId);
     const payload: AnyMessageContent = { audio, mimetype, ptt: true };
-    const sent = await this.sock.sendMessage(raw, payload);
+    await options?.beforeSend?.();
+    const sent = options?.messageId
+      ? await this.sock.sendMessage(raw, payload, { messageId: options.messageId })
+      : await this.sock.sendMessage(raw, payload);
     const messageId = sent?.key?.id;
     if (sent?.key) {
       this.rememberKey(messageId || '', sent.key, raw);
@@ -2814,6 +2855,7 @@ export class BaileysClient extends EventEmitter {
       useCachedGroupMetadata?: boolean;
       useUserDevicesCache?: boolean;
       quoted?: WAMessage;
+      messageId?: string;
     }
   ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
@@ -2825,6 +2867,7 @@ export class BaileysClient extends EventEmitter {
       sendOpts.useUserDevicesCache = options.useUserDevicesCache;
     }
     if (options?.quoted) sendOpts.quoted = options.quoted;
+    if (options?.messageId) sendOpts.messageId = options.messageId;
     return this.race(
       this.sock.sendMessage(rawJid, { text: content }, sendOpts),
       timeoutMs,

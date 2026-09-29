@@ -72,6 +72,7 @@ const ALL_FILES = [
   '007_user_channel_credentials.sql',
   '008_multiaccount_first_class.sql',
   '009_whatsapp_message_payloads.sql',
+  '010_whatsapp_send_attempts.sql',
 ];
 
 describe('migrate.ts _migrations ledger', () => {

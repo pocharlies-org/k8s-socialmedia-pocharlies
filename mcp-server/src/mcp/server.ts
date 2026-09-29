@@ -751,6 +751,9 @@ export class MCPServer {
     const candidate = error as { canonicalCode?: string; code?: number; name?: string };
     if (candidate?.canonicalCode) return candidate.canonicalCode;
     const message = safeError(error).toLowerCase();
+    // fase 3 / PR-2: the WhatsApp connector's Idempotency-Key answers (409).
+    if (message.includes('send_outcome_uncertain')) return 'outcome_unknown';
+    if (message.includes('idempotency_key_reused')) return 'conflict';
     if (
       candidate?.name === 'TimeoutError' ||
       candidate?.name === 'AbortError' ||
@@ -1781,15 +1784,18 @@ export class MCPServer {
       } else if (message) {
         const sent =
           channelName === 'whatsapp'
-            ? await this.handleSendMessage({
-                chatId: destination,
-                text: message,
-                account: accountIdValue,
-                replyTo:
-                  args.replyTo === null || args.replyTo === undefined
-                    ? undefined
-                    : String(args.replyTo),
-              })
+            ? await this.handleSendMessage(
+                {
+                  chatId: destination,
+                  text: message,
+                  account: accountIdValue,
+                  replyTo:
+                    args.replyTo === null || args.replyTo === undefined
+                      ? undefined
+                      : String(args.replyTo),
+                },
+                ...this.connectorIdempotency(args, 'text')
+              )
             : await this.handleTelegramSendMessage({
                 chatId: destination,
                 text: message,
@@ -1800,21 +1806,24 @@ export class MCPServer {
         operations.push(this.legacyResultData(sent));
       }
 
-      for (const item of mediaGroup ? [] : attachments) {
+      for (const [index, item] of (mediaGroup ? [] : attachments).entries()) {
         const attachmentValue = asObject(item);
         const location = pickString(attachmentValue, ['url']);
         const sent =
           channelName === 'whatsapp'
-            ? await this.handleSendFile({
-                conversationId: destination,
-                fileUrl: location,
-                caption: pickString(attachmentValue, ['caption']) || undefined,
-                account: accountIdValue,
-                replyTo:
-                  args.replyTo === null || args.replyTo === undefined
-                    ? undefined
-                    : String(args.replyTo),
-              })
+            ? await this.handleSendFile(
+                {
+                  conversationId: destination,
+                  fileUrl: location,
+                  caption: pickString(attachmentValue, ['caption']) || undefined,
+                  account: accountIdValue,
+                  replyTo:
+                    args.replyTo === null || args.replyTo === undefined
+                      ? undefined
+                      : String(args.replyTo),
+                },
+                ...this.connectorIdempotency(args, `attachment:${index}`)
+              )
             : await this.handleTelegramSendFile({
                 chatId: destination,
                 filePath: location,
@@ -1848,6 +1857,25 @@ export class MCPServer {
       providerMessageIds,
       operations,
     });
+  }
+
+  /**
+   * The connector-side Idempotency-Key of one WhatsApp sub-operation of a
+   * canonical send (fase 3 / PR-2): the caller's idempotencyKey scoped like its
+   * Redis record (tool, channel, account) plus the sub-operation, so the text
+   * and each attachment of one call never share a key. [] without a key, so
+   * the legacy handlers keep their one-argument call.
+   */
+  private connectorIdempotency(
+    args: Record<string, any>,
+    operation: string
+  ): [] | [{ idempotencyKey: string }] {
+    const key = typeof args.idempotencyKey === 'string' ? args.idempotencyKey.trim() : '';
+    if (!key) return [];
+    const digest = createHash('sha256')
+      .update(`social_send_message\0${args.channel}\0${args.accountId}\0${key}\0${operation}`)
+      .digest('hex');
+    return [{ idempotencyKey: `mcp-${digest}` }];
   }
 
   private async canonicalForwardMessage(args: Record<string, any>): Promise<any> {
@@ -2842,15 +2870,19 @@ export class MCPServer {
     }
   }
 
-  private async handleSendMessage(args: {
-    chatId: string;
-    text: string;
-    account?: string;
-    replyTo?: string;
-    phone?: string;
-    phoneE164?: string;
-    manualOpenUrl?: string;
-  }) {
+  private async handleSendMessage(
+    args: {
+      chatId: string;
+      text: string;
+      account?: string;
+      replyTo?: string;
+      phone?: string;
+      phoneE164?: string;
+      manualOpenUrl?: string;
+    },
+    // Set only by canonicalSendMessage, never from tool arguments.
+    options?: { idempotencyKey?: string }
+  ) {
     if (process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending is disabled (ENABLE_SENDING != true)');
     }
@@ -2883,6 +2915,8 @@ export class MCPServer {
           'X-Connector-Timestamp': timestamp.toString(),
           // SC-705: forward the verified caller identity to the connector.
           ...actorRequestHeaders(),
+          // fase 3 / PR-2: opt-in connector idempotency (never the sendToken).
+          ...(options?.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
         },
         body: JSON.stringify(body),
       });
@@ -3952,7 +3986,8 @@ export class MCPServer {
     method: string,
     path: string,
     body?: any,
-    timeoutMs = 15000
+    timeoutMs = 15000,
+    extraHeaders: Record<string, string> = {}
   ): Promise<any> {
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = body || {};
@@ -3966,6 +4001,7 @@ export class MCPServer {
         'X-Connector-Timestamp': timestamp.toString(),
         // SC-705: forward the verified caller identity to the connector.
         ...actorRequestHeaders(),
+        ...extraHeaders,
       },
       ...(method !== 'GET' && method !== 'DELETE' ? { body: JSON.stringify(payload) } : {}),
       signal: AbortSignal.timeout(timeoutMs),
@@ -3992,24 +4028,32 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
-  private async handleSendFile(args: {
-    conversationId: string;
-    fileUrl: string;
-    caption?: string;
-    replyTo?: string;
-    account?: string;
-  }) {
+  private async handleSendFile(
+    args: {
+      conversationId: string;
+      fileUrl: string;
+      caption?: string;
+      replyTo?: string;
+      account?: string;
+    },
+    // Set only by canonicalSendMessage, never from tool arguments.
+    options?: { idempotencyKey?: string }
+  ) {
     if (process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
     body.conversationId = bareWhatsAppJid(body.conversationId);
-    const data = await this.connectorCall(
-      this.waUrl(account),
-      'POST',
-      '/api/v1/messages/media/send',
-      body
-    );
+    const data = options?.idempotencyKey
+      ? await this.connectorCall(
+          this.waUrl(account),
+          'POST',
+          '/api/v1/messages/media/send',
+          body,
+          undefined,
+          { 'Idempotency-Key': options.idempotencyKey }
+        )
+      : await this.connectorCall(this.waUrl(account), 'POST', '/api/v1/messages/media/send', body);
     return this.jsonResponse(data);
   }
 

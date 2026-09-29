@@ -24,6 +24,18 @@ import {
   WhatsAppContactSeedInput,
 } from '../contact-sync';
 import { MessageUnavailableError } from '../durable-message-store';
+import {
+  claimSendAttempt,
+  confirmSend,
+  mediaRequestHash,
+  readIdempotencyKey,
+  recordSendFailure,
+  reserveSend,
+  SendAlreadyClaimedError,
+  SendReservation,
+  textRequestHash,
+  voiceRequestHash,
+} from '../send-idempotency';
 
 function statusForSendFailure(
   failureClass: WhatsAppSendFailureClass | 'disabled_sending' | 'invalid_request'
@@ -94,6 +106,96 @@ function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
     return status;
   }
   return null;
+}
+
+/**
+ * One send under an explicit Idempotency-Key (fase 3 / PR-2). `beforeSend`
+ * claims the attempt right before the network send; `claimed` says whether it
+ * did, i.e. whether a failure may have reached WhatsApp.
+ */
+interface IdempotentSend {
+  key: string;
+  messageId?: string;
+  claimed: boolean;
+  beforeSend: () => Promise<void>;
+}
+
+function uncertainOutcomeBody(messageId: string | undefined): Record<string, unknown> {
+  return {
+    error:
+      'The outcome of an earlier send with this Idempotency-Key is unknown; check the chat before sending again',
+    failureClass: 'send_outcome_uncertain',
+    messageId,
+  };
+}
+
+// CONTRACT: http.whatsapp-connector.send-idempotency.v1 — opt-in Idempotency-Key, replay + deduplicated, 409 idempotency_key_reused / send_outcome_uncertain
+/**
+ * Opt-in idempotency for a send route. Returns null when the request carries
+ * no key (or the client keeps no DB state, or the store is unavailable): the
+ * route then runs its legacy path, byte for byte. 'answered' when the response
+ * is already sent (invalid key, replay, 409).
+ */
+async function beginIdempotentSend(
+  client: BaileysClient,
+  req: AuthenticatedRequest,
+  res: Response,
+  requestHash: () => string,
+  replayBody: (reservation: SendReservation) => Record<string, unknown>
+): Promise<IdempotentSend | null | 'answered'> {
+  const { key, error } = readIdempotencyKey(req.headers, req.body);
+  if (error) {
+    res.status(400).json({ error, failureClass: 'invalid_request' });
+    return 'answered';
+  }
+  // SC-1225: a pairing-only client (ingest off) never touches the table.
+  if (!key || !client.isIngestEnabled()) return null;
+  const hash = requestHash();
+  const reservation = await reserveSend(key, hash);
+  switch (reservation.state) {
+    case 'unavailable':
+      return null;
+    case 'conflict':
+      res.status(409).json({
+        error: 'Idempotency-Key was already used for a different request',
+        failureClass: 'idempotency_key_reused',
+      });
+      return 'answered';
+    case 'pending':
+      res.status(409).json(uncertainOutcomeBody(reservation.messageId));
+      return 'answered';
+    case 'sent':
+      console.info(`WhatsApp send replayed messageId=${reservation.messageId || ''}`);
+      res.json({ ...replayBody(reservation), deduplicated: true });
+      return 'answered';
+    default: {
+      const attempt: IdempotentSend = {
+        key,
+        messageId: reservation.messageId,
+        claimed: false,
+        beforeSend: async () => {
+          await claimSendAttempt(key, hash);
+          attempt.claimed = true;
+        },
+      };
+      return attempt;
+    }
+  }
+}
+
+/** Error path of an idempotent send: true when the response was answered here. */
+async function failIdempotentSend(
+  attempt: IdempotentSend | null,
+  error: unknown,
+  res: Response
+): Promise<boolean> {
+  if (!attempt) return false;
+  if (error instanceof SendAlreadyClaimedError) {
+    res.status(409).json(uncertainOutcomeBody(attempt.messageId));
+    return true;
+  }
+  await recordSendFailure(attempt.key, attempt.claimed, error);
+  return false;
 }
 
 function manualOpenIdempotencyKey(phoneE164: string, text: string): string {
@@ -536,6 +638,7 @@ export function createRouter(
       let requestConversationId: unknown;
       let requestContent: unknown;
       let requestSendToken: unknown;
+      let idempotent: IdempotentSend | null = null;
       try {
         const body = req.body as {
           sendToken?: string;
@@ -595,16 +698,40 @@ export function createRouter(
           return;
         }
 
-        const messageId = await client.sendMessage(conversationId, content, { replyToMessageId });
+        // Opt-in: only an explicit Idempotency-Key, never sendToken (callers reuse it).
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () => textRequestHash({ conversationId, content, replyToMessageId }),
+          reservation => ({ messageId: reservation.messageId, sentAt: reservation.sentAt })
+        );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        const messageId = await client.sendMessage(
+          conversationId,
+          content,
+          idempotent
+            ? {
+                replyToMessageId,
+                messageId: idempotent.messageId,
+                beforeSend: idempotent.beforeSend,
+              }
+            : { replyToMessageId }
+        );
         console.info(
           `WhatsApp send ok conversationId=${conversationId} messageId=${messageId || ''}`
         );
 
         res.json({
           messageId,
-          sentAt: new Date().toISOString(),
+          sentAt: idempotent
+            ? await confirmSend(idempotent.key, messageId)
+            : new Date().toISOString(),
         });
       } catch (error) {
+        if (await failIdempotentSend(idempotent, error, res)) return;
         const failureClass = classifyWhatsAppSendFailure(error);
         const details = (error as any)?.details || {};
         console.error(
@@ -644,6 +771,7 @@ export function createRouter(
   // Send a voice note (requires auth) — {conversationId, audioBase64, mimeType}
   router.post('/messages/audio', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
+      let idempotent: IdempotentSend | null = null;
       try {
         const body = req.body as {
           conversationId?: string;
@@ -674,17 +802,35 @@ export function createRouter(
           return;
         }
 
-        const buf = Buffer.from(audioBase64, 'base64');
-        const messageId = await client.sendVoice(
-          conversationId,
-          buf,
-          mimeType || 'audio/ogg; codecs=opus'
+        const effectiveMimeType = mimeType || 'audio/ogg; codecs=opus';
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () => voiceRequestHash({ conversationId, audioBase64, mimeType: effectiveMimeType }),
+          reservation => ({ messageId: reservation.messageId, sentAt: reservation.sentAt })
         );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        const buf = Buffer.from(audioBase64, 'base64');
+        const messageId = idempotent
+          ? await client.sendVoice(conversationId, buf, effectiveMimeType, {
+              messageId: idempotent.messageId,
+              beforeSend: idempotent.beforeSend,
+            })
+          : await client.sendVoice(conversationId, buf, effectiveMimeType);
         console.info(
           `WhatsApp voice sent conversationId=${conversationId} messageId=${messageId || ''}`
         );
-        res.json({ messageId, sentAt: new Date().toISOString() });
+        res.json({
+          messageId,
+          sentAt: idempotent
+            ? await confirmSend(idempotent.key, messageId)
+            : new Date().toISOString(),
+        });
       } catch (error) {
+        if (await failIdempotentSend(idempotent, error, res)) return;
         const failureClass = classifyWhatsAppSendFailure(error);
         res.status(statusForSendFailure(failureClass)).json({
           error: `Failed to send voice: ${errorMessage(error)}`,
@@ -923,6 +1069,7 @@ export function createRouter(
   // Send file/media
   router.post('/messages/media/send', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
+      let idempotent: IdempotentSend | null = null;
       try {
         if (process.env.ENABLE_SENDING !== 'true') {
           res.status(403).json({ error: 'Sending disabled' });
@@ -940,12 +1087,51 @@ export function createRouter(
           res.status(400).json({ error: 'Missing conversationId or fileUrl' });
           return;
         }
-        await client.sendFile(conversationId, fileUrl, caption, {
-          asSticker: !!asSticker || kind === 'sticker',
-          replyToMessageId: optionalString(replyTo),
+        const sticker = !!asSticker || kind === 'sticker';
+        const replyToMessageId = optionalString(replyTo);
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () =>
+            mediaRequestHash({
+              conversationId,
+              fileUrl,
+              caption,
+              asSticker: sticker,
+              replyToMessageId,
+            }),
+          reservation => ({
+            sent: true,
+            sentAt: reservation.sentAt,
+            messageId: reservation.messageId,
+          })
+        );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        if (!idempotent) {
+          await client.sendFile(conversationId, fileUrl, caption, {
+            asSticker: sticker,
+            replyToMessageId,
+          });
+          res.json({ sent: true, sentAt: new Date().toISOString() });
+          return;
+        }
+        // Idempotent sends also answer the message id (additive).
+        const messageId = await client.sendFile(conversationId, fileUrl, caption, {
+          asSticker: sticker,
+          replyToMessageId,
+          messageId: idempotent.messageId,
+          beforeSend: idempotent.beforeSend,
         });
-        res.json({ sent: true, sentAt: new Date().toISOString() });
+        res.json({
+          sent: true,
+          sentAt: await confirmSend(idempotent.key, messageId),
+          messageId,
+        });
       } catch (e) {
+        if (await failIdempotentSend(idempotent, e, res)) return;
         if (e instanceof MessageUnavailableError) {
           res.status(e.status).json({ error: e.message, failureClass: e.failureClass });
           return;
