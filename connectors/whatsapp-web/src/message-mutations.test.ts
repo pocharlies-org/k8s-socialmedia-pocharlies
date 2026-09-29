@@ -434,7 +434,7 @@ test('with ingest off nothing is read or written, even when the action goes out 
 
 test('an inbound edit replaces the text, keeps the old one in edit_history and publishes EDITED', async () => {
   useAccount('professional');
-  const { calls, restore } = stubPool();
+  const { calls, restore } = stubPool(sql => (/^\s*UPDATE messages/i.test(sql) ? [{ id: 1 }] : []));
   try {
     const { client, events } = makeClient();
     await priv(client).handleInboundMutation({
@@ -456,6 +456,22 @@ test('an inbound edit replaces the text, keeps the old one in edit_history and p
     assert.deepEqual(events, [
       { waMessageId: 'IN1', updateType: 'EDITED', newContent: 'texto corregido' },
     ]);
+  } finally {
+    restore();
+  }
+});
+
+test('a replayed inbound edit (row already has that text) is not published again', async () => {
+  useAccount('personal');
+  const { calls, restore } = stubPool(); // UPDATE … WHERE content IS DISTINCT FROM → no row
+  try {
+    const { client, events } = makeClient();
+    await priv(client).handleInboundMutation({
+      key: { remoteJid: '34600@s.whatsapp.net', id: 'IN1', fromMe: false },
+      update: { message: { editedMessage: { message: { conversation: 'igual' } } } },
+    });
+    assert.equal(updates(calls).length, 1);
+    assert.equal(events.length, 0);
   } finally {
     restore();
   }

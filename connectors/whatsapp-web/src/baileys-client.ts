@@ -2302,13 +2302,17 @@ export class BaileysClient extends EventEmitter {
       this.logger.warn(`edit of ${waMessageId} carries no text; row left as is`);
       return;
     }
+    let changed: boolean;
     try {
-      await markMessageEdited(waMessageId, content, { source: 'whatsapp' });
+      changed = await markMessageEdited(waMessageId, content, { source: 'whatsapp' });
     } catch (e: any) {
       this.logger.warn(`edit persist failed for ${waMessageId}: ${e?.message || e}`);
       return;
     }
-    this.emit('message-update', { waMessageId, updateType: 'EDITED', newContent: content });
+    // A replay (history re-delivery, a late echo) changes nothing and is not re-published.
+    if (changed) {
+      this.emit('message-update', { waMessageId, updateType: 'EDITED', newContent: content });
+    }
   }
 
   async markAsRead(chatId: string): Promise<void> {
