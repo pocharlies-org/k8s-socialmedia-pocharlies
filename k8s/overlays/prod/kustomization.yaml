@@ -38,8 +38,8 @@ images:
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: socialmedia-v2-c88dce16
-    digest: sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
+    newTag: v1.3.67
+    digest: sha256:56fa67979f97c9af368d94da1bed4805c85e84025aeebd29e13aae5626e66050
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
@@ -50,10 +50,11 @@ images:
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
-  # tool social_edit_message (#112). Sin migraciones nuevas.
+  # tool social_edit_message (#112); v1.3.67 (run 36623083265, deploy/prod@e015709) añade
+  # la migración 011 (reacciones, #115) y editar en Telegram en el MCP (#114).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.66
-    digest: sha256:77cfc2e5d4b609fa6b0d5d2a40437b612a776a8f613d8e583b3d92212ec6ec9e
+    newTag: v1.3.67
+    digest: sha256:1532c4ab0119d0dab5b15a197d53e84c9ae9c919050e9e2da3a7d12b75cc2dc9
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

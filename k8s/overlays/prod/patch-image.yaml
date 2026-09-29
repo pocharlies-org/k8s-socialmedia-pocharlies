@@ -24,7 +24,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.65@sha256:f2ca96b832e053672e234818686da7bbe5e9b29339e3af81fdd17740a135db65
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.67@sha256:97b66da4584d4197b0c6eca8d0e7e48cd5e7643c42fa909fd0971334cec5be22
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.65@sha256:f2ca96b832e053672e234818686da7bbe5e9b29339e3af81fdd17740a135db65
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.67@sha256:97b66da4584d4197b0c6eca8d0e7e48cd5e7643c42fa909fd0971334cec5be22
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 apiVersion: apps/v1
@@ -49,7 +49,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-leila
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.65@sha256:f2ca96b832e053672e234818686da7bbe5e9b29339e3af81fdd17740a135db65
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.67@sha256:97b66da4584d4197b0c6eca8d0e7e48cd5e7643c42fa909fd0971334cec5be22
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -77,7 +77,7 @@ spec:
         # dead code); spelled out here now that the block dropped the name.
         # Same digest as the live pod — zero rollout.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.61@sha256:13adaefd9c4d90bd7025879b3476faa7f7e3df2bbc864c6228423c390e2ff35e
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.67@sha256:03084df9b9aeae0475c8ba0614d94015bf29bb008901c5ade6d2d361b4234795
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -92,7 +92,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.61@sha256:13adaefd9c4d90bd7025879b3476faa7f7e3df2bbc864c6228423c390e2ff35e
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.67@sha256:03084df9b9aeae0475c8ba0614d94015bf29bb008901c5ade6d2d361b4234795
 ---
 # SC-1197 encendido — the pairing pools run v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
@@ -145,7 +145,7 @@ spec:
     spec:
       containers:
         - name: telegram-sync
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:socialmedia-v2-c88dce16@sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.67@sha256:56fa67979f97c9af368d94da1bed4805c85e84025aeebd29e13aae5626e66050
 ---
 apiVersion: apps/v1
 kind: Deployment
