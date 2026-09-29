@@ -260,9 +260,15 @@ spec:
                 - { name: BRAIN_INGEST_BATCH, value: "2" }
                 - { name: BRAIN_INGEST_MAX_ROWS, value: "60" }
                 - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
-                - { name: BRAIN_PUSH_RETRIES, value: "3" }
+                # Reintento de pushToBrain (5xx y errores de red; 4xx no): backoff 1 s x2 hasta
+                # RETRY_MAX_DELAY, con presupuesto total de 240 s. Menor que
+                # BRAIN_INGEST_MAX_RUNTIME_MS (300000) y que activeDeadlineSeconds (360): el job
+                # agota el presupuesto y sale limpio antes de que lo mate el tope. El código
+                # recorta el presupuesto a MAX_RUNTIME_MS - 30 s si éste fuera menor.
+                - { name: BRAIN_PUSH_RETRIES, value: "8" }
                 - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
-                - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "10000" }
+                - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "30000" }
+                - { name: BRAIN_PUSH_BUDGET_MS, value: "240000" }
                 - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
                 # Namespaces e instancia del brain por cuenta: registro de cuentas.
                 - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
