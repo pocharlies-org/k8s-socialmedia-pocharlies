@@ -49,10 +49,11 @@ images:
     digest: sha256:bf90ef1679fb212969577b2d16efb17bd25c68f24778fb65efa30bb5ee42d90f
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
-  # por POST /messages/delete). Sin migraciones nuevas.
+  # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
+  # tool social_edit_message (#112). Sin migraciones nuevas.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.65
-    digest: sha256:3e34611d46bcb7ebc7cfc7331d183372c7d82cf98a713523aabc20eda4298eed
+    newTag: v1.3.66
+    digest: sha256:77cfc2e5d4b609fa6b0d5d2a40437b612a776a8f613d8e583b3d92212ec6ec9e
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
