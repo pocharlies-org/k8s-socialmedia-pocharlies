@@ -411,3 +411,71 @@ contracts:
       the "never read x-user-sub" rule are contract: a second audience is a
       new value, retiring or renaming this one is breaking — a new `.v2`
       entry beside this one.
+  - id: http.telegram-connector.messages-edit.v1
+    kind: http-route
+    value: /messages/edit
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/edit of the house Telegram connectors
+      (telegram-connector, telegram-connector-professional; the Telegram twin
+      of http.whatsapp-connector.messages-edit.v1), consumed by the MCP tool
+      social_edit_message (mcp-server/src/mcp/server.ts
+      handleTelegramEditMessage) and dgx-messages (/messages → Editar).
+      HMAC-signed like every route of this connector, body {chatId, messageId,
+      content, actor?}: chatId = the bare Telegram peer (marked numeric id or
+      @username, no tg_ prefix), messageId = the positive per-chat message
+      number (number or numeric string), actor ≤ 200 chars, recorded, never
+      auth. Edits one of OUR OWN TEXT messages (a text with a link preview
+      counts; media captions do not): the message is fetched from Telegram
+      first. Answers 200 {edited: true, messageId, chatId, editedAt, unchanged,
+      published} (chatId = the marked chat id; unchanged = the text already
+      was that one — MESSAGE_NOT_MODIFIED is an idempotent success with
+      nothing recorded; published = the telegram.MessageEdited event left for
+      NATS). Errors {error, failureClass, code?}: 403 disabled_sending
+      (ENABLE_SENDING set to anything but "true", or
+      EMERGENCY_DISABLE_SENDING=true — unset ENABLE_SENDING means on: the
+      Telegram connectors never had that switch), 400 invalid_request
+      (missing or blank field, non-numeric messageId, MESSAGE_EMPTY), 503
+      disconnected, 404 message_unavailable (unknown message or chat), 422
+      not_own_message (not ours; MESSAGE_ID_INVALID / MESSAGE_AUTHOR_REQUIRED
+      in `code`) / not_editable (not text, service message) /
+      rejected_by_telegram (Telegram's own rules — e.g.
+      MESSAGE_EDIT_TIME_EXPIRED, MESSAGE_TOO_LONG — in `code`), 429
+      rate_limited (FLOOD_WAIT, retryAfterSeconds + Retry-After), 401 auth,
+      504 timeout, 502 unknown. DB effect (no migration) through
+      nats.telegram-connector.message-edited.v1, written by telegram-sync:
+      content = new text, is_edited = true, the replaced text appended to
+      metadata.edit_history [{content, replaced_at, source, actor?}] and
+      metadata.edited_at — the WhatsApp representation. The path, the body
+      fields, the 200 shape and the failureClass values are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
+  - id: nats.telegram-connector.message-edited.v1
+    kind: routing-key
+    value: telegram.MessageEdited
+    role: provider
+    files:
+      - connectors/telegram/src/events/publisher.ts
+      - connectors/telegram-sync/sync/nats_consumer.py
+    status: active
+    note: >-
+      Core-NATS subject (at-most-once, like telegram.MessageReceived)
+      published by the house Telegram connectors for every text edit: the
+      ones POST /messages/edit makes (source "connector", with actor) and the
+      ones Telegram dispatches — a contact's, our phone's (source
+      "telegram"); our own edit's echo and reaction updates (same text) are
+      not re-published. Payload JSON {eventType: "TelegramMessageEdited",
+      account (CONNECTOR_ACCOUNT), conversationId (marked chat id),
+      telegramMessageId, content (new text, never empty), editedAt (ISO-8601),
+      source: connector|telegram, actor?, isOutbound}. Consumer: telegram-sync
+      (one instance per account, filtering on `account`), which updates the
+      row [<account>:]tg_<chat>_<msg> of account_id telegram:<account>:
+      content = new text, is_edited = true, the replaced text appended to
+      metadata.edit_history [{content, replaced_at, source, actor?}],
+      metadata.edited_at; idempotent (same text = no-op), never on VOICE/AUDIO
+      rows (their content is the transcription). The pairing pool
+      (telegram-pairing) never publishes it. The subject, the field names and
+      the source values are contract: changing any is breaking — a new `.v2`
+      entry beside this one.

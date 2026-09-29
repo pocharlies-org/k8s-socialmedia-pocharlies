@@ -24,7 +24,12 @@ import pino from 'pino';
 process.env.NATS_RECONNECT_BASE_MS = '50';
 process.env.NATS_RECONNECT_MAX_MS = '100';
 
-import { TelegramEventPublisher, TelegramMessageReceivedEvent } from './publisher';
+import {
+  TELEGRAM_MESSAGE_EDITED_SUBJECT,
+  TelegramEventPublisher,
+  TelegramMessageReceivedEvent,
+  toMessageEditedEvent,
+} from './publisher';
 
 type PublisherInternals = {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
@@ -246,4 +251,57 @@ test('publisher re-attaches when NATS comes up after startup (the CrashLoop scen
 
   // Whole test ran in ONE process from a failed startup — nothing exited:
   // the CrashLoop scenario is over, the pod survives a NATS-less boot.
+});
+
+test('publishMessageEdited: telegram.MessageEdited con el payload que aplica telegram-sync; sin NATS → false', async () => {
+  const logger = pino({ level: 'silent' });
+  const event = toMessageEditedEvent('professional', {
+    conversationId: '-1001234567890',
+    telegramMessageId: '42',
+    content: 'texto nuevo ñ',
+    editedAt: new Date('2026-09-29T10:00:00Z'),
+    isOutbound: true,
+    source: 'connector',
+    actor: 'dani',
+  });
+  assert.deepEqual(event, {
+    eventType: 'TelegramMessageEdited',
+    account: 'professional',
+    conversationId: '-1001234567890',
+    telegramMessageId: '42',
+    content: 'texto nuevo ñ',
+    editedAt: '2026-09-29T10:00:00.000Z',
+    source: 'connector',
+    actor: 'dani',
+    isOutbound: true,
+  });
+  // No actor → no key (telegram-sync records it only when present).
+  assert.equal(
+    'actor' in
+      toMessageEditedEvent('personal', {
+        ...event,
+        editedAt: new Date(),
+        source: 'telegram',
+        actor: undefined,
+      }),
+    false
+  );
+
+  const down = new TelegramEventPublisher('nats://127.0.0.1:1', undefined, logger);
+  openPublishers.push(down);
+  assert.equal(down.publishMessageEdited(event), false, 'NATS down → not published');
+
+  const stub = new NatsStub();
+  await stub.listen(0);
+  openStubs.push(stub);
+  const up = new TelegramEventPublisher(`nats://127.0.0.1:${stub.port}`, undefined, logger);
+  openPublishers.push(up);
+  await up.connect();
+  assert.equal(up.isConnected(), true);
+  assert.equal(up.publishMessageEdited(event), true);
+  await new Promise<void>(resolve => setTimeout(resolve, 200));
+  assert.equal(TELEGRAM_MESSAGE_EDITED_SUBJECT, 'telegram.MessageEdited');
+  const wire = Buffer.concat(stub.received).toString('utf8');
+  assert.ok(wire.includes('PUB telegram.MessageEdited'), 'PUB frame on telegram.MessageEdited');
+  assert.ok(wire.includes(JSON.stringify(event)), 'payload is the event JSON');
 });

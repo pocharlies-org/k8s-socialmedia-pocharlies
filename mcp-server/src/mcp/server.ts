@@ -1937,6 +1937,14 @@ export class MCPServer {
         account: this.account(args),
       });
     }
+    if (channelName === 'telegram') {
+      return this.handleTelegramEditMessage({
+        chatId: this.target(args),
+        messageId: this.string(args, 'messageId'),
+        content: this.string(args, 'message'),
+        account: this.account(args),
+      });
+    }
     throw this.canonicalError(
       'unsupported_capability',
       `Message editing is not supported by the deployed ${channelName} connector`
@@ -3890,6 +3898,75 @@ export class MCPServer {
       );
     }
     return this.jsonResponse(data);
+  }
+
+  /**
+   * Edit one of our own Telegram text messages through the connector's POST
+   * /messages/edit. The connector checks the message (ours, text), applies
+   * its sending gate and publishes telegram.MessageEdited; telegram-sync
+   * writes the row (replaced text kept in metadata.edit_history), so the MCP
+   * writes nothing itself. Telegram's own limits come back as 422
+   * rejected_by_telegram.
+   */
+  // CONTRACT: http.telegram-connector.messages-edit.v1
+  private async handleTelegramEditMessage(args: {
+    chatId: string;
+    messageId: string;
+    content: string;
+    account?: string;
+  }) {
+    const account = normalizeAccount(args.account);
+    const target = stripAccount(String(args.chatId).trim());
+    if (target.account !== 'personal' && target.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `target belongs to the ${target.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const { chatId } = this.telegramTopicTarget(args.chatId);
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      '/api/v1/messages/edit',
+      {
+        chatId,
+        messageId: this.telegramMessageNumber(args.messageId, chatId, account),
+        content: args.content,
+        ...this.connectorActor(),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /**
+   * Telegram message id (per chat) from what a caller holds: the bare number
+   * or the stored id `[<account>:]tg_<chat>_<msg>`, whose chat and account
+   * must be the ones addressed.
+   */
+  private telegramMessageNumber(messageId: string, chatId: string, account: Account): number {
+    const parsed = stripAccount(String(messageId).trim());
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId belongs to the ${parsed.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const stored = parsed.id.match(/^tg_(-?\d+)_(\d+)$/);
+    if (stored && stored[1] !== chatId) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId ${messageId} belongs to Telegram chat ${stored[1]}, not ${chatId}`
+      );
+    }
+    const raw = stored ? stored[2] : parsed.id;
+    const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(n) || n <= 0) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId must be a Telegram message number or tg_<chat>_<message>, got '${messageId}'`
+      );
+    }
+    return n;
   }
 
   private async handleTelegramMarkAsRead(args: { chatId: string; account?: string }) {

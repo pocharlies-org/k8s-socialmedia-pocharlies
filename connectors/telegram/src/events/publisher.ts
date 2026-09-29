@@ -32,6 +32,58 @@ export interface TelegramMessageReceivedEvent {
   chatTitle?: string;
 }
 
+/**
+ * A text edit of a stored message (ours through POST /messages/edit, or one
+ * Telegram dispatched: a contact's, our phone's). telegram-sync is the writer:
+ * content = new text, is_edited = true, the replaced text appended to
+ * metadata.edit_history, metadata.edited_at — the WhatsApp representation.
+ */
+// CONTRACT: nats.telegram-connector.message-edited.v1
+export const TELEGRAM_MESSAGE_EDITED_SUBJECT = 'telegram.MessageEdited';
+
+export interface TelegramMessageEditedEvent {
+  eventType: 'TelegramMessageEdited';
+  /** CONNECTOR_ACCOUNT of the emitting connector, the same filter as MessageReceived. */
+  account: string;
+  conversationId: string;
+  telegramMessageId: string;
+  /** The new text. */
+  content: string;
+  /** ISO-8601; Telegram's edit date (now for an unchanged-date answer). */
+  editedAt: string;
+  /** 'connector' = our HTTP edit, 'telegram' = dispatched by Telegram. */
+  source: 'connector' | 'telegram';
+  /** Who asked for a connector edit (dgx-messages user, MCP caller); never auth. */
+  actor?: string;
+  isOutbound: boolean;
+}
+
+/** An edit (TelegramMessageEdit of telegram-client.ts) stamped with the account. */
+export function toMessageEditedEvent(
+  account: string,
+  edit: {
+    conversationId: string;
+    telegramMessageId: string;
+    content: string;
+    editedAt: Date;
+    isOutbound: boolean;
+    source: 'connector' | 'telegram';
+    actor?: string;
+  }
+): TelegramMessageEditedEvent {
+  return {
+    eventType: 'TelegramMessageEdited',
+    account,
+    conversationId: edit.conversationId,
+    telegramMessageId: edit.telegramMessageId,
+    content: edit.content,
+    editedAt: edit.editedAt.toISOString(),
+    source: edit.source,
+    ...(edit.actor ? { actor: edit.actor } : {}),
+    isOutbound: edit.isOutbound,
+  };
+}
+
 export interface TelegramChatUpdatedEvent {
   eventType: 'TelegramChatUpdated';
   telegramChatId: string;
@@ -139,6 +191,29 @@ export class TelegramEventPublisher {
     } catch (error) {
       this.logger.error(`Failed to publish message: ${String(error)}`);
       this.markDisconnected();
+    }
+  }
+
+  /**
+   * Publish a message edited event (same no-op-while-down contract). Returns
+   * whether it was handed to NATS: the edit route reports it as `published`.
+   */
+  publishMessageEdited(event: TelegramMessageEditedEvent): boolean {
+    if (!this.nc || !this.connected) {
+      this.logger.warn(
+        `NATS not connected, skipping message edited event for ${event.conversationId}/${event.telegramMessageId}`
+      );
+      return false;
+    }
+
+    try {
+      this.nc.publish(TELEGRAM_MESSAGE_EDITED_SUBJECT, this.sc.encode(JSON.stringify(event)));
+      this.logger.debug(`Published event to ${TELEGRAM_MESSAGE_EDITED_SUBJECT}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to publish message edited: ${String(error)}`);
+      this.markDisconnected();
+      return false;
     }
   }
 

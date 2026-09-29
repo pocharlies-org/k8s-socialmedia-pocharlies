@@ -216,6 +216,57 @@ async def insert_message(
     return msg_id
 
 
+def social_account_id() -> str:
+    """social_accounts id of this instance's account (ADR 0001): telegram:<account>."""
+    return f"telegram:{ACCOUNT}"
+
+
+# Edit of a stored message — the WhatsApp representation (connectors/
+# whatsapp-web/src/message-mutations.ts markMessageEdited), no migration:
+# content = new text, is_edited = true, the text it replaces appended to
+# metadata.edit_history [{content, replaced_at, source, actor?}] (oldest
+# first) and metadata.edited_at = the last edit. On the right-hand side of
+# SET, `content` / `metadata` are the OLD values. Idempotent: the same text
+# again (our edit + Telegram's echo, a replay) matches no row. Voice/audio rows
+# are never touched: their content is the transcription, not a caption.
+MARK_EDITED_SQL = """
+UPDATE messages
+   SET content = $3::text,
+       is_edited = TRUE,
+       metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+         'edit_history',
+         COALESCE(metadata->'edit_history', '[]'::jsonb) || jsonb_build_array(
+           jsonb_strip_nulls(jsonb_build_object(
+             'content', content, 'replaced_at', $4::text,
+             'source', $5::text, 'actor', $6::text))),
+         'edited_at', $4::text)
+ WHERE wa_message_id = $1::text AND account_id = $2::text AND platform = 'telegram'
+   AND COALESCE(message_type, 'TEXT') NOT IN ('VOICE', 'AUDIO')
+   AND content IS DISTINCT FROM $3::text
+RETURNING id
+"""
+
+
+async def mark_message_edited(
+    pool: asyncpg.Pool,
+    chat_id: int,
+    telegram_message_id: int,
+    content: str,
+    edited_at: str,
+    source: str,
+    actor: str | None = None,
+) -> int | None:
+    """Record an edit on the row of this account; the messages.id changed, or
+    None when there is nothing to do (unknown row, same text)."""
+    wa_msg_id = account_key(f"tg_{chat_id}_{telegram_message_id}")
+    async with pool.acquire() as conn:
+        row_id = await conn.fetchval(
+            MARK_EDITED_SQL,
+            wa_msg_id, social_account_id(), content, edited_at, source, actor,
+        )
+    return int(row_id) if row_id is not None else None
+
+
 async def insert_attachment(
     pool: asyncpg.Pool,
     message_id: int,

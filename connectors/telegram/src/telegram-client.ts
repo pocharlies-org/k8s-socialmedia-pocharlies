@@ -18,6 +18,15 @@ import { EventEmitter } from 'events';
 import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 import { isSessionInvalidatedError } from './credential-session';
+import {
+  EditDeduper,
+  EditResult,
+  EditSource,
+  MessageMutationError,
+  TelegramEditApi,
+  editOwnTextMessage,
+  inboundTextEdit,
+} from './message-edit';
 
 /**
  * SC-1145: in-memory storage driver with a save() hook.
@@ -130,6 +139,21 @@ export interface InlineKeyboardButton {
   url?: string;
 }
 
+/**
+ * A text edit of a message, ours or someone else's: what `telegram.MessageEdited`
+ * carries. Emitted as 'messageEdited' for the edits Telegram tells us about;
+ * the HTTP route builds the same shape for its own edits.
+ */
+export interface TelegramMessageEdit {
+  conversationId: string;
+  telegramMessageId: string;
+  content: string;
+  editedAt: Date;
+  isOutbound: boolean;
+  source: EditSource;
+  actor?: string;
+}
+
 export interface TelegramClientConfig {
   apiId: number;
   apiHash: string;
@@ -226,6 +250,8 @@ export class TelegramClientWrapper extends EventEmitter {
   // setSessionInvalidatedHook). Unset = legacy behaviour, byte for byte.
   private sessionPersistHook: (() => void) | null = null;
   private sessionInvalidatedHook: (() => Promise<void> | void) | null = null;
+  // Last known text per message: one telegram.MessageEdited per real edit.
+  private readonly edits = new EditDeduper();
 
   constructor(config: TelegramClientConfig) {
     super();
@@ -315,6 +341,21 @@ export class TelegramClientWrapper extends EventEmitter {
       }
     });
     this.logger.info('Update (edit_message → reactions snapshot) handler registered');
+
+    // Text edits (a contact's, our phone's) → 'messageEdited' → NATS
+    // telegram.MessageEdited → telegram-sync records them on the row. Only
+    // text messages with an edit date: reaction changes also arrive as edits
+    // (same text, skipped by the deduper), media captions are not recorded
+    // (a voice/audio row's content is its transcription).
+    this.client.onEditMessage.add((message: Message) => {
+      try {
+        const edit = this.inboundEdit(message);
+        if (edit) this.emit('messageEdited', edit);
+      } catch (e) {
+        this.logger.error(`Error processing edited message: ${e}`);
+      }
+    });
+    this.logger.info('EditMessage (text edits → messageEdited) handler registered');
 
     // Typing indicator — forward to the dashboard so the chat header shows
     // "<user> is typing…". mtcute fires UserTypingUpdate every ~5s while the
@@ -1041,6 +1082,52 @@ export class TelegramClientWrapper extends EventEmitter {
       messages: [messageId],
       ...(toThreadId !== undefined ? { toThreadId } : {}),
     });
+  }
+
+  private inboundEdit(message: Message): TelegramMessageEdit | null {
+    const edit = inboundTextEdit(message, this.edits);
+    return edit ? { ...edit, source: 'telegram' } : null;
+  }
+
+  private editApi(): TelegramEditApi {
+    return {
+      getMessages: (chatId, messageIds) => this.client.getMessages(chatId, messageIds),
+      editMessage: params => this.client.editMessage(params),
+    };
+  }
+
+  /**
+   * Edit one of our own text messages (POST /messages/edit). The text is
+   * remembered before the call so the echo Telegram dispatches back is not
+   * published a second time: the route publishes this edit with its actor.
+   */
+  async editMessage(chatId: string, messageId: number, text: string): Promise<EditResult> {
+    if (!this.connected) {
+      throw new MessageMutationError('Not connected to Telegram', 503, 'disconnected');
+    }
+    let remembered: { key: string; previous: string | undefined } | null = null;
+    try {
+      const result = await editOwnTextMessage(
+        this.editApi(),
+        toMtcutePeer(chatId),
+        messageId,
+        text,
+        {
+          beforeEdit: target => {
+            const key = EditDeduper.key(String(target.chat.id), messageId);
+            remembered = { key, previous: this.edits.remember(key, text) };
+          },
+        }
+      );
+      this.logger.info(
+        `Message ${messageId} in ${chatId} ${result.unchanged ? 'already had that text' : 'edited'}`
+      );
+      return result;
+    } catch (e) {
+      const undo = remembered as { key: string; previous: string | undefined } | null;
+      if (undo) this.edits.restore(undo.key, text, undo.previous);
+      throw e;
+    }
   }
 
   /**

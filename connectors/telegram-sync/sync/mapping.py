@@ -43,6 +43,12 @@ def parse_ts(value: Any) -> datetime:
     return datetime.now(timezone.utc)
 
 
+def iso_utc(dt: datetime) -> str:
+    """ISO-8601 in UTC with milliseconds and `Z` — JavaScript's toISOString(),
+    the format the WhatsApp connector writes into metadata.edit_history."""
+    return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _int_or_none(value: Any) -> Optional[int]:
     if value is None or value == "":
         return None
@@ -86,6 +92,31 @@ def to_insert_kwargs(m: dict) -> Optional[dict]:
         "reply_to_message_id": _int_or_none(m.get("replyToMessageId")),
         "topic_id": _int_or_none(m.get("topicId")),
         "needs_transcription": mt in TRANSCRIBE_TYPES,
+    }
+
+
+EDIT_SOURCES = {"connector", "telegram"}
+
+
+def to_edit_kwargs(e: dict) -> Optional[dict]:
+    """Build kwargs for db.mark_message_edited from a TelegramMessageEdited
+    event (connectors/telegram/src/events/publisher.ts). None when the ids or
+    the text are missing — an edit never blanks a row."""
+    chat_id = _int_or_none(e.get("conversationId"))
+    tg_msg_id = _int_or_none(e.get("telegramMessageId"))
+    content = e.get("content")
+    if chat_id is None or tg_msg_id is None or not isinstance(content, str) or not content:
+        return None
+    source = e.get("source") if e.get("source") in EDIT_SOURCES else "telegram"
+    actor = e.get("actor")
+    actor = actor.strip()[:200] if isinstance(actor, str) and actor.strip() else None
+    return {
+        "chat_id": chat_id,
+        "telegram_message_id": tg_msg_id,
+        "content": content,
+        "edited_at": iso_utc(parse_ts(e.get("editedAt"))),
+        "source": source,
+        "actor": actor,
     }
 
 

@@ -1,7 +1,11 @@
 import express from 'express';
 import { PostgresCredentialStore, credentialSessionKeyFromEnv } from '@mcp-socialmedia/shared';
-import { TelegramClientWrapper, TelegramMessage } from './telegram-client';
-import { TelegramEventPublisher, TelegramMessageReceivedEvent } from './events/publisher';
+import { TelegramClientWrapper, TelegramMessage, TelegramMessageEdit } from './telegram-client';
+import {
+  TelegramEventPublisher,
+  TelegramMessageReceivedEvent,
+  toMessageEditedEvent,
+} from './events/publisher';
 import { createRouter } from './api/controller';
 import { getPool } from './db-pool';
 import {
@@ -100,7 +104,13 @@ async function main() {
     if (typeof sub === 'string' && sub) console.log(`API request carries x-user-sub=${sub}`);
     next();
   });
-  app.use('/api/v1', createRouter(client, CONNECTOR_SHARED_SECRET));
+  app.use(
+    '/api/v1',
+    createRouter(client, CONNECTOR_SHARED_SECRET, {
+      publishMessageEdited: edit =>
+        eventPublisher.publishMessageEdited(toMessageEditedEvent(CONNECTOR_ACCOUNT, edit)),
+    })
+  );
 
   // Health check endpoint. INFRA-291 (P4): readiness reports the REAL NATS
   // state (eventPublisher.isConnected()) — the publisher no longer kills the
@@ -151,6 +161,11 @@ async function main() {
     };
 
     await eventPublisher.publishMessageReceived(event);
+  });
+
+  // Edits Telegram tells us about (a contact's, our phone's) → telegram-sync.
+  client.on('messageEdited', (edit: TelegramMessageEdit) => {
+    eventPublisher.publishMessageEdited(toMessageEditedEvent(CONNECTOR_ACCOUNT, edit));
   });
 
   // Connect to Telegram

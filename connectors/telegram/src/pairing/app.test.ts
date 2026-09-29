@@ -319,3 +319,38 @@ test('fuente del pool: ningún fichero lee TELEGRAM_SESSION_STRING (fuera de com
     );
   }
 });
+
+test('el pool de pairing nunca edita ni escribe mensajes: sin /messages/edit y sin publicador/controlador', async () => {
+  const { base, close, factory } = await serve();
+  try {
+    const body = { chatId: '-1001', messageId: 1, content: 'x' };
+    for (const path of [
+      '/api/v1/messages/edit',
+      `${INTERNAL_TELEGRAM_SESSIONS_BASE}/messages/edit`,
+    ]) {
+      const r = await fetch(`${base}${path}`, signed(body));
+      assert.equal(r.status, 404, path);
+    }
+    assert.equal(factory.clients.length, 0, 'no Telegram client was opened');
+  } finally {
+    await close();
+  }
+  // Nothing in the pool can reach the NATS publisher, the house router or the
+  // edit module: the only paths by which an edit is recorded.
+  for (const file of ['main.ts', 'app.ts', 'client.ts', 'session-pool.ts']) {
+    const text = readFileSync(join(process.cwd(), 'src/pairing', file), 'utf-8');
+    const imports = text.match(/from\s+['"][^'"]+['"]|require\(\s*['"][^'"]+['"]/g) || [];
+    for (const forbidden of [
+      'events/publisher',
+      'api/controller',
+      'message-edit',
+      'telegram-client',
+    ]) {
+      assert.equal(
+        imports.some(i => i.includes(forbidden)),
+        false,
+        `${file} must not import ${forbidden}`
+      );
+    }
+  }
+});
