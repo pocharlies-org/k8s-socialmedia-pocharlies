@@ -627,28 +627,34 @@ export async function setMessageStatus(waMessageId: string, status: string): Pro
 /**
  * Persist the real unread badge + archived flag for a conversation.
  * No-op if the row doesn't exist yet (next message creates it). `archived`
- * is optional — pass undefined to leave the stored value untouched.
+ * is optional — pass undefined to leave the stored value untouched; so is
+ * `unreadCount`. A negative count is WhatsApp's "marked as unread" (Baileys
+ * emits -1): the badge becomes at least 1 instead of being cleared.
  */
 export async function setConversationState(
   id: string,
-  unreadCount: number,
+  unreadCount: number | undefined,
   archived?: boolean
 ): Promise<void> {
+  if (unreadCount === undefined && archived === undefined) return;
   const pool = getPool();
   // conversations.id is stored namespaced; route the bare id through accountKey
   // so the state UPDATE is not a silent no-op on the professional account.
   const convId = accountKey(id);
-  if (archived === undefined) {
-    await pool.query(
-      `UPDATE conversations SET unread_count = $2, updated_at = now() WHERE id = $1`,
-      [convId, Math.max(0, unreadCount | 0)]
-    );
-  } else {
-    await pool.query(
-      `UPDATE conversations SET unread_count = $2, archived = $3, updated_at = now() WHERE id = $1`,
-      [convId, Math.max(0, unreadCount | 0), archived]
-    );
+  const sets: string[] = [];
+  const params: unknown[] = [convId];
+  if (unreadCount !== undefined && unreadCount < 0) {
+    sets.push('unread_count = GREATEST(unread_count, 1)');
+  } else if (unreadCount !== undefined) {
+    params.push(Math.max(0, unreadCount | 0));
+    sets.push(`unread_count = $${params.length}`);
   }
+  if (archived !== undefined) {
+    params.push(archived);
+    sets.push(`archived = $${params.length}`);
+  }
+  sets.push('updated_at = now()');
+  await pool.query(`UPDATE conversations SET ${sets.join(', ')} WHERE id = $1`, params);
 }
 
 export async function getParticipantAvatar(id: string): Promise<string | null> {

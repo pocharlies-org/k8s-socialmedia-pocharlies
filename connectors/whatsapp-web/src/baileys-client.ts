@@ -27,6 +27,7 @@ import {
   makeCacheableSignalKeyStore,
   AnyMessageContent,
   CacheStore,
+  ChatModification,
   GroupMetadata,
   Browsers,
 } from '@whiskeysockets/baileys';
@@ -85,6 +86,18 @@ import {
   StoredMessage,
 } from './message-mutations';
 import { reactionTime, storeMessageReaction } from './message-reactions';
+import {
+  ChatState,
+  ChatStatePatch,
+  latestMessageId,
+  muteEndTimestamp,
+  muteFromBaileys,
+  MuteState,
+  pinFromBaileys,
+  recordInboundChatState,
+  resolveCanonicalConversation,
+  writeChatState,
+} from './chat-state';
 import { maybeRunRetention } from './retention';
 import {
   appendCompanyToDisplayName,
@@ -368,6 +381,130 @@ const OWN_MUTATION_ECHO_MS = 30_000;
 export interface MessageMutationRequest {
   /** Who asked (dgx-messages user, MCP caller); recorded in metadata. */
   actor?: string;
+}
+
+/**
+ * Chat-level actions of POST /chats/modify (fase 3 / PR-5, the NAS fork's
+ * modifyChat adapted). Starring is not here: WhatsApp stars messages, not
+ * chats — the console's "destacar" is its own conversations.flagged.
+ */
+export type ChatModifyAction =
+  'archive' | 'unarchive' | 'pin' | 'unpin' | 'mute' | 'unmute' | 'markRead' | 'markUnread';
+
+const CHAT_MODIFY_ALIASES: Record<string, ChatModifyAction> = {
+  archive: 'archive',
+  unarchive: 'unarchive',
+  pin: 'pin',
+  unpin: 'unpin',
+  mute: 'mute',
+  unmute: 'unmute',
+  markread: 'markRead',
+  read: 'markRead',
+  markunread: 'markUnread',
+  unread: 'markUnread',
+};
+
+/** `markRead`, `mark-read`, `mark_read`, `read`… → the action; null if unknown. */
+export function normalizeChatModifyAction(value: unknown): ChatModifyAction | null {
+  if (typeof value !== 'string') return null;
+  return (
+    CHAT_MODIFY_ALIASES[
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/[-_\s]/g, '')
+    ] ?? null
+  );
+}
+
+/** Actions whose app-state patch carries a message range (Baileys `lastMessages`). */
+export function chatModifyNeedsLastMessage(action: ChatModifyAction): boolean {
+  return (
+    action === 'archive' ||
+    action === 'unarchive' ||
+    action === 'markRead' ||
+    action === 'markUnread'
+  );
+}
+
+/**
+ * The documented Baileys chatModify shapes. archive / markRead need
+ * `lastMessages` — the newest message of the chat, key + timestamp in
+ * seconds (Baileys takes the LAST entry as lastMessageTimestamp, so one
+ * entry, the newest). Mute takes WhatsApp's muteEndTimestamp (see
+ * muteEndTimestamp), unmute null.
+ */
+export function buildChatModification(
+  action: ChatModifyAction,
+  options: {
+    lastMessages?: Array<{ key: WAMessageKey; messageTimestamp: number }>;
+    mute?: MuteState;
+  } = {}
+): ChatModification {
+  const lastMessages = options.lastMessages || [];
+  if (chatModifyNeedsLastMessage(action) && !lastMessages.length) {
+    throw new MessageUnavailableError(
+      `${action} needs the newest message of the chat (key + timestamp) and none is known`,
+      404,
+      'message_unavailable'
+    );
+  }
+  switch (action) {
+    case 'archive':
+    case 'unarchive':
+      return { archive: action === 'archive', lastMessages };
+    case 'markRead':
+    case 'markUnread':
+      return { markRead: action === 'markRead', lastMessages };
+    case 'pin':
+    case 'unpin':
+      return { pin: action === 'pin' };
+    case 'mute':
+      return { mute: muteEndTimestamp(options.mute || { until: null }) };
+    case 'unmute':
+      return { mute: null };
+  }
+}
+
+/** What an accepted action writes on the canonical conversation. */
+function chatStatePatchFor(action: ChatModifyAction, mute?: MuteState): ChatStatePatch {
+  switch (action) {
+    case 'archive':
+    case 'unarchive':
+      return { archived: action === 'archive' };
+    case 'pin':
+      return { pinnedAt: new Date() };
+    case 'unpin':
+      return { pinnedAt: null };
+    case 'mute':
+      return { mute: mute || { until: null } };
+    case 'unmute':
+      return { mute: null };
+    case 'markRead':
+      return { unread: 'read' };
+    case 'markUnread':
+      return { unread: 'unread' };
+  }
+}
+
+/** Options of POST /chats/modify. */
+export interface ChatModifyRequest {
+  /** For `mute`: until when (null / absent = forever). */
+  mute?: MuteState;
+  /** Who asked (dgx-messages user, MCP caller); logged, never auth. */
+  actor?: string;
+}
+
+export interface ChatModifyResult {
+  action: ChatModifyAction;
+  /** Normalised jid the change went to (the one WhatsApp used last). */
+  chatId: string;
+  /** conversations.id of the canonical conversation; null when not ingesting. */
+  conversationId: string | null;
+  /** The row was written (false: pairing pool, or pin / mute without migration 012). */
+  persisted: boolean;
+  /** The canonical row after the change, when persisted. */
+  state: ChatState | null;
 }
 
 /** A message we can edit or delete: its real WhatsApp key and what we stored of it. */
@@ -895,6 +1032,11 @@ export class BaileysClient extends EventEmitter {
         });
         // Persist real unread + archived from the history snapshot.
         void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
+        // Pin / mute (fase 3 / PR-5): only what the snapshot says.
+        void recordInboundChatState(norm, {
+          pinnedAt: pinFromBaileys(c),
+          mute: muteFromBaileys(c, 'snapshot'),
+        });
       }
       if (!this.historySyncOnLogin && Date.now() > this.historyBackfillRequestedUntil) return;
       this.logger.info(
@@ -943,7 +1085,10 @@ export class BaileysClient extends EventEmitter {
         const norm = this.normalizeJid(u.id);
         const prev = this.chatStore.get(norm);
         if (prev) {
-          if (typeof u.unreadCount === 'number') prev.unreadCount = u.unreadCount;
+          if (typeof u.unreadCount === 'number') {
+            // -1 = marked as unread on the phone: a dot, at least one unread.
+            prev.unreadCount = u.unreadCount < 0 ? Math.max(prev.unreadCount, 1) : u.unreadCount;
+          }
           if (u.conversationTimestamp) prev.timestamp = Number(u.conversationTimestamp);
           if ((u as any).name) prev.name = (u as any).name;
           this.emit('chat-update', {
@@ -952,10 +1097,18 @@ export class BaileysClient extends EventEmitter {
             metadata: { name: prev.name },
           });
         }
-        // chats.update may carry only a delta — persist whichever fields are present.
-        const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount || 0;
+        // chats.update may carry only a delta — persist whichever fields are
+        // present (an archive-only delta for a chat not cached here leaves the
+        // badge alone instead of zeroing it).
+        const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount;
         const arch = typeof (u as any).archived === 'boolean' ? (u as any).archived : undefined;
         void setConversationState(norm, uc, arch).catch(() => {});
+        // Pin / mute from app-state sync (the phone, or the echo of our own
+        // POST /chats/modify — same values), on the canonical conversation.
+        void recordInboundChatState(norm, {
+          pinnedAt: pinFromBaileys(u),
+          mute: muteFromBaileys(u, 'sync-action'),
+        });
       }
     });
 
@@ -973,6 +1126,10 @@ export class BaileysClient extends EventEmitter {
         });
         // Persist real unread badge + archived flag (fire-and-forget).
         void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
+        void recordInboundChatState(norm, {
+          pinnedAt: pinFromBaileys(c),
+          mute: muteFromBaileys(c, 'snapshot'),
+        });
         // Subscribe to presence so we get typing updates for this chat.
         void this.presenceSubscribeSilent(c.id);
       }
@@ -2163,6 +2320,134 @@ export class BaileysClient extends EventEmitter {
       this.logger.info(`Deleted ${target.id} for me in ${target.chatJid}`);
       return { messageId: target.id, deletedAt: deletedAt.toISOString() };
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat state (fase 3 / PR-5). Persistence: chat-state.ts.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Archive / pin / mute / read-unread a chat as the phone does (an app-state
+   * patch). `chatId` is resolved to the canonical conversation (tombstones
+   * and contact aliases followed); the patch goes to the jid of its newest
+   * message's key — memory, whatsapp_message_payloads, whatsapp_message_keys
+   * or the messages row, so it survives restarts — which is also the
+   * `lastMessages` entry archive and read need. The result is written on the
+   * canonical row once WhatsApp accepted it (ingest only); the echo that
+   * chats.update brings back carries the same values.
+   */
+  async modifyChat(
+    chatId: string,
+    action: ChatModifyAction,
+    request: ChatModifyRequest = {}
+  ): Promise<ChatModifyResult> {
+    const sock = this.connectedSocket();
+    const requested = stripAccountKey(String(chatId || '').trim());
+    if (!requested) {
+      throw new MessageMutationError(
+        'modifyChat: conversationId is required',
+        400,
+        'invalid_request'
+      );
+    }
+    const conversation = this.ingest ? await resolveCanonicalConversation(requested) : undefined;
+    if (this.ingest && !conversation) {
+      throw new MessageMutationError(
+        `modifyChat: conversation ${requested} is unavailable (unknown to this account)`,
+        404,
+        'conversation_unavailable'
+      );
+    }
+    const externalId = conversation?.externalId || this.normalizeJid(this.toRawJid(requested));
+    const last = conversation
+      ? await this.newestMessageTarget(conversation.id, externalId)
+      : undefined;
+    const chatJid = last?.chatJid || this.toRawJid(externalId);
+    const lastMessages =
+      last && last.timestampSeconds
+        ? [{ key: last.key, messageTimestamp: last.timestampSeconds }]
+        : [];
+
+    // markRead: read receipts for what is pending (the /messages/read path),
+    // then the app-state mark, which is what clears a "marked unread" dot.
+    // Without a known newest message the receipts are all there is to do.
+    const receipts = action === 'markRead' && this.ingest;
+    if (receipts) await this.markAsRead(externalId);
+    if (!receipts || lastMessages.length) {
+      const modification = buildChatModification(action, { lastMessages, mute: request.mute });
+      await this.applyChatModification(sock, modification, chatJid, action);
+    }
+
+    const chat = this.chatStore.get(this.normalizeJid(chatJid));
+    if (chat && action === 'markRead') chat.unreadCount = 0;
+    if (chat && action === 'markUnread') chat.unreadCount = Math.max(chat.unreadCount, 1);
+
+    let state: ChatState | undefined;
+    if (this.ingest && conversation) {
+      const patch = chatStatePatchFor(action, request.mute);
+      try {
+        state = await writeChatState(conversation.id, patch);
+      } catch (e: any) {
+        throw new Error(
+          `${action} of ${conversation.id} reached WhatsApp but was not saved: ${e?.message || e}`
+        );
+      }
+    }
+    this.logger.info(
+      `Chat ${action} ${chatJid}${request.actor ? ` by ${request.actor}` : ''}${state ? '' : ' (not recorded)'}`
+    );
+    return {
+      action,
+      chatId: this.normalizeJid(chatJid),
+      conversationId: conversation?.id ?? null,
+      persisted: !!state,
+      state: state ?? null,
+    };
+  }
+
+  /** Key + timestamp of the newest message of a conversation (undefined if none is usable). */
+  private async newestMessageTarget(
+    conversationId: string,
+    externalId: string
+  ): Promise<MutationTarget | undefined> {
+    const id = await latestMessageId(conversationId);
+    if (!id) return undefined;
+    let target: MutationTarget;
+    try {
+      target = await this.resolveMutationTarget(externalId, id, 'modifyChat');
+    } catch (e) {
+      if (e instanceof MessageUnavailableError) return undefined;
+      throw e;
+    }
+    // Baileys refuses a group message of someone else without its participant.
+    if (isJidGroup(target.chatJid) && !target.key.fromMe && !target.key.participant) {
+      return undefined;
+    }
+    return target;
+  }
+
+  /** chatModify, with WhatsApp's own refusals as 422 rejected_by_whatsapp. */
+  private async applyChatModification(
+    sock: WASocket,
+    modification: ChatModification,
+    chatJid: string,
+    action: ChatModifyAction
+  ): Promise<void> {
+    try {
+      await sock.chatModify(modification, chatJid);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      const connectionStatus = [401, 408, 428, 440].includes(status);
+      if (e?.isBoom && status >= 400 && status < 500 && !connectionStatus) {
+        throw new MessageMutationError(
+          `WhatsApp rejected ${action} of ${chatJid}: ${e?.message || e}`,
+          422,
+          'rejected_by_whatsapp',
+          String(status)
+        );
+      }
+      throw e;
+    }
   }
 
   private connectedSocket(): WASocket {

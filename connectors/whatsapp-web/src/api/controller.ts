@@ -3,8 +3,10 @@ import { createHash } from 'crypto';
 import {
   BaileysClient,
   classifyWhatsAppSendFailure,
+  normalizeChatModifyAction,
   WhatsAppSendFailureClass,
 } from '../baileys-client';
+import { MuteState } from '../chat-state';
 import { QRHandler } from '../qr-handler';
 import { createHMACAuth, AuthenticatedRequest } from './auth';
 import {
@@ -129,6 +131,34 @@ function mutationErrorResponse(res: Response, error: unknown, what: string): voi
     error: `Failed to ${what}: ${errorMessage(error)}`,
     failureClass,
   });
+}
+
+/** Longest timed mute accepted; beyond that, mute without an end ("always"). */
+const MAX_MUTE_MS = 366 * 24 * 60 * 60 * 1000;
+
+/**
+ * Mute end of a /chats/modify body: `durationMs` (from now) or `muteUntil`
+ * (ISO-8601 or epoch ms), neither = forever. A string is the 400 reason.
+ */
+function muteFromBody(body: Record<string, unknown>): MuteState | string {
+  const hasDuration = body.durationMs !== undefined && body.durationMs !== null;
+  const hasUntil = body.muteUntil !== undefined && body.muteUntil !== null;
+  if (hasDuration && hasUntil) return 'Pass durationMs or muteUntil, not both';
+  const now = Date.now();
+  let until: number | undefined;
+  if (hasDuration) {
+    const ms = typeof body.durationMs === 'number' ? body.durationMs : Number(body.durationMs);
+    if (!Number.isInteger(ms) || ms <= 0) return 'durationMs must be a positive integer';
+    until = now + ms;
+  } else if (hasUntil) {
+    const raw = body.muteUntil;
+    until = typeof raw === 'number' ? raw : typeof raw === 'string' ? Date.parse(raw) : NaN;
+    if (!Number.isFinite(until) || until <= now) return 'muteUntil must be a future time';
+  }
+  if (until !== undefined && until - now > MAX_MUTE_MS) {
+    return 'A timed mute is at most 366 days (omit durationMs / muteUntil to mute always)';
+  }
+  return { until: until === undefined ? null : new Date(until) };
 }
 
 function rejectWhenDisconnected(client: BaileysClient, res: Response): boolean {
@@ -1009,6 +1039,42 @@ export function createRouter(
         res.json({ chats });
       } catch (e) {
         res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  // Archive / pin / mute / read-unread a chat (fase 3 / PR-5): an app-state
+  // patch to WhatsApp, same gate as every send, recorded on the canonical
+  // conversation. Ids travel inside the signed body.
+  // CONTRACT: http.whatsapp-connector.chats-modify.v1 — body {conversationId, action, durationMs?, muteUntil?, actor?}, 200 {modified, action, chatId, conversationId, persisted, state}
+  router.post('/chats/modify', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const action = normalizeChatModifyAction(body.action);
+        if (!chatId || !action) {
+          res.status(400).json({
+            error:
+              'Missing conversationId or action (archive, unarchive, pin, unpin, mute, unmute, markRead, markUnread)',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const mute = action === 'mute' ? muteFromBody(body) : undefined;
+        if (typeof mute === 'string') {
+          res.status(400).json({ error: mute, failureClass: 'invalid_request' });
+          return;
+        }
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.modifyChat(chatId, action, {
+          mute,
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ modified: true, ...result });
+      } catch (error) {
+        mutationErrorResponse(res, error, 'modify chat');
       }
     })();
   });

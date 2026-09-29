@@ -267,6 +267,49 @@ contracts:
       messages.reactions as before; no NATS event. The path, the body fields,
       the 200 shape and the failureClass values are contract: changing any is
       breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.chats-modify.v1
+    kind: http-route
+    value: /chats/modify
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/chats/modify of the house WhatsApp connectors (fase 3 /
+      PR-5), consumed by dgx-messages (/messages → Archivar, Fijar, Silenciar,
+      Marcar como no leído / leído). HMAC-signed (same scheme as every
+      connector route), ids inside the signed body: {conversationId, action,
+      durationMs?, muteUntil?, actor?} (`chatId` accepted for conversationId,
+      bare jid or account-namespaced conversation id; action one of archive,
+      unarchive, pin, unpin, mute, unmute, markRead, markUnread — `mark-read`,
+      `mark_unread`, `read`, `unread` accepted; for mute, durationMs (positive
+      integer, from now) or muteUntil (ISO-8601 or epoch ms, future), neither =
+      mute always, at most 366 days; actor ≤ 200 chars, logged, never auth).
+      There is no star action: WhatsApp stars messages, not chats. The chat is
+      resolved to its canonical conversation (account_id + external_id,
+      following merged_into, else a non-blocked social_contact_aliases row) and
+      the app-state patch goes to the jid of the key of its newest message
+      (memory, whatsapp_message_payloads, whatsapp_message_keys or the messages
+      row — restart-proof), which is also the lastMessages entry archive and
+      read need; markRead also sends the pending read receipts
+      (/messages/read's path). Answers 200 {modified: true, action, chatId
+      (normalised jid used), conversationId (canonical conversations.id, null
+      without ingest), persisted, state: {archived, unreadCount, pinnedAt?,
+      muted?, muteUntil?} | null}. Errors {error, failureClass, code?}: 403
+      disabled_sending (ENABLE_SENDING not true or EMERGENCY_DISABLE_SENDING),
+      400 invalid_request, 503 disconnected, 404 conversation_unavailable
+      (unknown to this account) / message_unavailable (archive or read with no
+      usable newest message), 422 rejected_by_whatsapp (WhatsApp refused the
+      patch; `code` = its status), other send failure classes as
+      /messages/send. DB effect (ingest only, on the canonical row, after
+      WhatsApp accepted): archived; unread_count 0 (+ unread_mentions 0) or at
+      least 1 for markUnread; pinned_at (NULL = unpinned); muted + mute_until
+      (NULL while muted = always) — the last three from migration 012, while it
+      is missing the action still goes out and answers persisted: false. The
+      same columns follow the phone (chats.update / chats.upsert / history).
+      No NATS event. The path, the body fields, the action names, the 200
+      shape and the failureClass values are contract: changing any is breaking
+      — a new `.v2` entry beside this one.
   - id: http.social-api.pairing-whatsapp.v1
     kind: http-route
     value: /pairing/whatsapp
