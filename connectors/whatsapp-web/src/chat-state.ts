@@ -227,26 +227,29 @@ export async function writeChatState(
   }
   // A readback that names the 012 columns only when they are known to exist
   // keeps archive / read working on a DB without the migration.
-  const readNew = newColumns || !chatStateColumnsKnownMissing();
-  const returning = readNew
-    ? 'archived, unread_count, pinned_at, muted, mute_until'
-    : 'archived, unread_count';
-  const sql = `UPDATE conversations SET ${sets.join(', ')}
-      WHERE id = $1 AND account_id = $2 AND merged_into IS NULL
-      RETURNING ${returning}`;
-  try {
-    const result = await getPool().query(sql, params);
-    if (readNew) noteColumnsPresent();
+  const update = async (withNewColumns: boolean): Promise<ChatState | undefined> => {
+    const returning = withNewColumns
+      ? 'archived, unread_count, pinned_at, muted, mute_until'
+      : 'archived, unread_count';
+    const result = await getPool().query(
+      `UPDATE conversations SET ${sets.join(', ')}
+        WHERE id = $1 AND account_id = $2 AND merged_into IS NULL
+        RETURNING ${returning}`,
+      params
+    );
     const row = result.rows[0];
-    return row ? rowToState(row, readNew) : undefined;
+    return row ? rowToState(row, withNewColumns) : undefined;
+  };
+  const readNew = newColumns || !chatStateColumnsKnownMissing();
+  try {
+    const state = await update(readNew);
+    if (readNew) noteColumnsPresent();
+    return state;
   } catch (error) {
     if (pgCode(error) !== UNDEFINED_COLUMN) throw error;
     noteColumnsMissing();
-    if (newColumns) return undefined;
-    // Archive / read on a DB without 012: same write, legacy readback.
-    const result = await getPool().query(sql.replace(returning, 'archived, unread_count'), params);
-    const row = result.rows[0];
-    return row ? rowToState(row, false) : undefined;
+    // Pin / mute cannot be recorded; archive / read: same write, legacy readback.
+    return newColumns ? undefined : update(false);
   }
 }
 
