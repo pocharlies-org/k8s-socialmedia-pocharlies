@@ -77,7 +77,8 @@ const ALL_FILES = [
   '012_whatsapp_chat_state.sql',
   '013_whatsapp_polls_events.sql',
   '014_whatsapp_disappearing_timer.sql',
-  '015_brain_window_dirty.sql',
+  '015_whatsapp_reaction_merge_backfills.sql',
+  '017_brain_window_dirty.sql',
 ];
 
 describe('migrate.ts _migrations ledger', () => {
@@ -89,8 +90,10 @@ describe('migrate.ts _migrations ledger', () => {
     expect(db.ledger.every(l => !l.baseline)).toBe(true);
     expect(db.executed).toHaveLength(ALL_FILES.length);
     expect(db.executed[0]).toMatch(/CREATE TABLE conversations/); // 001, the non-idempotent one
-    expect(db.executed[db.executed.length - 3]).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/); // 013
-    expect(db.executed[db.executed.length - 1]).toMatch(/CREATE TABLE IF NOT EXISTS brain_window_dirty/); // 015, the last one
+    expect(db.executed[db.executed.length - 4]).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/); // 013
+    expect(db.executed[db.executed.length - 3]).toMatch(/ADD COLUMN IF NOT EXISTS ephemeral_expiration/); // 014
+    expect(db.executed[db.executed.length - 2]).toMatch(/FUNCTION public\.merge_inbound_reaction/); // 015
+    expect(db.executed[db.executed.length - 1]).toMatch(/CREATE TABLE IF NOT EXISTS brain_window_dirty/); // 017, the last one
     expect(db.commits).toBe(ALL_FILES.length);
     expect(db.openTx).toBe(false);
   });

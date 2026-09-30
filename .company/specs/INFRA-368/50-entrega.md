@@ -7,7 +7,7 @@ PR: rama `INFRA-368-wa-voice-transcribe` contra `deploy/prod` (enlace en el come
 ## Hecho
 - `connector-urls.ts` (cuenta→URL de conector, del registro de cuentas); `server.ts::waUrl` la importa.
 - Job `wa-voice-transcribe` (+lib+spec), `DRY_RUN=true` por defecto, concurrencia 1, relevo a omnivoice-audio.
-- Migración 015 `brain_window_dirty` (ledger; `migrate.spec.ts` actualizado). Sin DDL en `messages`.
+- Migración 017 `brain_window_dirty` (ledger; `migrate.spec.ts` actualizado). Sin DDL en `messages`.
 - Telegram `complete_transcription`: UPDATE+INSERT en `conn.transaction()`, `transcribed_at`, `transcription_model`.
 - CronJob `wa-voice-transcribe` (`7,37 * * * *`, Forbid, amd64/lan, imagen por digest vía `images` del overlay) **en `suspend: true`**: el digest del overlay (v1.3.76) es anterior al job; devops re-pina y lo activa.
 - CLAUDE.md de SM actualizado. `BRAIN-INGEST-HANDOFF.md` no existe en `deploy/prod`.
@@ -28,3 +28,10 @@ PR: rama `INFRA-368-wa-voice-transcribe` contra `deploy/prod` (enlace en el come
 
 ## Cómo verificar
 `cd mcp-server && ./node_modules/.bin/jest src/jobs/wa-voice-transcribe-lib.spec.ts`; `python3 -m pytest connectors/telegram-sync/tests/test_transcription_dirty.py`.
+
+## Rework 1 (CI rojo sobre 212833b) — causa de cada fallo
+- **Lint, test, build**: 6 errores `prettier/prettier` en `wa-voice-transcribe.ts` (formato; no corrí eslint completo en local, solo jest/tsc). Arreglado con `eslint --fix`; ahora `eslint src --ext .ts` da 0 errores. Clase revisada: todos mis ficheros TS pasan eslint.
+- **Contract surface**: `mcp-server/src/mcp/server.ts` es superficie de contrato y mi refactor de `waUrl` lo tocaba sin registry ni trailer. La causa real: el job es un consumidor nuevo de `GET /api/v1/messages/media/:chatId/:msgId`, que no estaba registrada. Entrada nueva `http.whatsapp-connector.messages-media-download.v1` (add) y trailer `Contract-Change: add http.whatsapp-connector.messages-media-download.v1`. La ruta no cambia.
+- **Migración**: el tronco ya tiene `015_whatsapp_reaction_merge_backfills` (#151) y INFRA-370 (#152) usa la 016; la mía pasa a **017** (`migrate.spec.ts` actualizado). Sin dependencia de orden con la 016 (tablas independientes; el ledger es por nombre de fichero). Si #152 entra antes, su cambio en `migrate.spec.ts` (lista y posiciones) conflictúa con el mío: quien mergee segundo lo rebasa.
+- Historia: el rebase obligaba a force-push (denegado), así que el delta va como commit normal encima de 212833b, sin reescribir.
+- Tests tras el cambio: jest wa-voice + migrate 15 passed; pytest 3 passed; `kubectl kustomize` rc=0; eslint 0 errores; tsc sin errores nuevos.

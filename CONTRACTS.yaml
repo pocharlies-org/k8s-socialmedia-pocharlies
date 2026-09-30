@@ -1219,3 +1219,27 @@ contracts:
       client (ingest off) answers the bare identities. The path and the 200
       shape are contract: changing either is breaking — a new `.v2` entry
       beside this one.
+  - id: http.whatsapp-connector.messages-media-download.v1
+    kind: http-route
+    value: /messages/media/:chatId/:msgId
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+      - mcp-server/src/jobs/wa-voice-transcribe.ts
+      - mcp-server/src/infrastructure/connector-urls.ts
+      - mcp-server/src/mcp/server.ts
+    status: active
+    note: >-
+      GET /api/v1/messages/media/:chatId/:msgId of the house WhatsApp connectors
+      (route unchanged since before INFRA-368). Consumed by the MCP tool
+      download_media (mcp-server/src/mcp/server.ts handleDownloadMedia) and, from
+      INFRA-368 (P2), by the wa-voice-transcribe CronJob, which resolves the
+      connector with infrastructure/connector-urls.ts (whatsappConnectorUrl,
+      the same account-registry lookup server.ts waUrl now delegates to).
+      HMAC-signed like every connector route (x-connector-timestamp +
+      x-connector-signature over "{}" for a GET). msgId is the WhatsApp id or the
+      numeric messages.id (the job sends the latter); chatId only names it.
+      200 {data (base64), mimetype, filename}; 404 {error: "No media found"} when
+      the message has no attachments row; 500 {error}. The path and the 200
+      shape are contract: changing either is breaking — a new `.v2` entry beside
+      this one.

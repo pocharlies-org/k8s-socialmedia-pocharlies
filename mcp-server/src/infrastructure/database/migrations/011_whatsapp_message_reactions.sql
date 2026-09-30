@@ -4,7 +4,7 @@
 -- Until now a reaction reached the DB only as a messages INSERT with
 -- message_type 'REACTION' (body = emoji, reply_to_message_id = target) that the
 -- BEFORE INSERT trigger trg_merge_inbound_reaction (merge_inbound_reaction(),
--- present in prod but not in this repo) folds into the target's
+-- versioned in 015) folds into the target's
 -- messages.reactions JSONB and then skips: 0 REACTION rows exist (measured
 -- 29-09) and the JSONB is what dgx-messages shows. That path is untouched —
 -- the connector keeps ingesting the REACTION messages exactly as before.
@@ -27,9 +27,9 @@
 -- to participants.id / messages.sender_wa_id. No FK on purpose: a reaction can
 -- arrive before (or without) its target message.
 --
--- No backfill: there are no REACTION rows to take it from. The history lives
+-- No backfill here: there are no REACTION rows to take it from. The history
 -- in messages.reactions (13k WhatsApp messages, reactors as participant ids
--- or "me"); copying it here is a follow-up, not part of this migration.
+-- or "me") is copied by 015.
 --
 -- NOTE for migrate.ts: the ledger baselines a file whose first table already
 -- exists. whatsapp_message_reactions must not be created by hand before this
