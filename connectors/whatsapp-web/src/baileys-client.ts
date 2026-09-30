@@ -1097,6 +1097,7 @@ export class BaileysClient extends EventEmitter {
     }
 
     this.connecting = true;
+    this.intentionalDisconnect = false;
     this.ready = false;
     this.lastState = 'INITIALIZING';
     this.initializeStartedAt = new Date();
@@ -1172,7 +1173,10 @@ export class BaileysClient extends EventEmitter {
     this.lastState = 'DISCONNECTED';
     this.lastDisconnectedAt = new Date();
     this.ready = false;
-    this.intentionalDisconnect = false;
+    // SC-1394: stays true until the next connect(). Baileys emits the
+    // socket's `close` after sock.end() returns; lowering the flag here made
+    // that late event look unintentional and revived a client the owner (the
+    // pairing pool) had closed, ~40 sockets/h forever.
   }
 
   async renewQR(): Promise<void> {
@@ -1635,7 +1639,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private async runWatchdog(): Promise<void> {
-    if (this.connecting) return;
+    if (this.connecting || this.intentionalDisconnect) return;
     const now = Date.now();
 
     if (this.ready) return;
@@ -1664,7 +1668,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private scheduleReconnect(reason: string): void {
-    if (this.reconnectTimer || this.connecting) return;
+    if (this.reconnectTimer || this.connecting || this.intentionalDisconnect) return;
     const delayMs = Math.min(60000, 5000 * Math.max(1, this.reconnectAttempts + 1));
     this.logger.warn(`Scheduling WhatsApp reconnect in ${delayMs}ms (${reason})`);
     this.reconnectTimer = setTimeout(() => {
@@ -1677,7 +1681,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private async reconnectNow(reason: string): Promise<void> {
-    if (this.connecting) return;
+    if (this.connecting || this.intentionalDisconnect) return;
     this.reconnectAttempts += 1;
     this.lastReconnectAt = new Date();
     this.ready = false;
