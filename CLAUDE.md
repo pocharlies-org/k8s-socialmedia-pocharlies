@@ -154,8 +154,10 @@ commit, distinto byte-code).
 - **Un run fallido quema tags**: publica `sha-<commit>` y a veces el `image_tag` de algunas imágenes antes
   de morir. Reintentar sobre el mismo commit choca con `sha-<commit>` (medido 30-09: runs 36699101771 →
   36701685011 sobre `aa547dc`). Para reintentar hace falta un commit nuevo en `deploy/prod` (vía PR) y un
-  `image_tag` que nadie haya usado; mira antes qué tags publicaron los runs fallidos
-  (`gh run view <id> --log | grep image_tag`), también los de otras sesiones.
+  `image_tag` que nadie haya usado. Un despacho sin `image_tag` también publica una versión `vX.Y.Z`
+  calculada (medido 30-09: run 36725155383 publicó `v1.3.74` sin input), así que el log no basta:
+  comprueba en Harbor que el tag no existe para ninguna imagen antes de despachar
+  (`docker manifest inspect harbor.e-dani.com/homelab/whatsappmcp-<imagen>:<tag>` debe fallar).
 - La promoción de la rama deploy (`reusable-manifest-release.yml`, push `HEAD:deploy/prod
   --force-with-lease`) exige que main sea ancestro de deploy/prod: tras el merge #104 lo es; si vuelven
   a divergir (p. ej. un hotfix directo sobre deploy/prod), reconciliar main ANTES de soltar desde main.
