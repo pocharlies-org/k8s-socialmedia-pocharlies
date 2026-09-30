@@ -18,12 +18,33 @@ const TRIVIAL_LINE_CHARS = 12;
 export interface ExtractionResult {
   summary: string;
   topics: string[];
-  entities: Array<{ type: string; name: string }>;
+  entities: Array<{ type: EntityType; name: string }>;
   patterns: string[];
 }
 
 export type LlmOutcome =
   { status: 'done'; result: ExtractionResult } | { status: 'skipped'; reason: string };
+
+/**
+ * The brain only maps `person|team|system|organization|ticket|repo|environment|project` to entity labels
+ * (ontology.py entity_label_for_kp_type) and sends the rest to Topic. A chat extraction yields this closed,
+ * lowercase set; `org` is an alias of `organization`, anything else becomes `other`.
+ */
+export const ENTITY_TYPES = [
+  'person',
+  'organization',
+  'place',
+  'product',
+  'event',
+  'other',
+] as const;
+export type EntityType = (typeof ENTITY_TYPES)[number];
+
+export function normalizeEntityType(raw: string): EntityType {
+  const t = raw.trim().toLowerCase();
+  if (t === 'org') return 'organization';
+  return (ENTITY_TYPES as readonly string[]).includes(t) ? (t as EntityType) : 'other';
+}
 
 const kebab = (s: string): string =>
   s
@@ -57,10 +78,11 @@ export function normalizeExtraction(raw: unknown): LlmOutcome {
   const entities: ExtractionResult['entities'] = [];
   for (const e of v.entities) {
     const name = e.name.trim();
-    const key = `${e.type}\u0000${name.toLowerCase()}`;
+    const type = normalizeEntityType(e.type);
+    const key = `${type}\u0000${name.toLowerCase()}`;
     if (!name || seen.has(key)) continue;
     seen.add(key);
-    entities.push({ type: e.type.trim(), name });
+    entities.push({ type, name });
     if (entities.length >= 7) break;
   }
   const patterns = v.patterns
@@ -83,7 +105,7 @@ const SYSTEM_PROMPT = [
   'Responde SOLO con un objeto JSON con estas claves:',
   '"summary": resumen en español, máximo 600 caracteres, solo lo que dice el texto, sin inventar;',
   '"topics": hasta 5 temas, cada uno en minúsculas con guiones (kebab-case, ASCII);',
-  '"entities": hasta 7 objetos {"type": "Person|Org|Place|Product|Event|Other", "name": "..."};',
+  '"entities": hasta 7 objetos {"type": "person|organization|place|product|event|other" (minúsculas), "name": "..."};',
   '"patterns": hasta 3 pautas recurrentes o compromisos (frases cortas), o [];',
   '"skip": null, o "trivial" si no hay contenido informativo (saludos, risas, acuses).',
   'No añadas texto fuera del JSON.',

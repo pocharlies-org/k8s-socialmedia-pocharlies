@@ -1,10 +1,10 @@
 {
-  "source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001",
-  "content": "",
+  "source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:abc",
+  "content": "Resumen: Ana y Luis acuerdan el pedido de mañana.",
   "metadata": {
     "type": "conversation_window",
     "source": "conversation",
-    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001",
+    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:abc",
     "source_system": "whatsapp",
     "platform": "whatsapp",
     "account": "personal",

@@ -6,14 +6,8 @@
 import { createHash } from 'crypto';
 import type { BrainDoc } from '../brain-ingest-lib';
 import { chunkWindow } from './chunker';
-import type { ExtractionResult } from './llm-extract';
-import {
-  conversationHeader,
-  dayUtc,
-  isoUtc,
-  type ConversationMeta,
-  type Window,
-} from './window-builder';
+import { normalizeEntityType, type ExtractionResult } from './llm-extract';
+import { dayUtc, isoUtc, type ConversationMeta, type Window } from './window-builder';
 
 export const CONTRACT_VERSION = 1;
 export const CONVERSATION_ADAPTER = 'conversation';
@@ -68,7 +62,7 @@ export function windowDocs(
       patterns: done ? result.patterns : [],
     },
   };
-  const chunks = chunkWindow(w, conversationHeader(meta));
+  const chunks = chunkWindow(w, w.header);
   const chunkDocs: BrainDoc[] = chunks.map(c => ({
     source_id: `${w.windowId}#c${c.index}`,
     content: c.text,
@@ -117,7 +111,7 @@ export function packetDoc(w: Window, meta: ConversationMeta, r: ExtractionResult
       kp_permalinks: [],
       kp_sensitivity: 'personal',
       kp_topics: topics,
-      kp_entities: entities.map(e => ({ type: e.type, name: e.name })),
+      kp_entities: entities.map(e => ({ type: normalizeEntityType(e.type), name: e.name })),
     },
   };
 }

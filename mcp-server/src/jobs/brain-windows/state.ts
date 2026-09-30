@@ -73,12 +73,20 @@ export async function setCursor(db: Db, account: string, c: Cursor): Promise<voi
   );
 }
 
-/** Newest counted message of the account: the upper bound of this run (a snapshot). */
+/**
+ * created_at is the START time of the inserting transaction: a long insert (the 329k history-sync
+ * messages) carries a created_at older than the snapshot and commits later, and a cursor that has
+ * already passed it would never see it. The upper bound of every pass therefore lags by 15 minutes.
+ */
+export const SNAPSHOT_DELAY_MINUTES = 15;
+
+/** Newest counted message old enough to be safely committed: the upper bound of this run (a snapshot). */
 export async function snapshotCursor(db: Db, account: string): Promise<Cursor | null> {
   const r = await db.query(
     `SELECT m.created_at::timestamptz::text AS at, m.id::text AS id
        FROM messages m
       WHERE m.account = $1 AND m.platform = ANY($2) AND ${COUNTED}
+        AND m.created_at <= now() - interval '${SNAPSHOT_DELAY_MINUTES} minutes'
       ORDER BY m.created_at DESC, m.id DESC LIMIT 1`,
     [account, PLATFORMS]
   );
@@ -128,6 +136,8 @@ export async function allChats(db: Db, account: string): Promise<string[]> {
 }
 
 // ---- dirty mailbox (written by the transcribers, INFRA-368) ----------------
+// `brain_window_dirty` is created by migration 017 of PR #148 (INFRA-368), NOT by this PR's 016.
+// Merge order #147 -> #148 -> #152; until 017 is applied both reads and deletes are fail-soft.
 
 const UNDEFINED_TABLE = '42P01';
 
@@ -146,18 +156,23 @@ export async function listDirty(db: Db, account: string): Promise<DirtyChat[]> {
     );
     return r.rows.map(x => ({ conversationId: x.conversation_id, seenUpTo: x.upto }));
   } catch (e) {
-    if ((e as { code?: string }).code === UNDEFINED_TABLE) return []; // INFRA-368 not deployed yet
+    if ((e as { code?: string }).code === UNDEFINED_TABLE) return []; // 017 of #148 not applied yet
     throw e;
   }
 }
 
 /** Only what was seen: a row touched while we were working stays for the next run. */
 export async function clearDirty(db: Db, account: string, d: DirtyChat): Promise<void> {
-  await db.query(
-    `DELETE FROM brain_window_dirty
-      WHERE account = $1 AND conversation_id = $2 AND touched_at <= $3::timestamptz`,
-    [account, d.conversationId, d.seenUpTo]
-  );
+  try {
+    await db.query(
+      `DELETE FROM brain_window_dirty
+        WHERE account = $1 AND conversation_id = $2 AND touched_at <= $3::timestamptz`,
+      [account, d.conversationId, d.seenUpTo]
+    );
+  } catch (e) {
+    if ((e as { code?: string }).code === UNDEFINED_TABLE) return; // same as listDirty: table not created yet
+    throw e;
+  }
 }
 
 // ---- conversation + messages -----------------------------------------------
@@ -206,8 +221,8 @@ export async function fetchChatPage(
     `SELECT id, wa_id, ts, content, message_type, reply_to, sender FROM (
        SELECT m.id, m.wa_message_id AS wa_id, ${TS_MS} AS ts, m.content, m.message_type,
               m.reply_to_message_id::text AS reply_to,
-              COALESCE(NULLIF(btrim(p.name), ''), NULLIF(m.sender_wa_id, ''), '?') AS sender
-         FROM messages m LEFT JOIN participants p ON p.id = m.sender_wa_id
+              COALESCE(NULLIF(btrim(m.metadata->>'sender_name'), ''), NULLIF(m.sender_wa_id, ''), '?') AS sender
+         FROM messages m
         WHERE m.account = $1 AND m.conversation_id::text = $2 AND m.platform = ANY($3) AND ${COUNTED}
      ) m
      WHERE ($4::bigint IS NULL OR m.ts >= $4::bigint)
@@ -322,16 +337,18 @@ export async function getWindow(db: Db, windowId: string): Promise<StateRow | nu
   return r.rows[0] ? toRow(r.rows[0]) : null;
 }
 
+/** `limit` null = no cap (initial load); 0 = none (LLM off) — never conflated. */
 export async function pendingLlm(
   db: Db,
   account: string,
   limit: number | null
 ): Promise<StateRow[]> {
+  if (limit === 0) return []; // LLM off: never a query, never "no cap"
   const r = await db.query(
     `${SELECT_STATE} WHERE account = $1 AND llm_status = 'pending' AND push_error IS NULL AND pushed_hash = window_hash
       ORDER BY end_ts DESC
-      ${limit ? 'LIMIT $2' : ''}`,
-    limit ? [account, limit] : [account]
+      ${limit === null ? '' : 'LIMIT $2'}`,
+    limit === null ? [account] : [account, limit]
   );
   return r.rows.map(toRow);
 }

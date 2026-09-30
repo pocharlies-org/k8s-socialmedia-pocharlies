@@ -1,21 +1,24 @@
 import { chunkWindow, CHUNK_MAX_CHARS, OVERLAP_MAX_CHARS, estimateTokens } from './chunker';
-import { buildWindows, conversationHeader } from './window-builder';
+import { buildWindows } from './window-builder';
 import { META, msg } from './test-support/helpers';
 
-const header = conversationHeader(META);
 const windowOf = (ms: ReturnType<typeof msg>[]) => buildWindows(META, ms)[0];
+const HEADER = 'Grupo familia · whatsapp/personal · 2026-09-28 09:00–09:01 UTC · 2 mensajes · Ana';
 
 describe('chunker', () => {
   it('a short window is one chunk: header + lines', () => {
-    const cs = chunkWindow(windowOf([msg(1, 0, 'hola'), msg(2, 60, 'qué tal')]), header);
+    const cs = chunkWindow(windowOf([msg(1, 0, 'hola'), msg(2, 60, 'qué tal')]), windowOf([msg(1, 0, 'hola'), msg(2, 60, 'qué tal')]).header);
     expect(cs).toHaveLength(1);
     expect(cs[0]).toMatchObject({ index: 0, count: 1, msgIdFirst: '1', msgIdLast: '2' });
-    expect(cs[0].text).toBe('[whatsapp · Grupo familia] 09:00 Ana: hola\n09:01 Ana: qué tal');
+    expect(cs[0].text).toBe(`${HEADER} 09:00 Ana: hola\n09:01 Ana: qué tal`);
+    expect(cs[0].text.split('\n')[0]).toContain('2026-09-28 09:00–09:01 UTC · 2 mensajes · Ana'); // date range, count, participants in EVERY chunk
   });
 
   it('splits at message boundaries, within ~400 tokens, overlapping the last previous message (<=200 chars)', () => {
     const ms = Array.from({ length: 30 }, (_, i) => msg(i + 1, i * 10, `${i}: ${'palabra '.repeat(40)}`));
-    const cs = chunkWindow(windowOf(ms), header);
+    const w = windowOf(ms);
+    const cs = chunkWindow(w, w.header);
+    const header = w.header;
     expect(cs.length).toBeGreaterThan(3);
     cs.forEach((c, i) => {
       expect(c.index).toBe(i);
@@ -33,7 +36,9 @@ describe('chunker', () => {
   });
 
   it('a single huge line is cut so no chunk exceeds the limit, all pieces keep their message id', () => {
-    const cs = chunkWindow(windowOf([msg(1, 0, 'w '.repeat(3_000))]), header);
+    const w = windowOf([msg(1, 0, 'w '.repeat(3_000))]);
+    const header = w.header;
+    const cs = chunkWindow(w, header);
     expect(cs.length).toBeGreaterThan(2);
     for (const c of cs) {
       expect(c.text.length).toBeLessThanOrEqual(CHUNK_MAX_CHARS + header.length + 1);
@@ -43,7 +48,9 @@ describe('chunker', () => {
 
   it('a tiny tail is folded into the previous chunk', () => {
     const ms = [...Array.from({ length: 8 }, (_, i) => msg(i + 1, i, 'k'.repeat(170))), msg(9, 20, 'ok')];
-    const cs = chunkWindow(windowOf(ms), header);
+    const w = windowOf(ms);
+    const cs = chunkWindow(w, w.header);
+    const header = w.header;
     expect(cs[cs.length - 1].msgIdLast).toBe('9');
     expect(cs.every((c) => c.text.length > 300)).toBe(true);
   });

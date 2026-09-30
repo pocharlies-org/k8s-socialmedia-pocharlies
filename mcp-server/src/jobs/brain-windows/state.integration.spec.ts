@@ -26,7 +26,8 @@ d('state.ts against Postgres', () => {
     pool = new Pool({ connectionString: URL });
     await pool.query(`DROP TABLE IF EXISTS brain_window_state, brain_window_cursor, brain_window_dirty, attachments, conversation_participants, messages, participants, conversations CASCADE`);
     // Production shape, reconstructed from the statements that run there (INFRA-370, audited column by column):
-    //  - repository.ts INSERT INTO conversations / participants / conversation_participants / messages
+    //  - repository.ts INSERT INTO conversations / participants / conversation_participants / messages,
+    //    connectors/whatsapp-web/src/db-writer.ts (messages INSERT: no sender_id; metadata.sender_name),
     //  - telegram-sync db.py INSERT INTO messages / attachments
     //  - brain-ingest-lib.ts fetchBatch (messages JOIN conversations), bigint cursor on messages.id
     // Migration 001 (uuid ids, messages.sender_id -> participants) is NOT what production has.
@@ -56,17 +57,16 @@ d('state.ts against Postgres', () => {
     await pool.query(readFileSync(join(MIG, '016_brain_window_state.sql'), 'utf8'));
     conv = 'professional:34600111222@s.whatsapp.net'; // real WhatsApp ids carry colons
     await pool.query(`INSERT INTO conversations (id, wa_chat_id, type, name, is_group, account) VALUES ($1, $1, NULL, 'Grupo familia', true, 'personal')`, [conv]); // type NULL + is_group, as in prod
-    await pool.query(`INSERT INTO participants (id, name) VALUES ('34601', 'Luis')`); // participants.id = sender_wa_id
     let n = 0;
-    const ins = (ts: string, content: string | null, extra: { type?: string; sender?: string; deleted?: boolean; reply?: string | null; platform?: string } = {}) =>
+    const ins = (ts: string, content: string | null, extra: { type?: string; sender?: string; name?: string; deleted?: boolean; reply?: string | null; platform?: string } = {}) =>
       pool.query(
-        `INSERT INTO messages (conversation_id, account, platform, wa_message_id, wa_timestamp, sender_wa_id, content, message_type, is_deleted, reply_to_message_id)
-         VALUES ($1,'personal',$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [conv, extra.platform ?? 'whatsapp', `wa-${++n}`, ts, extra.sender ?? '34600', content, extra.type ?? 'TEXT', extra.deleted ?? false, extra.reply ?? null]
+        `INSERT INTO messages (conversation_id, account, platform, wa_message_id, wa_timestamp, sender_wa_id, content, message_type, is_deleted, reply_to_message_id, metadata, created_at)
+         VALUES ($1,'personal',$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb, now() - interval '1 hour')`,
+        [conv, extra.platform ?? 'whatsapp', `personal:3EB0${++n}@s.whatsapp.net`, ts, extra.sender ?? '34600', content, extra.type ?? 'TEXT', extra.deleted ?? false, extra.reply ?? null, JSON.stringify(extra.name ? { sender_name: extra.name } : {})]
       );
     await ins('2026-09-28 09:00:00', 'hablamos del pedido');
-    await ins('2026-09-28 09:10:00', 'te paso el pedido mañana', { type: 'AUDIO', sender: '34601' });
-    await ins('2026-09-28 09:20:00', 'vale', { reply: 'wa-2' }); // reply_to_message_id holds the replied wa_message_id
+    await ins('2026-09-28 09:10:00', 'te paso el pedido mañana', { type: 'AUDIO', sender: '34601', name: 'Luis' });
+    await ins('2026-09-28 09:20:00', 'vale', { reply: 'personal:3EB02@s.whatsapp.net' }); // reply_to_message_id holds the namespaced wa_message_id
     await ins('2026-09-28 09:25:00', '   '); // blank: not counted
     await ins('2026-09-28 09:26:00', 'borrado', { deleted: true }); // deleted: not counted
     await ins('2026-09-28 09:27:00', 'instagram no entra', { platform: 'instagram' });
@@ -99,9 +99,9 @@ d('state.ts against Postgres', () => {
     expect(new Set(all).size).toBe(6);
     const first = await st.fetchChatPage(pool, 'personal', conv, { fromTs: null, after: null, limit: 10 });
     expect(first[1]).toMatchObject({ sender: 'Luis', isVoice: true });
-    expect(first[0].sender).toBe('34600'); // no participant: falls back to sender_wa_id
-    expect(first[1].waId).toBe('wa-2');
-    expect(first[2].replyToId).toBe('wa-2');
+    expect(first[0].sender).toBe('34600'); // no metadata.sender_name: falls back to sender_wa_id
+    expect(first[1].waId).toBe('personal:3EB02@s.whatsapp.net');
+    expect(first[2].replyToId).toBe('personal:3EB02@s.whatsapp.net');
     const ranged = await st.fetchChatPage(pool, 'personal', conv, { fromTs: first[3].ts, toTs: first[4].ts, after: null, limit: 10 });
     expect(ranged.map((m) => m.id)).toEqual([first[3].id, first[4].id]);
   });
@@ -117,7 +117,7 @@ d('state.ts against Postgres', () => {
     const s1 = await runAccount(deps, 'personal');
     expect(s1).toMatchObject({ chats: 1, windowsPushed: 2, failures: 0 });
     const text = String(pushes[0].docs[0].metadata.window_text);
-    expect(text).toContain('Luis: 🎙 te paso el pedido mañana'); // participants.id = messages.sender_wa_id
+    expect(text).toContain('Luis: 🎙 te paso el pedido mañana'); // metadata->>'sender_name'
     expect(text).toContain('09:20 34600: vale (resp. a Luis)'); // reply resolved through wa_message_id
     expect(pushes[0].docs[0].metadata.conversation_id).toBe(conv);
     const rows = (await pool.query(`SELECT msg_count, llm_status, pushed_hash = window_hash AS pushed FROM brain_window_state ORDER BY start_ts`)).rows;
@@ -131,8 +131,8 @@ d('state.ts against Postgres', () => {
     expect(pushes).toHaveLength(n);
 
     // late message (old wa_timestamp, new created_at) inside the first window
-    await pool.query(`INSERT INTO messages (conversation_id, account, platform, wa_message_id, wa_timestamp, sender_wa_id, content, message_type)
-                      VALUES ($1,'personal','whatsapp','late','2026-09-28 09:15:00','34600','mensaje tardío','TEXT')`, [conv]);
+    await pool.query(`INSERT INTO messages (conversation_id, account, platform, wa_message_id, wa_timestamp, sender_wa_id, content, message_type, created_at)
+                      VALUES ($1,'personal','whatsapp','late','2026-09-28 09:15:00','34600','mensaje tardío','TEXT', now() - interval '30 minutes')`, [conv]);
     const s3 = await runAccount(deps, 'personal');
     expect(s3.windowsPushed).toBe(1);
     expect(s3.windowsUnchanged).toBe(1);
@@ -144,6 +144,35 @@ d('state.ts against Postgres', () => {
     expect(s4.chats).toBe(1);
     expect(s4.windowsPushed).toBe(0);
     expect((await pool.query(`SELECT count(*)::int AS n FROM brain_window_dirty`)).rows[0].n).toBe(0);
+  });
+
+  it('snapshot lags 15 minutes: a message inserted just now is not in the snapshot nor in changedChats', async () => {
+    const before = await st.snapshotCursor(pool, 'personal');
+    await pool.query(`INSERT INTO messages (conversation_id, account, platform, wa_message_id, wa_timestamp, sender_wa_id, content, message_type)
+                      VALUES ($1,'personal','whatsapp','young','2026-09-29 10:00:00','34600','transacción larga, aún no visible','TEXT')`, [conv]);
+    const after = await st.snapshotCursor(pool, 'personal');
+    expect(after).toEqual(before);
+    const ch = await st.changedChats(pool, 'personal', before, after!);
+    expect(ch).toEqual([]);
+    await pool.query(`UPDATE messages SET created_at = now() - interval '20 minutes' WHERE wa_message_id = 'young'`);
+    const aged = await st.snapshotCursor(pool, 'personal');
+    expect(aged).not.toEqual(before);
+    expect((await st.changedChats(pool, 'personal', before, aged!)).map((c) => c.conversationId)).toEqual([conv]);
+  });
+
+  it('pendingLlm on real SQL: null = all, 0 = none, n = LIMIT', async () => {
+    await pool.query(`UPDATE brain_window_state SET llm_status = 'pending', pushed_hash = window_hash, push_error = NULL`);
+    const n = (await pool.query(`SELECT count(*)::int AS n FROM brain_window_state`)).rows[0].n;
+    expect(n).toBeGreaterThanOrEqual(2);
+    expect(await st.pendingLlm(pool, 'personal', null)).toHaveLength(n);
+    expect(await st.pendingLlm(pool, 'personal', 0)).toHaveLength(0);
+    expect(await st.pendingLlm(pool, 'personal', 1)).toHaveLength(1);
+  });
+
+  it('dirty table absent (migration 017 of #148 not applied): listDirty and clearDirty are fail-soft', async () => {
+    await pool.query(`DROP TABLE brain_window_dirty`);
+    await expect(st.listDirty(pool, 'personal')).resolves.toEqual([]);
+    await expect(st.clearDirty(pool, 'personal', { conversationId: conv, seenUpTo: '2026-09-28 09:00:00+00' })).resolves.toBeUndefined();
   });
 
   it('pg_try_advisory_lock: the second session does not get it; it does after release', async () => {

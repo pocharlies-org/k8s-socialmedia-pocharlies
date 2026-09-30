@@ -47,9 +47,9 @@ describe('conversation-window contract (vendored copy)', () => {
     const validate = ajv.compile(JSON.parse(readFileSync(join(DIR, 'conversation-window.schema.json'), 'utf8')));
     const fixtures = readdirSync(join(DIR, 'fixtures')).filter((f) => f.endsWith('.json'));
 
-    it('has the 6 valid and 6 invalid fixtures', () => {
+    it('has the 6 valid and 7 invalid fixtures', () => {
       expect(fixtures.filter((f) => f.startsWith('valid_'))).toHaveLength(6);
-      expect(fixtures.filter((f) => f.startsWith('invalid_'))).toHaveLength(6);
+      expect(fixtures.filter((f) => f.startsWith('invalid_'))).toHaveLength(7);
     });
 
     it.each(fixtures)('%s', (f) => {

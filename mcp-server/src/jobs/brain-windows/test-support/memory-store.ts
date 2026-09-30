@@ -6,6 +6,8 @@ import type { ChatKind, ConversationMeta, WindowMessage } from '../window-builde
 export interface MemMessage extends WindowMessage {
   conversationId: string;
   seq: number; // insertion order (created_at, id)
+  /** created_at younger than the 15-minute snapshot delay: not visible to the snapshot yet */
+  young?: boolean;
 }
 
 export class Mem {
@@ -16,8 +18,8 @@ export class Mem {
   dirty: Array<{ account: string; conversationId: string; at: number }> = [];
   private seq = 0;
 
-  add(conversationId: string, m: WindowMessage): MemMessage {
-    const row = { ...m, conversationId, seq: ++this.seq };
+  add(conversationId: string, m: WindowMessage, opts: { young?: boolean } = {}): MemMessage {
+    const row = { ...m, conversationId, seq: ++this.seq, young: opts.young };
     this.messages.push(row);
     if (!this.convs.has(conversationId))
       this.convs.set(conversationId, { name: 'Grupo familia', isGroup: true });
@@ -32,13 +34,19 @@ export function memoryStore(mem: Mem): Store {
     getCursor: async (_db, a) => mem.cursors.get(a) ?? null,
     setCursor: async (_db, a, c) => void mem.cursors.set(a, c),
     snapshotCursor: async () => {
-      const s = Math.max(0, ...mem.counted().map(m => m.seq));
+      const s = Math.max(
+        0,
+        ...mem
+          .counted()
+          .filter(m => !m.young)
+          .map(m => m.seq)
+      );
       return s ? { lastCreatedAt: String(s), lastId: '0' } : null;
     },
     changedChats: async (_db, _a, from, to) => {
       const by = new Map<string, number>();
       for (const m of mem.counted()) {
-        if (m.seq <= seqOf(from) || m.seq > seqOf(to)) continue;
+        if (m.seq <= seqOf(from) || m.seq > seqOf(to)) continue; // `to` is the delayed snapshot
         by.set(m.conversationId, Math.min(by.get(m.conversationId) ?? Infinity, m.ts));
       }
       return [...by].map(([conversationId, minTs]) => ({ conversationId, minTs }));
@@ -100,6 +108,7 @@ export function memoryStore(mem: Mem): Store {
         )
         .sort((x, y) => x.startTs - y.startTs),
     pendingLlm: async (_db, a, limit) => {
+      if (limit === 0) return [];
       const p = [...mem.windows.values()]
         .filter(
           w =>
@@ -109,7 +118,7 @@ export function memoryStore(mem: Mem): Store {
             w.pushedHash === w.windowHash
         )
         .sort((x, y) => y.endTs - x.endTs);
-      return limit ? p.slice(0, limit) : p;
+      return limit === null ? p : p.slice(0, limit);
     },
     upsertWindow: async (_db, s) => {
       const row: StateRow & { pushed?: boolean } = { ...s };

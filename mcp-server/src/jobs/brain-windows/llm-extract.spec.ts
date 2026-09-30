@@ -1,11 +1,11 @@
-import { extractWindow, normalizeExtraction, skipReason, TransientLlmError, type ChatFn } from './llm-extract';
+import { ENTITY_TYPES, extractWindow, normalizeEntityType, normalizeExtraction, skipReason, TransientLlmError, type ChatFn } from './llm-extract';
 import { LlmPool } from './llm-pool';
 import { buildWindows } from './window-builder';
 import { META, msg } from './test-support/helpers';
 
 const longWindow = () =>
   buildWindows(META, [msg(1, 0, 'hablamos del pedido de mañana'), msg(2, 10, 'llega a las nueve'), msg(3, 20, 'perfecto, lo recibe Luis')])[0];
-const good = JSON.stringify({ summary: 'Acuerdan el pedido de mañana.', topics: ['Pedido', 'Entrega Mañana'], entities: [{ type: 'Person', name: 'Luis' }], patterns: [], skip: null });
+const good = JSON.stringify({ summary: 'Acuerdan el pedido de mañana.', topics: ['Pedido', 'Entrega Mañana'], entities: [{ type: 'person', name: 'Luis' }], patterns: [], skip: null });
 const noSleep = async () => {};
 
 describe('skipReason (LLM eligibility)', () => {
@@ -104,5 +104,30 @@ describe('extractWindow', () => {
     expect(rs).toHaveLength(20);
     expect(n).toBeGreaterThan(20); // retries really happened
     expect(peak).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('entity types: the closed lowercase set the brain maps (ontology.py entity_label_for_kp_type)', () => {
+  it('normalizes case, maps org -> organization and anything unknown -> other', () => {
+    expect(ENTITY_TYPES).toEqual(['person', 'organization', 'place', 'product', 'event', 'other']);
+    const cases: Array<[string, string]> = [['Person', 'person'], ['PERSON', 'person'], ['Org', 'organization'], ['org', 'organization'], ['Organization', 'organization'], ['Place', 'place'], ['Product', 'product'], ['Event', 'event'], ['Other', 'other'], ['Persona', 'other'], ['', 'other'], ['  Place ', 'place']];
+    for (const [raw, want] of cases) expect(normalizeEntityType(raw)).toBe(want);
+  });
+
+  it('normalizeExtraction stores only members of the set (and de-duplicates after normalizing)', () => {
+    const r = normalizeExtraction({
+      summary: 'x',
+      entities: [{ type: 'Org', name: 'Skirmshop' }, { type: 'organization', name: 'skirmshop' }, { type: 'Person', name: 'Luis' }, { type: 'Country', name: 'España' }],
+    });
+    if (r.status !== 'done') throw new Error('expected done');
+    expect(r.result.entities).toEqual([{ type: 'organization', name: 'Skirmshop' }, { type: 'person', name: 'Luis' }, { type: 'other', name: 'España' }]);
+    for (const e of r.result.entities) expect(ENTITY_TYPES).toContain(e.type);
+  });
+
+  it('the prompt asks for the lowercase set, not the old capitalized one', async () => {
+    const seen: string[] = [];
+    await extractWindow(longWindow(), { chat: async (system) => (seen.push(system), good), pool: new LlmPool(2), sleep: noSleep });
+    expect(seen[0]).toContain('person|organization|place|product|event|other');
+    expect(seen[0]).not.toContain('Person|Org');
   });
 });

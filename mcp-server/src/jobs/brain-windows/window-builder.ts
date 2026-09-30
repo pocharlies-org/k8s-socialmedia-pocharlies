@@ -86,12 +86,34 @@ export function makeWindowId(meta: ConversationMeta, firstMsgId: string): string
   return `cw:${meta.platform}:${meta.account}:${meta.conversationId}:${firstMsgId}`;
 }
 
-export function conversationHeader(meta: ConversationMeta): string {
-  const name = (meta.conversationName ?? '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, MAX_NAME_IN_HEADER);
-  return name ? `[${meta.platform} · ${name}]` : `[${meta.platform}]`;
+const MAX_HEADER = MAX_WINDOW_TEXT - MAX_LINES_CHARS - 1; // 383: header + "\n" + lines stay within 16.384
+const HEADER_PARTICIPANTS = 5;
+const MAX_PARTICIPANT_IN_HEADER = 30;
+const oneLine = (t: string): string => t.replace(/\s+/g, ' ').trim();
+
+/**
+ * One-line context header (P1b §2), carried by the window text AND by every chunk:
+ * `{chat} · {platform}/{account} · {YYYY-MM-DD HH:MM}–{HH:MM} UTC · {n} mensajes · {participants ≤5}`.
+ * A window that crosses midnight UTC writes the end date too. Never longer than 383 chars.
+ */
+export function windowHeader(
+  meta: ConversationMeta,
+  w: { startTs: number; endTs: number; messageCount: number; participants: string[] }
+): string {
+  const name = oneLine(meta.conversationName ?? '').slice(0, MAX_NAME_IN_HEADER) || '(sin nombre)';
+  const start = new Date(w.startTs);
+  const end = new Date(w.endTs);
+  const hhmm = (d: Date): string => `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  const sameDay = dayUtc(w.startTs) === dayUtc(w.endTs);
+  const range = `${dayUtc(w.startTs)} ${hhmm(start)}–${sameDay ? '' : `${dayUtc(w.endTs)} `}${hhmm(end)} UTC`;
+  const shown = w.participants
+    .slice(0, HEADER_PARTICIPANTS)
+    .map(p => oneLine(p).slice(0, MAX_PARTICIPANT_IN_HEADER));
+  const more = w.participants.length - shown.length;
+  const who = shown.join(', ') + (more > 0 ? ` +${more}` : '');
+  const n = `${w.messageCount} ${w.messageCount === 1 ? 'mensaje' : 'mensajes'}`;
+  const header = `${name} · ${meta.platform}/${meta.account} · ${range} · ${n} · ${who}`;
+  return header.length > MAX_HEADER ? `${header.slice(0, MAX_HEADER - 1)}…` : header;
 }
 
 /** Paragraphs first, then a hard cut, so a piece never exceeds `max` chars. */
@@ -136,11 +158,7 @@ export class WindowStream {
   private cur: Open | null = null;
   private last: WindowMessage | null = null;
   private readonly out: Window[] = [];
-  private readonly headerBase: string;
-
-  constructor(private readonly meta: ConversationMeta) {
-    this.headerBase = conversationHeader(meta);
-  }
+  constructor(private readonly meta: ConversationMeta) {}
 
   /** Messages must arrive ordered by (wa_timestamp, id). Returns the windows this push closed. */
   push(m: WindowMessage): Window[] {
@@ -198,13 +216,18 @@ export class WindowStream {
     if (!cur || !cur.msgs.length) return null;
     const first = cur.msgs[0];
     const lastMsg = cur.msgs[cur.msgs.length - 1];
-    const header = `${this.headerBase} ${dayUtc(first.ts)}`;
-    const windowText = `${header}\n${cur.lines.map(l => l.text).join('\n')}`;
     const participants: string[] = [];
     for (const m of cur.msgs) {
       if (participants.length >= MAX_PARTICIPANTS) break;
       if (!participants.includes(m.sender)) participants.push(m.sender);
     }
+    const header = windowHeader(this.meta, {
+      startTs: first.ts,
+      endTs: lastMsg.ts,
+      messageCount: cur.msgs.length,
+      participants,
+    });
+    const windowText = `${header}\n${cur.lines.map(l => l.text).join('\n')}`;
     return {
       windowId: makeWindowId(this.meta, first.id),
       firstMsgId: first.id,

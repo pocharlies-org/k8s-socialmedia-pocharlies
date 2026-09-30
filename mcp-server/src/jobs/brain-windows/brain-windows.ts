@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { ingestNamespaces, instanceForAccount } from '../brain-ingest-lib';
 import { httpBrainClient, isPoison, type BrainClient } from './brain-client';
 import { chunkWindow } from './chunker';
@@ -25,13 +25,7 @@ import {
 import { extractWindow, openAiChat, skipReason, type ChatFn, type LlmOutcome } from './llm-extract';
 import { LlmPool } from './llm-pool';
 import * as st from './state';
-import {
-  conversationHeader,
-  WindowStream,
-  type ChatKind,
-  type ConversationMeta,
-  type Window,
-} from './window-builder';
+import { WindowStream, type ChatKind, type ConversationMeta, type Window } from './window-builder';
 
 export interface Logger {
   info(msg: string, extra?: unknown): void;
@@ -215,20 +209,18 @@ async function processChat(
   }
 
   // Windows that no longer exist (first message changed, messages removed): delete, after the new ones are in.
-  const gone = old.filter(r => !seen.has(r.windowId));
-  for (const r of gone) {
+  // The state row goes ONLY when the brain confirmed the delete: a failed delete (poison or not) keeps it,
+  // counts as a failure and is retried next run; dropping it would orphan the points in the brain forever.
+  for (const r of old.filter(x => !seen.has(x.windowId))) {
     try {
       await d.brain.deleteWindow(instance, r.windowId);
+      await d.store.deleteWindows(d.db, [r.windowId]);
+      stats.windowsDeleted++;
     } catch (e) {
-      if (!isPoison(e)) throw e;
-      d.log.error(`poison delete-window ${r.windowId}: ${(e as Error).message}`);
+      stats.failures++;
+      d.log.error(`delete-window ${r.windowId} failed, state row kept: ${(e as Error).message}`);
     }
-    stats.windowsDeleted++;
   }
-  await d.store.deleteWindows(
-    d.db,
-    gone.map(r => r.windowId)
-  );
 }
 
 // ---- phase 2: LLM pass -----------------------------------------------------------
@@ -309,6 +301,8 @@ async function llmWindow(
 }
 
 async function llmPass(d: Deps, account: string, instance: string, stats: RunStats): Promise<void> {
+  // No LLM configured, or maxLlmPerRun === 0 (explicitly off): windows stay pending, nothing is asked.
+  if (!d.chat || d.maxLlmPerRun === 0) return;
   const pending = await d.store.pendingLlm(d.db, account, d.maxLlmPerRun); // most recent first
   if (!pending.length) return;
   d.log.info(`LLM pass ${account}: ${pending.length} pending (cap ${d.maxLlmPerRun ?? 'none'})`);
@@ -364,7 +358,13 @@ export async function runAccount(d: Deps, account: string): Promise<RunStats> {
       `${account}: ${stats.failures} failures, cursor and mailbox NOT advanced (idempotent rerun)`
     );
   }
-  await llmPass({ ...d, maxLlmPerRun: cursor ? d.maxLlmPerRun : null }, account, instance, stats);
+  // initial load (no cursor): no cap; `0` stays 0 (LLM off) — the override never turns "off" into "unlimited"
+  await llmPass(
+    { ...d, maxLlmPerRun: d.maxLlmPerRun === 0 || cursor ? d.maxLlmPerRun : null },
+    account,
+    instance,
+    stats
+  );
   return stats;
 }
 
@@ -418,7 +418,7 @@ export async function dryRunAccount(
     for await (const w of streamWindows(d, meta, null)) {
       h.windows++;
       h.messages += w.messageCount;
-      h.chunks += chunkWindow(w, conversationHeader(meta)).length;
+      h.chunks += chunkWindow(w, w.header).length;
       if (w.truncatedBySize) h.truncated++;
       inc(h.byKind, meta.kind);
       inc(h.byMessageCount, bucket(w.messageCount, MC_EDGES, MC_LABELS));
@@ -463,27 +463,58 @@ const consoleLog: Logger = {
   error: (m, e) => console.error(m, e ?? ''),
 };
 
+/** Invalid configuration: the only thing that exits 1 (a cron that merely warns must not go Degraded). */
+export class ConfigError extends Error {}
+
+function required(env: NodeJS.ProcessEnv, name: string): string {
+  const v = env[name];
+  if (!v) throw new ConfigError(`${name} is unset: refusing to start brain-windows without it`);
+  return v;
+}
+
+/** MAX_LLM_PER_RUN: unset = 200; `0` = LLM off (never "unlimited"); otherwise a non-negative integer. */
+export function parseMaxLlmPerRun(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 200;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0)
+    throw new ConfigError(`MAX_LLM_PER_RUN must be a non-negative integer, got '${raw}'`);
+  return n;
+}
+
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
-  const DATABASE_URL = env.DATABASE_URL;
-  if (!DATABASE_URL)
-    throw new Error(
-      'DATABASE_URL is unset: refusing to start brain-windows without an explicit database connection'
-    );
+  const DATABASE_URL = required(env, 'DATABASE_URL');
   const dryRun = env.DRY_RUN !== 'false'; // default true
+  // No default for the brain: a wrong default (skirmshop-brain instead of the ingest service) would push to the wrong place.
+  const brain = dryRun
+    ? null
+    : httpBrainClient({
+        brainUrl: required(env, 'BRAIN_URL'),
+        apiKey: required(env, 'BRAIN_API_KEY'),
+      });
+  const maxLlmPerRun = parseMaxLlmPerRun(env.MAX_LLM_PER_RUN);
   const accounts = (
     env.BRAIN_WINDOWS_ACCOUNTS ? env.BRAIN_WINDOWS_ACCOUNTS.split(',') : ingestNamespaces()
   ).map(a => a.trim());
   const kinds = loadChatKinds(undefined, consoleLog);
   const pool = new Pool({ connectionString: DATABASE_URL, max: 4 });
-  const lockClient = await pool.connect();
-  try {
-    if (dryRun) {
+
+  if (dryRun) {
+    // Manual, read-only tool: a SQL error here must be loud (exit 1), it is the proof that the SQL runs.
+    try {
       const hs: Histogram[] = [];
       for (const a of accounts)
         hs.push(await dryRunAccount({ db: pool, store: st, kinds, log: consoleLog }, a));
       console.log(formatHistogram(hs));
       return 0;
+    } finally {
+      await pool.end();
     }
+  }
+
+  // Live run (cron): soft failures (brain down, a chat that fails, DB hiccup) warn and exit 0.
+  let lockClient: PoolClient | null = null;
+  try {
+    lockClient = await pool.connect();
     if (!(await st.tryLock(lockClient))) {
       console.log('brain-windows: another process holds the advisory lock; exiting 0');
       return 0;
@@ -495,26 +526,36 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     const deps: Deps = {
       db: pool,
       store: st,
-      brain: httpBrainClient({
-        brainUrl: env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local',
-        apiKey: env.BRAIN_API_KEY || '',
-      }),
+      brain: brain!,
       chat: env.LLM_BASE_URL ? openAiChat(env) : null,
       pool: new LlmPool(2),
       kinds,
-      maxLlmPerRun: Number(env.MAX_LLM_PER_RUN) > 0 ? Number(env.MAX_LLM_PER_RUN) : 200,
+      maxLlmPerRun,
       log: consoleLog,
     };
     let failures = 0;
     for (const a of accounts) {
-      const s = await runAccount(env.LLM_BASE_URL ? deps : { ...deps, maxLlmPerRun: 0 }, a);
-      console.log(`${a}: ${JSON.stringify(s)}`);
-      failures += s.failures;
+      try {
+        const s = await runAccount(deps, a);
+        console.log(`${a}: ${JSON.stringify(s)}`);
+        failures += s.failures;
+      } catch (e) {
+        failures++;
+        consoleLog.error(`${a}: run failed: ${(e as Error).message}`);
+      }
     }
-    return failures ? 1 : 0;
+    if (failures)
+      consoleLog.warn(
+        `brain-windows: ${failures} soft failure(s); exit 0, the next run retries (cursor not advanced)`
+      );
+    return 0;
+  } catch (e) {
+    if (e instanceof ConfigError) throw e;
+    consoleLog.error(`brain-windows: soft failure: ${(e as Error).message}; exit 0`);
+    return 0;
   } finally {
-    lockClient.release();
-    await pool.end();
+    lockClient?.release();
+    await pool.end().catch(() => undefined);
   }
 }
 

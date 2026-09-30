@@ -1,4 +1,4 @@
-import { buildWindows, compareMessages, cutByParagraphs, MAX_LINES_CHARS, MAX_WINDOW_TEXT, WindowStream } from './window-builder';
+import { buildWindows, compareMessages, cutByParagraphs, MAX_LINES_CHARS, MAX_WINDOW_TEXT, windowHeader, WindowStream } from './window-builder';
 import { META, msg } from './test-support/helpers';
 
 describe('window-builder (contract §C rules 3 and 4)', () => {
@@ -67,19 +67,69 @@ describe('window-builder (contract §C rules 3 and 4)', () => {
     expect(compareMessages(msg('b', 1, ''), msg('a', 1, ''))).toBeGreaterThan(0);
   });
 
-  it('formats lines: HH:MM Nombre: texto, voice 🎙, reply inside the window', () => {
+  it('formats lines: HH:MM Nombre: texto, voice 🎙, reply inside the window (by wa_message_id)', () => {
     const [w] = buildWindows(META, [
       msg('a', 0, 'hola'),
       msg('b', 600, 'te paso el pedido', { sender: 'Luis', isVoice: true }),
       msg('c', 1200, 'vale', { replyToId: 'wa-b' }),
       msg('d', 1300, 'ok', { replyToId: 'fuera-de-la-ventana' }),
     ]);
-    expect(w.windowText).toBe(
-      ['[whatsapp · Grupo familia] 2026-09-28', '09:00 Ana: hola', '09:10 Luis: 🎙 te paso el pedido', '09:20 Ana: vale (resp. a Luis)', '09:21 Ana: ok'].join('\n')
-    );
+    expect(w.lines.map((l) => l.text)).toEqual(['09:00 Ana: hola', '09:10 Luis: 🎙 te paso el pedido', '09:20 Ana: vale (resp. a Luis)', '09:21 Ana: ok']);
+    expect(w.windowText).toBe(`${w.header}\n${w.lines.map((l) => l.text).join('\n')}`);
     expect(w.participants).toEqual(['Ana', 'Luis']);
     expect(w.startTs).toBe(msg('a', 0, '').ts);
     expect(w.endTs).toBe(msg('d', 1300, '').ts);
+  });
+
+  it('the reply key is the namespaced wa_message_id, never messages.id', () => {
+    const ns = 'professional:3EB0ABC@s.whatsapp.net';
+    const [w] = buildWindows(META, [msg(10, 0, 'pregunta', { sender: 'Luis', waId: ns }), msg(11, 60, 'respuesta', { replyToId: ns }), msg(12, 120, 'otra', { replyToId: '10' })]);
+    expect(w.lines[1].text).toBe('09:01 Ana: respuesta (resp. a Luis)');
+    expect(w.lines[2].text).toBe('09:02 Ana: otra'); // '10' is a messages.id: does not match
+  });
+
+  describe('header (P1b §2): chat · platform/account · date range · n · participants, in window and chunks', () => {
+    it('same-day window', () => {
+      const [w] = buildWindows(META, [msg(1, 0, 'a'), msg(2, 600, 'b', { sender: 'Luis' }), msg(3, 1200, 'c')]);
+      expect(w.header).toBe('Grupo familia · whatsapp/personal · 2026-09-28 09:00–09:20 UTC · 3 mensajes · Ana, Luis');
+      expect(w.windowText.split('\n')[0]).toBe(w.header);
+    });
+
+    it('a window crossing midnight UTC writes the end date; one message is singular', () => {
+      const [w] = buildWindows(META, [msg(1, 14 * 3600 + 50 * 60, 'tarde'), msg(2, 15 * 3600 + 10 * 60, 'noche')]);
+      expect(w.header).toContain('2026-09-28 23:50–2026-09-29 00:10 UTC · 2 mensajes');
+      expect(buildWindows(META, [msg(1, 0, 'solo')])[0].header).toContain('09:00–09:00 UTC · 1 mensaje ·');
+    });
+
+    it('participants: at most 5 shown, +N for the rest, names cut and on one line', () => {
+      const ms = Array.from({ length: 8 }, (_, i) => msg(i + 1, i, 'x', { sender: `P${i}\n${'n'.repeat(60)}` }));
+      const [w] = buildWindows(META, ms);
+      expect(w.header).not.toContain('\n');
+      expect(w.header.endsWith(' +3')).toBe(true);
+      const shown = w.header.split(' · ')[4].replace(/ \+3$/, '').split(', ');
+      expect(shown.every((p) => p.length <= 30)).toBe(true); // each name is cut at 30 chars
+      expect(w.header.split(' · ')[4].split(', ')).toHaveLength(5);
+    });
+
+    it('no name: a placeholder, never an empty slot', () => {
+      const [w] = buildWindows({ ...META, conversationName: null }, [msg(1, 0, 'hola')]);
+      expect(w.header.startsWith('(sin nombre) · whatsapp/personal')).toBe(true);
+    });
+
+    it('header at its cap keeps window_text <= 16.384 with 16.000 chars of lines', () => {
+      const long = { ...META, conversationName: 'N'.repeat(500) };
+      const senders = Array.from({ length: 50 }, (_, i) => `Participante-${i}-${'z'.repeat(80)}`);
+      const ms = senders.map((s, i) => msg(i + 1, i, 'y'.repeat(300), { sender: s }));
+      for (const w of buildWindows(long, ms)) {
+        expect(w.header.length).toBeLessThanOrEqual(383);
+        expect(w.windowText.length).toBeLessThanOrEqual(MAX_WINDOW_TEXT);
+      }
+      const big = buildWindows(long, Array.from({ length: 16 }, (_, i) => msg(i + 1, i, 'q'.repeat(985), { sender: senders[i] })));
+      expect(big.length).toBeGreaterThanOrEqual(1);
+      for (const w of big) expect(w.windowText.length).toBeLessThanOrEqual(MAX_WINDOW_TEXT);
+      const direct = windowHeader(long, { startTs: msg(1, 0, '').ts, endTs: msg(1, 0, '').ts, messageCount: 99999, participants: senders });
+      expect(direct.length).toBeLessThanOrEqual(383);
+    });
   });
 
   it('window_hash depends on (id, content) and not on anything else', () => {
@@ -99,8 +149,4 @@ describe('window-builder (contract §C rules 3 and 4)', () => {
     expect(() => new WindowStream(META).push(msg(2, 10, 'x')) && s.push(msg(1, 0, 'late'))).toThrow(/out of order/);
   });
 
-  it('a conversation without a name still has a header', () => {
-    const [w] = buildWindows({ ...META, conversationName: null }, [msg(1, 0, 'hola')]);
-    expect(w.header).toBe('[whatsapp] 2026-09-28');
-  });
 });

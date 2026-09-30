@@ -2,6 +2,8 @@
 
 Origen: INFRA-364 `nota-architect-plan.md` §C (architect, 2026-10-01). **Normativo y transcrito sin cambios**; cambiarlo = pedir al architect (vía tech-lead). Un cambio roto es `conversation-window.v2` al lado, nunca una edición de este. Este repo no tiene `CONTRACTS.yaml`: este documento es el registro.
 
+Nota de parseo: `conversation_id` puede contener `:` (p. ej. `professional:34600123456@s.whatsapp.net`); `first_msg_id` es numérico (`messages.id` bigint), así que un `window_id` se parte por el último `:`.
+
 Artefactos: `docs/conversation-window.schema.json` (JSON Schema 2020-12 del documento de `push-ingest`: `{source_id, content, metadata}`), fixtures en `tests/fixtures/conversation_windows/` (`valid_*.json` deben validar, `invalid_*.json` deben rechazarse) y test `tests/unit/test_conversation_contract.py`. Copia vendorizada con checksum en `k8s-socialmedia-pocharlies` (`mcp-server/src/jobs/brain-windows/contract/`).
 
 ## §C. Contrato socialmedia → brain (normativo, `contract v1`)

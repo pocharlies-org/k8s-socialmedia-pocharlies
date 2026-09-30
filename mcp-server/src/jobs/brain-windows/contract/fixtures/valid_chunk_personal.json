@@ -1,10 +1,10 @@
 {
-  "source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001#c0",
+  "source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001#c0",
   "content": "[whatsapp · Grupo] 09:00 Ana: hola\n09:10 Luis: 🎙 te paso el pedido mañana",
   "metadata": {
     "type": "conversation_chunk",
     "source": "conversation",
-    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001",
+    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001",
     "source_system": "whatsapp",
     "platform": "whatsapp",
     "account": "personal",
@@ -20,7 +20,7 @@
     "contract_version": 1,
     "chunk_index": 0,
     "chunk_count": 1,
-    "msg_id_first": "m1",
-    "msg_id_last": "m3"
+    "msg_id_first": "1001",
+    "msg_id_last": "1003"
   }
 }

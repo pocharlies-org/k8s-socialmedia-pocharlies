@@ -19,7 +19,7 @@ const ok = (d: unknown) => {
 const result: ExtractionResult = {
   summary: 'Ana y Luis acuerdan el pedido de mañana. Luis lo recibe.',
   topics: ['pedido', 'entrega-manana'],
-  entities: [{ type: 'Person', name: 'Luis' }],
+  entities: [{ type: 'person', name: 'Luis' }],
   patterns: ['recordar el pedido'],
 };
 const metas: ConversationMeta[] = [
@@ -48,7 +48,8 @@ describe('doc-builder: every BrainDoc validates against the vendored schema', ()
     expect(windowDocs(w, META, 'done', result)[0].content).toBe(result.summary);
     const pending = windowDocs(w, META, 'pending', null)[0];
     expect(pending.content.length).toBe(1_500);
-    expect(pending.content.startsWith('[whatsapp · Grupo familia] 2026-09-28\n09:00 Ana: línea 0')).toBe(true);
+    expect(pending.content.startsWith(`${w.header}\n09:00 Ana: línea 0`)).toBe(true);
+    expect(w.header).toContain('2026-09-28 09:00–09:00 UTC · 60 mensajes · Ana');
     expect(pending.metadata).toMatchObject({ llm_status: 'pending', patterns: [], window_text: w.windowText, window_hash: w.windowHash });
     expect(windowDocs(w, META, 'done', result)[0].metadata.patterns).toEqual(['recordar el pedido']);
   });
@@ -71,7 +72,7 @@ describe('doc-builder: every BrainDoc validates against the vendored schema', ()
     const many: ExtractionResult = {
       summary: 'Resumen.',
       topics: Array.from({ length: 9 }, (_, i) => `tema-${i}`),
-      entities: Array.from({ length: 9 }, (_, i) => ({ type: 'Person', name: `P${i}` })),
+      entities: Array.from({ length: 9 }, (_, i) => ({ type: 'person' as const, name: `P${i}` })),
       patterns: [],
     };
     const p = packetDoc(windowFor(META), META, many)!;
@@ -93,6 +94,35 @@ describe('doc-builder: every BrainDoc validates against the vendored schema', ()
     expect(packetHash(a)).not.toBe(packetHash(packetDoc(w, META, { ...result, topics: ['otro-tema'] })!));
   });
 
+
+  it('every chunk carries the full window header (date range, count, participants), one line', () => {
+    const w = windowFor(META);
+    const [, c0] = windowDocs(w, META, 'pending', null);
+    expect(c0.content.startsWith(`${w.header} `)).toBe(true);
+    expect(c0.content.split('\n')[0]).toContain('2026-09-28 09:00–09:01 UTC · 3 mensajes · Ana, Luis');
+    const long = buildWindows(META, Array.from({ length: 60 }, (_, i) => msg(i + 1, i, `línea ${i} ${'x'.repeat(80)}`)))[0];
+    const chunks = windowDocs(long, META, 'pending', null).slice(1);
+    expect(chunks.length).toBeGreaterThan(2);
+    for (const c of chunks) expect(c.content.startsWith(`${long.header} `)).toBe(true);
+  });
+
+  it('professional chat with a namespaced conversation id and numeric first_msg_id: window, chunk and packet validate against the #147 schema', () => {
+    const meta: ConversationMeta = { ...META, account: 'professional', conversationId: 'professional:34600123456@s.whatsapp.net', conversationName: 'Cliente Skirmshop' };
+    const w = buildWindows(meta, [msg(4711, 0, 'hola, ¿tenéis stock?'), msg(4712, 30, 'sí, te lo envío hoy', { sender: 'Tienda' }), msg(4713, 60, 'perfecto, gracias')])[0];
+    expect(w.windowId).toBe('cw:whatsapp:professional:professional:34600123456@s.whatsapp.net:4711');
+    const docs = [...windowDocs(w, meta, 'pending', null), ...windowDocs(w, meta, 'done', result), packetDoc(w, meta, result)!];
+    expect(docs.map((d) => d.metadata.type)).toEqual(['conversation_window', 'conversation_chunk', 'conversation_window', 'conversation_chunk', 'conversation_packet']);
+    docs.forEach(ok);
+    expect(docs[1].source_id).toBe(`${w.windowId}#c0`);
+    expect(docs[4].source_id).toBe(`${w.windowId}#kp`);
+  });
+
+  it('entity types reach the brain in its closed lowercase set, whatever the extraction carried', () => {
+    const dirty = { ...result, entities: [{ type: 'Org', name: 'Skirmshop' }, { type: 'Person', name: 'Luis' }, { type: 'Whatever', name: 'X' }] } as unknown as ExtractionResult;
+    const p = packetDoc(windowFor(META), META, dirty)!;
+    expect((p.metadata as { kp_entities: Array<{ type: string }> }).kp_entities.map((e) => e.type)).toEqual(['organization', 'person', 'other']);
+    ok(p);
+  });
   it('window ids keep colons of the conversation id (WhatsApp chat ids); first_msg_id stays numeric', () => {
     const meta = { ...META, conversationId: '34600111222:15@s.whatsapp.net' };
     const w = buildWindows(meta, [msg(4711, 0, 'hola')])[0];

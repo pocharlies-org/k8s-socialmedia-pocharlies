@@ -261,6 +261,73 @@ describe('brain-windows: run', () => {
     expect(s2.windowsPushed).toBeGreaterThanOrEqual(1); // the new window of the poisoned chat is tried
   });
 
+  it.each([401, 403, 404, 405])('a %i from the brain is a configuration failure, not poison: thrown, no push_error, cursor not advanced, retried next run', async (status) => {
+    let broken = true;
+    const t = setup({
+      brain: {
+        push: async (instance, adapter, docs) => {
+          if (broken) throw new Error(`brain push-ingest ${instance}/${adapter} -> ${status}: nope`);
+          t.pushes.push({ instance, adapter, docs });
+          return docs.length;
+        },
+      },
+    });
+    fill(t.mem, CONV, 4);
+    const s1 = await t.run();
+    expect(s1).toMatchObject({ failures: 1, poison: 0 });
+    expect(t.mem.windows.size).toBe(0);
+    expect(t.mem.cursors.has('personal')).toBe(false);
+    broken = false;
+    const s2 = await t.run();
+    expect(s2).toMatchObject({ failures: 0, windowsPushed: 1 });
+    expect([...t.mem.windows.values()].every((w) => !w.pushError)).toBe(true);
+  });
+
+  it.each([400, 413, 422])('a %i is poison: push_error set, run continues, cursor advances', async (status) => {
+    const t = setup({
+      brain: {
+        push: async (instance, adapter, docs) => {
+          if (docs[0].metadata.conversation_id === CONV) throw new Error(`brain push-ingest ${instance}/${adapter} -> ${status}: bad doc`);
+          t.pushes.push({ instance, adapter, docs });
+          return docs.length;
+        },
+      },
+    });
+    fill(t.mem, CONV, 4, 0, 1);
+    fill(t.mem, CONV2, 4, 100_000, 50);
+    const s = await t.run();
+    expect(s).toMatchObject({ poison: 1, failures: 0 });
+    expect(t.mem.cursors.has('personal')).toBe(true);
+  });
+
+  it.each([['422 poison', 'brain delete-window personal -> 422: bad id'], ['404 absent route', 'brain delete-window personal -> 404: Not Found'], ['503 down', 'brain delete-window personal -> 503: down']])(
+    'delete-window failing (%s): the state row is KEPT, it counts as a failure, the cursor does not advance; next run deletes it',
+    async (_n, message) => {
+      let broken = true;
+      const t = setup({
+        brain: {
+          deleteWindow: async (_i, id) => {
+            if (broken) throw new Error(message);
+            t.deletes.push(id);
+          },
+        },
+      });
+      fill(t.mem, CONV, 5, 1_000, 10);
+      await t.run();
+      const oldId = [...t.mem.windows.keys()][0];
+      t.mem.add(CONV, msg(5, 900, 'llega tarde y es el primero'));
+      const s = await t.run();
+      expect(s.failures).toBe(1);
+      expect(t.mem.windows.has(oldId)).toBe(true); // not orphaned: still tracked, retried
+      expect(t.mem.cursors.get('personal')!.lastCreatedAt).not.toBe(String(Math.max(...t.mem.counted().map((m) => m.seq))));
+      broken = false;
+      const s2 = await t.run();
+      expect(s2.failures).toBe(0);
+      expect(t.deletes).toEqual([oldId]);
+      expect(t.mem.windows.has(oldId)).toBe(false);
+    }
+  );
+
   it('dirty mailbox (late voice transcription): recomputes the chat, re-pushes only the changed window, clears the row', async () => {
     const t = setup();
     fill(t.mem, CONV, 4, 0, 1);
@@ -277,11 +344,49 @@ describe('brain-windows: run', () => {
     expect(t.mem.dirty).toHaveLength(0);
   });
 
-  it('no LLM configured: windows are pushed pending and stay pending', async () => {
-    const t = setup({ chat: null, maxLlm: 0 });
-    fill(t.mem, CONV, 5);
-    await t.run().catch(() => undefined);
-    expect(t.windowPushes()[0].docs[0].metadata.llm_status).toBe('pending');
+  it('no LLM configured (chat null): windows pushed pending, nothing is asked, zero failures — also on the initial load', async () => {
+    const t = setup({ chat: null });
+    for (let c = 0; c < 6; c++) fill(t.mem, `c-${c}`, 4, c * 100_000, 1 + c * 10);
+    const s = await t.run();
+    expect(s).toMatchObject({ windowsPushed: 6, failures: 0, llmDone: 0, llmErrors: 0 });
+    expect(t.windowPushes().every((p) => p.docs[0].metadata.llm_status === 'pending')).toBe(true);
+    expect([...t.mem.windows.values()].every((w) => w.llmStatus === 'pending')).toBe(true);
+    expect(t.mem.cursors.has('personal')).toBe(true);
+  });
+
+  it('maxLlmPerRun = 0 means NO LLM (not "no cap"), on the initial load and after it', async () => {
+    const t = setup({ maxLlm: 0 });
+    for (let c = 0; c < 5; c++) fill(t.mem, `c-${c}`, 4, c * 100_000, 1 + c * 10);
+    await t.run(); // initial load: the override to "no cap" must not apply to 0
+    expect(t.chat).not.toHaveBeenCalled();
+    fill(t.mem, 'c-9', 4, 900_000, 91);
+    await t.run();
+    expect(t.chat).not.toHaveBeenCalled();
+    expect([...t.mem.windows.values()].every((w) => w.llmStatus === 'pending')).toBe(true);
+  });
+
+  it('pendingLlm: null = no cap, 0 = none, n = n most recent', async () => {
+    const t = setup({ chat: null });
+    for (let c = 0; c < 4; c++) fill(t.mem, `c-${c}`, 4, c * 100_000, 1 + c * 10);
+    await t.run();
+    const q = (n: number | null) => t.deps.store.pendingLlm(t.deps.db, 'personal', n);
+    expect(await q(null)).toHaveLength(4);
+    expect(await q(0)).toHaveLength(0);
+    expect((await q(2)).map((w) => w.conversationId)).toEqual(['c-3', 'c-2']);
+  });
+
+  it('snapshot with delay: a message younger than the delay is not in the snapshot, the cursor does not pass it, and it is picked up once it has aged', async () => {
+    const t = setup();
+    fill(t.mem, CONV, 4, 0, 1);
+    t.mem.add(CONV2, msg(500, 100_000, 'mensaje de una transacción larga que aún no se ve'), { young: true });
+    await t.run();
+    expect(t.mem.windows.size).toBe(1); // only CONV
+    expect([...t.mem.windows.values()][0].conversationId).toBe(CONV);
+    const cur = t.mem.cursors.get('personal')!;
+    expect(Number(cur.lastCreatedAt)).toBeLessThan(t.mem.messages.find((m) => m.id === '500')!.seq);
+    t.mem.messages.find((m) => m.id === '500')!.young = false; // 15 minutes later
+    await t.run();
+    expect(t.mem.windows.size).toBe(2);
   });
 });
 
