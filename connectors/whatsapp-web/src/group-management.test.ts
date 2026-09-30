@@ -29,6 +29,7 @@ import {
   parseGroupParticipants,
   parseGroupUpdate,
   participantOutcome,
+  participantsIncludeOwn,
   toParticipantJid,
 } from './group-management';
 import { resetChatStateForTests } from './chat-state';
@@ -1042,6 +1043,128 @@ test('a failing group persist never throws out of the handler', async () => {
   } finally {
     console.warn = warn;
     restore();
+  }
+});
+
+test('participantsIncludeOwn: our PN (any device) or LID, as a jid or a participant object', () => {
+  const own = [ME_PN, ME_LID];
+  assert.equal(participantsIncludeOwn(['34600111222:7@s.whatsapp.net'], own), true);
+  assert.equal(participantsIncludeOwn([{ id: ME_LID }], own), true);
+  assert.equal(participantsIncludeOwn([{ id: '5@lid', phoneNumber: ME_PN }], own), true);
+  assert.equal(
+    participantsIncludeOwn([{ id: ME_PN.replace('600', '699'), lid: ME_LID }], own),
+    true
+  );
+  assert.equal(participantsIncludeOwn(['111@lid', { id: '222@lid' }, null], own), false);
+  assert.equal(participantsIncludeOwn([ME_PN], []), false);
+});
+
+test('added by someone to an existing group: fresh metadata, conversation row active as of now', async () => {
+  useAccount('leila');
+  const { calls: db, restore } = stubPool(sql => (isInsert(sql) ? [{ id: `leila:${GROUP}` }] : []));
+  try {
+    const { client, calls, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    priv(client).groupMetaCache.set(GROUP, { ...groupMeta(), subject: 'Viejo' });
+    const before = Date.now();
+    // What Baileys emits from the w:gp2 <add> stub: participant objects, LID first.
+    await handlers['group-participants.update']({
+      id: GROUP,
+      author: '111@lid',
+      participants: [{ id: ME_LID, phoneNumber: ME_PN, admin: null }],
+      action: 'add',
+    });
+    await settle();
+    assert.deepEqual(calls.metadata, [GROUP], 'fresh from WhatsApp, not the stale cache');
+    const inserts = db.filter(c => isInsert(c.sql));
+    assert.equal(inserts.length, 1);
+    assert.deepEqual(inserts[0].params.slice(0, 3), [`leila:${GROUP}`, 'Equipo', 4]);
+    const activity = inserts[0].params[3] as Date;
+    assert.ok(
+      activity instanceof Date && activity.getTime() >= before,
+      'joined now, not at creation'
+    );
+    assert.deepEqual(inserts[0].params.slice(4), ['leila', 'whatsapp:leila', GROUP]);
+    assert.match(inserts[0].sql, /WHERE conversations\.merged_into IS NULL/);
+    assert.equal(priv(client).chatStore.get(GROUP)?.name, 'Equipo');
+    assert.equal(sockCallsToWhatsApp(calls), 0, 'ingest only: nothing goes to WhatsApp');
+
+    // By PN jid (with device) too.
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: ['34600111222:5@s.whatsapp.net'],
+      action: 'add',
+    });
+    await settle();
+    assert.equal(db.filter(c => isInsert(c.sql)).length, 2);
+  } finally {
+    restore();
+  }
+});
+
+test('someone else added, or us removed / promoted: no metadata fetch, no row', async () => {
+  useAccount('leila');
+  const { calls: db, restore } = stubPool(() => []);
+  try {
+    const { client, calls, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: [{ id: '222@lid', phoneNumber: '34622222222@s.whatsapp.net' }],
+      action: 'add',
+    });
+    for (const action of ['remove', 'promote', 'demote']) {
+      await handlers['group-participants.update']({
+        id: GROUP,
+        participants: [{ id: ME_LID }],
+        action,
+      });
+    }
+    await settle();
+    assert.deepEqual(calls.metadata, []);
+    assert.equal(db.filter(c => isInsert(c.sql)).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('joined group: metadata refused still records the row; a DB failure never escapes', async () => {
+  useAccount('leila');
+  let pool = stubPool(sql => (isInsert(sql) ? [{ id: `leila:${GROUP}` }] : []));
+  const warn = console.warn;
+  try {
+    const { client, handlers } = makeClient({}, { metadataError: boom(403) });
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: [ME_LID],
+      action: 'add',
+    });
+    await settle();
+    const inserts = pool.calls.filter(c => isInsert(c.sql));
+    assert.equal(inserts.length, 1);
+    assert.equal(inserts[0].params[0], `leila:${GROUP}`);
+    assert.equal(inserts[0].params[1], null, 'no subject known yet');
+  } finally {
+    pool.restore();
+  }
+  pool = stubPool(() => {
+    throw Object.assign(new Error('db down'), { code: '57P01' });
+  });
+  try {
+    console.warn = () => {};
+    const { client, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: [ME_LID],
+      action: 'add',
+    });
+    await settle();
+    assert.equal(pool.calls.filter(c => isInsert(c.sql)).length, 1);
+  } finally {
+    console.warn = warn;
+    pool.restore();
   }
 });
 

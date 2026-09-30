@@ -29,6 +29,7 @@ import {
   CacheStore,
   ChatModification,
   GroupMetadata,
+  GroupParticipant,
   Browsers,
   generateMessageIDV2,
   generateWAMessageFromContent,
@@ -159,6 +160,7 @@ import {
   participantApiJid,
   participantIds,
   participantOutcome,
+  participantsIncludeOwn,
   recordGroupChange,
   recordGroupConversation,
   recordInboundGroup,
@@ -1702,6 +1704,9 @@ export class BaileysClient extends EventEmitter {
         },
       });
       this.groupMetaCache.delete(id);
+      // Added to a group that already existed: WhatsApp sends no groups.upsert
+      // for that, only this "add" naming us.
+      if (action === 'add') void this.recordGroupJoined(id, participants);
     });
 
     // A group created (by us or with us in it): its conversation row, so it
@@ -4159,6 +4164,31 @@ export class BaileysClient extends EventEmitter {
   // ---------------------------------------------------------------------------
   // Group management (fase 3 / PR-6; the helpers live in group-management.ts)
   // ---------------------------------------------------------------------------
+
+  /**
+   * A group-participants.update "add": when it names this account (PN or
+   * LID), someone added us to a group — fresh metadata, then its conversation
+   * row (recordGroupConversation: namespaced, account_id, external_id, a live
+   * row only refreshed), active as of now. Anyone else's add changes nothing
+   * here. Never throws (a socket handler); ingest only (bound after the gate).
+   */
+  private async recordGroupJoined(
+    groupJid: string,
+    participants: ReadonlyArray<string | Partial<GroupParticipant>>
+  ): Promise<void> {
+    try {
+      if (!this.ingest || !isJidGroup(groupJid)) return;
+      if (!participantsIncludeOwn(participants, await this.ownIds())) return;
+      const meta = await this.fetchGroupMetadata(groupJid, true).catch((e: any) => {
+        this.logger.warn(`metadata of joined group ${groupJid} unavailable: ${e?.message || e}`);
+        return { id: groupJid } as GroupMetadata;
+      });
+      const id = await recordGroupConversation(meta, { activityAt: new Date() });
+      this.logger.info(`Added to group ${groupJid}${id ? ` (conversation ${id})` : ''}`);
+    } catch (e: any) {
+      this.logger.warn(`joined group ${groupJid} not recorded: ${e?.message || e}`);
+    }
+  }
 
   /** Our own ids (PN and LID), to find this account among a group's participants. */
   private async ownIds(): Promise<string[]> {

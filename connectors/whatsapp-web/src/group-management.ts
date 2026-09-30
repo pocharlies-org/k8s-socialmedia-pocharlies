@@ -136,6 +136,29 @@ export function findParticipant(
   return (meta.participants || []).find(p => participantIds(p).includes(wanted));
 }
 
+/**
+ * Whether a group-participants.update names this account: its participants
+ * (a jid, or {id, phoneNumber, lid}) matched against our PN / LID ids.
+ */
+export function participantsIncludeOwn(
+  participants: ReadonlyArray<string | Partial<GroupParticipant> | null | undefined>,
+  ownIds: Iterable<string>
+): boolean {
+  const own = new Set(
+    Array.from(ownIds)
+      .map(id => normalizedOrNull(id))
+      .filter((id): id is string => !!id)
+  );
+  if (!own.size) return false;
+  return (participants || []).some(p => {
+    const ids = typeof p === 'string' ? [p] : p ? [p.id, p.phoneNumber, p.lid] : [];
+    return ids.some(id => {
+      const normalized = normalizedOrNull(id);
+      return !!normalized && own.has(normalized);
+    });
+  });
+}
+
 /** Our own participant row in `meta` (matched by any of our PN / LID ids). */
 export function ownParticipant(
   meta: GroupMetadata,
@@ -493,13 +516,16 @@ function participantCountOf(meta: Partial<GroupMetadata>): number | null {
 
 /**
  * The conversation row of a group WhatsApp told us about (groups.upsert: we
- * created it, or someone created it with us in it). Inserted under the
- * namespaced id with account_id / external_id; an existing live row only gets
- * the subject and size — never last_message_at, never a tombstone. Returns
- * the conversations.id written, undefined when nothing was.
+ * created it, or someone created it with us in it; group-participants.update:
+ * someone added us to an existing group). Inserted under the namespaced id
+ * with account_id / external_id; an existing live row only gets the subject
+ * and size — never last_message_at, never a tombstone. A new row's
+ * last_message_at is `activityAt` (when we joined), else the group's creation
+ * (else now). Returns the conversations.id written, undefined when nothing was.
  */
 export async function recordGroupConversation(
-  meta: Partial<GroupMetadata>
+  meta: Partial<GroupMetadata>,
+  options: { activityAt?: Date } = {}
 ): Promise<string | undefined> {
   const groupJid = normalizeGroupJid(meta.id);
   if (!groupJid) return undefined;
@@ -518,7 +544,7 @@ export async function recordGroupConversation(
       accountKey(groupJid),
       subject,
       participantCountOf(meta),
-      creationDate(meta.creation),
+      options.activityAt || creationDate(meta.creation),
       connectorAccount(),
       whatsappAccountId(),
       groupJid,
