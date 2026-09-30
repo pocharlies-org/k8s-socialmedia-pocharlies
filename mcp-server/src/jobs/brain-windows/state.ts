@@ -169,7 +169,7 @@ export async function conversationMeta(
   kinds: Record<string, ChatKind>
 ): Promise<ConversationMeta | null> {
   const r = await db.query(
-    `SELECT c.name, c.type,
+    `SELECT c.name, COALESCE(c.type, CASE WHEN c.is_group THEN 'GROUP' ELSE 'INDIVIDUAL' END) AS type,
             (SELECT m.platform FROM messages m
               WHERE m.conversation_id = c.id AND m.account = $2 AND m.platform = ANY($3) LIMIT 1) AS platform
        FROM conversations c WHERE c.id::text = $1`,
@@ -203,11 +203,11 @@ export async function fetchChatPage(
   opts: { fromTs: number | null; toTs?: number | null; after: MsgKey | null; limit: number }
 ): Promise<WindowMessage[]> {
   const r = await db.query(
-    `SELECT id, ts, content, message_type, reply_to, sender FROM (
-       SELECT m.id, ${TS_MS} AS ts, m.content, m.message_type,
+    `SELECT id, wa_id, ts, content, message_type, reply_to, sender FROM (
+       SELECT m.id, m.wa_message_id AS wa_id, ${TS_MS} AS ts, m.content, m.message_type,
               m.reply_to_message_id::text AS reply_to,
               COALESCE(NULLIF(btrim(p.name), ''), NULLIF(m.sender_wa_id, ''), '?') AS sender
-         FROM messages m LEFT JOIN participants p ON p.id = m.sender_id
+         FROM messages m LEFT JOIN participants p ON p.id = m.sender_wa_id
         WHERE m.account = $1 AND m.conversation_id::text = $2 AND m.platform = ANY($3) AND ${COUNTED}
      ) m
      WHERE ($4::bigint IS NULL OR m.ts >= $4::bigint)
@@ -227,6 +227,7 @@ export async function fetchChatPage(
   );
   return r.rows.map(x => ({
     id: String(x.id),
+    waId: String(x.wa_id),
     ts: Number(x.ts),
     sender: String(x.sender),
     content: String(x.content),

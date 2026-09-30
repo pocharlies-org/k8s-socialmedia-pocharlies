@@ -20,6 +20,7 @@ export function msg(
 ): WindowMessage {
   return {
     id: String(id),
+    waId: `wa-${id}`,
     ts: T0 + sec * 1000,
     sender: 'Ana',
     content,

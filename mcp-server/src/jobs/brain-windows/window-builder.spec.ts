@@ -71,7 +71,7 @@ describe('window-builder (contract §C rules 3 and 4)', () => {
     const [w] = buildWindows(META, [
       msg('a', 0, 'hola'),
       msg('b', 600, 'te paso el pedido', { sender: 'Luis', isVoice: true }),
-      msg('c', 1200, 'vale', { replyToId: 'b' }),
+      msg('c', 1200, 'vale', { replyToId: 'wa-b' }),
       msg('d', 1300, 'ok', { replyToId: 'fuera-de-la-ventana' }),
     ]);
     expect(w.windowText).toBe(

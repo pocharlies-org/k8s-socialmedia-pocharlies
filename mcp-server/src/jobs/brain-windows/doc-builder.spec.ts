@@ -28,7 +28,7 @@ const metas: ConversationMeta[] = [
   { ...META, account: 'leila', conversationName: 'Ñandú "y" <cía>' },
 ];
 const windowFor = (meta: ConversationMeta) =>
-  buildWindows(meta, [msg(11, 0, 'hablamos del pedido'), msg(12, 30, 'llega mañana', { sender: 'Luis', isVoice: true }), msg(13, 60, 'vale', { replyToId: '12' })])[0];
+  buildWindows(meta, [msg(11, 0, 'hablamos del pedido'), msg(12, 30, 'llega mañana', { sender: 'Luis', isVoice: true }), msg(13, 60, 'vale', { replyToId: 'wa-12' })])[0];
 
 describe('doc-builder: every BrainDoc validates against the vendored schema', () => {
   it.each(metas.map((m) => [`${m.platform}/${m.account}`, m] as const))('window + chunks, pending and done, packet (%s)', (_n, meta) => {

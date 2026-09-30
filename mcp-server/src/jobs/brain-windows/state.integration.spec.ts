@@ -24,27 +24,49 @@ d('state.ts against Postgres', () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: URL });
-    await pool.query(`DROP TABLE IF EXISTS brain_window_state, brain_window_cursor, brain_window_dirty, messages, participants, conversations CASCADE`);
+    await pool.query(`DROP TABLE IF EXISTS brain_window_state, brain_window_cursor, brain_window_dirty, attachments, conversation_participants, messages, participants, conversations CASCADE`);
+    // Production shape, reconstructed from the statements that run there (INFRA-370, audited column by column):
+    //  - repository.ts INSERT INTO conversations / participants / conversation_participants / messages
+    //  - telegram-sync db.py INSERT INTO messages / attachments
+    //  - brain-ingest-lib.ts fetchBatch (messages JOIN conversations), bigint cursor on messages.id
+    // Migration 001 (uuid ids, messages.sender_id -> participants) is NOT what production has.
     await pool.query(`
-      CREATE TABLE conversations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, type text);
-      CREATE TABLE participants (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), conversation_id uuid, name text);
+      CREATE TABLE conversations (
+        id text PRIMARY KEY, wa_chat_id text, type text, name text, is_group boolean, avatar_url text,
+        created_at timestamp DEFAULT now(), updated_at timestamp DEFAULT now(), metadata jsonb,
+        account text NOT NULL DEFAULT 'personal');
+      CREATE TABLE participants (
+        id text PRIMARY KEY, name text, phone text, first_seen timestamp DEFAULT now(),
+        last_seen timestamp DEFAULT now(), account text NOT NULL DEFAULT 'personal');
+      CREATE TABLE conversation_participants (
+        conversation_id text NOT NULL, participant_id text NOT NULL, joined_at timestamp DEFAULT now(),
+        PRIMARY KEY (conversation_id, participant_id));
       CREATE TABLE messages (
-        id bigserial PRIMARY KEY, conversation_id uuid, account text, platform text, wa_message_id text,
-        wa_timestamp timestamp, sender_id uuid, sender_wa_id text, content text, message_type text,
-        is_deleted boolean DEFAULT false, reply_to_message_id bigint, created_at timestamp DEFAULT now());`);
-    await pool.query(readFileSync(join(MIG, '016_brain_window_state.sql'), 'utf8'));
+        id bigserial PRIMARY KEY, conversation_id text NOT NULL REFERENCES conversations(id),
+        wa_message_id text NOT NULL UNIQUE, sender_wa_id text NOT NULL, wa_timestamp timestamp NOT NULL,
+        direction text NOT NULL DEFAULT 'INBOUND', content text, message_type text NOT NULL DEFAULT 'TEXT',
+        is_forwarded boolean DEFAULT false, is_edited boolean DEFAULT false, is_deleted boolean DEFAULT false,
+        reply_to_message_id text, platform text NOT NULL, metadata jsonb,
+        account text NOT NULL DEFAULT 'personal', created_at timestamp DEFAULT now());
+      CREATE TABLE attachments (
+        id bigserial PRIMARY KEY, message_id bigint NOT NULL REFERENCES messages(id), file_type text,
+        mime_type text, file_name text, file_size bigint, file_url text, duration_seconds int,
+        width int, height int, caption text);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS brain_window_dirty (account text NOT NULL, conversation_id text NOT NULL, touched_at timestamptz NOT NULL DEFAULT now(), reason text, PRIMARY KEY (account, conversation_id, touched_at))`);
-    conv = (await pool.query(`INSERT INTO conversations (name, type) VALUES ('Grupo familia', 'GROUP') RETURNING id`)).rows[0].id;
-    const p = (await pool.query(`INSERT INTO participants (conversation_id, name) VALUES ($1, 'Luis') RETURNING id`, [conv])).rows[0].id;
-    const ins = (ts: string, content: string | null, extra: { type?: string; sender?: string | null; deleted?: boolean; reply?: number | null; platform?: string } = {}) =>
+    await pool.query(readFileSync(join(MIG, '016_brain_window_state.sql'), 'utf8'));
+    conv = 'professional:34600111222@s.whatsapp.net'; // real WhatsApp ids carry colons
+    await pool.query(`INSERT INTO conversations (id, wa_chat_id, type, name, is_group, account) VALUES ($1, $1, NULL, 'Grupo familia', true, 'personal')`, [conv]); // type NULL + is_group, as in prod
+    await pool.query(`INSERT INTO participants (id, name) VALUES ('34601', 'Luis')`); // participants.id = sender_wa_id
+    let n = 0;
+    const ins = (ts: string, content: string | null, extra: { type?: string; sender?: string; deleted?: boolean; reply?: string | null; platform?: string } = {}) =>
       pool.query(
-        `INSERT INTO messages (conversation_id, account, platform, wa_message_id, wa_timestamp, sender_id, sender_wa_id, content, message_type, is_deleted, reply_to_message_id)
-         VALUES ($1,'personal',$2,gen_random_uuid()::text,$3,$4,'34600',$5,$6,$7,$8)`,
-        [conv, extra.platform ?? 'whatsapp', ts, extra.sender ?? null, content, extra.type ?? 'TEXT', extra.deleted ?? false, extra.reply ?? null]
+        `INSERT INTO messages (conversation_id, account, platform, wa_message_id, wa_timestamp, sender_wa_id, content, message_type, is_deleted, reply_to_message_id)
+         VALUES ($1,'personal',$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [conv, extra.platform ?? 'whatsapp', `wa-${++n}`, ts, extra.sender ?? '34600', content, extra.type ?? 'TEXT', extra.deleted ?? false, extra.reply ?? null]
       );
     await ins('2026-09-28 09:00:00', 'hablamos del pedido');
-    await ins('2026-09-28 09:10:00', 'te paso el pedido mañana', { type: 'AUDIO', sender: p });
-    await ins('2026-09-28 09:20:00', 'vale', { reply: 2 });
+    await ins('2026-09-28 09:10:00', 'te paso el pedido mañana', { type: 'AUDIO', sender: '34601' });
+    await ins('2026-09-28 09:20:00', 'vale', { reply: 'wa-2' }); // reply_to_message_id holds the replied wa_message_id
     await ins('2026-09-28 09:25:00', '   '); // blank: not counted
     await ins('2026-09-28 09:26:00', 'borrado', { deleted: true }); // deleted: not counted
     await ins('2026-09-28 09:27:00', 'instagram no entra', { platform: 'instagram' });
@@ -54,7 +76,7 @@ d('state.ts against Postgres', () => {
   });
 
   afterAll(async () => {
-    await pool?.query(`DROP TABLE IF EXISTS brain_window_state, brain_window_cursor, brain_window_dirty, messages, participants, conversations CASCADE`);
+    await pool?.query(`DROP TABLE IF EXISTS brain_window_state, brain_window_cursor, brain_window_dirty, attachments, conversation_participants, messages, participants, conversations CASCADE`);
     await pool?.end();
   });
 
@@ -70,7 +92,7 @@ d('state.ts against Postgres', () => {
 
   it('conversationMeta + keyset paging give ordered, deduplicated pages with voice and reply', async () => {
     const meta = await st.conversationMeta(pool, 'personal', conv, {});
-    expect(meta).toMatchObject({ platform: 'whatsapp', conversationName: 'Grupo familia', isGroup: true, kind: 'chat' });
+    expect(meta).toMatchObject({ platform: 'whatsapp', conversationName: 'Grupo familia', isGroup: true, kind: 'chat' }); // type NULL, is_group true
     const all: string[] = [];
     for await (const m of st.streamChat(pool, 'personal', conv, null, null, 2)) all.push(m.id);
     expect(all).toHaveLength(6);
@@ -78,20 +100,26 @@ d('state.ts against Postgres', () => {
     const first = await st.fetchChatPage(pool, 'personal', conv, { fromTs: null, after: null, limit: 10 });
     expect(first[1]).toMatchObject({ sender: 'Luis', isVoice: true });
     expect(first[0].sender).toBe('34600'); // no participant: falls back to sender_wa_id
-    expect(first[2].replyToId).toBe('2');
+    expect(first[1].waId).toBe('wa-2');
+    expect(first[2].replyToId).toBe('wa-2');
     const ranged = await st.fetchChatPage(pool, 'personal', conv, { fromTs: first[3].ts, toTs: first[4].ts, after: null, limit: 10 });
     expect(ranged.map((m) => m.id)).toEqual([first[3].id, first[4].id]);
   });
 
   it('runAccount end to end on real SQL: windows, state rows, cursor, idempotent rerun, late message', async () => {
     const pushes: Array<{ adapter: string; docs: BrainDoc[] }> = [];
+    const keep = (x: { adapter: string; docs: BrainDoc[] }) => pushes.push(x);
     const deps: Deps = {
       db: pool, store: st, kinds: {}, maxLlmPerRun: null, pool: new LlmPool(2), log: { info() {}, warn() {}, error: (m) => console.log('ERR', m) }, sleep: async () => {},
-      brain: { push: async (_i, adapter, docs) => (pushes.push({ adapter, docs }), docs.length), deleteWindow: async () => {} },
+      brain: { push: async (_i, adapter, docs) => (keep({ adapter, docs }), docs.length), deleteWindow: async () => {} },
       chat: async () => good,
     };
     const s1 = await runAccount(deps, 'personal');
     expect(s1).toMatchObject({ chats: 1, windowsPushed: 2, failures: 0 });
+    const text = String(pushes[0].docs[0].metadata.window_text);
+    expect(text).toContain('Luis: 🎙 te paso el pedido mañana'); // participants.id = messages.sender_wa_id
+    expect(text).toContain('09:20 34600: vale (resp. a Luis)'); // reply resolved through wa_message_id
+    expect(pushes[0].docs[0].metadata.conversation_id).toBe(conv);
     const rows = (await pool.query(`SELECT msg_count, llm_status, pushed_hash = window_hash AS pushed FROM brain_window_state ORDER BY start_ts`)).rows;
     expect(rows.map((r) => r.msg_count)).toEqual([3, 3]); // Σ = 6 counted messages
     expect(rows.every((r) => r.pushed)).toBe(true);

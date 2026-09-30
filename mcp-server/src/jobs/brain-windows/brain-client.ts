@@ -29,7 +29,9 @@ export function httpBrainClient(config: BrainPushConfig): BrainClient {
             body: JSON.stringify({ window_id: windowId }),
             signal: AbortSignal.timeout(60_000),
           });
-          if (resp.ok || resp.status === 404) return; // not_found is idempotent
+          // 200 covers {status: deleted|not_found}: the brain already makes it idempotent.
+          // A 404 here means an unknown instance, and a 422 a window_id without 'cw:': never swallowed.
+          if (resp.ok) return;
           const text = await resp.text().catch(() => '');
           last = new Error(
             `brain delete-window ${instance} -> ${resp.status}: ${text.slice(0, 300)}`

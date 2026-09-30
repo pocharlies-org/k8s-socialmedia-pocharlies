@@ -16,11 +16,14 @@ export type ChatKind = 'chat' | 'bot' | 'broadcast';
 
 export interface WindowMessage {
   id: string;
+  /** messages.wa_message_id: what `reply_to_message_id` of a reply points at (not messages.id) */
+  waId: string;
   /** wa_timestamp in epoch ms (UTC) */
   ts: number;
   sender: string;
   content: string;
   isVoice: boolean;
+  /** wa_message_id of the message this one replies to */
   replyToId: string | null;
 }
 
@@ -125,7 +128,7 @@ interface Open {
   msgs: WindowMessage[];
   lines: WindowLine[];
   chars: number; // chars of joined lines
-  senderById: Map<string, string>;
+  senderByWaId: Map<string, string>;
   truncated: boolean;
 }
 
@@ -155,7 +158,7 @@ export class WindowStream {
     if (this.cur && this.last && m.ts - this.last.ts > GAP_MS) flush();
 
     const replySender =
-      this.cur && m.replyToId ? (this.cur.senderById.get(m.replyToId) ?? null) : null;
+      this.cur && m.replyToId ? (this.cur.senderByWaId.get(m.replyToId) ?? null) : null;
     let line = formatLine(m, content, replySender);
     let truncated = false;
 
@@ -170,13 +173,13 @@ export class WindowStream {
     }
 
     if (!this.cur) {
-      this.cur = { msgs: [], lines: [], chars: 0, senderById: new Map(), truncated: false };
+      this.cur = { msgs: [], lines: [], chars: 0, senderByWaId: new Map(), truncated: false };
     }
     const cur = this.cur;
     cur.chars += (cur.lines.length ? 1 : 0) + line.length;
     cur.msgs.push(m);
     cur.lines.push({ msgId: m.id, text: line });
-    cur.senderById.set(m.id, m.sender);
+    cur.senderByWaId.set(m.waId, m.sender);
     cur.truncated = cur.truncated || truncated;
     this.last = m;
     if (truncated) flush(); // the oversized message closes its own window
