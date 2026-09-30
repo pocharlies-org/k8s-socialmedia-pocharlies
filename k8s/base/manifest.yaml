@@ -210,7 +210,10 @@ spec:
   # cuando no hay embeddings, en vez de convertirse en una tormenta de 502.
   # Saltarse pasadas no pierde datos: la ingesta es incremental (cursor keyset en
   # `brain_ingest_cursor`) e idempotente (el Brain deduplica por source_id).
-  suspend: false
+  # 30-09-2026 (Dani): PAUSADO. La ingesta por mensaje suelto se sustituye por ventanas de
+  # conversacion de una hora y se reindexa todo WhatsApp/Telegram desde cero (epica nueva).
+  # Seguir metiendo mensajes sueltos solo anade vectores que habra que borrar.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 2
