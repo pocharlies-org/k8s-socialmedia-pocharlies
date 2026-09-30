@@ -280,6 +280,9 @@ test('a session without salt re-snapshots regular_high once; with salt or the ma
   const salted = await run({ me: { lid: '900:5@lid' }, nctSalt: SALT });
   assert.equal(salted.keys.sets.length, 0);
 
+  const noLid = await run({ me: { id: '34600111222:5@s.whatsapp.net' } });
+  assert.equal(noLid.keys.sets.length, 0);
+
   // Once is once: the marker set by the first run stops the second.
   const creds: Record<string, unknown> = { me: { lid: '900:5@lid' } };
   await run(creds);

@@ -5080,6 +5080,8 @@ export class BaileysClient extends EventEmitter {
     const creds = sock?.authState?.creds;
     const keys = sock?.authState?.keys;
     if (!creds || !keys || creds.nctSalt?.length || creds.nctSaltBootstrapAt) return;
+    // cstoken is only sent from a LID-addressed account: no LID, nothing to fetch.
+    if (!creds.me?.lid) return;
     sock.ev.emit('creds.update', { nctSaltBootstrapAt: Date.now() });
     await keys.set({ 'app-state-sync-version': { regular_high: null } });
     this.logger.info('no NCT salt stored: re-snapshotting regular_high once to read it');
