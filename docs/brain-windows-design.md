@@ -3,8 +3,8 @@
 Épica INFRA-364. Este documento **explica y fija los números** del contrato
 `conversation-window v1` (PR #147, `mcp-server/src/jobs/brain-windows/contract/`). **No lo modifica**: si una
 regla de aquí choca con el contrato, manda el contrato y se pide cambio al architect (un cambio roto sería
-`conversation-window.v2` al lado). Los puntos donde el contrato deja margen y aquí se elige van marcados
-**[interpretación]** para que el architect los confirme.
+`conversation-window.v2` al lado). Donde el contrato deja margen (posición de la marca de respuesta, `truncated_by_size`, cobertura de los
+chunks en el caso 8), aquí se fija la regla y coincide con las fixtures aprobadas de P1a y con la revisión del architect en #149.
 
 ## 1. Fuentes (leídas el 2026-10-01) y qué se toma de cada una
 
@@ -28,11 +28,13 @@ Fijado por el contrato §C; aquí el razonamiento.
 - **`window_id`** = `cw:{platform}:{account}:{conversation_id}:{first_msg_id}`. La identidad es el primer mensaje: añadir mensajes al final o
   en medio no cambia el id (upsert); solo cambia si entra uno anterior al primero.
 - **Cabecera** (una línea, contexto estilo Contextual Retrieval): `{conversation_name} · {plataforma}/{cuenta} · {YYYY-MM-DD HH:MM}–{HH:MM} UTC · {n} mensajes · {participantes ≤5}`.
-- **Líneas:** `HH:MM Nombre: texto`; nota de voz `HH:MM Nombre: 🎙 texto`; respuesta dentro de la ventana `HH:MM Nombre (resp. a Otro): texto`.
+- **Líneas:** `HH:MM Nombre: texto`; nota de voz `HH:MM Nombre: 🎙 texto`; respuesta dentro de la ventana: la marca va **al final** de la línea, `HH:MM Nombre: texto (resp. a Otro)` (igual que las fixtures `valid_window_*` de P1a).
 - **`window_text`** = cabecera + salto + líneas; **≤16.384 chars** (líneas ≤16.000 + cabecera ≤384). Es lo que devuelve la búsqueda.
 - **Sub-chunks** (`window_id#c{n}`): cabecera + 800–1.600 chars (≈200–400 tokens con el estimador chars/4), cortando **en frontera de
   mensaje**; solape = último mensaje del chunk anterior, truncado a 200 chars. Un mensaje que por sí solo supera 1.600 chars se corta por
   párrafo (luego por frase) y cada trozo lleva la cabecera. `msg_id_first/last` acotan el rango; `chunk_count` se fija al terminar.
+  **En v1 los chunks cubren `window_text`**: si `truncated_by_size=true` (un mensaje >16.000 chars, caso 8), el exceso del mensaje no se indexa
+  (indexarlo es seguimiento); `window_hash` sí cubre el contenido completo.
 - **`content` del punto ventana:** resumen LLM (`llm_status=done`) o cabecera + primeros ≤1.500 chars (`pending`/`skipped`). Así la ventana
   es buscable desde la carga inicial, antes de la pasada LLM.
 - **Packet** (`#kp`): `Temas: a, b. Entidades: x, y.` (§5). Solo `kind=chat` y `llm_status=done`.
@@ -73,7 +75,7 @@ Una ventana queda `llm_status=skipped` (con motivo) y **sin packet** si se cumpl
 1. `kind != chat` (bot/difusión, §7).
 2. `message_count < 3` **y** `chars < 400` (`skip: "trivial"`).
 3. Todas las líneas ≤ 12 chars de texto («ok», «👍», «vale»).
-4. Tras 1 reintento el LLM no devuelve JSON válido contra el esquema (`skip: "invalid_json"`).
+4. Tras 1 reintento el LLM no devuelve JSON válido contra el esquema (el builder registra el motivo `invalid_json`; no lo devuelve el modelo).
 
 Siguen siendo ventana + chunks (buscables). Objetivo: orden de 18–20 k ventanas elegibles; si el dry-run difiere mucho, se avisa al tech-lead.
 
@@ -82,11 +84,13 @@ Modelo `tooling` vía LiteLLM, `temperature 0`, máx. 2 peticiones en vuelo. Ent
 ```json
 { "summary": "≤600 chars, español, solo lo que dice el texto",
   "topics":   ["kebab-ascii-≤40", "… máx. 5"],
-  "entities": [{"type": "Person|Org|Product|Place|Other", "name": "…"}],
+  "entities": [{"type": "person|organization|product|place|other", "name": "…"}],
   "patterns": ["≤3 regularidades o pedidos recurrentes, frases cortas"],
   "skip": null }
 ```
-`entities` máx. 7. `skip: "trivial"` lo puede devolver el modelo (equivale a §4.4-2/3). Mapeo al contrato: `summary` → `content` de la
+`entities` máx. 7, tipos en minúsculas. El brain solo da etiqueta propia a `person` y `organization`
+(`entity_label_for_kp_type`, `skirmshop-brain-v2/src/schema/ontology.py`); `product`, `place` y `other` se guardan como `Topic` con id tipado
+(`product:…`). `skip: "trivial"` lo puede devolver el modelo (equivale a §4.4-2/3). Mapeo al contrato: `summary` → `content` de la
 ventana; `topics`/`entities` → `kp_topics`/`kp_entities` (≤12 conceptos en total); `patterns` → `patterns` de la ventana. Prompt: «no
 inventes; si no hay tema claro, `skip`». Sin puntos `kp_kind: "assertion"` (contrato).
 
@@ -98,16 +102,17 @@ Horas UTC; `m1…` en orden de `(wa_timestamp, id)`.
 | 1 | Hueco de 3.600 s exacto | m1 10:00:00, m2 11:00:00, m3 12:00:01 | **W1 = {m1, m2}** (hueco 3.600 no corta), **W2 = {m3}** (hueco 3.601 corta). `window_id` W1 = `…:m1`, W2 = `…:m3`. Ningún mensaje en 0 ni 2 ventanas. |
 | 2 | Tardío dentro de ventana cerrada | W1 = {m1 10:00, m2 10:20, m3 10:45}, cerrada (siguiente mensaje 14:00). Llega m4 10:30 (history sync, `created_at` posterior) | Mismo `window_id` (`…:m1`), `message_count` 3→4, `window_hash` cambia ⇒ reenvío de ventana + chunks; el brain barre chunks sobrantes; LLM y packet se recalculan (cambia `llm_input_hash`). Sin `delete-window`. |
 | 3 | Tardío más antiguo que el primero | W1 = {m2 10:00, m3 10:10}; llega m1 09:50 | Hueco 600 s ⇒ m1 entra en W1 y es el nuevo primero: `window_id` pasa de `…:m2` a `…:m1` ⇒ `delete-window(…:m2)` + push de `…:m1` con 3 mensajes. Variante: m1 a las 08:30 (hueco 5.400 s) crea W0 = {m1} y W1 **no cambia**. |
-| 4 | Grupo sin pausa > 16 k | 120 mensajes de ~300 chars (≈36 k) sin hueco > 3.600 s | Corte por tamaño **antes** de superar 16.000 chars de líneas, en frontera de mensaje: 3 ventanas contiguas (≈16 k / ≈16 k / ≈4 k), sin mensajes repetidos, cada `window_text` ≤ 16.384, `first_msg_id` distintos, Σ`message_count` = 120. `truncated_by_size=false` en las tres **[interpretación]**: el contrato lo reserva al troceo de un mensaje (caso 8). |
-| 5 | Bot | conversación marcada `"bot"` en `chat-kinds.json`, 40 mensajes | Ventanas y chunks normales con `kind:"bot"`; `llm_status=skipped`; **sin packet `#kp`**; gardener y grafo de chats la ignoran (P3-i/j). |
+| 4 | Grupo sin pausa > 16 k | 120 mensajes cuya línea (con `HH:MM Nombre: `) mide ~300 chars (≈36 k) sin hueco > 3.600 s | Corte por tamaño **antes** de superar 16.000 chars de líneas, en frontera de mensaje: 3 ventanas contiguas (≈16 k / ≈16 k / ≈4 k), sin mensajes repetidos, cada `window_text` ≤ 16.384, `first_msg_id` distintos, Σ`message_count` = 120. `truncated_by_size=false` en las tres: solo se pone a `true` cuando se trocea **un mensaje** (caso 8), no en el corte por tamaño en frontera de mensaje (§C regla 3). |
+| 5 | Bot / difusión | conversación marcada `"bot"` (o `"broadcast"`) en `chat-kinds.json`, 40 mensajes | Ventanas y chunks normales con `kind:"bot"` (o `"broadcast"`); `llm_status=skipped`; **sin packet `#kp`**; gardener y grafo de chats la ignoran (P3-i/j). |
 | 6 | Trivial | `kind=chat`, 2 mensajes «ok» / «👍» (< 3 mensajes y < 400 chars) | Ventana + 1 chunk; `llm_status=skipped` (motivo `trivial`); `content` = cabecera + texto (≤1.500); sin packet. Sigue contando en Σ`message_count`. |
 | 7 | Voz transcrita tarde | m5 AUDIO con `content=''` dentro de W1; 3 días después se escribe `content` y se inserta `brain_window_dirty` | Antes: m5 no cuenta (regla 4) y no está en W1. Después: m5 entra por su `wa_timestamp`; si no es el primero, mismo `window_id`, hash cambia, reenvío (como caso 2); si queda antes del primero, como caso 3. Línea `HH:MM Nombre: 🎙 texto`. |
-| 8 | Mensaje único > 16 k | m1 de 40.000 chars | Una sola ventana (`message_count=1`; nunca dos ventanas con el mismo `first_msg_id`), `truncated_by_size=true`: `window_text` lleva los primeros ≤16.000 chars cortados por párrafo; los **chunks** salen del texto completo, por párrafos, así todo es buscable **[interpretación]** (el contrato no dice si los chunks cubren lo que `window_text` omite). El mensaje siguiente abre ventana nueva. |
+| 8 | Mensaje único > 16 k | m1 de 40.000 chars | Una sola ventana: `message_count=1`, `msg_id_first = msg_id_last = m1` (no puede haber dos ventanas con el mismo `first_msg_id`), `truncated_by_size=true`. `window_text` lleva los primeros ≤16.000 chars cortados por párrafo; los chunks cubren `window_text` (`chunk_count` = nº real) y **el exceso no se indexa en v1** (seguimiento); `window_hash` cubre el mensaje completo. Ventana + chunks en **una sola petición** (regla 1). El mensaje siguiente abre ventana nueva. |
 
 ## 7. Bots, monitorización y difusión (`chat-kinds.json`)
-Formato `{conversation_id: "bot"|"broadcast"}` (regla 6). Criterio de candidato (`scripts/sql/brain-windows-chat-candidates.sql`, solo
+Formato `{conversation_id: "bot"|"broadcast"}` (regla 6). Señales de candidato (`scripts/sql/brain-windows-chat-candidates.sql`, solo
 lectura): `senders=1` o `top_sender_share ≥ 0,95`, `inbound_share` ≈ 1 (alertas) o ≈ 0 (difusión propia), y los nombres que citó Dani
-(Synapse monitor, Alertas Monitoring, Skirmshop ES OP, Pocharlies Operations, Ofertas Chollos).
+(Synapse monitor, Alertas Monitoring, Skirmshop ES OP, Pocharlies Operations, Ofertas Chollos). Las señales proponen; Skirmshop ES OP y
+Pocharlies Operations son `bot` por decisión expresa (§7.2), aunque su perfil sea mixto.
 
 ### 7.1 Informe de candidatos
 Fuente: salida de la consulta (solo lectura) ejecutada por `sre` sobre `whatsappmcp` (adjunto `nota-sre-chat-candidates.md` de INFRA-367,
@@ -115,7 +120,7 @@ Fuente: salida de la consulta (solo lectura) ejecutada por `sre` sobre `whatsapp
 `professional` llevan el prefijo `professional:`; aquí no hay ninguno candidato. `senders`/`top`/`in` = remitentes distintos, cuota del
 remitente más activo y fracción entrante.
 
-**Marcados en `chat-kinds.json` (solo lo claro):**
+**Marcados en `chat-kinds.json` (13: 8 `bot` + 5 `broadcast`; las 4 filas de ES OP y Operations por la decisión de §7.2, el resto por estructura y nombre):**
 
 | conversation_id | nombre | msgs | senders | top | in | avg_len | kind | por qué |
 |---|---|---:|---:|---:|---:|---:|---|---|
@@ -140,7 +145,7 @@ tabla `conversations` (`private` para grupos y canales) no son fiables: por eso 
 porque conste que sean canales. Si fueran grupos con un único remitente visible, se estaría dejando sin LLM ni neuronas conversación real.
 
 ### 7.2 Decisión cerrada (tech-lead, 01-10-2026)
-1. Las 4 `bot` y 5 `broadcast` de la primera tabla se mantienen.
+1. Se mantienen las 4 `bot` (Synapse monitor ×2, Alertas Monitoring Skirmshop, github pocharlies-org) y las 5 `broadcast` propuestas.
 2. **Skirmshop ES OP y Pocharlies Operations (los dos ids de cada una, grupos previos incluidos) son `bot`**: Dani las nombró expresamente como
    canales sin LLM ni neuronas.
 3. **Se quedan como `chat` normal (con LLM):** Hogar (`tg_-1003749364241`, 5.854), Openclaw (`tg_8621739742`, 4.737), Hermes Pocharlies
