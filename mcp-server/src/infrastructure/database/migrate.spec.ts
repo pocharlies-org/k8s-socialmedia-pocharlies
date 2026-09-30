@@ -1,3 +1,4 @@
+import { readdirSync } from 'fs';
 import { join } from 'path';
 import { MigrationClient, runMigrations } from './migrate';
 
@@ -62,7 +63,7 @@ class FakeDb implements MigrationClient {
 }
 
 const MIGRATIONS_DIR = join(__dirname, 'migrations');
-const ALL_FILES = [
+const BASELINE_FILES = [
   '001_initial_schema.sql',
   '002_account_scope.sql',
   '003_whatsapp_customer_allowlist.sql',
@@ -78,6 +79,16 @@ const ALL_FILES = [
   '013_whatsapp_polls_events.sql',
   '014_whatsapp_disappearing_timer.sql',
 ];
+// Every migration on disk, in order. Derived, not hand-listed: a new migration (016 brain_window_state,
+// 015 brain_window_dirty, ...) must not break the ledger contract this spec checks. The guard below
+// still catches a deleted or renamed historical file.
+const ALL_FILES = readdirSync(MIGRATIONS_DIR)
+  .filter(f => f.endsWith('.sql'))
+  .sort();
+
+it('keeps every historical migration, in order, as the prefix of the directory', () => {
+  expect(ALL_FILES.slice(0, BASELINE_FILES.length)).toEqual(BASELINE_FILES);
+});
 
 describe('migrate.ts _migrations ledger', () => {
   test('fresh DB: applies every file in order, records each, commits per file', async () => {
@@ -88,8 +99,11 @@ describe('migrate.ts _migrations ledger', () => {
     expect(db.ledger.every(l => !l.baseline)).toBe(true);
     expect(db.executed).toHaveLength(ALL_FILES.length);
     expect(db.executed[0]).toMatch(/CREATE TABLE conversations/); // 001, the non-idempotent one
-    expect(db.executed[db.executed.length - 2]).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/); // 013
-    expect(db.executed[db.executed.length - 1]).toMatch(/ADD COLUMN IF NOT EXISTS ephemeral_expiration/); // 014, the last one
+    // Positions are anchored to the historical files (index in ALL_FILES), never to "the last one":
+    // later migrations append and must not move these.
+    expect(db.executed[ALL_FILES.indexOf('013_whatsapp_polls_events.sql')]).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/);
+    expect(db.executed[ALL_FILES.indexOf('014_whatsapp_disappearing_timer.sql')]).toMatch(/ADD COLUMN IF NOT EXISTS ephemeral_expiration/);
+    expect(db.executed[ALL_FILES.indexOf('016_brain_window_state.sql')]).toMatch(/CREATE TABLE IF NOT EXISTS brain_window_state/); // INFRA-370
     expect(db.commits).toBe(ALL_FILES.length);
     expect(db.openTx).toBe(false);
   });
