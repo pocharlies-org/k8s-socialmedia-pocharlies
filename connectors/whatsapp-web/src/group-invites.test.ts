@@ -19,6 +19,7 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
 import pg from 'pg';
+import { generateWAMessageContent } from '@whiskeysockets/baileys';
 import { BaileysClient, BaileysClientOptions } from './baileys-client';
 import {
   addRequestOf,
@@ -144,6 +145,13 @@ function makeClient(
       behaviour.answer
         ? behaviour.answer(participants)
         : participants.map(p => ({ status: '200', jid: p })),
+    // A group without a picture: WhatsApp answers 404 (Baileys throws).
+    profilePictureUrl: async () => {
+      throw Object.assign(new Error('item-not-found'), {
+        isBoom: true,
+        output: { statusCode: 404 },
+      });
+    },
     groupInviteCode: async () => {
       calls.inviteCode += 1;
       return behaviour.inviteCode ? behaviour.inviteCode() : 'LINKCODE';
@@ -256,6 +264,17 @@ test('add: a 403 is reported in inviteRequired (the private code kept, never ret
         subject: 'Equipo',
       },
     });
+    // The card's thumbnail lookup never fails the send (no group picture = 404).
+    assert.equal(await calls.sent[0].opts.getProfilePicUrl(GROUP, 'preview'), undefined);
+    const card = await generateWAMessageContent(calls.sent[0].content, {
+      upload: (async () => {
+        throw new Error('no upload');
+      }) as never,
+      getProfilePicUrl: calls.sent[0].opts.getProfilePicUrl,
+    });
+    assert.equal(card.groupInviteMessage?.inviteCode, 'PRIV1');
+    assert.equal(card.groupInviteMessage?.groupJid, GROUP);
+    assert.equal(card.groupInviteMessage?.jpegThumbnail ?? undefined, undefined);
     // Used once: a second invite falls back to the link.
     await client.sendGroupInvites(GROUP, [ANA_LID]);
     assert.equal(calls.sent[1].content.groupInvite.inviteCode, 'LINKCODE');

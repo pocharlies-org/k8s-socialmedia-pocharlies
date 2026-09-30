@@ -27,6 +27,7 @@ import {
   makeCacheableSignalKeyStore,
   AnyMessageContent,
   CacheStore,
+  MiscMessageGenerationOptions,
   ChatModification,
   GroupMetadata,
   GroupParticipant,
@@ -4787,10 +4788,14 @@ export class BaileysClient extends EventEmitter {
         : undefined;
       const chatJid = this.toRawJid(conversation?.externalId || member.jid);
       try {
-        const sendOptions = withEphemeralExpiration(
-          undefined,
-          await this.outgoingEphemeral(chatJid, conversation?.id)
-        );
+        // Baileys fetches the group's picture for the card's thumbnail and a
+        // group without one answers 404, which would fail the whole send:
+        // no picture → a card without thumbnail.
+        const sendOptions = {
+          ...withEphemeralExpiration({}, await this.outgoingEphemeral(chatJid, conversation?.id)),
+          getProfilePicUrl: (jid: string, type: 'preview' | 'image') =>
+            sock.profilePictureUrl(jid, type).catch(() => undefined),
+        } as MiscMessageGenerationOptions;
         const content: AnyMessageContent = {
           groupInvite: {
             inviteCode,
@@ -4800,9 +4805,7 @@ export class BaileysClient extends EventEmitter {
             subject: meta.subject || '',
           },
         };
-        const sent = sendOptions
-          ? await sock.sendMessage(chatJid, content, sendOptions)
-          : await sock.sendMessage(chatJid, content);
+        const sent = await sock.sendMessage(chatJid, content, sendOptions);
         const messageId = sent?.key?.id || null;
         if (sent?.key && messageId) {
           this.rememberKey(messageId, sent.key, chatJid);
