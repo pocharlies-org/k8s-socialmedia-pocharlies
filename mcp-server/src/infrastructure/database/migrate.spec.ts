@@ -75,6 +75,7 @@ const ALL_FILES = [
   '010_whatsapp_send_attempts.sql',
   '011_whatsapp_message_reactions.sql',
   '012_whatsapp_chat_state.sql',
+  '013_whatsapp_polls_events.sql',
 ];
 
 describe('migrate.ts _migrations ledger', () => {
@@ -86,7 +87,7 @@ describe('migrate.ts _migrations ledger', () => {
     expect(db.ledger.every(l => !l.baseline)).toBe(true);
     expect(db.executed).toHaveLength(ALL_FILES.length);
     expect(db.executed[0]).toMatch(/CREATE TABLE conversations/); // 001, the non-idempotent one
-    expect(db.executed[db.executed.length - 1]).toMatch(/ADD COLUMN IF NOT EXISTS pinned_at/); // 012, the last one
+    expect(db.executed[db.executed.length - 1]).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/); // 013, the last one
     expect(db.commits).toBe(ALL_FILES.length);
     expect(db.openTx).toBe(false);
   });

@@ -437,6 +437,147 @@ contracts:
       whatsapp.ChatUpdated as before). The path, the body fields, the action
       names, the 200 shape, the reasons and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-poll.v1
+    kind: http-route
+    value: /messages/poll
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/poll of the house WhatsApp connectors (fase 3 /
+      PR-7), consumed by dgx-messages (/messages → composer "Encuesta").
+      HMAC-signed body {conversationId, name, options[], selectableCount?,
+      actor?}: conversationId a group, phone (@c.us / @s.whatsapp.net) or LID
+      chat, bare or account-namespaced (a broadcast, newsletter or another
+      account's prefix is 400); name 1–255 chars; options 2–12 trimmed,
+      non-empty, non-repeated, ≤ 100 chars each; selectableCount 0 (default,
+      any number) to the number of options (1 = single choice). Validated first
+      (400 invalid_request, with `details`), then the same gate as every send
+      (403 disabled_sending), 503 disconnected; the opt-in Idempotency-Key of
+      send-idempotency.v1 (header or body idempotencyKey; derived message id,
+      replay with deduplicated: true, 409 idempotency_key_reused /
+      send_outcome_uncertain). A merged conversation sends to its canonical
+      chat. Answers 200 {sent: true, messageId, conversationId, sentAt}. The
+      poll's row is a messages row message_type POLL (content = question,
+      metadata.poll {question, options, selectableCount}); its secret stays in
+      whatsapp_message_payloads. The path, the body fields, the 200 shape and
+      the failureClass values are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-poll-vote.v1
+    kind: http-route
+    value: /messages/poll/vote
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/poll/vote (fase 3 / PR-7), consumed by
+      dgx-messages (/messages → vote / change / retract on a poll bubble).
+      HMAC-signed body {conversationId, messageId, options[], actor?}: the
+      complete selection of exact option names ([] retracts the vote);
+      messageId bare or account-namespaced. 400 invalid_request when options is
+      not a list of strings (before the gate) or does not match the poll
+      (unknown / repeated option, more than selectableCount — `details`
+      carries validOptions); 403 disabled_sending; 503 disconnected; 404
+      message_unavailable (unknown message); 422 not_a_poll; 422
+      poll_secret_unavailable (the poll is not stored with its messageSecret,
+      e.g. received before the durable payloads); 422 identity_unavailable.
+      The poll comes from memory or whatsapp_message_payloads (restart-proof);
+      the vote is encrypted with the chat's addressing identities (LID unless
+      the poll's sender is a phone jid) and relayed to the poll's chat. Opt-in
+      Idempotency-Key as messages-poll.v1. Answers 200 {voted: true, messageId,
+      pollMessageId, conversationId, options, retracted, votedAt, persisted}
+      (persisted = recorded in whatsapp_poll_votes; false while migration 013
+      is missing — the vote went out anyway). The path, the body fields, the
+      200 shape and the failureClass values are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-poll-results.v1
+    kind: http-route
+    value: /messages/poll/results
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/poll/results (fase 3 / PR-7): a read, no sending
+      gate and no connection needed. HMAC-signed body {conversationId,
+      messageId}. The definition comes from memory, the payload or the row's
+      metadata.poll; the votes from whatsapp_poll_votes_current (one current
+      vote per person, PN/LID collapsed, retracted left out). Answers 200
+      {poll: {messageId, conversationId, question, selectableCount, options:
+      [{name, votes, voters: [{jid, fromMe}]}], totalVoters, myVote (our
+      current selection, [] = none), persisted (false while 013 is missing)}}.
+      400 invalid_request, 404 message_unavailable, 422 not_a_poll. Votes
+      received while the connector was down are not there (a lower bound, not
+      WhatsApp's full tally). The path, the body fields and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-event.v1
+    kind: http-route
+    value: /messages/event
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/event (fase 3 / PR-7), consumed by dgx-messages
+      (/messages → composer "Evento"). HMAC-signed body {conversationId, name,
+      description?, startTime, endTime?, location?, call?, extraGuestsAllowed?,
+      actor?}: chats as messages-poll.v1; name 1–255 chars; description ≤
+      2048; startTime / endTime ISO-8601 or epoch milliseconds (not before
+      2020; endTime ≥ startTime); location a name or {name?, degreesLatitude,
+      degreesLongitude} (coordinates never invented); call "audio" | "video"
+      (WhatsApp creates the call link); extraGuestsAllowed boolean. 400
+      invalid_request (with `details`) before the gate, 403 disabled_sending,
+      503 disconnected; opt-in Idempotency-Key as messages-poll.v1. Answers 200
+      {sent: true, messageId, conversationId, sentAt}; the event's row is
+      message_type EVENT (content = name, metadata.event {name, description,
+      startTime, endTime (ms), location, joinLink, isCanceled,
+      extraGuestsAllowed}). The path, the body fields, the 200 shape and the
+      failureClass values are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-event-respond.v1
+    kind: http-route
+    value: /messages/event/respond
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/event/respond (fase 3 / PR-7), consumed by
+      dgx-messages (/messages → Voy / Quizá / No voy on an event bubble).
+      HMAC-signed body {conversationId, messageId, response: going | not_going
+      | maybe, extraGuestCount?, actor?} (extra guests 0–100, only with going
+      and only when the event allows them). 400 invalid_request, 403
+      disabled_sending, 503 disconnected, 404 message_unavailable, 422
+      not_an_event, 422 event_cancelled, 422 event_secret_unavailable, 422
+      identity_unavailable (the creator's phone jid is unknown: responses are
+      signed with phone jids, as Baileys decrypts them). Opt-in
+      Idempotency-Key as messages-poll.v1. Answers 200 {responded: true,
+      messageId, eventMessageId, conversationId, response, extraGuestCount,
+      respondedAt, persisted} (persisted = recorded in
+      whatsapp_event_responses). The path, the body fields, the response
+      values, the 200 shape and the failureClass values are contract: changing
+      any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-event-results.v1
+    kind: http-route
+    value: /messages/event/results
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/event/results (fase 3 / PR-7): a read, no sending
+      gate. HMAC-signed body {conversationId, messageId}. Answers 200 {event:
+      {messageId, conversationId, name, description, startTime, endTime,
+      location, joinLink, isCanceled, extraGuestsAllowed, counts: {going,
+      maybe, not_going}, extraGuests, responses: [{jid, response,
+      extraGuestCount, fromMe, respondedAt}], myResponse (going | not_going |
+      maybe | unknown | null), persisted}} from
+      whatsapp_event_responses_current (one current answer per person, cleared
+      ones left out). 400 invalid_request, 404 message_unavailable, 422
+      not_an_event. The path, the body fields and the 200 shape are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
   - id: http.social-api.pairing-whatsapp.v1
     kind: http-route
     value: /pairing/whatsapp

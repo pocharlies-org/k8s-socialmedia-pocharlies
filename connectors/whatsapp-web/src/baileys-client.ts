@@ -30,6 +30,9 @@ import {
   ChatModification,
   GroupMetadata,
   Browsers,
+  generateMessageIDV2,
+  generateWAMessageFromContent,
+  normalizeMessageContent,
 } from '@whiskeysockets/baileys';
 import {
   isTcTokenExpired,
@@ -86,6 +89,42 @@ import {
   StoredMessage,
 } from './message-mutations';
 import { reactionTime, storeMessageReaction } from './message-reactions';
+import {
+  buildPollContent,
+  buildPollVoteContent,
+  cryptoUserJid,
+  decryptPollVoteWith,
+  int64Ms,
+  keyAuthorCandidates,
+  messageSecretOf,
+  optionHash,
+  OwnIdentity,
+  parsePollDefinition,
+  PollEventInputError,
+  pollSigningPair,
+  selectedOptionNames,
+  validatePollSelection,
+  ValidatedPoll,
+} from './poll-votes';
+import {
+  buildEventContent,
+  buildEventResponseContent,
+  decryptEventResponseWith,
+  EventResponse,
+  parseEventDefinition,
+  ValidatedEvent,
+} from './event-responses';
+import {
+  aggregateEventResults,
+  aggregatePollResults,
+  EventResults,
+  loadStructuredMetadata,
+  PollResults,
+  readEventResponses,
+  readPollVotes,
+  storeEventResponse,
+  storePollVote,
+} from './poll-event-store';
 import {
   ChatState,
   ChatStatePatch,
@@ -184,6 +223,11 @@ export interface WhatsAppMessage {
   senderPnE164?: string;
   /** Baileys `key.fromMe`: true when this account sent the message (any device). */
   fromMe?: boolean;
+  /**
+   * Structured data of a POLL / EVENT row (fase 3 / PR-7): `{poll}` or
+   * `{event}`, merged into messages.metadata. Never key material.
+   */
+  structured?: Record<string, unknown>;
   attachments?: Array<{
     type: string;
     url: string;
@@ -587,6 +631,89 @@ interface MutationTarget {
   isText?: boolean;
   stored?: StoredMessage;
 }
+
+// ---------------------------------------------------------------------------
+// Polls and events (fase 3 / PR-7)
+// ---------------------------------------------------------------------------
+
+/** A poll vote or an event response: state of another message, never a chat row. */
+export function isPollOrEventResponse(msg: WAMessage): boolean {
+  const content = normalizeMessageContent(msg.message);
+  return !!(content?.pollUpdateMessage || content?.encEventResponseMessage);
+}
+
+/**
+ * Votes / responses after everything else of a batch: a history batch can
+ * carry a poll and its votes, and a vote is only decryptable once its poll
+ * (and its secret) is known.
+ */
+export function responsesLast<T extends WAMessage>(messages: T[]): T[] {
+  const responses = messages.filter(isPollOrEventResponse);
+  if (!responses.length) return messages;
+  return [...messages.filter(m => !isPollOrEventResponse(m)), ...responses];
+}
+
+/** Types an old row of a poll may have (whatsapp-web.js era, Baileys before PR-7). */
+const POLL_ROW_TYPES = /^(POLL|POLL_CREATION|POLLCREATIONMESSAGE(V\d)?|MESSAGECONTEXTINFO)$/;
+const EVENT_ROW_TYPES = /^(EVENT|EVENTMESSAGE|MESSAGECONTEXTINFO)$/;
+
+/** Chats a poll / event can go to: a group, a phone-number or a LID chat. */
+const STRUCTURED_CHAT_JID = /^(?:\d+(?:-\d+)?@g\.us|\d+@(?:c\.us|s\.whatsapp\.net|lid))$/;
+
+export interface StructuredSendOptions {
+  /** Idempotent sends: the id derived from the Idempotency-Key. */
+  messageId?: string;
+  /** Runs right before the network send (the idempotency claim). */
+  beforeSend?: () => Promise<void>;
+  actor?: string;
+}
+
+export interface StructuredSendResult {
+  messageId: string;
+  conversationId: string;
+  sentAt: string;
+}
+
+export interface PollVoteResult {
+  messageId: string;
+  pollMessageId: string;
+  conversationId: string;
+  options: string[];
+  retracted: boolean;
+  votedAt: string;
+  persisted: boolean;
+}
+
+export interface EventResponseResult {
+  messageId: string;
+  eventMessageId: string;
+  conversationId: string;
+  response: EventResponse;
+  extraGuestCount: number;
+  respondedAt: string;
+  persisted: boolean;
+}
+
+export type PollResultsView = PollResults & {
+  messageId: string;
+  conversationId: string;
+  /** false when the votes table is missing (013 not applied): counts are then empty. */
+  persisted: boolean;
+};
+
+export type EventResultsView = EventResults & {
+  messageId: string;
+  conversationId: string;
+  name: string;
+  description: string | null;
+  startTime: number | null;
+  endTime: number | null;
+  location: unknown;
+  joinLink: string | null;
+  isCanceled: boolean;
+  extraGuestsAllowed: boolean;
+  persisted: boolean;
+};
 
 // ---------------------------------------------------------------------------
 // LID → phone-number (PN) extraction
@@ -1072,7 +1199,7 @@ export class BaileysClient extends EventEmitter {
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify' && type !== 'append') return;
       const isLive = type === 'notify';
-      for (const msg of messages) {
+      for (const msg of responsesLast(messages)) {
         if (!msg.message) continue;
         try {
           await this.ingestMessage(msg, {
@@ -1115,7 +1242,7 @@ export class BaileysClient extends EventEmitter {
         string,
         { inserted: number; oldest?: WhatsAppMessage; newest?: WhatsAppMessage }
       >();
-      for (const m of messages) {
+      for (const m of responsesLast(messages)) {
         try {
           const result = await this.ingestMessage(m, {
             source: 'baileys_history_sync',
@@ -1438,6 +1565,15 @@ export class BaileysClient extends EventEmitter {
       this.rememberMessageForRetry(msg.key, msg.message);
     }
 
+    // Fase 3 / PR-7: a poll vote or an event response is state of the poll /
+    // event, not a chat message (WhatsApp does not list it either): it is
+    // decrypted into whatsapp_poll_votes / whatsapp_event_responses and no
+    // messages row is written (before, an empty POLLUPDATEMESSAGE row).
+    if (isPollOrEventResponse(msg)) {
+      await this.ingestPollOrEventResponse(msg, options);
+      return { inserted: false };
+    }
+
     const waMessage = this.convertMessage(msg);
     if (!waMessage) return { inserted: false };
 
@@ -1543,6 +1679,8 @@ export class BaileysClient extends EventEmitter {
         // and Baileys surfaced the PN. Omitted entirely otherwise — never an
         // invented value. Consumer contract: messages.metadata->>'senderPnE164'.
         senderPnE164: lidPn?.e164,
+        // POLL / EVENT (fase 3 / PR-7): {poll} or {event}, what dgx-messages renders.
+        ...waMessage.structured,
       },
     };
     const msgId = await storeMessage(data);
@@ -1559,11 +1697,12 @@ export class BaileysClient extends EventEmitter {
       )
     );
     // Also for an already-stored row (msgId null): a history replay after a
-    // relink backfills the payloads of the recent window.
+    // relink backfills the payloads of the recent window. A poll / event is
+    // kept whatever its age: its secret is what decrypts the votes / responses.
     await this.persistDurablePayload(
       msg,
       waMessage.conversationId,
-      options.source === 'baileys_history_sync' ? 'history' : 'live'
+      options.source === 'baileys_history_sync' && !waMessage.structured ? 'history' : 'live'
     );
     // Before the msgId check: prod folds REACTION inserts into the target's
     // messages.reactions and skips the row, so msgId is always null for them.
@@ -1626,6 +1765,9 @@ export class BaileysClient extends EventEmitter {
     let body: string | null = null;
     let isForwarded = false;
     let replyToWaId: string | undefined;
+    let poll: ReturnType<typeof parsePollDefinition> = null;
+    let event: ReturnType<typeof parseEventDefinition> = null;
+    let structured: Record<string, unknown> | undefined;
 
     const text = content.conversation;
     const ext = content.extendedTextMessage;
@@ -1666,6 +1808,16 @@ export class BaileysClient extends EventEmitter {
     } else if (content.contactsArrayMessage) {
       messageType = 'CONTACT';
       body = content.contactsArrayMessage.displayName || null;
+    } else if ((poll = parsePollDefinition(content))) {
+      // Fase 3 / PR-7: a proper POLL row (was MESSAGECONTEXTINFO or
+      // POLLCREATIONMESSAGEV3 with no content). The secret stays in the payload.
+      messageType = 'POLL';
+      body = poll.question || null;
+      structured = { poll };
+    } else if ((event = parseEventDefinition(content))) {
+      messageType = 'EVENT';
+      body = event.name || null;
+      structured = { event };
     } else if (content.protocolMessage) {
       // ignore key updates etc.
       return null;
@@ -1690,6 +1842,7 @@ export class BaileysClient extends EventEmitter {
       // Sender display name (attacker-controlled + PII; do NOT log).
       // Omitted when absent (e.g. history sync).
       pushName: msg.pushName || undefined,
+      ...(structured ? { structured } : {}),
     };
   }
 
@@ -2222,6 +2375,502 @@ export class BaileysClient extends EventEmitter {
       reactionId: sent?.key?.id || undefined,
       emoji: text,
       reactedAt: reactedAt.toISOString(),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Polls and events (fase 3 / PR-7)
+  // ---------------------------------------------------------------------------
+
+  /** Our own user jids for the vote / response crypto (PN from meJid when the socket has no user). */
+  private async ownIdentity(): Promise<OwnIdentity> {
+    const ids = await this.ownIds();
+    return {
+      pn: ids.find(id => id.endsWith('@s.whatsapp.net')) || cryptoUserJid(this.meJid),
+      lid: ids.find(id => id.endsWith('@lid')) || null,
+    };
+  }
+
+  /** Candidates plus their PN ↔ LID alternates from Baileys' mapping. */
+  private async withAliases(jids: string[]): Promise<string[]> {
+    const out: string[] = [];
+    for (const jid of jids) {
+      for (const alias of await this.jidAliases(jid)) {
+        const user = cryptoUserJid(alias);
+        if (user && !out.includes(user)) out.push(user);
+      }
+    }
+    return out;
+  }
+
+  /** Poll / event creation message by id: memory, then the durable payload (PR-1). */
+  private async structuredOriginal(id: string): Promise<WAMessage | undefined> {
+    return this.memoryMessage(id) || (await this.durableMessage(id));
+  }
+
+  /**
+   * A vote or a response seen on the socket (a contact, our phone) → its
+   * table. The poll / event must be known with its secret, else the update is
+   * logged and skipped (never a crash): a poll received before the durable
+   * payloads (PR-1) cannot be decrypted. The raw update is kept as a payload.
+   */
+  private async ingestPollOrEventResponse(msg: WAMessage, options: IngestOptions): Promise<void> {
+    if (!this.ingest || !msg.key?.id || !msg.key.remoteJid) return;
+    const content = normalizeMessageContent(msg.message);
+    const conversationId = this.normalizeJid(msg.key.remoteJid);
+    await this.persistDurablePayload(
+      msg,
+      conversationId,
+      options.source === 'baileys_history_sync' ? 'history' : 'live'
+    );
+    const fromMe = !!msg.key.fromMe;
+    const person = this.normalizeJid(
+      fromMe ? this.meJid || msg.key.remoteJid : msg.key.participant || msg.key.remoteJid
+    );
+    const own = await this.ownIdentity();
+    const at = (ms: number | undefined) =>
+      new Date(ms || (unixSeconds(msg.messageTimestamp) || 0) * 1000 || Date.now());
+
+    const update = content?.pollUpdateMessage;
+    if (update) {
+      const pollId = update.pollCreationMessageKey?.id || '';
+      const poll = pollId ? await this.structuredOriginal(pollId) : undefined;
+      const definition = parsePollDefinition(poll?.message);
+      const secret = messageSecretOf(poll?.message);
+      if (!poll || !definition || !secret) {
+        this.logger.info(
+          `Poll vote ${msg.key.id} for ${pollId || 'an unknown poll'} skipped: ${
+            !poll ? 'poll unknown' : !definition ? 'not a poll' : 'poll secret unavailable'
+          }`
+        );
+        return;
+      }
+      const decrypted = decryptPollVoteWith(update.vote, {
+        pollId,
+        secret,
+        creators: await this.withAliases([
+          ...keyAuthorCandidates(poll.key, own),
+          ...keyAuthorCandidates(update.pollCreationMessageKey as WAMessageKey, own),
+        ]),
+        voters: await this.withAliases(keyAuthorCandidates(msg.key, own)),
+      });
+      if (!decrypted) {
+        this.logger.warn(`Poll vote ${msg.key.id} for ${pollId} could not be decrypted: skipped`);
+        return;
+      }
+      const { names } = selectedOptionNames(definition, decrypted.hashes);
+      await storePollVote({
+        pollMessageId: pollId,
+        conversationId,
+        voterJid: person,
+        selectedOptions: names,
+        selectedHashes: decrypted.hashes,
+        fromMe,
+        voteMessageId: msg.key.id,
+        votedAt: at(int64Ms(update.senderTimestampMs)),
+      });
+      return;
+    }
+
+    const enc = content?.encEventResponseMessage;
+    const eventId = enc?.eventCreationMessageKey?.id || '';
+    const event = eventId ? await this.structuredOriginal(eventId) : undefined;
+    const secret = messageSecretOf(event?.message);
+    if (!enc || !event || !parseEventDefinition(event.message) || !secret) {
+      this.logger.info(
+        `Event response ${msg.key.id} for ${eventId || 'an unknown event'} skipped: ${
+          !event ? 'event unknown' : !secret ? 'event secret unavailable' : 'not an event'
+        }`
+      );
+      return;
+    }
+    const decrypted = decryptEventResponseWith(enc, {
+      eventId,
+      secret,
+      creators: await this.withAliases([
+        ...keyAuthorCandidates(event.key, own),
+        ...keyAuthorCandidates(enc.eventCreationMessageKey as WAMessageKey, own),
+      ]),
+      responders: await this.withAliases(keyAuthorCandidates(msg.key, own)),
+    });
+    if (!decrypted) {
+      this.logger.warn(
+        `Event response ${msg.key.id} for ${eventId} could not be decrypted: skipped`
+      );
+      return;
+    }
+    await storeEventResponse({
+      eventMessageId: eventId,
+      conversationId,
+      responderJid: person,
+      response: decrypted.response,
+      extraGuestCount: decrypted.extraGuestCount,
+      fromMe,
+      responseMessageId: msg.key.id,
+      respondedAt: at(decrypted.timestampMs),
+    });
+  }
+
+  /**
+   * The chat a new poll / event goes to: the canonical conversation's jid
+   * (a merged PN twin sends to its @lid), else the id as given. Only groups,
+   * phone-number and LID chats (a broadcast, newsletter or another account's
+   * prefix is 400).
+   */
+  private async structuredSendTarget(
+    chatId: string,
+    what: string
+  ): Promise<{ raw: string; conversationId: string }> {
+    const requested = stripAccountKey(String(chatId || '').trim());
+    if (!STRUCTURED_CHAT_JID.test(requested)) {
+      throw new MessageMutationError(
+        `${what}: ${requested || 'conversationId'} is not a WhatsApp group, phone or LID chat`,
+        400,
+        'invalid_request'
+      );
+    }
+    const conversation = this.ingest ? await resolveCanonicalConversation(requested) : undefined;
+    const raw = this.toRawJid(conversation?.externalId || requested);
+    return { raw, conversationId: this.normalizeJid(raw) };
+  }
+
+  /** The poll / event behind a vote / response, or the precise reason it cannot be used. */
+  private async structuredTarget(
+    chatId: string,
+    messageId: string,
+    kind: 'poll' | 'event'
+  ): Promise<{ target: MutationTarget; original: WAMessage; secret: Uint8Array }> {
+    const target = await this.resolveMutationTarget(
+      chatId,
+      messageId,
+      kind === 'poll' ? 'vote' : 'respond'
+    );
+    const original = await this.structuredOriginal(target.id);
+    const parsed =
+      kind === 'poll'
+        ? parsePollDefinition(original?.message)
+        : parseEventDefinition(original?.message);
+    if (!original || !parsed) {
+      const rowType = target.stored?.messageType || '';
+      const maybe = (kind === 'poll' ? POLL_ROW_TYPES : EVENT_ROW_TYPES).test(rowType);
+      if (original || (target.stored && !maybe)) {
+        throw new MessageMutationError(
+          `Message ${target.id} is not a${kind === 'poll' ? ' poll' : 'n event'}`,
+          422,
+          kind === 'poll' ? 'not_a_poll' : 'not_an_event'
+        );
+      }
+      throw new MessageMutationError(
+        `The ${kind} ${target.id} is not stored with its content (received before the connector kept payloads): answer it from the phone`,
+        422,
+        `${kind}_secret_unavailable`
+      );
+    }
+    const secret = messageSecretOf(original.message);
+    if (!secret) {
+      throw new MessageMutationError(
+        `The ${kind} ${target.id} has no encryption secret: answer it from the phone`,
+        422,
+        `${kind}_secret_unavailable`
+      );
+    }
+    const key = { ...original.key, ...target.key, id: target.id };
+    return { target: { ...target, key }, original: { ...original, key }, secret };
+  }
+
+  /** A relayed control message (vote / response): kept for retries and restarts. */
+  private async relayStructured(
+    sock: WASocket,
+    chatJid: string,
+    content: proto.IMessage,
+    options: StructuredSendOptions,
+    userJid: string
+  ): Promise<string> {
+    const messageId = options.messageId || generateMessageIDV2(sock.user?.id);
+    const full = generateWAMessageFromContent(chatJid, content, { messageId, userJid });
+    await options.beforeSend?.();
+    await sock.relayMessage(chatJid, full.message as proto.IMessage, { messageId });
+    this.rememberKey(messageId, full.key, chatJid);
+    this.rememberMessageForRetry(full.key, full.message);
+    await this.persistDurablePayload(full, this.normalizeJid(chatJid), 'sent');
+    return messageId;
+  }
+
+  /**
+   * Send a poll. Its POLL row comes from the echo Baileys emits (like every
+   * send); the payload with the secret is stored now, so votes can be read
+   * and cast after a restart.
+   */
+  async sendPoll(
+    chatId: string,
+    poll: ValidatedPoll,
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(chatId, 'sendPoll');
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(
+      target.raw,
+      buildPollContent(poll),
+      options.messageId ? { messageId: options.messageId } : undefined
+    );
+    return this.afterStructuredSend(sent, target, 'Poll', options.actor);
+  }
+
+  async sendEvent(
+    chatId: string,
+    event: ValidatedEvent,
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(chatId, 'sendEvent');
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(
+      target.raw,
+      buildEventContent(event),
+      options.messageId ? { messageId: options.messageId } : undefined
+    );
+    return this.afterStructuredSend(sent, target, 'Event', options.actor);
+  }
+
+  private async afterStructuredSend(
+    sent: WAMessage | undefined,
+    target: { raw: string; conversationId: string },
+    what: 'Poll' | 'Event',
+    actor?: string
+  ): Promise<StructuredSendResult> {
+    const messageId = sent?.key?.id;
+    if (!sent || !messageId)
+      throw new Error(`WhatsApp returned no message id for the ${what.toLowerCase()}`);
+    this.rememberKey(messageId, sent.key, target.raw);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, target.conversationId, 'sent');
+    this.logger.info(`${what} ${messageId} sent to ${target.raw}${actor ? ` by ${actor}` : ''}`);
+    return { messageId, conversationId: target.conversationId, sentAt: new Date().toISOString() };
+  }
+
+  /**
+   * Vote on a poll (the complete selection; [] retracts). The poll comes from
+   * memory or its durable payload (needs its secret); the vote is signed with
+   * the identities the chat is addressed with (poll-votes.ts) and recorded
+   * as ours once WhatsApp has it.
+   */
+  async sendPollVote(
+    chatId: string,
+    messageId: string,
+    options: unknown,
+    sendOptions: StructuredSendOptions = {}
+  ): Promise<PollVoteResult> {
+    const sock = this.connectedSocket();
+    const { target, original, secret } = await this.structuredTarget(chatId, messageId, 'poll');
+    const definition = parsePollDefinition(original.message)!;
+    const selection = validatePollSelection(definition, options);
+    const own = await this.ownIdentity();
+    const lidAddressed = isJidGroup(target.chatJid)
+      ? (await this.fetchGroupMetadata(target.chatJid).catch(() => undefined))?.addressingMode ===
+        'lid'
+      : target.chatJid.endsWith('@lid');
+    const pair = pollSigningPair(target.key, own, lidAddressed);
+    if (!pair) {
+      throw new MessageMutationError(
+        `Cannot tell which identity signs a vote on ${target.id}`,
+        422,
+        'identity_unavailable'
+      );
+    }
+    const votedAtMs = Date.now();
+    const content = buildPollVoteContent({
+      creationKey: { ...target.key, remoteJid: target.chatJid },
+      secret,
+      creator: pair.creator,
+      voter: pair.voter,
+      options: selection,
+      senderTimestampMs: votedAtMs,
+    });
+    const voteId = await this.relayStructured(
+      sock,
+      target.chatJid,
+      content,
+      sendOptions,
+      pair.voter
+    );
+    const conversationId = this.normalizeJid(target.chatJid);
+    const persisted =
+      this.ingest && !!this.meJid
+        ? await storePollVote({
+            pollMessageId: target.id,
+            conversationId,
+            voterJid: this.normalizeJid(this.meJid),
+            selectedOptions: selection,
+            selectedHashes: selection.map(optionHash),
+            fromMe: true,
+            voteMessageId: voteId,
+            votedAt: new Date(votedAtMs),
+          })
+        : false;
+    this.logger.info(
+      `Poll vote ${voteId} on ${target.id} (${selection.length ? `${selection.length} option(s)` : 'retracted'})${
+        sendOptions.actor ? ` by ${sendOptions.actor}` : ''
+      }`
+    );
+    return {
+      messageId: voteId,
+      pollMessageId: target.id,
+      conversationId,
+      options: selection,
+      retracted: selection.length === 0,
+      votedAt: new Date(votedAtMs).toISOString(),
+      persisted,
+    };
+  }
+
+  /**
+   * Answer an event (going / not_going / maybe). Signed with phone jids (see
+   * event-responses.ts); recorded as ours once WhatsApp has it.
+   */
+  async respondToEvent(
+    chatId: string,
+    messageId: string,
+    answer: { response: EventResponse; extraGuestCount: number },
+    sendOptions: StructuredSendOptions = {}
+  ): Promise<EventResponseResult> {
+    const sock = this.connectedSocket();
+    const { target, original, secret } = await this.structuredTarget(chatId, messageId, 'event');
+    const definition = parseEventDefinition(original.message)!;
+    if (definition.isCanceled) {
+      throw new MessageMutationError(
+        `The event ${target.id} was cancelled`,
+        422,
+        'event_cancelled'
+      );
+    }
+    if (answer.extraGuestCount > 0 && !definition.extraGuestsAllowed) {
+      throw new PollEventInputError('This event does not allow extra guests', {
+        field: 'extraGuestCount',
+      });
+    }
+    const own = await this.ownIdentity();
+    const ownPn = own.pn;
+    const creator = target.key.fromMe
+      ? ownPn
+      : (await this.withAliases(keyAuthorCandidates(target.key, own))).find(jid =>
+          jid.endsWith('@s.whatsapp.net')
+        ) || null;
+    if (!ownPn || !creator) {
+      throw new MessageMutationError(
+        `Cannot resolve the phone identities that sign a response to ${target.id}`,
+        422,
+        'identity_unavailable'
+      );
+    }
+    const respondedAtMs = Date.now();
+    const content = buildEventResponseContent({
+      eventKey: { ...target.key, remoteJid: target.chatJid },
+      secret,
+      creator,
+      responder: ownPn,
+      response: answer.response,
+      extraGuestCount: answer.extraGuestCount,
+      timestampMs: respondedAtMs,
+    });
+    const responseId = await this.relayStructured(
+      sock,
+      target.chatJid,
+      content,
+      sendOptions,
+      ownPn
+    );
+    const conversationId = this.normalizeJid(target.chatJid);
+    const persisted =
+      this.ingest && !!this.meJid
+        ? await storeEventResponse({
+            eventMessageId: target.id,
+            conversationId,
+            responderJid: this.normalizeJid(this.meJid),
+            response: answer.response,
+            extraGuestCount: answer.extraGuestCount,
+            fromMe: true,
+            responseMessageId: responseId,
+            respondedAt: new Date(respondedAtMs),
+          })
+        : false;
+    this.logger.info(
+      `Event response ${responseId} on ${target.id} (${answer.response})${
+        sendOptions.actor ? ` by ${sendOptions.actor}` : ''
+      }`
+    );
+    return {
+      messageId: responseId,
+      eventMessageId: target.id,
+      conversationId,
+      response: answer.response,
+      extraGuestCount: answer.response === 'going' ? answer.extraGuestCount : 0,
+      respondedAt: new Date(respondedAtMs).toISOString(),
+      persisted,
+    };
+  }
+
+  /** Definition of a poll / event for its results: memory, payload, then metadata of its row. */
+  private async structuredDefinition<K extends 'poll' | 'event'>(
+    messageId: string,
+    kind: K
+  ): Promise<{
+    id: string;
+    conversationId: string;
+    definition: K extends 'poll'
+      ? NonNullable<ReturnType<typeof parsePollDefinition>>
+      : NonNullable<ReturnType<typeof parseEventDefinition>>;
+  }> {
+    const id = stripAccountKey(String(messageId || '').trim());
+    if (!id) throw new MessageMutationError('messageId is required', 400, 'invalid_request');
+    const original = await this.structuredOriginal(id);
+    const meta = this.ingest ? await loadStructuredMetadata(id) : undefined;
+    const parsed =
+      kind === 'poll'
+        ? parsePollDefinition(original?.message) || meta?.poll
+        : parseEventDefinition(original?.message) || meta?.event;
+    if (!parsed) {
+      if (!original && !meta) {
+        throw new MessageUnavailableError(
+          `Message ${id} is unavailable`,
+          404,
+          'message_unavailable'
+        );
+      }
+      throw new MessageMutationError(
+        `Message ${id} is not a${kind === 'poll' ? ' poll' : 'n event'}`,
+        422,
+        kind === 'poll' ? 'not_a_poll' : 'not_an_event'
+      );
+    }
+    const conversationId =
+      meta?.conversationId ||
+      (original?.key.remoteJid ? this.normalizeJid(original.key.remoteJid) : '');
+    return { id, conversationId, definition: parsed as never };
+  }
+
+  /** Current results of a poll: its definition + the stored votes (read-only). */
+  async getPollResults(chatId: string, messageId: string): Promise<PollResultsView> {
+    const { id, conversationId, definition } = await this.structuredDefinition(messageId, 'poll');
+    const votes = this.ingest ? await readPollVotes(id) : { available: false, votes: [] };
+    return {
+      messageId: id,
+      conversationId: conversationId || this.normalizeJid(this.toRawJid(stripAccountKey(chatId))),
+      ...aggregatePollResults(definition, votes.votes),
+      persisted: votes.available,
+    };
+  }
+
+  /** Current responses of an event: its definition + the stored responses (read-only). */
+  async getEventResults(chatId: string, messageId: string): Promise<EventResultsView> {
+    const { id, conversationId, definition } = await this.structuredDefinition(messageId, 'event');
+    const stored = this.ingest ? await readEventResponses(id) : { available: false, responses: [] };
+    return {
+      messageId: id,
+      conversationId: conversationId || this.normalizeJid(this.toRawJid(stripAccountKey(chatId))),
+      ...definition,
+      ...aggregateEventResults(stored.responses),
+      persisted: stored.available,
     };
   }
 
