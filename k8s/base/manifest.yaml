@@ -257,8 +257,13 @@ spec:
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
-                - { name: BRAIN_INGEST_BATCH, value: "2" }
-                - { name: BRAIN_INGEST_MAX_ROWS, value: "60" }
+                # 30-09-2026: 60 filas en lotes de 2 dejaban `personal` ~80 dias atras
+                # (216k mensajes pendientes; cada pasada tardaba ~30 s de 300). 500 por
+                # cuenta en lotes de 50: mismo trabajo de embeddings, 25x menos peticiones,
+                # y la pasada sigue muy por debajo de activeDeadlineSeconds. El cursor se
+                # guarda por lote, asi que un corte por deadline no pierde nada.
+                - { name: BRAIN_INGEST_BATCH, value: "50" }
+                - { name: BRAIN_INGEST_MAX_ROWS, value: "500" }
                 - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
                 # Reintento de pushToBrain (5xx y errores de red; 4xx no): backoff 1 s x2 con tope
                 # RETRY_MAX_DELAY (30 s). Manda el PRESUPUESTO BRAIN_PUSH_BUDGET_MS (240 s), menor que
