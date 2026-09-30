@@ -124,7 +124,7 @@ async def run(pool: asyncpg.Pool, connector: ConnectorClient):
                     None, _transcribe, model, file_path
                 )
                 if text:
-                    await db.complete_transcription(pool, msg_id, text)
+                    await db.complete_transcription(pool, msg_id, text, "faster-whisper-" + os.environ.get("WHISPER_MODEL", "small"))
                     logger.info(f"Transcription complete for {tg_msg_id}: {len(text)} chars")
                 else:
                     await db.fail_transcription(pool, msg_id, "empty_transcription", increment_attempts=True)

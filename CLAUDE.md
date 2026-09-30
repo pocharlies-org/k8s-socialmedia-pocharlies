@@ -165,6 +165,12 @@ commit, distinto byte-code).
 - El `main` de Harbor es un cadáver inmutable: no borrarlo (protección del registro); ignorarlo como
   referencia de despliegue — el overlay prod fija imágenes por digest, nunca por tag `main`.
 
+## Notas de voz y buzón de ventanas (INFRA-368 P2)
+
+- `mcp-server/src/jobs/wa-voice-transcribe.ts` (+`-lib.ts`): transcribe las notas de voz de WhatsApp (`message_type='AUDIO'`, con fila en `attachments`, sin texto, `transcription_attempts<3`). Audio por `GET /api/v1/messages/media/…` del conector (URL de `infrastructure/connector-urls.ts`, firma `generateHMACSignature`); STT por HTTP a `stt-turbo`, concurrencia 1, relevo a `omnivoice-audio` ante 5xx/timeout. **`DRY_RUN=true` por defecto** (cuenta antes/después, imprime 3 muestras, no escribe). CronJob `wa-voice-transcribe` en `suspend: true` hasta que devops re-pine la imagen.
+- Buzón `brain_window_dirty` (migración 015): `messages` no tiene `updated_at`, así que quien cambia el texto de un mensaje ya ingerido (este job y `connectors/telegram-sync/sync/db.py::complete_transcription`) escribe el `UPDATE` y el `INSERT` del buzón **en la misma transacción**; el constructor de ventanas lo consume (`DELETE … RETURNING`). Esto resuelve el fallo del cursor por `created_at` con las transcripciones tardías: el cursor no vuelve atrás, el buzón sí avisa.
+- `BRAIN-INGEST-HANDOFF.md` no existe en el tronco `deploy/prod`: no hay nada que actualizar ahí.
+
 ## Estructura
 
 Tras el refactor del 2026-05-07 (commit `6791fae`), todo bajo carpetas dedicadas:

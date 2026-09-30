@@ -21,6 +21,7 @@ import {
 import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
 import { actorRequestHeaders, generateHMACSignature } from '@mcp-socialmedia/shared';
+import { whatsappConnectorUrl } from '../infrastructure/connector-urls';
 import {
   accountList,
   accountKey,
@@ -375,7 +376,12 @@ export class MCPServer {
 
   /** WhatsApp connector URL for an account (every one is a Baileys instance). */
   private waUrl(account?: string): string {
-    return this.registryAccount('whatsapp', account).connectorUrl as string;
+    const url = whatsappConnectorUrl(account);
+    if (!url) {
+      // Same canonical error as registryAccount for an unknown/disabled account.
+      return this.registryAccount('whatsapp', account).connectorUrl as string;
+    }
+    return url;
   }
 
   /** Telegram connector URL for an account (separate instance per account). */

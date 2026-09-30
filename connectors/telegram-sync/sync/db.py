@@ -326,14 +326,32 @@ async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: int):
         )
 
 
-async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
+async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str, model: str = "faster-whisper"):
+    """Write the transcript and tell the brain window builder, in ONE transaction.
+
+    `messages` has no updated_at, so the UPDATE and the `brain_window_dirty`
+    mailbox row commit together or not at all (INFRA-368 P2). Same
+    `transcription_*` keys as the WhatsApp job (wa-voice-transcribe).
+    """
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE messages SET "
-            "  content = $2::text, "
-            "  metadata = metadata || '{\"transcription_status\": \"done\"}'::jsonb "
-            "WHERE id = $1", msg_id, text
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "UPDATE messages SET "
+                "  content = $2::text, "
+                "  metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object("
+                "    'transcription_status', 'done', "
+                "    'transcribed_at', now()::text, "
+                "    'transcription_model', $3::text) "
+                "WHERE id = $1 RETURNING account, conversation_id",
+                msg_id, text, model,
+            )
+            if row is None:
+                return
+            await conn.execute(
+                "INSERT INTO brain_window_dirty (account, conversation_id, reason) "
+                "VALUES ($1, $2, 'voice_transcribed')",
+                row["account"], row["conversation_id"],
+            )
 
 
 async def fail_transcription(pool: asyncpg.Pool, msg_id: int, error: str, increment_attempts: bool = True):

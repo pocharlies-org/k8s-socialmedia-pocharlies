@@ -296,6 +296,62 @@ spec:
             - name: accounts
               configMap: { name: social-accounts }
 ---
+# INFRA-368 (P2): transcribe las notas de voz de WhatsApp con adjunto y sin texto
+# (stt-turbo por HTTP, relevo a omnivoice-audio; concurrencia 1; sin cargas nuevas en los
+# Sparks). Escribe UPDATE messages + INSERT brain_window_dirty en una transaccion.
+# DRY_RUN=true por defecto: cuenta antes/despues e imprime 3 muestras sin escribir.
+# `suspend: true` hasta que devops re-pine la imagen (el digest del overlay es anterior a
+# este job) y lance la ejecucion inicial: `kubectl create job --from=cronjob/wa-voice-transcribe`
+# con DRY_RUN=false, tras leer `gpu-arbiter-state` (no con phase: switching).
+# La imagen base va como :latest y la sustituye por digest el bloque `images` del overlay.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: wa-voice-transcribe
+  namespace: whatsapp-mcp
+spec:
+  schedule: "7,37 * * * *"
+  timeZone: Europe/Madrid
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1500
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+          containers:
+            - name: wa-voice-transcribe
+              image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+              command:
+                - sh
+                - -c
+                - cd mcp-server && node --import tsx src/jobs/wa-voice-transcribe.ts
+              env:
+                - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+                - { name: DRY_RUN, value: "true" }
+                - { name: STT_BASE_URL, value: "http://stt-turbo.llm.svc.cluster.local:8000" }
+                - { name: STT_FALLBACK_URL, value: "http://omnivoice-audio.llm.svc.cluster.local:8000" }
+                - { name: WA_VOICE_MAX_ROWS, value: "500" }
+                - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
+                # CONNECTOR_SHARED_SECRET, DB_USER y DB_PASSWORD vienen de whatsapp-mcp-secrets.
+              envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+              volumeMounts:
+                - { name: accounts, mountPath: /accounts, readOnly: true }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits:   { memory: 512Mi }
+          volumes:
+            - name: accounts
+              configMap: { name: social-accounts }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
