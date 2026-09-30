@@ -874,6 +874,72 @@ export type EventResultsView = EventResults & {
 // ---------------------------------------------------------------------------
 
 /** A `@lid` jid is the privacy id; anything else is already phone-addressable. */
+export class ProfilePictureTimeoutError extends Error {
+  constructor() {
+    super('WhatsApp profile picture lookup timed out');
+    this.name = 'ProfilePictureTimeoutError';
+  }
+}
+
+export class ProfilePictureDownloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProfilePictureDownloadError';
+  }
+}
+
+const PROFILE_PICTURE_LOOKUP_TIMEOUT_MS = 8_000;
+
+/**
+ * Baileys' profile-picture iq can go unanswered (it waits its whole query
+ * timeout); cap it so /chats/:jid/photo answers 504 instead of hanging, and
+ * keep a provider 408 as the same timeout rather than a "no photo".
+ */
+async function boundedProfilePictureUrl(
+  lookup: (timeoutMs: number) => Promise<string | undefined>
+): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      lookup(PROFILE_PICTURE_LOOKUP_TIMEOUT_MS),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ProfilePictureTimeoutError()),
+          PROFILE_PICTURE_LOOKUP_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } catch (error) {
+    if (
+      error instanceof ProfilePictureTimeoutError ||
+      (error instanceof Boom && error.output.statusCode === 408)
+    ) {
+      throw new ProfilePictureTimeoutError();
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 403 (private) and 404 (none) are WhatsApp's answers for "no visible picture". */
+function isUnavailableProfilePicture(error: unknown): boolean {
+  return error instanceof Boom && [403, 404].includes(error.output.statusCode);
+}
+
+/**
+ * Whether the patched Baileys will attach a <cstoken> to a 1:1 send that has
+ * no tctoken: same guard as its messages-send (own account LID-addressed, NCT
+ * salt provisioned, recipient resolved to a LID). WA Web genCsTokenBody,
+ * whatsmeow cstoken.go.
+ */
+export function canAttachCsToken(
+  creds: { me?: { lid?: string | null } | null; nctSalt?: Uint8Array | null } | undefined,
+  storageJid: string
+): boolean {
+  return Boolean(creds?.me?.lid && creds?.nctSalt?.length && storageJid.endsWith('@lid'));
+}
+
 function isLidJid(jid: string | null | undefined): boolean {
   return typeof jid === 'string' && jid.endsWith('@lid');
 }
@@ -4781,27 +4847,71 @@ export class BaileysClient extends EventEmitter {
 
   /**
    * Fetch a contact/group's profile picture as raw JPEG bytes.
-   * Returns null if the JID has no picture or the lookup fails (privacy).
+   * Returns null only when WhatsApp reports no visible picture (403/404);
+   * a timeout or a failed CDN download throws instead of passing for "no photo".
    */
   async getProfilePictureBytes(jid: string): Promise<Buffer | null> {
     if (!this.sock) return null;
     const raw = this.toRawJid(jid);
     let url: string | undefined;
     try {
-      url = await this.sock.profilePictureUrl(raw, 'image');
+      url = await boundedProfilePictureUrl(timeoutMs =>
+        this.sock!.profilePictureUrl(raw, 'image', timeoutMs)
+      );
     } catch (e) {
-      // 'item-not-found' / 'forbidden' — not all JIDs have pics or are visible
-      return null;
+      if (isUnavailableProfilePicture(e)) return null;
+      throw e;
     }
     if (!url) return null;
     try {
-      const r = await fetch(url);
-      if (!r.ok) return null;
-      const ab = await r.arrayBuffer();
-      return Buffer.from(ab);
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:' || !this.isAllowedWhatsAppMediaHost(parsed.hostname)) {
+        throw new ProfilePictureDownloadError('WhatsApp returned an invalid profile picture URL');
+      }
+      const signal = AbortSignal.timeout(10_000);
+      const r = await fetch(url, { redirect: 'manual', signal });
+      if (!r.ok || !r.body)
+        throw new ProfilePictureDownloadError(
+          `WhatsApp profile picture download failed (${r.status})`
+        );
+      const length = Number(r.headers.get('content-length') || 0);
+      const maxBytes = 10 * 1024 * 1024;
+      if (length > maxBytes)
+        throw new ProfilePictureDownloadError('WhatsApp profile picture exceeds 10 MB');
+      const reader = r.body.getReader();
+      const chunks: Buffer[] = [];
+      let size = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxBytes)
+            throw new ProfilePictureDownloadError('WhatsApp profile picture exceeds 10 MB');
+          chunks.push(Buffer.from(value));
+        }
+      } finally {
+        reader.releaseLock();
+        if (size > maxBytes) await r.body.cancel().catch(() => {});
+      }
+      return Buffer.concat(chunks, size);
     } catch (e) {
-      return null;
+      if (e instanceof ProfilePictureDownloadError) throw e;
+      if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+        throw new ProfilePictureTimeoutError();
+      }
+      throw new ProfilePictureDownloadError('WhatsApp profile picture download failed');
     }
+  }
+
+  private isAllowedWhatsAppMediaHost(hostname: string): boolean {
+    const host = hostname.toLowerCase().replace(/\.$/, '');
+    return (
+      host === 'whatsapp.net' ||
+      host.endsWith('.whatsapp.net') ||
+      host === 'fbcdn.net' ||
+      host.endsWith('.fbcdn.net')
+    );
   }
 
   async refreshGroupSession(
@@ -4955,9 +5065,30 @@ export class BaileysClient extends EventEmitter {
    * WhatsApp. baileys emits chats.update events for each mutation, which the
    * chats.update handler persists to the DB. Returns once the sync completes.
    */
+  /**
+   * The NCT salt behind cstoken arrives in the `regular_high` app-state
+   * collection (index `nct_salt_sync`). Baileys rc13 could not decode it, so a
+   * session paired before the patch has already applied that mutation and
+   * dropped the salt. Once per session, forget the stored regular_high version
+   * so the next resync asks for a full snapshot and the salt is read again.
+   * The marker in creds keeps an account that has no salt from re-snapshotting
+   * on every reconnect. WA_NCT_SALT_BOOTSTRAP=false turns it off.
+   */
+  private async prepareNctSaltBootstrap(): Promise<void> {
+    if (process.env.WA_NCT_SALT_BOOTSTRAP === 'false') return;
+    const sock = this.sock as any;
+    const creds = sock?.authState?.creds;
+    const keys = sock?.authState?.keys;
+    if (!creds || !keys || creds.nctSalt?.length || creds.nctSaltBootstrapAt) return;
+    sock.ev.emit('creds.update', { nctSaltBootstrapAt: Date.now() });
+    await keys.set({ 'app-state-sync-version': { regular_high: null } });
+    this.logger.info('no NCT salt stored: re-snapshotting regular_high once to read it');
+  }
+
   async resyncChatState(reason = 'manual'): Promise<{ ok: boolean; error?: string }> {
     if (!this.sock) return { ok: false, error: 'not connected' };
     try {
+      if (reason === 'connection-open') await this.prepareNctSaltBootstrap();
       this.logger.info(`resyncAppState (${reason})`);
       await (this.sock as any).resyncAppState(
         ['critical_unblock_low', 'regular_high', 'regular_low', 'regular'],
@@ -5641,6 +5772,17 @@ export class BaileysClient extends EventEmitter {
       return;
     }
 
+    // A first message never has the recipient's tctoken: they issue it once
+    // they talk to us. WA Web and whatsmeow then send a self-computed
+    // <cstoken>, which the patched Baileys attaches when this holds. Without
+    // it the send would go out token-less and count as a reach-out, so stop.
+    if (canAttachCsToken(sock.authState?.creds, tokenState.storageJid)) {
+      this.logger.info(
+        `WhatsApp direct preflight: no trusted-contact token, sending with cstoken rawJid=${rawJid} normalizedJid=${normalizedJid}`
+      );
+      return;
+    }
+
     if (sock.serverProps?.privacyTokenOn1to1) {
       throw new WhatsAppSendError(
         'WhatsApp direct preflight could not obtain a trusted-contact token for this 1:1 target',
@@ -5651,7 +5793,9 @@ export class BaileysClient extends EventEmitter {
           isGroup: false,
           attempts: 0,
           elapsedMs: Date.now() - started,
-          causeMessage: 'missing trusted-contact token after preflight',
+          causeMessage: sock.authState?.creds?.nctSalt?.length
+            ? 'missing trusted-contact token after preflight (recipient has no LID for a cstoken)'
+            : 'missing trusted-contact token after preflight and no NCT salt for a cstoken',
           actionable: actionableForFailure('account_restricted', false),
         }
       );

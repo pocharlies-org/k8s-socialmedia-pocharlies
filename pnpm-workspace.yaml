@@ -53,3 +53,16 @@ allowBuilds:
   better-sqlite3: false
   # Postinstall is just a funding notice.
   '@nestjs/core': false
+
+# Baileys rc13 privacy tokens (patches/…rc13.patch; drop it when a release ships both):
+# - profile picture iq: the <tctoken> goes INSIDE <picture> with its `t` timestamp
+#   (rc13 put it next to <picture>, without `t`), and untimestamped tokens are dropped.
+# - first 1:1 message: the NCT salt (app-state `nct_salt_sync`, HistorySync.nctSalt)
+#   is decoded into creds.nctSalt and, with no tctoken, the message carries
+#   <cstoken> = HMAC-SHA256(salt, recipientLid), like WA Web and whatsmeow.
+patchedDependencies:
+  '@whiskeysockets/baileys@7.0.0-rc13': patches/@whiskeysockets__baileys@7.0.0-rc13.patch
+
+# Service Docker builds include only their own workspace packages, so the
+# patch is unused in images that do not pull Baileys.
+allowUnusedPatches: true

@@ -17,6 +17,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.json ./
+COPY patches ./patches
 COPY workers/whatsapp-open-worker/package.json workers/whatsapp-open-worker/tsconfig.json ./workers/whatsapp-open-worker/
 
 RUN pnpm install --filter @mcp-socialmedia/whatsapp-open-worker...

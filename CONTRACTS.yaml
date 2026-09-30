@@ -1158,3 +1158,20 @@ contracts:
       never the raw vCard. The path, the body fields and the 200 shape are
       contract: changing any is breaking — a new `.v2` entry beside this one.
       Also consumed by the MCP tool social_share_contact (mcp-server/src/mcp/server.ts canonicalShareContact; added later, surface unchanged).
+  - id: http.whatsapp-connector.chat-photo.v1
+    kind: http-route
+    value: /chats/:jid/photo
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/chats/:jid/photo of the house WhatsApp connectors (HMAC over
+      "{}"): the chat's or contact's profile picture. 200 {data (base64),
+      size, contentType: image/jpeg}; 404 {error: "No photo"} only when
+      WhatsApp answers private (403) or none (404); 504 when the lookup does
+      not answer within 8 s (fase 3 / PR-10: a timeout is not a missing
+      photo); 502 when the picture URL is off the WhatsApp/Facebook CDN, the
+      download fails or exceeds 10 MB; 500 otherwise. The path and the 200
+      shape are contract: changing either is breaking — a new `.v2` entry
+      beside this one.

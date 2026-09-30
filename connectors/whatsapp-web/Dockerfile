@@ -14,6 +14,7 @@ WORKDIR /app
 
 # Baileys is a pure Node.js WebSocket client — no Chromium/Puppeteer needed.
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.json ./
+COPY patches ./patches
 COPY connectors/whatsapp-web/package.json connectors/whatsapp-web/tsconfig.json ./connectors/whatsapp-web/
 COPY shared/package.json shared/tsconfig.json ./shared/
 

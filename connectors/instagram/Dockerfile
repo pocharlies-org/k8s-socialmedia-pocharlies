@@ -14,6 +14,7 @@ WORKDIR /app
 
 # Copy package files
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.json ./
+COPY patches ./patches
 COPY connectors/tsconfig.json ./connectors/tsconfig.json
 COPY connectors/instagram/package.json connectors/instagram/tsconfig.json ./connectors/instagram/
 COPY shared/package.json shared/tsconfig.json ./shared/

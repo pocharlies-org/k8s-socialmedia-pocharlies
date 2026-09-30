@@ -16,6 +16,7 @@ COPY pnpm-workspace.yaml ./
 COPY package.json ./
 COPY pnpm-lock.yaml* ./
 COPY tsconfig.json ./
+COPY patches ./patches
 
 COPY shared ./shared
 COPY connectors/telegram ./connectors/telegram

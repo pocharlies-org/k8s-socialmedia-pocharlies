@@ -4,6 +4,8 @@ import {
   BaileysClient,
   classifyWhatsAppSendFailure,
   normalizeChatModifyAction,
+  ProfilePictureDownloadError,
+  ProfilePictureTimeoutError,
   WhatsAppSendFailureClass,
 } from '../baileys-client';
 import { MuteState } from '../chat-state';
@@ -1786,6 +1788,7 @@ export function createRouter(
   });
 
   // Download a chat/contact's profile picture as base64 (mirrors telegram-connector shape).
+  // CONTRACT: http.whatsapp-connector.chat-photo.v1 — path and 200 {data, size, contentType}; 404 no photo, 504 lookup timeout, 502 download
   router.get('/chats/:jid/photo', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
@@ -1800,6 +1803,14 @@ export function createRouter(
           contentType: 'image/jpeg',
         });
       } catch (e) {
+        if (e instanceof ProfilePictureTimeoutError) {
+          res.status(504).json({ error: 'WhatsApp profile picture timed out' });
+          return;
+        }
+        if (e instanceof ProfilePictureDownloadError) {
+          res.status(502).json({ error: e.message });
+          return;
+        }
         res.status(500).json({ error: String(e) });
       }
     })();
