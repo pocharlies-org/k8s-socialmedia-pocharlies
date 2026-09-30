@@ -103,6 +103,37 @@ transport is actually deployed.
 `social_manage_chat` supports `setTitle`, `setDescription`, `setPhoto`, and
 `setForumEnabled`.
 
+## WhatsApp chats, groups, polls, events and contacts
+
+WhatsApp only unless noted; other channels return `unsupported_capability`.
+Writes pass through the connector's `ENABLE_SENDING` /
+`EMERGENCY_DISABLE_SENDING` gate; reads are not gated.
+
+- `social_react_message` (WhatsApp and Telegram): `emoji: ''` removes ours.
+- `social_set_chat_state`: `archive`, `unarchive`, `pin`, `unpin`, `mute`
+  (optional `durationMs` or `muteUntil`), `unmute`, `markRead`, `markUnread`.
+- `social_get_group` / `social_manage_group`: `create`, `update` (subject,
+  description, `announce`, `restrict`), `add|remove|promote|demoteParticipants`.
+- `social_send_poll`, `social_vote_poll` (`options: []` retracts),
+  `social_get_poll_results`, `social_send_event`, `social_respond_event`,
+  `social_get_event_results`.
+- `social_start_chat` (phone, optional first message; returns the canonical
+  conversation), `social_share_contact` (1–5 cards), `social_list_contacts`
+  (local index).
+- `social_get_presence` and `social_get_privacy` are read-only (the latter,
+  with `target`, adds that chat's disappearing timer). The MCP exposes no
+  presence, privacy or disappearing-timer writes.
+
+Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `start_chat` with a
+message) forward the caller's `idempotencyKey`, scoped per tool, as the
+connector's `Idempotency-Key`. Connector refusals keep their `failureClass` as
+the error `code` (`disabled_sending`, `disconnected`, `not_group_admin`,
+`not_on_whatsapp`, `account_restricted`, …) with the connector payload in
+`error.details`; `invalid_request` stays, `idempotency_key_reused` becomes
+`conflict`, `send_outcome_uncertain` becomes `outcome_unknown`, and a route the
+deployed connector lacks becomes `unsupported_capability`. `account_restricted`
+on `social_start_chat` carries a `wa.me` link a human can open to send by hand.
+
 ## OpenClaw
 
 OpenClaw registers channel adapters named `socialmedia-whatsapp`,

@@ -267,6 +267,7 @@ contracts:
       messages.reactions as before; no NATS event. The path, the body fields,
       the 200 shape and the failureClass values are contract: changing any is
       breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_react_message (mcp-server/src/mcp/server.ts canonicalReactMessage; added later, surface unchanged).
   - id: http.whatsapp-connector.chats-modify.v1
     kind: http-route
     value: /chats/modify
@@ -310,6 +311,7 @@ contracts:
       No NATS event. The path, the body fields, the action names, the 200
       shape and the failureClass values are contract: changing any is breaking
       — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_set_chat_state (mcp-server/src/mcp/server.ts canonicalSetChatState; added later, surface unchanged).
   - id: http.whatsapp-connector.groups-state.v1
     kind: http-route
     value: /groups/state
@@ -339,6 +341,7 @@ contracts:
       not_group_member (WhatsApp: not a participant), 404 group_unavailable.
       The path, the body fields, the 200 shape and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_get_group (mcp-server/src/mcp/server.ts canonicalGetGroup; added later, surface unchanged).
   - id: http.whatsapp-connector.groups-create.v1
     kind: http-route
     value: /groups/create
@@ -372,6 +375,7 @@ contracts:
       failure classes as /messages/send. No NATS event. The path, the body
       fields, the 200 shape and the failureClass values are contract: changing
       any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_manage_group (mcp-server/src/mcp/server.ts canonicalManageGroup; added later, surface unchanged).
   - id: http.whatsapp-connector.groups-update.v1
     kind: http-route
     value: /groups/update
@@ -404,6 +408,7 @@ contracts:
       422 rejected_by_whatsapp, 503, other send failure classes. No NATS event.
       The path, the body fields, the 200 shape and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_manage_group (mcp-server/src/mcp/server.ts canonicalManageGroup; added later, surface unchanged).
   - id: http.whatsapp-connector.groups-participants.v1
     kind: http-route
     value: /groups/participants
@@ -437,6 +442,7 @@ contracts:
       whatsapp.ChatUpdated as before). The path, the body fields, the action
       names, the 200 shape, the reasons and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_manage_group (mcp-server/src/mcp/server.ts canonicalManageGroup; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-poll.v1
     kind: http-route
     value: /messages/poll
@@ -464,6 +470,7 @@ contracts:
       whatsapp_message_payloads. The path, the body fields, the 200 shape and
       the failureClass values are contract: changing any is breaking — a new
       `.v2` entry beside this one.
+      Also consumed by the MCP tool social_send_poll (mcp-server/src/mcp/server.ts canonicalSendPoll; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-poll-vote.v1
     kind: http-route
     value: /messages/poll/vote
@@ -492,6 +499,7 @@ contracts:
       is missing — the vote went out anyway). The path, the body fields, the
       200 shape and the failureClass values are contract: changing any is
       breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_vote_poll (mcp-server/src/mcp/server.ts canonicalVotePoll; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-poll-results.v1
     kind: http-route
     value: /messages/poll/results
@@ -512,6 +520,7 @@ contracts:
       received while the connector was down are not there (a lower bound, not
       WhatsApp's full tally). The path, the body fields and the 200 shape are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_get_poll_results (mcp-server/src/mcp/server.ts canonicalGetPollResults; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-event.v1
     kind: http-route
     value: /messages/event
@@ -536,6 +545,7 @@ contracts:
       extraGuestsAllowed}). The path, the body fields, the 200 shape and the
       failureClass values are contract: changing any is breaking — a new
       `.v2` entry beside this one.
+      Also consumed by the MCP tool social_send_event (mcp-server/src/mcp/server.ts canonicalSendEvent; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-event-respond.v1
     kind: http-route
     value: /messages/event/respond
@@ -559,6 +569,7 @@ contracts:
       whatsapp_event_responses). The path, the body fields, the response
       values, the 200 shape and the failureClass values are contract: changing
       any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_respond_event (mcp-server/src/mcp/server.ts canonicalRespondEvent; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-event-results.v1
     kind: http-route
     value: /messages/event/results
@@ -578,6 +589,7 @@ contracts:
       ones left out). 400 invalid_request, 404 message_unavailable, 422
       not_an_event. The path, the body fields and the 200 shape are contract:
       changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_get_event_results (mcp-server/src/mcp/server.ts canonicalGetEventResults; added later, surface unchanged).
   - id: http.social-api.pairing-whatsapp.v1
     kind: http-route
     value: /pairing/whatsapp
@@ -898,6 +910,7 @@ contracts:
       {error, failureClass}: 400 invalid_request, 404, 503. The path, the body
       fields, the 200 shape and the status values are contract: changing any
       is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_get_presence (mcp-server/src/mcp/server.ts canonicalGetPresence; added later, surface unchanged).
   - id: http.whatsapp-connector.privacy-read.v1
     kind: http-route
     value: /privacy
@@ -917,6 +930,7 @@ contracts:
       (setting → accepted values)}}. Nothing stored. The path, the 200 shape
       and the setting names are contract: changing any is breaking — a new
       `.v2` entry beside this one.
+      Also consumed by the MCP tool social_get_privacy (mcp-server/src/mcp/server.ts canonicalGetPrivacy; added later, surface unchanged).
   - id: http.whatsapp-connector.privacy-update.v1
     kind: http-route
     value: /privacy
@@ -967,6 +981,7 @@ contracts:
       contact's default for NEW chats from USync, not this chat's timer; null
       when not shared)}}. The path, the body fields and the 200 shape are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_get_privacy (mcp-server/src/mcp/server.ts canonicalGetPrivacy; added later, surface unchanged).
   - id: http.whatsapp-connector.chats-disappearing.v1
     kind: http-route
     value: /chats/disappearing
@@ -1028,6 +1043,7 @@ contracts:
       fallback? (account_restricted: manual wa.me URL)}. The path, the body
       fields, the 200 shape and the failureClass values are contract: changing
       any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_start_chat (mcp-server/src/mcp/server.ts canonicalStartChat; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-sticker.v1
     kind: http-route
     value: /messages/sticker
@@ -1094,6 +1110,7 @@ contracts:
       count}. A pairing-only client answers []. The path, the query and the
       200 shape are contract: changing any is breaking — a new `.v2` entry
       beside this one. POST /contacts is contacts-create.v1.
+      Also consumed by the MCP tool social_list_contacts (mcp-server/src/mcp/server.ts canonicalListContacts; added later, surface unchanged).
   - id: http.whatsapp-connector.contacts-create.v1
     kind: http-route
     value: /contacts/create
@@ -1140,3 +1157,4 @@ contracts:
       [{displayName, phones (E.164, waid first), waids, organization?}]} —
       never the raw vCard. The path, the body fields and the 200 shape are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_share_contact (mcp-server/src/mcp/server.ts canonicalShareContact; added later, surface unchanged).

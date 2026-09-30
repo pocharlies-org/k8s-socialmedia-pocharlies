@@ -20,12 +20,18 @@ const EXPECTED_TOOL_NAMES = [
   'social_forward_message',
   'social_get_conversation',
   'social_get_digest',
+  'social_get_event_results',
   'social_get_forum',
+  'social_get_group',
   'social_get_insights',
   'social_get_media',
+  'social_get_poll_results',
+  'social_get_presence',
+  'social_get_privacy',
   'social_get_profile',
   'social_list_accounts',
   'social_list_comments',
+  'social_list_contacts',
   'social_list_content',
   'social_list_conversations',
   'social_list_drafts',
@@ -35,16 +41,25 @@ const EXPECTED_TOOL_NAMES = [
   'social_manage_chat',
   'social_manage_comment',
   'social_manage_forum',
+  'social_manage_group',
   'social_manage_session',
   'social_mark_read',
   'social_publish_content',
+  'social_react_message',
   'social_resolve_target',
+  'social_respond_event',
   'social_search_messages',
   'social_send_draft',
+  'social_send_event',
   'social_send_message',
+  'social_send_poll',
+  'social_set_chat_state',
+  'social_share_contact',
+  'social_start_chat',
   'social_start_digest',
   'social_summarize',
   'social_validate_account',
+  'social_vote_poll',
 ] as const;
 
 const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffect> = {
@@ -58,12 +73,18 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_forward_message: 'externalWrite',
   social_get_conversation: 'read',
   social_get_digest: 'read',
+  social_get_event_results: 'read',
   social_get_forum: 'read',
+  social_get_group: 'read',
   social_get_insights: 'read',
   social_get_media: 'read',
+  social_get_poll_results: 'read',
+  social_get_presence: 'read',
+  social_get_privacy: 'read',
   social_get_profile: 'read',
   social_list_accounts: 'read',
   social_list_comments: 'read',
+  social_list_contacts: 'read',
   social_list_content: 'read',
   social_list_conversations: 'read',
   social_list_drafts: 'read',
@@ -73,16 +94,25 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_manage_chat: 'externalWrite',
   social_manage_comment: 'destructive',
   social_manage_forum: 'destructive',
+  social_manage_group: 'destructive',
   social_manage_session: 'externalWrite',
   social_mark_read: 'externalWrite',
   social_publish_content: 'externalWrite',
+  social_react_message: 'externalWrite',
   social_resolve_target: 'read',
+  social_respond_event: 'externalWrite',
   social_search_messages: 'read',
   social_send_draft: 'externalWrite',
+  social_send_event: 'externalWrite',
   social_send_message: 'externalWrite',
+  social_send_poll: 'externalWrite',
+  social_set_chat_state: 'externalWrite',
+  social_share_contact: 'externalWrite',
+  social_start_chat: 'externalWrite',
   social_start_digest: 'internalWrite',
   social_summarize: 'compute',
   social_validate_account: 'read',
+  social_vote_poll: 'externalWrite',
 };
 
 const EXPECTED_AUTH_SCOPES: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialAuthScope> =
@@ -161,7 +191,19 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: true,
     openWorldHint: false,
   },
+  social_get_event_results: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_get_forum: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_get_group: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
@@ -174,6 +216,24 @@ const EXPECTED_ANNOTATIONS: Record<
     openWorldHint: true,
   },
   social_get_media: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_get_poll_results: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_get_presence: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_get_privacy: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
@@ -196,6 +256,12 @@ const EXPECTED_ANNOTATIONS: Record<
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
+  },
+  social_list_contacts: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
   },
   social_list_content: {
     readOnlyHint: true,
@@ -251,6 +317,12 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: false,
     openWorldHint: true,
   },
+  social_manage_group: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
   social_manage_session: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -269,9 +341,21 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: false,
     openWorldHint: true,
   },
+  social_react_message: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_resolve_target: {
     readOnlyHint: true,
     destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_respond_event: {
+    readOnlyHint: false,
+    destructiveHint: true,
     idempotentHint: true,
     openWorldHint: true,
   },
@@ -287,7 +371,37 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: false,
     openWorldHint: true,
   },
+  social_send_event: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
   social_send_message: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  social_send_poll: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  social_set_chat_state: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_share_contact: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  social_start_chat: {
     readOnlyHint: false,
     destructiveHint: false,
     idempotentHint: false,
@@ -308,6 +422,12 @@ const EXPECTED_ANNOTATIONS: Record<
   social_validate_account: {
     readOnlyHint: true,
     destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_vote_poll: {
+    readOnlyHint: false,
+    destructiveHint: true,
     idempotentHint: true,
     openWorldHint: true,
   },
@@ -398,11 +518,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 35 canonical tools in deterministic order', () => {
+  it('contains exactly the 50 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(35);
+    expect(new Set(names).size).toBe(50);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -428,7 +548,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(16);
+    expect(writes).toHaveLength(25);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same

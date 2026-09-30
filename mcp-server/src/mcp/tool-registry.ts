@@ -1107,6 +1107,444 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
       }
     ),
   }),
+  // Fase 3 WhatsApp capabilities. Every write goes through the connector's
+  // gate (ENABLE_SENDING / EMERGENCY_DISABLE_SENDING); reads are not gated.
+  tool({
+    name: 'social_react_message',
+    title: 'React to message',
+    description:
+      "Set or remove (emoji '') our reaction on a message (WhatsApp, Telegram). " +
+      'A new reaction replaces the previous one.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'messages.react',
+    handler: 'reactMessage',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        messageId: { type: 'string', minLength: 1 },
+        emoji: {
+          type: 'string',
+          maxLength: 32,
+          description: "One emoji; '' removes our reaction.",
+        },
+      },
+      ['channel', 'accountId', 'target', 'messageId', 'emoji']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_set_chat_state',
+    title: 'Set chat state',
+    description:
+      'Archive, unarchive, pin, unpin, mute, unmute, mark read or mark unread a chat on ' +
+      'the account (WhatsApp). mute without durationMs/muteUntil mutes always.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'chats.state',
+    handler: 'setChatState',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        action: {
+          type: 'string',
+          enum: [
+            'archive',
+            'unarchive',
+            'pin',
+            'unpin',
+            'mute',
+            'unmute',
+            'markRead',
+            'markUnread',
+          ],
+        },
+        durationMs: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 31622400000,
+          description: 'mute only: mute for this long from now (at most 366 days).',
+        },
+        muteUntil: {
+          type: 'string',
+          format: 'date-time',
+          description: 'mute only: mute until this future time (at most 366 days away).',
+        },
+      },
+      ['channel', 'accountId', 'target', 'action'],
+      {
+        not: { required: ['durationMs', 'muteUntil'] },
+        allOf: [
+          {
+            if: { not: { properties: { action: { const: 'mute' } } } },
+            then: {
+              not: { anyOf: [{ required: ['durationMs'] }, { required: ['muteUntil'] }] },
+            },
+          },
+        ],
+      }
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_get_group',
+    title: 'Get group',
+    description:
+      'Read a group: subject, description, settings, members and what this account may ' +
+      'change in it (WhatsApp).',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'groups.get',
+    handler: 'getGroup',
+    inputSchema: objectSchema({ ...commonProperties, readSource }, [
+      'channel',
+      'accountId',
+      'target',
+    ]),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_manage_group',
+    title: 'Manage group',
+    description:
+      'Create a group, change its subject, description or settings, or add, remove, ' +
+      'promote or demote participants (WhatsApp). Members see every change.',
+    effect: 'destructive',
+    authScope: 'social.write',
+    capability: 'groups.manage',
+    handler: 'manageGroup',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        action: {
+          type: 'string',
+          enum: [
+            'create',
+            'update',
+            'addParticipants',
+            'removeParticipants',
+            'promoteParticipants',
+            'demoteParticipants',
+          ],
+        },
+        subject: { type: 'string', minLength: 1, maxLength: 100 },
+        description: {
+          type: 'string',
+          maxLength: 2048,
+          description: "update only; '' removes the description.",
+        },
+        announce: { type: 'boolean', description: 'update only: only admins send messages.' },
+        restrict: {
+          type: 'boolean',
+          description: 'update only: only admins edit subject, description and picture.',
+        },
+        participants: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+          minItems: 1,
+          maxItems: 50,
+          description: 'Phone numbers or user jids (…@s.whatsapp.net, …@c.us, …@lid).',
+        },
+      },
+      ['channel', 'accountId', 'action'],
+      {
+        allOf: [
+          {
+            if: { properties: { action: { const: 'create' } } },
+            then: { required: ['subject', 'participants'] },
+          },
+          {
+            if: { properties: { action: { const: 'update' } } },
+            then: {
+              required: ['target'],
+              anyOf: [
+                { required: ['subject'] },
+                { required: ['description'] },
+                { required: ['announce'] },
+                { required: ['restrict'] },
+              ],
+            },
+          },
+          {
+            if: {
+              properties: {
+                action: {
+                  enum: [
+                    'addParticipants',
+                    'removeParticipants',
+                    'promoteParticipants',
+                    'demoteParticipants',
+                  ],
+                },
+              },
+            },
+            then: { required: ['target', 'participants'] },
+          },
+        ],
+      }
+    ),
+  }),
+  tool({
+    name: 'social_send_poll',
+    title: 'Send poll',
+    description: 'Send a poll to a chat (WhatsApp).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'polls.send',
+    handler: 'sendPoll',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        question: { type: 'string', minLength: 1, maxLength: 255 },
+        options: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, maxLength: 100 },
+          minItems: 2,
+          maxItems: 12,
+          uniqueItems: true,
+        },
+        selectableCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 12,
+          default: 0,
+          description: '0 = any number of options, 1 = single choice.',
+        },
+      },
+      ['channel', 'accountId', 'target', 'question', 'options']
+    ),
+  }),
+  tool({
+    name: 'social_vote_poll',
+    title: 'Vote in poll',
+    description:
+      'Vote in a poll with the exact option names; [] retracts our vote. A vote replaces ' +
+      'the previous one (WhatsApp).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'polls.vote',
+    handler: 'votePoll',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        messageId: { type: 'string', minLength: 1 },
+        options: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+          maxItems: 12,
+          uniqueItems: true,
+        },
+      },
+      ['channel', 'accountId', 'target', 'messageId', 'options']
+    ),
+    idempotent: true,
+    destructive: true,
+  }),
+  tool({
+    name: 'social_get_poll_results',
+    title: 'Get poll results',
+    description: 'Read the options, votes and voters of a poll (WhatsApp).',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'polls.results',
+    handler: 'getPollResults',
+    inputSchema: objectSchema(
+      { ...commonProperties, messageId: { type: 'string', minLength: 1 }, readSource },
+      ['channel', 'accountId', 'target', 'messageId']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_send_event',
+    title: 'Send event',
+    description: 'Send an event invitation to a chat (WhatsApp).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'events.send',
+    handler: 'sendEvent',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        name: { type: 'string', minLength: 1, maxLength: 255 },
+        description: { type: 'string', maxLength: 2048 },
+        startTime: { type: 'string', format: 'date-time' },
+        endTime: { type: 'string', format: 'date-time' },
+        location: {
+          oneOf: [
+            { type: 'string', minLength: 1, maxLength: 255 },
+            {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                name: { type: 'string', maxLength: 255 },
+                degreesLatitude: { type: 'number', minimum: -90, maximum: 90 },
+                degreesLongitude: { type: 'number', minimum: -180, maximum: 180 },
+              },
+            },
+          ],
+        },
+        call: { type: 'string', enum: ['audio', 'video'] },
+        extraGuestsAllowed: { type: 'boolean' },
+      },
+      ['channel', 'accountId', 'target', 'name', 'startTime']
+    ),
+  }),
+  tool({
+    name: 'social_respond_event',
+    title: 'Respond to event',
+    description:
+      'Answer an event invitation (going, not_going, maybe). An answer replaces the ' +
+      'previous one (WhatsApp).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'events.respond',
+    handler: 'respondEvent',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        messageId: { type: 'string', minLength: 1 },
+        response: { type: 'string', enum: ['going', 'not_going', 'maybe'] },
+        extraGuestCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 100,
+          description: 'Only with response going, when the event allows extra guests.',
+        },
+      },
+      ['channel', 'accountId', 'target', 'messageId', 'response']
+    ),
+    idempotent: true,
+    destructive: true,
+  }),
+  tool({
+    name: 'social_get_event_results',
+    title: 'Get event results',
+    description: 'Read an event and who answered going, not going or maybe (WhatsApp).',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'events.results',
+    handler: 'getEventResults',
+    inputSchema: objectSchema(
+      { ...commonProperties, messageId: { type: 'string', minLength: 1 }, readSource },
+      ['channel', 'accountId', 'target', 'messageId']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_start_chat',
+    title: 'Start chat',
+    description:
+      'Open (or find) the chat with a phone number and optionally send a first message ' +
+      '(WhatsApp). Returns the canonical conversation. When WhatsApp restricts the ' +
+      'account, the error carries a wa.me link for a human to send manually.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'chats.start',
+    handler: 'startChat',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        idempotencyKey: writeProperties.idempotencyKey,
+        phone: {
+          type: 'string',
+          minLength: 1,
+          description: 'E.164 phone number (or 9 digits of the default country).',
+        },
+        message: { type: 'string', minLength: 1, maxLength: 4096 },
+      },
+      ['channel', 'accountId', 'phone']
+    ),
+  }),
+  tool({
+    name: 'social_share_contact',
+    title: 'Share contact',
+    description: 'Send one to five contact cards to a chat (WhatsApp).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'contacts.share',
+    handler: 'shareContact',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        contacts: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 5,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['displayName', 'phone'],
+            properties: {
+              displayName: { type: 'string', minLength: 1, maxLength: 100 },
+              phone: { type: 'string', minLength: 1 },
+              organization: { type: 'string', maxLength: 100 },
+              email: { type: 'string', format: 'email' },
+            },
+          },
+        },
+      },
+      ['channel', 'accountId', 'target', 'contacts']
+    ),
+  }),
+  tool({
+    name: 'social_list_contacts',
+    title: 'List contacts',
+    description: 'List the contacts the account knows, optionally filtered by name or number.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'contacts.list',
+    handler: 'listContacts',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        query: { type: 'string', minLength: 1 },
+        limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 },
+        readSource,
+      },
+      ['channel', 'accountId']
+    ),
+    idempotent: true,
+    openWorld: false,
+  }),
+  tool({
+    name: 'social_get_presence',
+    title: 'Get presence',
+    description:
+      'Read the last known presence (online, typing, last seen) of a chat or of one group ' +
+      'participant (WhatsApp). Read-only: it never changes our own presence.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'presence.get',
+    handler: 'getPresence',
+    inputSchema: objectSchema(
+      {
+        ...commonProperties,
+        participant: {
+          type: 'string',
+          minLength: 1,
+          description: 'Group chats: phone number or user jid of one participant.',
+        },
+        readSource,
+      },
+      ['channel', 'accountId', 'target']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_get_privacy',
+    title: 'Get privacy settings',
+    description:
+      "Read the account's privacy settings and default disappearing timer (WhatsApp); with " +
+      "target, also that chat's disappearing-messages timer. Read-only.",
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'privacy.get',
+    handler: 'getPrivacy',
+    inputSchema: objectSchema({ channel, accountId, target, readSource }, ['channel', 'accountId']),
+    idempotent: true,
+  }),
 ].sort((left, right) => left.name.localeCompare(right.name));
 
 export const SOCIAL_TOOL_NAMES = SOCIAL_TOOL_REGISTRY.map(toolDefinition => toolDefinition.name);
