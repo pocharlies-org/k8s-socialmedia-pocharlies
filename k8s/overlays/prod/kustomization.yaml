@@ -62,9 +62,11 @@ images:
   # mensajes temporales, #128). v1.3.71/v1.3.72 quemados por runs fallidos.
   # v1.3.74 (run 36725155383, deploy/prod@7f0dd82) añade SC-1256 (#123): social_list_accounts
   # por actor, omite Instagram sin credencial (no_credential). Sin migraciones nuevas.
+  # v1.3.76 (run 36751988471, deploy/prod@2df6408) añade las 15 tools MCP de la fase 3 (#138)
+  # y el Baileys parcheado (#139). Sin migraciones nuevas.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.74
-    digest: sha256:23b6670d01098b860bb93e219d0c8a0cc4b3342e4c5d13561ff9c6442ea6e802
+    newTag: v1.3.76
+    digest: sha256:7b3d09a0adb1a7dceb60ecf111ce5d9bd2e57a8a5d2de4bbfd37ccd6dff6173b
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
