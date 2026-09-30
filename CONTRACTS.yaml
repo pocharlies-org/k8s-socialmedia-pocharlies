@@ -1175,3 +1175,47 @@ contracts:
       download fails or exceeds 10 MB; 500 otherwise. The path and the 200
       shape are contract: changing either is breaking — a new `.v2` entry
       beside this one.
+  - id: http.whatsapp-connector.contacts-block.v1
+    kind: http-route
+    value: /contacts/block
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/contacts/block of the house WhatsApp connectors, consumed by
+      dgx-messages ("Bloquear / Desbloquear"). HMAC-signed body {phone |
+      conversationId (exactly one; a group is refused), action: block|unblock,
+      confirm: true, actor?} — else 400 invalid_request (confirm checked
+      before anything else: blocking is visible to the contact and on every
+      linked device). Then 403 disabled_sending (ENABLE_SENDING /
+      EMERGENCY_DISABLE_SENDING), 503 disconnected. The target resolves to the
+      canonical conversation's jid (merged rows followed; a phone through the
+      PN ↔ LID aliases of 008); Baileys writes the item under the LID with
+      pn_jid. The provider's blocklist is re-read as the only proof: 200 {ok,
+      action, blocked, changed (false = already so, nothing written),
+      confirmed: true, jid, jids (PN / LID of the person), conversationId};
+      409 block_not_confirmed, 422 identity_unresolved (Baileys cannot map PN
+      ↔ LID yet), 422 rejected_by_whatsapp, 502 provider_invalid_response.
+      No DB write. The path, the body fields and the 200 shape are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.contacts-blocklist.v1
+    kind: http-route
+    value: /contacts/blocklist
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/contacts/blocklist?fresh=1 of the house WhatsApp connectors,
+      consumed by dgx-messages ("Bloqueados", the blocked badge). HMAC over
+      "{}"; a read, ungated; 503 disconnected. One fetchBlocklist() (or the
+      in-memory list of the socket when read < 60 s ago and patched by
+      blocklist.update; fresh=1 forces the read), collapsed one entry per
+      person: 200 {blocked: [{id (the LID when known), jids, blockedJids,
+      phone (E.164 from a phone jid, never LID digits), name, pushName,
+      conversationId (canonical 1:1, null when none)}], count, readAt,
+      cached}. Names read only from conversations / participants; a pairing
+      client (ingest off) answers the bare identities. The path and the 200
+      shape are contract: changing either is breaking — a new `.v2` entry
+      beside this one.

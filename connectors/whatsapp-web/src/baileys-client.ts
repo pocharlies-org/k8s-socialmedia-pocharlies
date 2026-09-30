@@ -210,6 +210,23 @@ import {
   StickerGifRequest,
 } from './sticker-gif';
 import {
+  ContactBlockError,
+  ContactBlockOutcome,
+  ContactBlockRequest,
+  readBlocklist,
+  setContactBlocked,
+  signalAlias,
+} from './contact-block';
+import {
+  accountAliasPairs,
+  BlockedContactEntry,
+  BlocklistCache,
+  describeBlockedPeople,
+  groupBlockedPeople,
+  personId,
+  phoneOfJid,
+} from './blocked-contacts';
+import {
   appendCompanyToDisplayName,
   displayNameOrPhone,
   NormalizedWhatsAppPhone,
@@ -1138,6 +1155,9 @@ export class BaileysClient extends EventEmitter {
   // stored; cleared with the socket so a reader gets `unknown`, not stale.
   private presenceCache = new PresenceCache();
   private presenceThrottle = new PresenceSendThrottle();
+  // The account's blocklist as last read (60 s), patched by blocklist.update;
+  // it belongs to a socket: cleared on every open / close. Never stored.
+  private blocklistCache = new BlocklistCache();
   // Last forced re-subscribe per chat (a read refreshes an expired presence).
   private presenceRefreshedAt = new Map<string, number>();
   private groupMetaCache = new Map<string, GroupMetadata>(); // by raw JID
@@ -1343,6 +1363,7 @@ export class BaileysClient extends EventEmitter {
         // Presence subscriptions and snapshots belong to the old socket: a
         // reconnect resubscribes and never shows a stale "online".
         this.resetPresence();
+        this.blocklistCache.clear();
         this.markConnected('connection.update open');
         // SC-1225: a pairing-only socket (ingest off) touches no DB state.
         if (!this.ingest) return;
@@ -1369,6 +1390,7 @@ export class BaileysClient extends EventEmitter {
       if (connection === 'close') {
         this.ready = false;
         this.resetPresence();
+        this.blocklistCache.clear();
         this.lastDisconnectedAt = new Date();
         const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
         const reason = lastDisconnect?.error?.message || `close (${statusCode || 'unknown'})`;
@@ -1581,6 +1603,19 @@ export class BaileysClient extends EventEmitter {
       } catch (e) {
         this.logger.warn(`presence.update handler failed: ${(e as Error).message}`);
       }
+    });
+
+    // The blocklist changed on another device (the phone): patch the cache so
+    // a read within its TTL is not stale. rc13 types blocklist.set but never
+    // emits it; handled anyway (a full replacement).
+    sock.ev.on('blocklist.update', evt => {
+      this.blocklistCache.apply(evt);
+      this.logger.info(
+        `Blocklist ${String(evt?.type)} (${Array.isArray(evt?.blocklist) ? evt.blocklist.length : 0}) from WhatsApp`
+      );
+    });
+    sock.ev.on('blocklist.set', evt => {
+      this.blocklistCache.apply(evt, true);
     });
 
     sock.ev.on('messages.update', updates => {
@@ -2830,6 +2865,100 @@ export class BaileysClient extends EventEmitter {
       addressBookSync: true,
       persisted,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Contact block / blocklist (helpers in contact-block.ts, blocked-contacts.ts)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The direct contact a block request is about, as the jid WhatsApp knows
+   * the chat by: a conversation resolved to its canonical row (merged
+   * tombstones followed; a group is 400), a phone to the conversation this
+   * account already has for it (its LID one through 008's aliases) and only
+   * otherwise its phone jid. Baileys itself maps PN ↔ LID when it writes.
+   */
+  private async blockTarget(
+    request: ContactBlockRequest
+  ): Promise<{ jid: string; conversationId: string | null }> {
+    if (request.conversationId) {
+      const target = await this.chatTarget(request.conversationId, 'block', false);
+      if (target.isGroup) {
+        throw new ContactBlockError(
+          'A group cannot be blocked: block one of its members instead',
+          400,
+          'invalid_request'
+        );
+      }
+      return { jid: target.raw, conversationId: target.conversationId };
+    }
+    const phone = request.phone!;
+    const known = this.ingest ? await resolveCanonicalConversation(phone.rawJid) : undefined;
+    return {
+      jid: known ? this.toRawJid(stripAccountKey(known.externalId)) : phone.rawJid,
+      conversationId: known?.id ?? null,
+    };
+  }
+
+  /**
+   * Block or unblock one contact (WhatsApp's own blocklist IQ via Baileys),
+   * proven by re-reading the provider's blocklist. The caller (POST
+   * /contacts/block) already required confirm: true and the sending gate.
+   */
+  async setContactBlock(
+    request: ContactBlockRequest,
+    options: { actor?: string } = {}
+  ): Promise<
+    Omit<ContactBlockOutcome, 'blocklist'> & {
+      action: ContactBlockRequest['action'];
+      conversationId: string | null;
+    }
+  > {
+    const sock = this.connectedSocket();
+    const target = await this.blockTarget(request);
+    const { blocklist, ...outcome } = await setContactBlocked(
+      sock,
+      target.jid,
+      request.action === 'block'
+    );
+    this.blocklistCache.set(blocklist);
+    this.logger.info(
+      `Contact ${outcome.jid} ${request.action}${outcome.changed ? '' : ' (already)'}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return { action: request.action, ...outcome, conversationId: target.conversationId };
+  }
+
+  /**
+   * The account's blocked contacts, one entry per person (PN + LID through
+   * Baileys' mapping and 008's aliases), named from participants /
+   * conversations. The provider is read unless the cached list is fresh (or
+   * `fresh` is asked). A pairing-only client (ingest off) never touches the DB.
+   */
+  async listBlockedContacts(
+    options: { fresh?: boolean } = {}
+  ): Promise<{ blocked: BlockedContactEntry[]; readAt: string; cached: boolean }> {
+    const sock = this.connectedSocket();
+    const cached = options.fresh ? null : this.blocklistCache.fresh();
+    const entries = cached || this.blocklistCache.set(await readBlocklist(sock));
+    const readAt = this.blocklistCache.last()?.readAt || new Date().toISOString();
+    const pairs = this.ingest ? await accountAliasPairs(entries) : [];
+    const groups = await groupBlockedPeople(entries, async jid => {
+      const fromDb = pairs.flatMap(([a, b]) => (a === jid ? [b] : b === jid ? [a] : []));
+      const fromSignal = await signalAlias(sock, jid);
+      return [...fromDb, ...(fromSignal ? [fromSignal] : [])];
+    });
+    const blocked = this.ingest
+      ? await describeBlockedPeople(groups)
+      : groups.map(group => ({
+          id: personId(group.jids),
+          jids: group.jids,
+          blockedJids: group.blocked,
+          phone: group.jids.map(phoneOfJid).find((value): value is string => !!value) || null,
+          name: null,
+          pushName: null,
+          conversationId: null,
+        }));
+    return { blocked, readAt, cached: !!cached };
   }
 
   /**

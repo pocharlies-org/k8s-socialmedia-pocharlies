@@ -41,6 +41,7 @@ import {
   StartedChat,
 } from '../contacts';
 import { parseStickerGifRequest, stickerGifHashInput } from '../sticker-gif';
+import { parseContactBlockRequest } from '../contact-block';
 import {
   GroupActionError,
   normalizeGroupParticipantAction,
@@ -1783,6 +1784,42 @@ export function createRouter(
         });
       } catch (e) {
         await failStructuredSend(attempt, e, res, 'share contact');
+      }
+    })();
+  });
+
+  // Contact block / unblock and the account's blocklist. Blocking is outward
+  // and visible (the contact can no longer reach us; every linked device
+  // shows it): the body is validated first, `confirm: true` included (400),
+  // then the sending gate (403) and the connection (503). The blocklist is a
+  // read: no gate, only the connection. Ids inside the signed body.
+
+  // CONTRACT: http.whatsapp-connector.contacts-block.v1 — body {phone | conversationId, action: block|unblock, confirm: true, actor?}, 200 {ok, action, blocked, changed, confirmed, jid, jids, conversationId}, 409 block_not_confirmed, 422 identity_unresolved|rejected_by_whatsapp
+  router.post('/contacts/block', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseContactBlockRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.setContactBlock(request, { actor: actorFromBody(body.actor) });
+        res.json({ ok: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'change the contact block');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.contacts-blocklist.v1 — GET ?fresh=1 (signed over "{}"), 200 {blocked: [{id, jids, blockedJids, phone, name, pushName, conversationId}], count, readAt, cached}
+  router.get('/contacts/blocklist', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        const fresh = req.query.fresh === '1' || req.query.fresh === 'true';
+        const result = await client.listBlockedContacts({ fresh });
+        res.json({ ...result, count: result.blocked.length });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read the blocklist');
       }
     })();
   });
