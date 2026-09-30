@@ -187,6 +187,7 @@ import {
   parseDisappearingExpiration,
   readConversationEphemeral,
   recordInboundEphemeral,
+  withEphemeralExpiration,
   writeConversationEphemeral,
 } from './disappearing';
 import {
@@ -2236,6 +2237,33 @@ export class BaileysClient extends EventEmitter {
   }
 
   /**
+   * Disappearing timer (seconds) an outgoing message to `raw` must carry, when
+   * known and on: a group's cached metadata (what Baileys itself puts on the
+   * stanza), else the canonical conversation row (014) — `conversationId`
+   * when the caller already resolved it. Unknown, off, ingest off or any
+   * failure → undefined: the message goes as before, never blocked by this.
+   */
+  private async outgoingEphemeral(
+    raw: string,
+    conversationId?: string | null
+  ): Promise<number | undefined> {
+    try {
+      if (this.isGroupJid(raw)) {
+        const meta = this.groupMetaCache.get(raw);
+        if (meta) return groupEphemeral(meta) || undefined;
+      }
+      if (!this.ingest) return undefined;
+      const id = conversationId || (await resolveCanonicalConversation(raw))?.id;
+      if (!id) return undefined;
+      const stored = await readConversationEphemeral(id);
+      return stored && stored.expiration > 0 ? stored.expiration : undefined;
+    } catch (e: any) {
+      this.logger.warn(`disappearing timer of ${raw} unreadable, sent without: ${e?.message || e}`);
+      return undefined;
+    }
+  }
+
+  /**
    * Persist the raw message for quote/forward/retry after a restart. SC-1225:
    * a pairing-only socket (ingest off) writes nothing.
    */
@@ -2331,6 +2359,7 @@ export class BaileysClient extends EventEmitter {
       });
     }
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
+    const ephemeralExpiration = await this.outgoingEphemeral(raw);
     await options?.beforeSend?.();
     try {
       const sent = await this.sendTextWithTimeout(raw, content, timeoutMs, {
@@ -2338,6 +2367,7 @@ export class BaileysClient extends EventEmitter {
         useUserDevicesCache: isGroup ? false : undefined,
         quoted,
         messageId: options?.messageId,
+        ephemeralExpiration,
       });
       const messageId = sent?.key?.id;
       this.logger.info(
@@ -2393,6 +2423,7 @@ export class BaileysClient extends EventEmitter {
             useUserDevicesCache: false,
             quoted,
             messageId: options?.messageId,
+            ephemeralExpiration,
           });
           const messageId = retried?.key?.id;
           this.logger.info(
@@ -2571,14 +2602,17 @@ export class BaileysClient extends EventEmitter {
         caption,
       };
 
+    const ephemeralExpiration = await this.outgoingEphemeral(raw);
     await options?.beforeSend?.();
-    const sendOptions =
+    const sendOptions = withEphemeralExpiration(
       quoted || options?.messageId
         ? {
             ...(quoted ? { quoted } : {}),
             ...(options?.messageId ? { messageId: options.messageId } : {}),
           }
-        : undefined;
+        : undefined,
+      ephemeralExpiration
+    );
     const sent = await this.sock.sendMessage(raw, payload, sendOptions);
     if (sent?.key?.id) {
       this.rememberKey(sent.key.id, sent.key, raw);
@@ -2601,9 +2635,13 @@ export class BaileysClient extends EventEmitter {
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
     const raw = this.toRawJid(chatId);
     const payload: AnyMessageContent = { audio, mimetype, ptt: true };
+    const sendOptions = withEphemeralExpiration(
+      options?.messageId ? { messageId: options.messageId } : undefined,
+      await this.outgoingEphemeral(raw)
+    );
     await options?.beforeSend?.();
-    const sent = options?.messageId
-      ? await this.sock.sendMessage(raw, payload, { messageId: options.messageId })
+    const sent = sendOptions
+      ? await this.sock.sendMessage(raw, payload, sendOptions)
       : await this.sock.sendMessage(raw, payload);
     const messageId = sent?.key?.id;
     if (sent?.key) {
@@ -2735,14 +2773,17 @@ export class BaileysClient extends EventEmitter {
       kind === 'sticker' ? STICKER_MAX_BYTES : GIF_MAX_BYTES
     );
     const content = stickerGifContent(kind, file.bytes, file.contentType, request.caption);
+    const ephemeralExpiration = await this.outgoingEphemeral(target.raw, target.canonicalId);
     await options.beforeSend?.();
-    const sendOptions =
+    const sendOptions = withEphemeralExpiration(
       quoted || options.messageId
         ? {
             ...(quoted ? { quoted } : {}),
             ...(options.messageId ? { messageId: options.messageId } : {}),
           }
-        : undefined;
+        : undefined,
+      ephemeralExpiration
+    );
     const sent = await sock.sendMessage(target.raw, content, sendOptions);
     const messageId = sent?.key?.id;
     if (!sent || !messageId) throw new Error(`WhatsApp returned no message id for the ${kind}`);
@@ -2770,12 +2811,12 @@ export class BaileysClient extends EventEmitter {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'shareContact');
     const content = buildContactShareContent(cards);
-    await options.beforeSend?.();
-    const sent = await sock.sendMessage(
-      target.raw,
-      content,
-      options.messageId ? { messageId: options.messageId } : undefined
+    const sendOptions = withEphemeralExpiration(
+      options.messageId ? { messageId: options.messageId } : undefined,
+      await this.outgoingEphemeral(target.raw, target.canonicalId)
     );
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(target.raw, content, sendOptions);
     const messageId = sent?.key?.id;
     if (!sent || !messageId) throw new Error('WhatsApp returned no message id for the contact');
     this.rememberKey(messageId, sent.key, target.raw);
@@ -3153,7 +3194,7 @@ export class BaileysClient extends EventEmitter {
   private async structuredSendTarget(
     chatId: string,
     what: string
-  ): Promise<{ raw: string; conversationId: string }> {
+  ): Promise<{ raw: string; conversationId: string; canonicalId: string | null }> {
     const requested = stripAccountKey(String(chatId || '').trim());
     if (!STRUCTURED_CHAT_JID.test(requested)) {
       throw new MessageMutationError(
@@ -3164,7 +3205,7 @@ export class BaileysClient extends EventEmitter {
     }
     const conversation = this.ingest ? await resolveCanonicalConversation(requested) : undefined;
     const raw = this.toRawJid(conversation?.externalId || requested);
-    return { raw, conversationId: this.normalizeJid(raw) };
+    return { raw, conversationId: this.normalizeJid(raw), canonicalId: conversation?.id ?? null };
   }
 
   /** The poll / event behind a vote / response, or the precise reason it cannot be used. */
@@ -3241,12 +3282,12 @@ export class BaileysClient extends EventEmitter {
   ): Promise<StructuredSendResult> {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'sendPoll');
-    await options.beforeSend?.();
-    const sent = await sock.sendMessage(
-      target.raw,
-      buildPollContent(poll),
-      options.messageId ? { messageId: options.messageId } : undefined
+    const sendOptions = withEphemeralExpiration(
+      options.messageId ? { messageId: options.messageId } : undefined,
+      await this.outgoingEphemeral(target.raw, target.canonicalId)
     );
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(target.raw, buildPollContent(poll), sendOptions);
     return this.afterStructuredSend(sent, target, 'Poll', options.actor);
   }
 
@@ -3257,12 +3298,12 @@ export class BaileysClient extends EventEmitter {
   ): Promise<StructuredSendResult> {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'sendEvent');
-    await options.beforeSend?.();
-    const sent = await sock.sendMessage(
-      target.raw,
-      buildEventContent(event),
-      options.messageId ? { messageId: options.messageId } : undefined
+    const sendOptions = withEphemeralExpiration(
+      options.messageId ? { messageId: options.messageId } : undefined,
+      await this.outgoingEphemeral(target.raw, target.canonicalId)
     );
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(target.raw, buildEventContent(event), sendOptions);
     return this.afterStructuredSend(sent, target, 'Event', options.actor);
   }
 
@@ -3531,7 +3572,10 @@ export class BaileysClient extends EventEmitter {
       );
     }
     const rawTarget = this.toRawJid(toChatId);
-    const sent = await this.sock.sendMessage(rawTarget, { forward: original });
+    const sendOptions = withEphemeralExpiration(undefined, await this.outgoingEphemeral(rawTarget));
+    const sent = sendOptions
+      ? await this.sock.sendMessage(rawTarget, { forward: original }, sendOptions)
+      : await this.sock.sendMessage(rawTarget, { forward: original });
     const sentId = sent?.key?.id;
     if (sent?.key) {
       this.rememberKey(sentId || '', sent.key, rawTarget);
@@ -5795,6 +5839,7 @@ export class BaileysClient extends EventEmitter {
       useUserDevicesCache?: boolean;
       quoted?: WAMessage;
       messageId?: string;
+      ephemeralExpiration?: number;
     }
   ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
@@ -5807,6 +5852,7 @@ export class BaileysClient extends EventEmitter {
     }
     if (options?.quoted) sendOpts.quoted = options.quoted;
     if (options?.messageId) sendOpts.messageId = options.messageId;
+    if (options?.ephemeralExpiration) sendOpts.ephemeralExpiration = options.ephemeralExpiration;
     return this.race(
       this.sock.sendMessage(rawJid, { text: content }, sendOpts),
       timeoutMs,

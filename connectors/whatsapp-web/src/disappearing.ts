@@ -180,6 +180,21 @@ export function groupEphemeral(meta: { ephemeralDuration?: unknown }): number {
 }
 
 /**
+ * Baileys send options of an outgoing message into a chat whose timer is
+ * known and on: `ephemeralExpiration` makes Baileys put contextInfo.expiration
+ * on the message, as WhatsApp's own clients do in such a chat (without it the
+ * other side keeps it forever). Unknown or off → the options as they were
+ * (undefined stays undefined).
+ */
+export function withEphemeralExpiration<T extends object>(
+  options: T | undefined,
+  expiration: number | null | undefined
+): (T & { ephemeralExpiration?: number }) | undefined {
+  if (!expiration || expiration <= 0) return options;
+  return { ...(options || ({} as T)), ephemeralExpiration: expiration };
+}
+
+/**
  * The stored timer of a canonical conversation. undefined = no row / never
  * learnt; null = the 014 columns are missing (unknown, not an error).
  */
