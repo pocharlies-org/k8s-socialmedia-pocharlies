@@ -248,6 +248,8 @@ function pushBudgetMs(): number {
   return budget;
 }
 
+// BRAIN_PUSH_RETRIES es techo de seguridad: manda el presupuesto y los intentos deben cubrirlo
+// con el backoff real (1,2,4,8,16 s y luego maxDelay): 240 s / 30 s piden 13 intentos.
 export async function pushToBrain(
   config: BrainPushConfig,
   instance: string,
@@ -257,7 +259,7 @@ export async function pushToBrain(
 ): Promise<number> {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
-  const maxAttempts = envInt('BRAIN_PUSH_RETRIES', 8);
+  const maxAttempts = envInt('BRAIN_PUSH_RETRIES', 20);
   const maxDelay = envInt('BRAIN_PUSH_RETRY_MAX_DELAY_MS', 30000);
   const budget = pushBudgetMs();
   const start = now();

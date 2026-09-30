@@ -260,12 +260,17 @@ spec:
                 - { name: BRAIN_INGEST_BATCH, value: "2" }
                 - { name: BRAIN_INGEST_MAX_ROWS, value: "60" }
                 - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
-                # Reintento de pushToBrain (5xx y errores de red; 4xx no): backoff 1 s x2 hasta
-                # RETRY_MAX_DELAY, con presupuesto total de 240 s. Menor que
-                # BRAIN_INGEST_MAX_RUNTIME_MS (300000) y que activeDeadlineSeconds (360): el job
-                # agota el presupuesto y sale limpio antes de que lo mate el tope. El código
-                # recorta el presupuesto a MAX_RUNTIME_MS - 30 s si éste fuera menor.
-                - { name: BRAIN_PUSH_RETRIES, value: "8" }
+                # Reintento de pushToBrain (5xx y errores de red; 4xx no): backoff 1 s x2 con tope
+                # RETRY_MAX_DELAY (30 s). Manda el PRESUPUESTO BRAIN_PUSH_BUDGET_MS (240 s), menor que
+                # BRAIN_INGEST_MAX_RUNTIME_MS (300000) y que activeDeadlineSeconds (360): el job agota
+                # el presupuesto y sale limpio antes de que lo mate el tope. El código lo recorta a
+                # MAX_RUNTIME_MS - 30 s si éste fuera menor.
+                # BRAIN_PUSH_RETRIES es solo techo de seguridad y debe cubrir la ventana: con backoff
+                # 1,2,4,8,16 s y luego 30 s los sueños suman 31 s + 30 s x n; 240 s piden 13 intentos
+                # (12 reintentos). 20 deja margen; con 8 (7 reintentos = 91 s) el tope de intentos
+                # cortaba antes que el presupuesto (INFRA-284, QA). Si subes BUDGET o bajas MAX_DELAY,
+                # recalcula: intentos >= 6 + (BUDGET - 31 s) / MAX_DELAY, redondeado hacia arriba.
+                - { name: BRAIN_PUSH_RETRIES, value: "20" }
                 - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
                 - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "30000" }
                 - { name: BRAIN_PUSH_BUDGET_MS, value: "240000" }

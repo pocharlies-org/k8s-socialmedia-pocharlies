@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   adapterForPlatform,
   instanceForAccount,
@@ -87,7 +89,12 @@ describe('pushToBrain: ventana de reintento', () => {
     },
   };
   const res = (status: number, body: unknown = {}) =>
-    ({ ok: status < 400, status, text: async () => 'x', json: async () => body }) as unknown as Response;
+    ({
+      ok: status < 400,
+      status,
+      text: async () => 'x',
+      json: async () => body,
+    }) as unknown as Response;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -105,14 +112,18 @@ describe('pushToBrain: ventana de reintento', () => {
   });
 
   it('ventana: 502 durante 240 s y luego 200 resuelve', async () => {
-    global.fetch = jest.fn(async () => (clock < 240000 ? res(502) : res(200, { chunks_ingested: 7 })));
+    global.fetch = jest.fn(async () =>
+      clock < 240000 ? res(502) : res(200, { chunks_ingested: 7 })
+    );
     const p = pushToBrain(cfg, 'personal', 'wa', [], opts);
     await jest.advanceTimersByTimeAsync(0);
     await expect(p).resolves.toBe(7);
   });
 
   it('ventana: 502 durante 241 s lanza con reintentos y tiempo', async () => {
-    global.fetch = jest.fn(async () => (clock < 241000 ? res(502) : res(200, { chunks_ingested: 7 })));
+    global.fetch = jest.fn(async () =>
+      clock < 241000 ? res(502) : res(200, { chunks_ingested: 7 })
+    );
     const p = pushToBrain(cfg, 'personal', 'wa', [], opts);
     const assertion = expect(p).rejects.toThrow(/502.*reintentos.*240000 ms/);
     await jest.advanceTimersByTimeAsync(0);
@@ -136,5 +147,47 @@ describe('pushToBrain: ventana de reintento', () => {
     global.fetch = jest.fn(async () => res(503));
     await expect(pushToBrain(cfg, 'personal', 'wa', [], opts)).rejects.toThrow(/70000 ms\)/);
     expect(clock).toBe(70000);
+  });
+
+  describe('con los valores desplegados en k8s/base/manifest.yaml', () => {
+    const manifest = readFileSync(join(__dirname, '../../../k8s/base/manifest.yaml'), 'utf8');
+    const deployed = (name: string) => {
+      const m = manifest.match(new RegExp(`name: ${name}, value: "(\\d+)"`));
+      if (!m) throw new Error(`${name} no está en el manifest`);
+      return m[1];
+    };
+    beforeEach(() => {
+      for (const k of [
+        'BRAIN_PUSH_RETRIES',
+        'BRAIN_PUSH_BUDGET_MS',
+        'BRAIN_PUSH_RETRY_MAX_DELAY_MS',
+        'BRAIN_INGEST_MAX_RUNTIME_MS',
+      ]) {
+        process.env[k] = deployed(k);
+      }
+    });
+
+    it('ventana real: 502 sostenido 240 s y 200 final resuelve', async () => {
+      global.fetch = jest.fn(async () =>
+        clock < 240000 ? res(502) : res(200, { chunks_ingested: 7 })
+      );
+      const p = pushToBrain(cfg, 'personal', 'wa', [], opts);
+      await jest.advanceTimersByTimeAsync(0);
+      await expect(p).resolves.toBe(7);
+      expect(clock).toBe(240000);
+    });
+
+    it('ventana real: 241 s lanza por presupuesto, no por intentos', async () => {
+      global.fetch = jest.fn(async () =>
+        clock < 241000 ? res(502) : res(200, { chunks_ingested: 7 })
+      );
+      const p = pushToBrain(cfg, 'personal', 'wa', [], opts);
+      const assertion = expect(p).rejects.toThrow(
+        /502.*tras 12 reintentos, 240000 ms gastados de 240000 ms/
+      );
+      await jest.advanceTimersByTimeAsync(0);
+      await assertion;
+      expect(clock).toBeLessThan(300000);
+    });
   });
 });
