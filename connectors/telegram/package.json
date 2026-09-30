@@ -9,7 +9,7 @@
     "start": "node dist/main.js",
     "start:pairing": "tsx src/pairing/main.ts",
     "lint": "pnpm --filter @mcp-socialmedia/shared run build && eslint src/**/*.ts",
-    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/credential-session.test.ts src/message-edit.test.ts src/api/controller.test.ts src/events/publisher.test.ts src/pairing/session-pool.test.ts src/pairing/app.test.ts",
+    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/credential-session.test.ts src/message-edit.test.ts src/api/controller.test.ts src/moderation.test.ts src/events/publisher.test.ts src/pairing/session-pool.test.ts src/pairing/app.test.ts",
     "generate-session": "tsx src/generate-session-mtcute.ts"
   },
   "dependencies": {
