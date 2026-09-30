@@ -7,6 +7,8 @@ import os
 
 import asyncpg
 
+from sync import mapping
+
 logger = logging.getLogger(__name__)
 
 # This sync instance serves exactly one account ("personal" by default,
@@ -327,6 +329,11 @@ async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: int):
 
 
 async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
+    # Belt & braces (INFRA-364): `content` is prose the brain reads. If an STT
+    # backend ever hands back its raw response body (`{"text":"…"}`) instead of
+    # the transcript, unwrap it here — the single writer of transcriptions —
+    # so no JSON shape reaches the row. Clean text passes through unchanged.
+    text = mapping.unwrap_asr_json(text)
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE messages SET "

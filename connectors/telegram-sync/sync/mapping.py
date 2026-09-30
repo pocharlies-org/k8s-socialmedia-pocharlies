@@ -18,6 +18,7 @@ Field notes vs the old Telethon path:
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -25,6 +26,80 @@ from typing import Any, Optional
 DOWNLOADABLE_TYPES = {"photo", "video", "audio", "voice", "video_note", "sticker", "document"}
 # Voice notes + audio files get queued for whisper transcription.
 TRANSCRIBE_TYPES = {"voice", "audio"}
+
+# --- ASR echo unwrap (INFRA-364) ---------------------------------------------
+# Bots that transcribe an incoming voice note echo the transcript back as a TEXT
+# message (Hermes gateway with `echo_transcripts: true`, DGX Studio). When the
+# gateway embeds the RAW STT response body instead of its `.text`, the echo
+# arrives as e.g. `🎙️ "{"text":"…","usage":null}"` — emoji marker + quoted JSON,
+# inner quotes unescaped. The DB must store only the clean text (the brain and
+# the window builder read `content` as prose), so we unwrap exactly those shapes
+# on ingest, keeping the 🎙️ marker the echo intends. A message that merely
+# *mentions* JSON is not the shape and passes through untouched.
+VOICE_ECHO_PREFIX = "🎙️"
+
+
+def _as_asr_text(s: str) -> Optional[str]:
+    """The transcript inside a full ASR-response JSON object, or None.
+
+    The whole string must parse as a JSON object carrying a non-empty string
+    `text` (OpenAI-compatible /v1/audio/transcriptions `json` format), or — as
+    `verbose_json` — a `segments` array whose parts carry the text."""
+    s = s.strip()
+    if not (s.startswith("{") and s.endswith("}")):
+        return None
+    try:
+        obj = json.loads(s)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    text = obj.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    segments = obj.get("segments")
+    if isinstance(segments, list):
+        parts = [
+            seg["text"].strip()
+            for seg in segments
+            if isinstance(seg, dict) and isinstance(seg.get("text"), str) and seg["text"].strip()
+        ]
+        if parts:
+            return " ".join(parts)
+    return None
+
+
+def unwrap_asr_json(content: Any) -> Any:
+    """Rewrite an ASR-echo message body to `🎙️ <clean text>` (or plain text when
+    the echo carried no marker). Non-matching content — and non-strings — are
+    returned unchanged."""
+    if not isinstance(content, str):
+        return content
+    rest = content.strip()
+    prefix = ""
+    if rest.startswith(VOICE_ECHO_PREFIX):
+        i = len(VOICE_ECHO_PREFIX)
+        while i < len(rest) and rest[i] in " \t":
+            i += 1
+        prefix, rest = rest[:i], rest[i:]
+    text = None
+    if len(rest) >= 2 and rest[0] == '"' and rest[-1] == '"':
+        # Observed echo shape: raw body wrapped in quotes WITHOUT escaping the
+        # inner ones — strip the outer quotes and parse what is left. Fall back
+        # to a properly escaped JSON string whose value is itself the body.
+        text = _as_asr_text(rest[1:-1])
+        if text is None:
+            try:
+                inner = json.loads(rest)
+            except ValueError:
+                inner = None
+            if isinstance(inner, str):
+                text = _as_asr_text(inner)
+    else:
+        text = _as_asr_text(rest)
+    if text is None:
+        return content
+    return f"{prefix}{text}" if prefix else text
 
 
 def parse_ts(value: Any) -> datetime:
@@ -72,7 +147,7 @@ def to_insert_kwargs(m: dict) -> Optional[dict]:
         return None
 
     mt = message_type_of(m)
-    content = m.get("content")
+    content = unwrap_asr_json(m.get("content"))
     if content == "":
         content = None
     sender_name = m.get("senderFirstName") or m.get("senderUsername") or None
@@ -104,7 +179,7 @@ def to_edit_kwargs(e: dict) -> Optional[dict]:
     the text are missing — an edit never blanks a row."""
     chat_id = _int_or_none(e.get("conversationId"))
     tg_msg_id = _int_or_none(e.get("telegramMessageId"))
-    content = e.get("content")
+    content = unwrap_asr_json(e.get("content"))
     if chat_id is None or tg_msg_id is None or not isinstance(content, str) or not content:
         return None
     source = e.get("source") if e.get("source") in EDIT_SOURCES else "telegram"
