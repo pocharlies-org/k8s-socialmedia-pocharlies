@@ -286,6 +286,14 @@ test('an incoming contact message becomes a CONTACT row with metadata.contact', 
   assert.deepEqual(converted.structured, {
     contact: { displayName: 'Manu', contacts: [{ displayName: 'Manu', phones: [PHONE], waids: ['34611111111'] }] },
   });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gif = (client as any).convertMessage({
+    key: { id: 'G1', remoteJid: LID, fromMe: true },
+    messageTimestamp: 1,
+    message: { videoMessage: { gifPlayback: true, caption: 'jaja' } },
+  });
+  assert.equal(gif.messageType, 'VIDEO');
+  assert.deepEqual(gif.structured, { gifPlayback: true });
 });
 
 // ---------------------------------------------------------------------------

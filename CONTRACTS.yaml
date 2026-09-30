@@ -1067,7 +1067,8 @@ contracts:
       gif_not_mp4 (the connector does not transcode), other refusals as
       messages-sticker.v1. Same gate, canonical chat, idempotency and 200
       shape as messages-sticker.v1 with kind: 'gif' (no animated). The row is
-      written by the echo as VIDEO. The path, the body fields and the 200
+      written by the echo as VIDEO with metadata.gifPlayback: true (as is any
+      received GIF). The path, the body fields and the 200
       shape are contract: changing any is breaking — a new `.v2` entry beside
       this one.
   - id: http.whatsapp-connector.contacts-list.v1

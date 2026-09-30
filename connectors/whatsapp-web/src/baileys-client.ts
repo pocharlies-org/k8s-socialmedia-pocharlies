@@ -1938,6 +1938,8 @@ export class BaileysClient extends EventEmitter {
     } else if (content.videoMessage) {
       messageType = 'VIDEO';
       body = content.videoMessage.caption || null;
+      // A WhatsApp GIF is a looping muted video (fase 3 / PR-9).
+      if (content.videoMessage.gifPlayback) structured = { gifPlayback: true };
     } else if (content.audioMessage) {
       messageType = content.audioMessage.ptt ? 'AUDIO' : 'AUDIO';
       body = null;
