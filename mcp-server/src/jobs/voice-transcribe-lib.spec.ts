@@ -16,6 +16,8 @@ class FakePool {
   calls: { sql: string; params: unknown[] }[] = [];
   selectRows: unknown[] = [];
   selectCount = 0;
+  /** rowCount for UPDATEs — 0 simulates losing the optimistic claim. */
+  updateRowCount = 1;
   async query(sql: string, params: unknown[] = []): Promise<{ rows: unknown[]; rowCount: number }> {
     this.calls.push({ sql, params });
     if (/^\s*SELECT/i.test(sql)) {
@@ -24,7 +26,7 @@ class FakePool {
       const rows = this.selectCount === 1 ? this.selectRows : [];
       return { rows, rowCount: rows.length };
     }
-    return { rows: [], rowCount: 1 };
+    return { rows: [], rowCount: this.updateRowCount };
   }
   updates(): { sql: string; params: unknown[] }[] {
     return this.calls.filter(c => /^\s*UPDATE/i.test(c.sql));
@@ -174,6 +176,49 @@ describe('transcribeVoiceRow', () => {
     expect(seen).toHaveLength(2);
     expect(seen[0].fields).toContainEqual(['language', 'es']);
     expect(seen[1].fields.find(([k]) => k === 'language')).toBeUndefined();
+  });
+
+  it('claim is optimistic and a lost claim skips the row without touching MinIO/STT', async () => {
+    const pool = new FakePool();
+    const { fn, seen } = fakeFetch([{ ok: true, body: { text: 'hola' } }]);
+    let downloads = 0;
+    const out = await transcribeVoiceRow(
+      {
+        pool: pool as never,
+        download: async () => {
+          downloads += 1;
+          return Buffer.from('x');
+        },
+        stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fn },
+        now: () => NOW,
+      },
+      voiceRow(),
+      runOpts()
+    );
+    // The claim UPDATE must be guarded: only empty-content rows still pending
+    // (or unmarked) can be claimed.
+    const claim = pool.updates()[0];
+    expect(claim.sql).toContain("btrim(COALESCE(content,'')) = ''");
+    expect(claim.sql).toContain("COALESCE(metadata->>'transcription_status','') IN ('', 'pending')");
+    // Now simulate losing the race: rowCount 0 → skipped, nothing else runs.
+    pool.calls.length = 0;
+    pool.updateRowCount = 0;
+    const out2 = await transcribeVoiceRow(
+      {
+        pool: pool as never,
+        download: async () => {
+          downloads += 1;
+          return Buffer.from('x');
+        },
+        stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fn },
+        now: () => NOW,
+      },
+      voiceRow(),
+      runOpts()
+    );
+    expect(out2).toEqual({ id: '100', outcome: 'skipped', reason: 'claim_lost' });
+    expect(downloads).toBe(1); // only the first (won) call downloaded
+    expect(seen).toHaveLength(1); // STT called once, not twice
   });
 
   it('no attachment + young row → back to pending without burning an attempt', async () => {

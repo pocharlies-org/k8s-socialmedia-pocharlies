@@ -105,21 +105,29 @@ WHERE m.platform = 'whatsapp'
 }
 
 /**
- * Flip a row to `processing` (claimed by this pass). The claim instant rides in
- * metadata so crash recovery can tell "being worked on" from "abandoned"
- * without a schema change (messages has no updated_at until INFRA-364 §6).
+ * Optimistic claim: flip a row to `processing` ONLY while it is still
+ * claimable (empty content, status pending or unmarked). Returns true when this
+ * worker won the claim — false means another pass (a racing CronJob overlap or
+ * a manual backfill Job) already took the row, and the caller must skip it.
+ * Postgres serializes the two UPDATEs on the row, so exactly one worker sees
+ * rowCount 1. The claim instant rides in metadata so crash recovery can tell
+ * "being worked on" from "abandoned" without a schema change (messages has no
+ * updated_at until INFRA-364 §6).
  */
-export async function markProcessing(pool: Pool, id: string): Promise<void> {
-  await pool.query(
+export async function markProcessing(pool: Pool, id: string): Promise<boolean> {
+  const res = await pool.query(
     `UPDATE messages
         SET metadata = COALESCE(metadata, '{}'::jsonb)
           || jsonb_build_object(
                'transcription_status', 'processing',
                'transcription_claimed_at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
              )
-      WHERE id = $1`,
+      WHERE id = $1
+        AND btrim(COALESCE(content,'')) = ''
+        AND COALESCE(metadata->>'transcription_status','') IN ('', 'pending')`,
     [id]
   );
+  return (res.rowCount ?? 0) > 0;
 }
 
 /**
@@ -331,7 +339,14 @@ export async function transcribeVoiceRow(
   opts: VoiceRunOptions
 ): Promise<VoiceOutcome> {
   const log = deps.logger ?? console;
-  if (!opts.dryRun) await markProcessing(deps.pool, row.id);
+  if (!opts.dryRun) {
+    const claimed = await markProcessing(deps.pool, row.id);
+    if (!claimed) {
+      // Lost the optimistic claim: another pass already owns (or finished)
+      // this row. Skip — never double-transcribe.
+      return { id: row.id, outcome: 'skipped', reason: 'claim_lost' };
+    }
+  }
 
   // 1. bytes: the attachment row is written only after the MinIO upload
   //    succeeded (baileys-client.downloadAndStoreMedia), so a missing row here
