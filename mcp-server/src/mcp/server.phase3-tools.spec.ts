@@ -600,6 +600,214 @@ describe('presence and privacy (read-only)', () => {
   });
 });
 
+describe('social_block_contact', () => {
+  it('blocks the 1:1 conversation through POST /contacts/block with confirm and the caller', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({
+      ok: true,
+      action: 'block',
+      blocked: true,
+      changed: true,
+    });
+    const out = await runWithRequestActor({ sub: 'sub-1', name: 'dani' }, () =>
+      run('social_block_contact', {
+        ...wa,
+        target: 'professional:34600@s.whatsapp.net',
+        action: 'block',
+        confirm: true,
+      })
+    );
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/contacts/block',
+      { conversationId: '34600@s.whatsapp.net', action: 'block', confirm: true, actor: 'dani' }
+    );
+    expect(out.structuredContent).toMatchObject({ ok: true, data: { blocked: true } });
+  });
+
+  it('unblocks by phone', async () => {
+    const { run, connectorCall } = serverWith();
+    await run('social_block_contact', {
+      ...wa,
+      phone: '+34600111222',
+      action: 'unblock',
+      confirm: true,
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/contacts/block',
+      { phone: '+34600111222', action: 'unblock', confirm: true }
+    );
+  });
+
+  it('refuses without confirm: true (schema) and with both or neither target and phone', async () => {
+    const { run, connectorCall } = serverWith();
+    for (const confirm of [undefined, false]) {
+      await expect(
+        run('social_block_contact', {
+          ...wa,
+          target: '34600@s.whatsapp.net',
+          action: 'block',
+          ...(confirm === undefined ? {} : { confirm }),
+        })
+      ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    }
+    for (const ids of [{}, { target: '34600@s.whatsapp.net', phone: '+34600111222' }]) {
+      const out = await run('social_block_contact', {
+        ...wa,
+        ...ids,
+        action: 'block',
+        confirm: true,
+      });
+      expect(out.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    }
+    const foreign = await run('social_block_contact', {
+      channel: 'whatsapp',
+      accountId: 'personal',
+      target: 'professional:34600@s.whatsapp.net',
+      action: 'block',
+      confirm: true,
+    });
+    expect(foreign.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    const tg = await run('social_block_contact', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      action: 'block',
+      confirm: true,
+    });
+    expect(tg.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('maps the connector refusals to their failureClass', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending disabled', failureClass: 'disabled_sending' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(422, { error: 'no LID yet', failureClass: 'identity_unresolved' })
+      );
+    const args = { ...wa, target: '34600@s.whatsapp.net', action: 'block', confirm: true };
+    const gated = await run('social_block_contact', args);
+    expect(gated.structuredContent.error).toMatchObject({
+      code: 'disabled_sending',
+      details: { status: 403 },
+    });
+    const unresolved = await run('social_block_contact', args);
+    expect(unresolved.structuredContent.error).toMatchObject({ code: 'identity_unresolved' });
+  });
+
+  it('is a destructive write and social_list_blocked a read', () => {
+    const block = SOCIAL_TOOL_REGISTRY.find(tool => tool.name === 'social_block_contact')!;
+    expect(block.effect).toBe('destructive');
+    expect(block.annotations.destructiveHint).toBe(true);
+    expect((block.inputSchema.properties as Record<string, unknown>).confirm).toMatchObject({
+      const: true,
+    });
+    const list = SOCIAL_TOOL_REGISTRY.find(tool => tool.name === 'social_list_blocked')!;
+    expect(list.effect).toBe('read');
+    expect(list.annotations.readOnlyHint).toBe(true);
+  });
+});
+
+describe('social_list_blocked', () => {
+  it('reads GET /contacts/blocklist, fresh on demand', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValue({ blocked: [], count: 0, cached: false });
+    await run('social_list_blocked', wa);
+    const out = await run('social_list_blocked', { ...wa, fresh: true });
+    expect(connectorCall.mock.calls).toEqual([
+      ['http://wa-professional', 'GET', '/api/v1/contacts/blocklist', undefined],
+      ['http://wa-professional', 'GET', '/api/v1/contacts/blocklist?fresh=1', undefined],
+    ]);
+    expect(out.structuredContent).toMatchObject({ ok: true, data: { count: 0 } });
+  });
+
+  it('is provider-only and WhatsApp-only', async () => {
+    const { run, connectorCall } = serverWith();
+    const index = await run('social_list_blocked', { ...wa, readSource: 'index' });
+    expect(index.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    const tg = await run('social_list_blocked', { channel: 'telegram', accountId: 'personal' });
+    expect(tg.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+});
+
+describe('social_edit_message / social_delete_message error codes', () => {
+  it('keep the connector failureClass as the code on WhatsApp and Telegram', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall
+      .mockRejectedValueOnce(
+        connectorError(422, { error: 'too late', failureClass: 'rejected_by_whatsapp' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending is disabled', failureClass: 'disabled_sending' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(404, { error: 'gone', failureClass: 'message_unavailable' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending is disabled', failureClass: 'disabled_sending' })
+      );
+    const waEdit = await run('social_edit_message', {
+      ...wa,
+      target: '34600@s.whatsapp.net',
+      messageId: '3EB0OLD',
+      message: 'x',
+    });
+    expect(waEdit.structuredContent.error).toMatchObject({
+      code: 'rejected_by_whatsapp',
+      details: { status: 422, failureClass: 'rejected_by_whatsapp' },
+    });
+    const tgEdit = await run('social_edit_message', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      messageId: '77',
+      message: 'x',
+    });
+    expect(tgEdit.structuredContent.error).toMatchObject({ code: 'disabled_sending' });
+    const waDelete = await run('social_delete_message', {
+      ...wa,
+      target: '34600@s.whatsapp.net',
+      messageId: 'NOPE',
+    });
+    expect(waDelete.structuredContent.error).toMatchObject({ code: 'message_unavailable' });
+    const tgDelete = await run('social_delete_message', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      messageId: '77',
+    });
+    expect(tgDelete.structuredContent.error).toMatchObject({ code: 'disabled_sending' });
+    expect(connectorCall.mock.calls.map(call => [call[1], call[2]])).toEqual([
+      ['POST', '/api/v1/messages/edit'],
+      ['POST', '/api/v1/messages/edit'],
+      ['POST', '/api/v1/messages/delete'],
+      ['DELETE', '/api/v1/messages/12345/77'],
+    ]);
+  });
+
+  it('answer provider_error for a connector error without failureClass', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockRejectedValueOnce(connectorError(500, { error: 'boom' }));
+    const out = await run('social_delete_message', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      messageId: '77',
+    });
+    expect(out.structuredContent.error).toMatchObject({
+      code: 'provider_error',
+      details: { status: 500 },
+    });
+  });
+});
+
 /** A server whose Redis double lets an idempotencyKey through (first use). */
 async function runWithRedisDouble(
   body: (server: {

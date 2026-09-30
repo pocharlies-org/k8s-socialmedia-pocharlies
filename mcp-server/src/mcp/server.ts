@@ -765,6 +765,10 @@ export class MCPServer {
         return this.canonicalGetPresence(args);
       case 'getPrivacy':
         return this.canonicalGetPrivacy(args);
+      case 'blockContact':
+        return this.canonicalBlockContact(args);
+      case 'listBlocked':
+        return this.canonicalListBlocked(args);
       default:
         throw this.canonicalError(
           'unsupported_capability',
@@ -2329,6 +2333,48 @@ export class MCPServer {
     });
   }
 
+  /**
+   * POST /contacts/block: exactly one of target (the 1:1 conversation) or
+   * phone; confirm: true is forced by the schema and passed through (the
+   * connector refuses without it). The connector re-reads the blocklist as
+   * proof; changed: false = already so.
+   */
+  private async canonicalBlockContact(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const hasTarget = typeof args.target === 'string' && args.target.trim() !== '';
+    const hasPhone = typeof args.phone === 'string' && args.phone.trim() !== '';
+    if (hasTarget === hasPhone) {
+      throw this.canonicalError('invalid_request', 'Provide exactly one of target or phone');
+    }
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/contacts/block', {
+        ...(hasTarget
+          ? { conversationId: this.whatsAppProviderTarget(args) }
+          : { phone: args.phone.trim() }),
+        action: this.string(args, 'action'),
+        confirm: true,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  private async canonicalListBlocked(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The blocklist');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'GET',
+        `/api/v1/contacts/blocklist${args.fresh === true ? '?fresh=1' : ''}`
+      )
+    );
+  }
+
   /** WhatsApp account + bare chat jid of a canonical call (another account's target refused). */
   private whatsAppChat(args: Record<string, any>): { account: string; chatId: string } {
     const chatId = this.whatsAppProviderTarget(args);
@@ -2385,12 +2431,23 @@ export class MCPServer {
     body?: Record<string, unknown>,
     idempotency?: { idempotencyKey: string }
   ): Promise<any> {
+    return this.classifiedConnectorCall(this.waUrl(account), method, path, body, idempotency);
+  }
+
+  /** whatsAppCall's error mapping for any connector (the Telegram edit / delete answer the same shape). */
+  private async classifiedConnectorCall(
+    baseUrl: string,
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: Record<string, unknown>,
+    idempotency?: { idempotencyKey: string }
+  ): Promise<any> {
     try {
       return idempotency
-        ? await this.connectorCall(this.waUrl(account), method, path, body, undefined, {
+        ? await this.connectorCall(baseUrl, method, path, body, undefined, {
             'Idempotency-Key': idempotency.idempotencyKey,
           })
-        : await this.connectorCall(this.waUrl(account), method, path, body);
+        : await this.connectorCall(baseUrl, method, path, body);
     } catch (error) {
       const match = /^Connector error (\d{3}): ([\s\S]*)$/.exec(safeError(error));
       if (!match) throw error;
@@ -4342,7 +4399,7 @@ export class MCPServer {
     account?: string;
   }) {
     const account = normalizeAccount(args.account);
-    const data = await this.connectorCall(
+    const data = await this.classifiedConnectorCall(
       this.tgUrl(args.account),
       'DELETE',
       `/api/v1/messages/${args.chatId}/${args.messageId}`
@@ -4389,7 +4446,7 @@ export class MCPServer {
       );
     }
     const { chatId } = this.telegramTopicTarget(args.chatId);
-    const data = await this.connectorCall(
+    const data = await this.classifiedConnectorCall(
       this.tgUrl(args.account),
       'POST',
       '/api/v1/messages/edit',
@@ -4674,7 +4731,7 @@ export class MCPServer {
    * account; another account's id is refused like a foreign target.
    */
   private async handleDeleteMessage(args: { chatId: string; messageId: string; account?: string }) {
-    const data = await this.connectorCall(
+    const data = await this.classifiedConnectorCall(
       this.waUrl(args.account),
       'POST',
       '/api/v1/messages/delete',
@@ -4700,7 +4757,7 @@ export class MCPServer {
     content: string;
     account?: string;
   }) {
-    const data = await this.connectorCall(
+    const data = await this.classifiedConnectorCall(
       this.waUrl(args.account),
       'POST',
       '/api/v1/messages/edit',

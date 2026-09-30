@@ -123,6 +123,10 @@ Writes pass through the connector's `ENABLE_SENDING` /
 - `social_get_presence` and `social_get_privacy` are read-only (the latter,
   with `target`, adds that chat's disappearing timer). The MCP exposes no
   presence, privacy or disappearing-timer writes.
+- `social_block_contact` (`action: block|unblock`, exactly one of `target` —
+  the 1:1 conversation — or `phone`, `confirm: true` required by the schema;
+  groups are refused) and `social_list_blocked` (read; `fresh: true` re-reads
+  WhatsApp's list). `changed: false` means it already was so.
 
 Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `start_chat` with a
 message) forward the caller's `idempotencyKey`, scoped per tool, as the
@@ -131,7 +135,10 @@ the error `code` (`disabled_sending`, `disconnected`, `not_group_admin`,
 `not_on_whatsapp`, `account_restricted`, …) with the connector payload in
 `error.details`; `invalid_request` stays, `idempotency_key_reused` becomes
 `conflict`, `send_outcome_uncertain` becomes `outcome_unknown`, and a route the
-deployed connector lacks becomes `unsupported_capability`. `account_restricted`
+deployed connector lacks becomes `unsupported_capability`.
+`social_edit_message` and `social_delete_message` (WhatsApp and Telegram) map
+their connector refusals the same way (`not_own_message`,
+`rejected_by_whatsapp`, `rejected_by_telegram`, `message_unavailable`, …). `account_restricted`
 on `social_start_chat` carries a `wa.me` link a human can open to send by hand.
 
 ## OpenClaw

@@ -683,7 +683,7 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     name: 'social_edit_message',
     title: 'Edit message',
     description:
-      'Replace the text of one of our own sent text messages where supported (WhatsApp). ' +
+      'Replace the text of one of our own sent text messages (WhatsApp and Telegram). ' +
       'The previous text is kept in the message history.',
     effect: 'externalWrite',
     authScope: 'social.write',
@@ -1529,6 +1529,51 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
         readSource,
       },
       ['channel', 'accountId', 'target']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_block_contact',
+    title: 'Block or unblock contact',
+    description:
+      'Block or unblock a contact (WhatsApp), by phone or by its 1:1 conversation (target) — ' +
+      'exactly one of them; groups cannot be blocked. Visible to the contact and on every ' +
+      'linked device, so confirm must be true. Already blocked/unblocked answers changed: false.',
+    effect: 'destructive',
+    authScope: 'social.write',
+    capability: 'contacts.block',
+    handler: 'blockContact',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        phone: {
+          type: 'string',
+          minLength: 1,
+          description: 'Phone number (E.164) of the contact, instead of target.',
+        },
+        action: { type: 'string', enum: ['block', 'unblock'] },
+        confirm: {
+          const: true,
+          description: 'Must be true: blocking is visible to the contact and on every device.',
+        },
+      },
+      ['channel', 'accountId', 'action', 'confirm']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_list_blocked',
+    title: 'List blocked contacts',
+    description:
+      "List the account's blocked contacts (WhatsApp), one entry per person with phone, name " +
+      'and 1:1 conversation when known. fresh re-reads the list from WhatsApp.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'contacts.blocklist',
+    handler: 'listBlocked',
+    inputSchema: objectSchema(
+      { channel, accountId, fresh: { type: 'boolean', default: false }, readSource },
+      ['channel', 'accountId']
     ),
     idempotent: true,
   }),

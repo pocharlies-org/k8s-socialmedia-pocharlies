@@ -1605,6 +1605,7 @@ contracts:
       ↔ LID yet), 422 rejected_by_whatsapp, 502 provider_invalid_response.
       No DB write. The path, the body fields and the 200 shape are contract:
       changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_block_contact (mcp-server/src/mcp/server.ts canonicalBlockContact; added later, surface unchanged).
   - id: http.whatsapp-connector.contacts-blocklist.v1
     kind: http-route
     value: /contacts/blocklist
@@ -1625,6 +1626,7 @@ contracts:
       client (ingest off) answers the bare identities. The path and the 200
       shape are contract: changing either is breaking — a new `.v2` entry
       beside this one.
+      Also consumed by the MCP tool social_list_blocked (mcp-server/src/mcp/server.ts canonicalListBlocked; added later, surface unchanged).
   - id: http.whatsapp-connector.groups-invite.v1
     kind: http-route
     value: /groups/invite
