@@ -12,7 +12,9 @@ patches:
   # (supersedes draft #89, built on a pre-squash trunk). instagram-connector
   # falls back to the base manifest's explicit "false"; WhatsApp keeps its
   # explicit "false" in patch-credential-store.yaml. The SC-1197 pairing flag
-  # (patch-social-pairing-on.yaml) is untouched. Re-flip = revert of this
+  # (patch-social-pairing-on.yaml) is untouched. The rollback is of the flag,
+  # not of the image: the instagram-connector pin keeps its own history under
+  # images: (SC-1256 moved it v1.3.55 -> v1.3.74). Re-flip = revert of this
   # revert. ON is prod-only, stg stays OFF.
   - path: patch-credential-store.yaml
   # SC-1197 encendido: SOCIAL_PAIRING_API=on + replicas 1 + CREDENTIAL_STORE_ENABLED
@@ -45,8 +47,7 @@ images:
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
-  # CREDENTIAL_STORE_ENABLED went ON with #86 (b03f60f) and is back OFF in
-  # this rollback (SC-1257); the pin itself is unchanged.
+  # CREDENTIAL_STORE_ENABLED stays false until the pre-check (C6) PR.
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
     newTag: v1.3.55
     digest: sha256:bf90ef1679fb212969577b2d16efb17bd25c68f24778fb65efa30bb5ee42d90f
