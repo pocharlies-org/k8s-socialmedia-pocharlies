@@ -73,7 +73,7 @@ jobs:
           # Matches the images and the root engines field. Node 20 went EOL in
           # April 2026 and cannot run the pinned pnpm.
           node-version: "22"
-      # corepack picks up packageManager (pnpm@11.28.2) from package.json.
+      # corepack picks up packageManager (pnpm@11.18.0) from package.json.
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm contract:check
@@ -89,7 +89,7 @@ jobs:
     with:
       runner: arc-k8s
       node_version: "22"
-      pnpm_version: "11.28.2"
+      pnpm_version: "11.18.0"
       docker_build_timeout: 12m
       kustomize_paths: k8s/overlays/stg k8s/overlays/prod
       images: |
