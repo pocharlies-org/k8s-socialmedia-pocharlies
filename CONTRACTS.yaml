@@ -821,3 +821,33 @@ contracts:
       (telegram-pairing) never publishes it. The subject, the field names and
       the source values are contract: changing any is breaking — a new `.v2`
       entry beside this one.
+  - id: http.telegram-connector.moderation.v1
+    kind: http-route
+    value: /chats/:id/moderation
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+      - connectors/telegram/src/moderation.ts
+    status: active
+    note: >-
+      Member moderation of the house Telegram connectors (INFRA-218, story
+      INFRA-344; to be exposed through the socialmedia MCP / AgentGateway).
+      HMAC-signed like every route of this connector. Routes under
+      /api/v1/chats/:id/moderation, :id = the numeric (marked) chat id, never a
+      username: POST /ban {user_id, until?}, POST /unban {user_id}, POST /kick
+      {user_id} (remove member), POST /restrict {user_id, restriction, until?}
+      with restriction one of mute|no_media|no_invite|read_only, POST
+      /unrestrict {user_id}, and GET /admin-rights (this account's own rights in
+      that chat). user_id is a numeric id in the body; until is an optional
+      ISO-8601 date (absent = no end). ban, unban and kick are supergroup-only.
+      Answers 200 {chatId, userId, action, until?} for the POSTs and 200
+      {chatId, is_admin, is_creator, status, rights{name: boolean}} for
+      admin-rights. Errors {error, failureClass, code?, retry_after_s?,
+      missing_right?}: 400 invalid_target / invalid_request, 403 not_admin
+      (missing_right = the admin right the account lacks), 404
+      user_not_participant, 422 unsupported_chat_type, 429 rate_limited
+      (retry_after_s + Retry-After), 502 telegram_error (the TL error text in
+      `code`); outcome_unknown is not a value. The paths, the methods, the body
+      fields, the restriction names, the 200 shapes and the failureClass values
+      are contract: changing any is breaking — a new `.v2` entry beside this
+      one.
