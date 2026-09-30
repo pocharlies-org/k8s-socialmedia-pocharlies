@@ -196,6 +196,74 @@ test('patched relayMessage attaches <cstoken> only as the no-tctoken fallback', 
   );
 });
 
+test('the next pairing keeps the NCT salt of its INITIAL_BOOTSTRAP history sync', async () => {
+  const { proto, DEFAULT_CONNECTION_CONFIG } = await import('@whiskeysockets/baileys');
+  const { default: processMessage } = await import(`${BAILEYS}/Utils/process-message.js`);
+  const { deflateSync } = await import('node:zlib');
+  const { readFile } = await import('node:fs/promises');
+  const T = proto.HistorySync.HistorySyncType;
+
+  // The connector leaves shouldSyncHistoryMessage to Baileys: WA_HISTORY_SYNC_ON_LOGIN
+  // only decides what the DB ingests, never which history blobs Baileys decodes.
+  const source = await readFile(`${process.cwd()}/src/baileys-client.ts`, 'utf8');
+  const socketOptions = source.slice(source.indexOf('makeWASocket({'), source.indexOf('this.bindSocketEvents(saveCreds)'));
+  assert.ok(socketOptions.length > 0);
+  assert.doesNotMatch(socketOptions, /shouldSyncHistoryMessage/);
+  for (const syncType of [T.INITIAL_BOOTSTRAP, T.NON_BLOCKING_DATA, T.RECENT, T.PUSH_NAME, T.ON_DEMAND]) {
+    assert.equal(DEFAULT_CONNECTION_CONFIG.shouldSyncHistoryMessage({ syncType } as Any), true, `syncType ${syncType}`);
+  }
+
+  // What the phone sends at pairing: HistorySync { syncType = 0, nctSalt = 19 }, inline and deflated.
+  const blob = Buffer.concat([Buffer.from([0x08, T.INITIAL_BOOTSTRAP]), Buffer.from([0x9a, 0x01, SALT.length]), SALT]);
+  const emitted: Array<[string, Any]> = [];
+  await processMessage(
+    {
+      key: { remoteJid: '34600111222@s.whatsapp.net', fromMe: true, id: 'HIST1' },
+      message: {
+        protocolMessage: {
+          type: proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION,
+          historySyncNotification: { syncType: T.INITIAL_BOOTSTRAP, initialHistBootstrapInlinePayload: deflateSync(blob) },
+        },
+      },
+    },
+    {
+      shouldProcessHistoryMsg: true,
+      ev: { emit: (name: string, value: unknown) => emitted.push([name, value]) },
+      creds: { me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' }, processedHistoryMessages: [] },
+      signalRepository: { lidMapping: { storeLIDPNMappings: async () => {}, getLIDForPN: async () => null } },
+      keyStore: keyStore(),
+      options: {},
+      getMessage: async () => undefined,
+    }
+  );
+  const salt = emitted.find(([name, value]) => name === 'creds.update' && value.nctSalt);
+  assert.ok(salt, 'creds.update carries the salt');
+  assert.deepEqual(Buffer.from(salt[1].nctSalt), SALT);
+  const history = emitted.find(([name]) => name === 'messaging-history.set');
+  assert.equal(history?.[1].syncType, T.INITIAL_BOOTSTRAP);
+  assert.deepEqual(Buffer.from(history?.[1].nctSalt), SALT);
+});
+
+test('the connector logs the NCT salt when it arrives (the Baileys logger runs at warn)', async () => {
+  const client = newClient();
+  const handlers: Record<string, (u: Any) => unknown> = {};
+  const infos: string[] = [];
+  client.sock = { ev: { on: (e: string, fn: (u: Any) => unknown) => (handlers[e] = fn), emit: () => {} } };
+  client.logger = { info: (m: string) => infos.push(m), warn() {}, error() {}, debug() {} };
+  client.ingest = true;
+  client.bindSocketEvents(async () => {});
+
+  handlers['creds.update']({ accountSyncCounter: 2 });
+  assert.equal(infos.filter(m => /NCT salt/.test(m)).length, 0);
+  handlers['creds.update']({ nctSalt: SALT });
+  assert.ok(infos.some(m => /NCT salt stored in creds/.test(m)));
+
+  // History outside the ingest window is not ingested, but its salt is still reported.
+  await handlers['messaging-history.set']({ chats: [], contacts: [], messages: [], syncType: 0, nctSalt: SALT });
+  assert.ok(infos.some(m => m === 'NCT salt received in history sync (syncType=0)'));
+  assert.equal(infos.filter(m => /history\.set received/.test(m)).length, 0);
+});
+
 // ---------------------------------------------------------------------------
 // Direct-send preflight
 // ---------------------------------------------------------------------------

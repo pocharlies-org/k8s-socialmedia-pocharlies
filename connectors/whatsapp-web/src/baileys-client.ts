@@ -1337,7 +1337,12 @@ export class BaileysClient extends EventEmitter {
     const sock = this.sock;
     if (!sock) return;
 
-    sock.ev.on('creds.update', () => {
+    sock.ev.on('creds.update', update => {
+      // The Baileys logger runs at warn, so the patch's own info line about
+      // the NCT salt never reaches the pod log: say it here.
+      if (update?.nctSalt?.length) {
+        this.logger.info('NCT salt stored in creds: first messages can carry a cstoken');
+      }
       // SC-705: after the on-disk save completes, let the per-sub connector
       // mirror the auth dir into the credential store (no-op for the house).
       void saveCreds()
@@ -1444,7 +1449,15 @@ export class BaileysClient extends EventEmitter {
       }
     });
 
-    sock.ev.on('messaging-history.set', async ({ chats, messages, isLatest }) => {
+    sock.ev.on('messaging-history.set', async update => {
+      const { chats, messages, isLatest, syncType } = update;
+      // The patched Baileys carries HistorySync field 19 (NCT salt) here. It is
+      // logged before the ingest gate: the INITIAL_BOOTSTRAP of a pairing
+      // brings it even when message history is not ingested.
+      const nctSalt = (update as { nctSalt?: Uint8Array }).nctSalt;
+      if (nctSalt?.length) {
+        this.logger.info(`NCT salt received in history sync (syncType=${syncType})`);
+      }
       // chats: Chat[] (Baileys type). Refresh in-memory chat store.
       for (const c of chats) {
         if (!c.id) continue;
