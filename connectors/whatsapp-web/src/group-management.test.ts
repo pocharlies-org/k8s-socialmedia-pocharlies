@@ -902,6 +902,15 @@ test('participants: nobody done → 422 with the results; answers under other id
           ],
           succeeded: 0,
           failed: 1,
+          // No <add_request> in the answer: the invite will use the group link.
+          inviteRequired: [
+            {
+              participant: '+34677777777',
+              jid: '34677777777@c.us',
+              privateInvite: false,
+              inviteExpiresAt: null,
+            },
+          ],
         });
         return true;
       }

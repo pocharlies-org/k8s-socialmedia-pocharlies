@@ -1219,3 +1219,38 @@ contracts:
       client (ingest off) answers the bare identities. The path and the 200
       shape are contract: changing either is breaking — a new `.v2` entry
       beside this one.
+  - id: http.whatsapp-connector.groups-invite.v1
+    kind: http-route
+    value: /groups/invite
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/groups/invite of the house WhatsApp connectors: invite by
+      private message (WhatsApp's "join group" card, Baileys groupInvite) the
+      people WhatsApp would not add to a group — a 403 on
+      groups-participants.v1 add, whose answer now also carries (additively;
+      the v1 fields unchanged) inviteRequired [{participant, jid,
+      privateInvite, inviteExpiresAt}] on the 200 and in the 422 details.
+      Opt-in: nothing is invited automatically. HMAC-signed body {groupId,
+      participants[], text?, actor?}: groupId a `…@g.us` (account prefix
+      allowed); participants 1–20 phones or PN / LID jids (as groups-create.v1,
+      smaller cap: each is a message to a real person); text an optional
+      caption ≤ 1024. 400 invalid_request first, then the sending gate (403
+      disabled_sending), then 503 disconnected. Fresh metadata: 403
+      not_group_member / not_group_admin (admins only), 422
+      community_unsupported, 422 self_participant. Per person: WhatsApp's
+      private code from that refused add while this process still holds it
+      and it has not expired (invite: private), else the group's invite link
+      code (invite: link, card expiry 3 days); the card goes to the person's
+      canonical chat (merged phone chat → its LID) with the chat's
+      disappearing timer. Someone already in the group is reported
+      (already_participant), not messaged. 200 {invited: true, groupId,
+      results [{participant, jid, ok, reason (invited | already_participant |
+      send_failed | invite_link_unavailable), invite (private | link | null),
+      messageId}], succeeded, failed, partial}; nobody invited → 422
+      invite_not_sent with {results, succeeded: 0, failed}. No DB write (the
+      sent card's payload is kept for retries, ingest only). The path, the
+      body fields, the 200 shape, the reasons and the failureClass values are
+      contract: changing any is breaking — a new `.v2` entry beside this one.

@@ -161,6 +161,13 @@ import {
   participantIds,
   participantOutcome,
   participantsIncludeOwn,
+  addRequestOf,
+  AddRequest,
+  GroupInviteResult,
+  InviteRequiredEntry,
+  LINK_INVITE_TTL_SECONDS,
+  parseGroupInviteParticipants,
+  parseGroupInviteText,
   recordGroupChange,
   recordGroupConversation,
   recordInboundGroup,
@@ -561,6 +568,17 @@ export interface GroupParticipantsResult {
   partial: boolean;
   persisted: boolean;
   group: GroupStateView | null;
+  /** add only: the people WhatsApp refused with 403 (privacy: invite only). */
+  inviteRequired?: InviteRequiredEntry[];
+}
+
+/** POST /groups/invite. */
+export interface GroupInvitesResult {
+  groupId: string;
+  results: GroupInviteResult[];
+  succeeded: number;
+  failed: number;
+  partial: boolean;
 }
 
 /**
@@ -1164,6 +1182,13 @@ export class BaileysClient extends EventEmitter {
   // Last forced re-subscribe per chat (a read refreshes an expired presence).
   private presenceRefreshedAt = new Map<string, number>();
   private groupMetaCache = new Map<string, GroupMetadata>(); // by raw JID
+  /**
+   * Private invites WhatsApp handed back with a refused add (403), by
+   * `<raw group>|<participant jid>` (every alias of the person): what POST
+   * /groups/invite sends them. In memory only — after a restart the invite
+   * falls back to the group link.
+   */
+  private pendingGroupInvites = new Map<string, AddRequest>();
   private keyCache = new Map<string, { key: WAMessageKey; chatJid: string }>(); // by waMessageId
   // `<kind>:<bare id>` of our own edits/revokes/deletes-for-me whose echo the
   // inbound handlers must leave alone (see OWN_MUTATION_ECHO_MS).
@@ -4530,6 +4555,7 @@ export class BaileysClient extends EventEmitter {
     const entries = (answer || []).map(entry => ({
       status: entry?.status === undefined || entry?.status === null ? null : String(entry.status),
       jid: entry?.jid ? jidNormalizedUser(entry.jid) : '',
+      request: verb === 'add' ? addRequestOf((entry as { content?: unknown })?.content) : null,
       used: false,
     }));
     const matched = targets.map(target => {
@@ -4540,9 +4566,9 @@ export class BaileysClient extends EventEmitter {
     // An answer under an id we did not know (a PN WhatsApp maps to a LID):
     // pair the leftovers in order, as WhatsApp answers in request order.
     const leftovers = entries.filter(e => !e.used);
+    const paired = targets.map((target, index) => matched[index] ?? leftovers.shift());
     const results: GroupParticipantResult[] = targets.map((target, index) => {
-      const entry = matched[index] ?? leftovers.shift();
-      const status = entry?.status ?? null;
+      const status = paired[index]?.status ?? null;
       return {
         participant: target.input,
         jid: participantApiJid(target.sent),
@@ -4550,6 +4576,30 @@ export class BaileysClient extends EventEmitter {
         ...participantOutcome(verb, status),
       };
     });
+    // 403 on add: their privacy only allows an invite. WhatsApp's private
+    // code (when it sent one) is kept for POST /groups/invite, never returned.
+    const inviteRequired: InviteRequiredEntry[] | undefined =
+      verb === 'add'
+        ? targets.flatMap((target, index) => {
+            if (results[index].status !== '403') return [];
+            const request = paired[index]?.request || null;
+            if (request) {
+              for (const alias of target.aliases) {
+                this.pendingGroupInvites.set(`${raw}|${alias}`, request);
+              }
+            }
+            return [
+              {
+                participant: target.input,
+                jid: participantApiJid(target.sent),
+                privateInvite: !!request,
+                inviteExpiresAt: request?.expiration
+                  ? new Date(request.expiration * 1000).toISOString()
+                  : null,
+              },
+            ];
+          })
+        : undefined;
     const counts = countResults(results);
     this.logger.info(
       `Group ${raw} ${verb} participants=${targets.length} done=${counts.succeeded}${request.actor ? ` by ${request.actor}` : ''}`
@@ -4559,7 +4609,14 @@ export class BaileysClient extends EventEmitter {
         `WhatsApp did not ${verb} any of the ${targets.length} participant(s) of ${raw}`,
         422,
         'rejected_by_whatsapp',
-        { details: { action: verb, results, ...counts } }
+        {
+          details: {
+            action: verb,
+            results,
+            ...counts,
+            ...(inviteRequired ? { inviteRequired } : {}),
+          },
+        }
       );
     }
     const refreshed = await this.fetchGroupMetadata(raw, true).catch(() => undefined);
@@ -4580,6 +4637,160 @@ export class BaileysClient extends EventEmitter {
       partial: counts.failed > 0,
       persisted,
       group: refreshed ? this.groupView(refreshed, own) : null,
+      ...(inviteRequired ? { inviteRequired } : {}),
+    };
+  }
+
+  /**
+   * Invite people to a group by private message (the card WhatsApp shows with
+   * "Join group"): for those an add was refused with 403 — their privacy only
+   * lets them be invited. Admins only, against fresh metadata. Each person
+   * gets WhatsApp's private code from that refused add when this process
+   * still has it and it has not expired, else the group's invite link code.
+   * The card goes to the person's canonical chat (a merged phone chat → its
+   * LID), with the chat's disappearing timer. Someone already in the group is
+   * reported, not messaged. Nobody invited → 422 with the results; some → 200
+   * with `partial`.
+   */
+  async sendGroupInvites(
+    groupId: string,
+    participants: unknown,
+    request: MessageMutationRequest & { text?: unknown } = {}
+  ): Promise<GroupInvitesResult> {
+    const raw = parseGroupJid(groupId);
+    const members = parseGroupInviteParticipants(participants);
+    const text = parseGroupInviteText(request.text);
+    const sock = this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    if (!capabilities.isAdmin) {
+      throw new GroupActionError(`Only admins can invite people to ${raw}`, 403, 'not_group_admin');
+    }
+    for (const member of members) {
+      if (own.includes(member.jid)) {
+        throw new GroupActionError('This account cannot invite itself', 422, 'self_participant');
+      }
+    }
+    let linkCode: string | null | undefined;
+    const results: GroupInviteResult[] = [];
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    for (const member of members) {
+      const base = { participant: member.input, jid: participantApiJid(member.jid) };
+      if (findParticipant(meta, member.jid)) {
+        results.push({
+          ...base,
+          ok: false,
+          reason: 'already_participant',
+          invite: null,
+          messageId: null,
+        });
+        continue;
+      }
+      const aliases = await this.jidAliases(member.jid);
+      const pending = aliases
+        .map(alias => this.pendingGroupInvites.get(`${raw}|${alias}`))
+        .find(item => !!item && (!item.expiration || item.expiration > nowSeconds + 60));
+      let invite: 'private' | 'link' = 'private';
+      let inviteCode = pending?.code;
+      let inviteExpiration = pending?.expiration || nowSeconds + LINK_INVITE_TTL_SECONDS;
+      if (!inviteCode) {
+        invite = 'link';
+        if (linkCode === undefined) {
+          // A refusal here must not lose the invites already sent above.
+          linkCode =
+            (await this.groupCall('the invite link', raw, () => sock.groupInviteCode(raw)).catch(
+              (e: any) => {
+                this.logger.warn(`invite link of ${raw} unavailable: ${e?.message || e}`);
+                return null;
+              }
+            )) || null;
+        }
+        if (!linkCode) {
+          results.push({
+            ...base,
+            ok: false,
+            reason: 'invite_link_unavailable',
+            invite: null,
+            messageId: null,
+          });
+          continue;
+        }
+        inviteCode = linkCode;
+        inviteExpiration = nowSeconds + LINK_INVITE_TTL_SECONDS;
+      }
+      const conversation = this.ingest
+        ? await resolveCanonicalConversation(member.jid).catch(() => undefined)
+        : undefined;
+      const chatJid = this.toRawJid(conversation?.externalId || member.jid);
+      try {
+        const sendOptions = withEphemeralExpiration(
+          undefined,
+          await this.outgoingEphemeral(chatJid, conversation?.id)
+        );
+        const content: AnyMessageContent = {
+          groupInvite: {
+            inviteCode,
+            inviteExpiration,
+            text: text || '',
+            jid: raw,
+            subject: meta.subject || '',
+          },
+        };
+        const sent = sendOptions
+          ? await sock.sendMessage(chatJid, content, sendOptions)
+          : await sock.sendMessage(chatJid, content);
+        const messageId = sent?.key?.id || null;
+        if (sent?.key && messageId) {
+          this.rememberKey(messageId, sent.key, chatJid);
+          this.rememberMessageForRetry(sent.key, sent.message);
+          await this.persistDurablePayload(sent, this.normalizeJid(chatJid), 'sent').catch(
+            (e: any) =>
+              this.logger.warn(`invite ${messageId} payload not stored: ${e?.message || e}`)
+          );
+        }
+        if (invite === 'private') {
+          for (const alias of aliases) this.pendingGroupInvites.delete(`${raw}|${alias}`);
+        }
+        results.push({
+          ...base,
+          jid: participantApiJid(chatJid),
+          ok: true,
+          reason: 'invited',
+          invite,
+          messageId,
+        });
+      } catch (e: any) {
+        this.logger.warn(`Invite to ${raw} for ${chatJid} failed: ${e?.message || e}`);
+        results.push({
+          ...base,
+          jid: participantApiJid(chatJid),
+          ok: false,
+          reason: 'send_failed',
+          invite,
+          messageId: null,
+        });
+      }
+    }
+    const succeeded = results.filter(r => r.ok).length;
+    const failed = results.length - succeeded;
+    this.logger.info(
+      `Group ${raw} invites=${results.length} sent=${succeeded}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    if (!succeeded) {
+      throw new GroupActionError(
+        `No invite to ${raw} was sent (${results.length} requested)`,
+        422,
+        'invite_not_sent',
+        { details: { results, succeeded, failed } }
+      );
+    }
+    return {
+      groupId: this.normalizeJid(raw),
+      results,
+      succeeded,
+      failed,
+      partial: failed > 0,
     };
   }
 

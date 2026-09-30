@@ -46,6 +46,8 @@ import {
   GroupActionError,
   normalizeGroupParticipantAction,
   parseGroupJid,
+  parseGroupInviteParticipants,
+  parseGroupInviteText,
   parseGroupParticipants,
   parseGroupSubject,
   parseGroupUpdate,
@@ -1471,6 +1473,31 @@ export function createRouter(
         res.json({ updated: true, ...result });
       } catch (e) {
         mutationErrorResponse(res, e, 'update group participants');
+      }
+    })();
+  });
+
+  // Invite by private message the people WhatsApp would not add (403 on
+  // /groups/participants add → inviteRequired): opt-in, admin only, a real
+  // message to each person — validated (400), gated (403), connected (503).
+  // CONTRACT: http.whatsapp-connector.groups-invite.v1 — body {groupId, participants[], text?, actor?}, 200 {invited, groupId, results[{participant, jid, ok, reason, invite, messageId}], succeeded, failed, partial}
+  router.post('/groups/invite', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const participants = parseGroupInviteParticipants(body.participants);
+        const text = parseGroupInviteText(body.text);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.sendGroupInvites(
+          groupId,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor), text }
+        );
+        res.json({ invited: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'send group invites');
       }
     })();
   });

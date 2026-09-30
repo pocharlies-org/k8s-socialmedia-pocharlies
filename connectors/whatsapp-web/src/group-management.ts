@@ -280,6 +280,98 @@ export function participantOutcome(
 }
 
 // ---------------------------------------------------------------------------
+// Invites: people WhatsApp would not add (403 = their privacy only allows an
+// invite)
+// ---------------------------------------------------------------------------
+
+/**
+ * People invited per POST /groups/invite. Each invite is a private message to
+ * a real person who did not choose to be added: a smaller cap than the add.
+ */
+export const GROUP_INVITES_MAX = 20;
+/** Caption of an invite card (WA Web shows about a paragraph). */
+export const GROUP_INVITE_TEXT_MAX = 1024;
+/** Card expiry of an invite built from the group link (WhatsApp's private ones last 3 days). */
+export const LINK_INVITE_TTL_SECONDS = 3 * 24 * 60 * 60;
+
+/**
+ * The private invite WhatsApp hands back with a 403 on add: the participant
+ * node carries `<add_request code=… expiration=…/>`, a code valid for that
+ * person only (what WhatsApp's own "invite to group" sends them).
+ */
+export interface AddRequest {
+  code: string;
+  /** Unix seconds; null when WhatsApp gave none. */
+  expiration: number | null;
+}
+
+/** The `<add_request>` of a groupParticipantsUpdate answer entry (its `content` node). */
+export function addRequestOf(content: unknown): AddRequest | null {
+  const children = (content as { content?: unknown } | null)?.content;
+  if (!Array.isArray(children)) return null;
+  const node = children.find(
+    (child: unknown) => (child as { tag?: unknown } | null)?.tag === 'add_request'
+  ) as { attrs?: Record<string, unknown> } | undefined;
+  const code = node?.attrs?.code;
+  if (typeof code !== 'string' || !code) return null;
+  const expiration = Number(node?.attrs?.expiration);
+  return {
+    code,
+    expiration: Number.isFinite(expiration) && expiration > 0 ? Math.floor(expiration) : null,
+  };
+}
+
+/** One person of an add WhatsApp refused with 403: send them an invite instead. */
+export interface InviteRequiredEntry {
+  /** What the caller sent. */
+  participant: string;
+  /** Legacy jid (`…@c.us` / `…@lid`) the add went to. */
+  jid: string;
+  /** WhatsApp gave a private invite for them (POST /groups/invite uses it). */
+  privateInvite: boolean;
+  /** When that private invite expires (ISO); null without one. */
+  inviteExpiresAt: string | null;
+}
+
+/** One person of POST /groups/invite, as reported to the caller. */
+export interface GroupInviteResult {
+  participant: string;
+  /** Legacy jid of the chat the invite went to. */
+  jid: string;
+  ok: boolean;
+  /** invited | already_participant | send_failed | invite_link_unavailable */
+  reason: string;
+  /** private = WhatsApp's per-person code from the refused add; link = the group's link. */
+  invite: 'private' | 'link' | null;
+  messageId: string | null;
+}
+
+/** Optional caption of an invite card: a string up to GROUP_INVITE_TEXT_MAX, else 400. */
+export function parseGroupInviteText(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || value.length > GROUP_INVITE_TEXT_MAX) {
+    throw new GroupActionError(
+      `text must be a string of at most ${GROUP_INVITE_TEXT_MAX} characters`,
+      400,
+      'invalid_request'
+    );
+  }
+  return value.trim() || undefined;
+}
+
+/** Participants of an invite: as for an add (phones, PN / LID jids), at most GROUP_INVITES_MAX. */
+export function parseGroupInviteParticipants(value: unknown): ParticipantInput[] {
+  if (Array.isArray(value) && value.length > GROUP_INVITES_MAX) {
+    throw new GroupActionError(
+      `At most ${GROUP_INVITES_MAX} people per invite request`,
+      400,
+      'invalid_request'
+    );
+  }
+  return parseGroupParticipants(value);
+}
+
+// ---------------------------------------------------------------------------
 // Request bodies → values (400 invalid_request before anything goes out)
 // ---------------------------------------------------------------------------
 
