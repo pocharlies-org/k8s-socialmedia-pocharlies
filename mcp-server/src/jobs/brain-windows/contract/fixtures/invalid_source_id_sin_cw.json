@@ -1,10 +1,10 @@
 {
-  "source_id": "wa:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001",
+  "source_id": "wa:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001",
   "content": "Resumen: Ana y Luis acuerdan el pedido de mañana.",
   "metadata": {
     "type": "conversation_window",
     "source": "conversation",
-    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001",
+    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001",
     "source_system": "whatsapp",
     "platform": "whatsapp",
     "account": "personal",
@@ -20,9 +20,9 @@
     "contract_version": 1,
     "window_text": "[whatsapp · Grupo familia] 2026-09-28\n09:00 Ana: hola\n09:10 Luis: 🎙 te paso el pedido mañana\n09:20 Ana: vale (resp. a Luis)",
     "message_ids": [
-      "0b1f0000-0000-4000-8000-000000000001",
-      "m2",
-      "m3"
+      "1001",
+      "1002",
+      "1003"
     ],
     "participants": [
       "Ana",

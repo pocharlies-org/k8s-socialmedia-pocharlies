@@ -13,7 +13,7 @@
   "properties": {
     "source_id": {
       "type": "string",
-      "pattern": "^cw:(whatsapp|telegram):(personal|professional|leila):[^:#\\s]+:[^:#\\s]+(#c[0-9]+|#kp)?$"
+      "pattern": "^cw:(whatsapp|telegram):(personal|professional|leila):[^#\\s]+:[0-9]+(#c[0-9]+|#kp)?$"
     },
     "content": {
       "type": "string",
@@ -103,7 +103,7 @@
     },
     "window_id": {
       "type": "string",
-      "pattern": "^cw:(whatsapp|telegram):(personal|professional|leila):[^:#\\s]+:[^:#\\s]+$"
+      "pattern": "^cw:(whatsapp|telegram):(personal|professional|leila):[^#\\s]+:[0-9]+$"
     },
     "common": {
       "type": "object",

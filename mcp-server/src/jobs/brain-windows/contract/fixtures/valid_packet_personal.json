@@ -1,10 +1,10 @@
 {
-  "source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001#kp",
+  "source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001#kp",
   "content": "Temas: pedido, entrega-manana. Entidades: Luis.",
   "metadata": {
     "type": "conversation_packet",
     "source": "knowledge_packet",
-    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001",
+    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001",
     "source_system": "whatsapp",
     "platform": "whatsapp",
     "account": "personal",
@@ -19,7 +19,7 @@
     "message_count": 3,
     "contract_version": 1,
     "kp_kind": "summary",
-    "kp_source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001",
+    "kp_source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:1001",
     "kp_source_type": "conversation_window",
     "kp_source_label": "ConvDay",
     "kp_title": "Pedido de mañana",

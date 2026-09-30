@@ -1,14 +1,14 @@
 {
-  "source_id": "cw:telegram:professional:c0a8f1d2-0000-4000-8000-000000000002:0b1f0000-0000-4000-8000-000000000002",
-  "content": "[telegram · Proveedor] 2026-09-28\n09:00 Ana: hola\n09:10 Luis: 🎙 te paso el pedido mañana\n09:20 Ana: vale (resp. a Luis)",
+  "source_id": "cw:whatsapp:professional:professional:34600123456@s.whatsapp.net:2001",
+  "content": "[whatsapp · Proveedor] 2026-09-28\n09:00 Ana: hola\n09:10 Luis: 🎙 te paso el pedido mañana\n09:20 Ana: vale (resp. a Luis)",
   "metadata": {
     "type": "conversation_window",
     "source": "conversation",
-    "window_id": "cw:telegram:professional:c0a8f1d2-0000-4000-8000-000000000002:0b1f0000-0000-4000-8000-000000000002",
-    "source_system": "telegram",
-    "platform": "telegram",
+    "window_id": "cw:whatsapp:professional:professional:34600123456@s.whatsapp.net:2001",
+    "source_system": "whatsapp",
+    "platform": "whatsapp",
     "account": "professional",
-    "conversation_id": "c0a8f1d2-0000-4000-8000-000000000002",
+    "conversation_id": "professional:34600123456@s.whatsapp.net",
     "conversation_name": "Proveedor",
     "is_group": false,
     "kind": "chat",
@@ -18,11 +18,11 @@
     "day": "2026-09-28",
     "message_count": 3,
     "contract_version": 1,
-    "window_text": "[telegram · Proveedor] 2026-09-28\n09:00 Ana: hola\n09:10 Luis: 🎙 te paso el pedido mañana\n09:20 Ana: vale (resp. a Luis)",
+    "window_text": "[whatsapp · Proveedor] 2026-09-28\n09:00 Ana: hola\n09:10 Luis: 🎙 te paso el pedido mañana\n09:20 Ana: vale (resp. a Luis)",
     "message_ids": [
-      "0b1f0000-0000-4000-8000-000000000002",
-      "m2",
-      "m3"
+      "2001",
+      "2002",
+      "2003"
     ],
     "participants": [
       "Ana",
