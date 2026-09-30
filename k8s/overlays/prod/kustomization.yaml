@@ -22,8 +22,9 @@ images:
   # 36135670213, deploy/prod@115c066 — the tip that carries #70..#85: the P1a
   # baileys pairing pool, the P1b/P2/P4b social-api routes and the SC-1243
   # status fix). This block rewrites EVERY consumer of the image name, so the
-  # advance also moves the house mcp-server, mcp-sse, the brain-ingest CronJob
-  # and the PreSync migrate Job — the repo's established pin pattern (PRs
+  # advance also moves the house mcp-server, mcp-sse, the brain CronJobs
+  # (brain-windows since INFRA-364) and the PreSync migrate Job — the repo's
+  # established pin pattern (PRs
   # 73/76/78 did exactly this). All of them set DATABASE_URL, which the code
   # requires since SC-1239 C2 (#84), and migrate.ts's `_migrations` ledger
   # skips what 007/008 already applied.

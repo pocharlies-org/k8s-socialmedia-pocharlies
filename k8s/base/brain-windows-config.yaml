@@ -1,0 +1,61 @@
+# brain-windows (INFRA-364, ADR 0002 §5): knobs of the conversation-window
+# jobs (CronJob brain-windows and the backfill Job). Mounted as the ConfigMap
+# `brain-windows` at /brain-config/brain-windows-config.yaml; the jobs read it
+# at start (a change takes effect on the next pass, no restart needed).
+#
+# Bots, monitoring and broadcast channels: their windows ARE built and pushed
+# (searchable transcripts) but never go through the LLM and never create
+# neurons (Dani's decision 2 in ADR 0002). Telegram channels are already
+# caught by conversations.type='channel'; `channels` is the belt-and-braces
+# name list for ones stored without that type.
+
+# Silence that closes a window (seconds). ADR 0002 §1.
+gapSeconds: 3600
+# Transcript cap per window part, characters (ADR 0002 §1).
+transcriptCapChars: 16000
+# A split part keeps at least this many characters when a temporal gap exists.
+splitFloorChars: 8000
+# Trivial window (ADR 0002 §3): fewer messages OR fewer useful characters.
+trivialMinMessages: 4
+trivialMinChars: 160
+
+# Author of OUTBOUND messages per DB namespace (ADR 0002 §2).
+outboundNames:
+  personal: Dani
+  professional: Skirmshop
+  leila: Leila
+
+# Bot / monitoring chats, matched by exact name (case-insensitive) and/or by
+# conversation id. Seeded with the ones measured in prod on 30-09 (ADR 0002
+# Contexto: «Synapse monitor» alone is 42 % of the text). The tg_-5... ids are
+# the legacy groups and the tg_-100... ids the supergroups of the same chats
+# (both rows exist in `conversations`).
+bots:
+  - name: Synapse monitor
+    ids:
+      - tg_-1003785136626
+      - tg_-5154502991
+  - name: Alertas Monitoring Skirmshop
+    ids:
+      - tg_7934536267
+  - name: Skirmshop ES OP
+    ids:
+      - tg_-1003984393379
+      - tg_-5055944631
+  - name: Skirmshop Spain Hermes
+    ids:
+      - tg_-1003745557294
+  - name: Pocharlies Operations
+    ids:
+      - tg_-1004409526898
+      - tg_-5354963698
+
+# Broadcast channels by name (type='channel' covers them anyway; measured
+# 30-09: both are personal/telegram rows of type channel).
+channels:
+  - name: Ofertas Chollos
+    ids:
+      - tg_-1001052910318
+  - name: Anonymous Catalonia
+    ids:
+      - tg_-1001275874234

@@ -1,0 +1,71 @@
+# ── brain-windows backfill (INFRA-364, ADR 0002 §9 fases 2 y 3) ─────────────
+# One-shot reindex Job, NOT wired into the kustomization on purpose: it is an
+# operational run, launched by hand per phase and resumable (cursor per RUN_ID
+# in brain_windows_backfill_cursor). DRY_RUN defaults to TRUE in the code; the
+# values below are the template for the real runs — edit and `kubectl apply`
+# (or `kubectl create job --from=job/...` after a first run) when the brain
+# purge (fase 1) is done.
+#
+#   fase 2 (push):  PHASE=push  DRY_RUN=true  -> projected counts, no writes
+#                   PHASE=push  DRY_RUN=false -> all windows (parents +
+#                   children), no LLM. Search works from here.
+#   fase 3 (llm):   PHASE=llm   DRY_RUN=false -> summaries newest-first, 2 in
+#                   parallel against the resident `tooling` (LiteLLM). The
+#                   Sparks' compute profile must be `llm-tp` with the LLM
+#                   resident (kubectl get cm -n comfyui gpu-arbiter-state);
+#                   nothing here runs ON the Sparks — this pod is amd64/lan.
+#
+# Re-runs are cheap: the diff against brain_windows only pushes what is
+# missing or changed, so a crashed run resumes from its cursor and a finished
+# run converges to zero work.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: brain-windows-backfill
+  namespace: whatsapp-mcp
+spec:
+  backoffLimit: 0
+  # Long run by design (fase 2 is ~52k windows; fase 3 is the LLM at 2 in
+  # parallel). The job stops itself at MAX_RUNTIME_MS and the cursor lets the
+  # next apply resume. Raise only together with the deadline.
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: backfill
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          command: ["sh", "-c", "cd mcp-server && node --import tsx src/jobs/brain-windows-backfill.ts"]
+          env:
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
+            - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+            - { name: LLM_CHAT_MODEL, value: "tooling" }
+            - { name: BRAIN_WINDOWS_CONFIG_FILE, value: "/brain-config/brain-windows-config.yaml" }
+            - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
+            # Phase + scope (ADR 0002 §9). ACCOUNT=personal|professional|leila
+            # and PLATFORM=whatsapp|telegram narrow a run; empty = everything.
+            - { name: PHASE, value: "push" }
+            - { name: RUN_ID, value: "infra364" }
+            - { name: DRY_RUN, value: "true" }
+            - { name: ACCOUNT, value: "" }
+            - { name: PLATFORM, value: "" }
+            - { name: BATCH_CHATS, value: "50" }
+            - { name: BATCH_WINDOWS, value: "40" }
+            - { name: MAX_RUNTIME_MS, value: "3300000" }
+            - { name: MAX_CHAT_ROWS, value: "200000" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          volumeMounts:
+            - { name: accounts, mountPath: /accounts, readOnly: true }
+            - { name: brain-config, mountPath: /brain-config, readOnly: true }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { memory: 2Gi }
+      volumes:
+        - name: accounts
+          configMap: { name: social-accounts }
+        - name: brain-config
+          configMap: { name: brain-windows }

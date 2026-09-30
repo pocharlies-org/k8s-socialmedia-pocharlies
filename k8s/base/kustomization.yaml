@@ -35,6 +35,12 @@ configMapGenerator:
   - name: social-accounts
     files:
       - social-accounts.json=generated/social-accounts.json
+  # INFRA-364 (ADR 0002 §5): bot/monitoring/channel lists and window knobs for
+  # the brain-windows jobs. Mismo criterio de nombre estatico que arriba: son
+  # listas de datos que los jobs releen en cada pasada.
+  - name: brain-windows
+    files:
+      - brain-windows-config.yaml
 
 generatorOptions:
   disableNameSuffixHash: true

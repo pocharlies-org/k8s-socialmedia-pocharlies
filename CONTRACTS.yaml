@@ -1660,3 +1660,36 @@ contracts:
       sent card's payload is kept for retries, ingest only). The path, the
       body fields, the 200 shape, the reasons and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.brain.push-ingest.conversation-window.v1
+    kind: http-route
+    value: /instances/{instance}/push-ingest
+    anchor: conversation_window
+    role: consumer
+    files:
+      - mcp-server/src/jobs/brain-windows-lib.ts
+      - mcp-server/src/jobs/brain-windows.ts
+      - mcp-server/src/jobs/brain-windows-backfill.ts
+    status: active
+    note: >-
+      This repo is the CONSUMER; the provider is skirmshop-brain-v2 (service
+      skirmshop-brain-ingest, ns skirmshop-brain-prod), which this repo must
+      not rename. The brain-windows jobs (INFRA-364, ADR 0002) push, per
+      account instance (personal|skirmshop from the account registry) and
+      adapter (whatsapp|telegram), parent documents of metadata.type
+      `conversation_window` (content = header + summary or header + first
+      ~1500 chars; metadata carries window_key, part, start_ts, end_ts,
+      observed_at, message_count, participants[], message_ids[], transcript,
+      content_hash, llm_status, summary, extraction) plus child documents of
+      metadata.type `conversation_chunk` (source_id = parent + '#cN';
+      metadata carries window_source_id, chunk_index, observed_at,
+      message_ids[]). Removed windows are deleted with
+      POST /instances/{instance}/delete-document {adapter, source_id} (parent
+      and each child). The brain's small-to-big retrieval (ADR 0002 §4) groups
+      children by window_source_id and its hebbian graph (ADR 0002 §8) reads
+      extraction/entities/topics: renaming a document type, a metadata key
+      listed here, the '#cN' child suffix or the 'win:' source_id prefix is
+      breaking against the provider — a new `.v2` entry beside this one, not
+      an in-place edit. The per-message surface this replaces
+      (metadata.type `message`, source ids wa:/tg:/ig:) is retired by the ADR
+      0002 §9 purge; brain-ingest.ts / brain-replay.ts keep pushing it for
+      recovery only.

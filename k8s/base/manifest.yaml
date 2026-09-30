@@ -179,40 +179,35 @@ spec:
 # GENERATED from the account registry: see k8s/base/generated/connectors.yaml
 # (scripts/render-connectors.py). Edit k8s/base/social-accounts.json, not here.
 ---
-# ── WhatsApp professional Cloud API connector ─────────────────────────────────
-# Brain ingestion: push WhatsApp/Telegram messages into SkirmBrain RAG, one
-# instance per account (personal -> personal, professional -> skirmshop).
-# Runs the mcp-server image (has pg + tsx + the messages schema). Idempotent:
-# brain dedups by source_id; keyset cursor in `brain_ingest_cursor`.
+# ── Brain windows (INFRA-364, ADR 0002): conversation windows into SkirmBrain ─
+# Replaces the per-message `brain-ingest` CronJob (retired here on 30-09-2026,
+# #144 had already suspended it: Dani's ADR 0002 indexes WhatsApp/Telegram by
+# 1-hour-silence windows, parent + 200-400-token children, LLM summaries on
+# closed non-bot windows). The old per-message points are purged by the brain
+# repo (ADR 0002 §9 fase 1) and the code stays for brain-replay (recovery).
+#
+# Each pass (mcp-server image: pg + tsx + the jobs):
+#   1. reads messages changed after `brain_windows_cursor` (updated_at keyset —
+#      edits, deletions, late history syncs and voice notes transcribed hours
+#      later all move updated_at, migration 015);
+#   2. recomputes the windows of the affected chats and diffs them against
+#      `brain_windows`: gone -> delete-document, new/changed -> push-ingest;
+#   3. runs the LLM (LiteLLM alias `tooling`, exactly 2 in parallel, closed
+#      windows only, capped per pass) and re-pushes the parents with summary.
+#
+# SUSPENDED ON PURPOSE (Dani's session): the reindex (ADR 0002 §9 fases 2-3,
+# k8s/base/brain-windows-backfill.yaml) must land first — running this against
+# a brain that still holds the per-message points doubles the noise. Unsuspend
+# after the reindex + purge, together with the image re-pin that carries this
+# job (the prod overlay pins whatsappmcp-mcp-server for every consumer).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: brain-ingest
+  name: brain-windows
   namespace: whatsapp-mcp
 spec:
-  schedule: "*/5 * * * *"
+  schedule: "*/30 * * * *"
   timeZone: Europe/Madrid
-  # 29-08-2026: reactivado. Estuvo 74 dias suspendido por 502 repetidos contra
-  # skirmshop-brain-ingest, y la causa no era ese servicio (esta sano, 1/1): es que
-  # BGE depende del perfil de computo de los Sparks. Hay un deployment por perfil
-  # (`bge-m3-embedding` para llm-tp, `bge-m3-embedding-creative` para creative) y el
-  # arbitro los intercambia, asi que en REGIMEN hay embeddings en los dos perfiles.
-  # La ventana ciega es la TRANSICION: medido el 29-08 a las 07:2x con
-  # `phase: switching`, los tres deployments estaban a la vez a cero
-  # (bge-m3-embedding 0/0, -cpu 0/0, -creative 0/1) y /health daba primary y
-  # fallback down. Este cron disparaba cada 5 min sin mirar nada, asi que cada
-  # transicion le costaba una tanda de 502.
-  #
-  # Coste medido: `personal_documents` no recibia nada desde junio (telegram y
-  # gmail) y mayo (whatsapp).
-  #
-  # El arreglo es la guarda de abajo: la pasada comprueba /health y se salta sola
-  # cuando no hay embeddings, en vez de convertirse en una tormenta de 502.
-  # Saltarse pasadas no pierde datos: la ingesta es incremental (cursor keyset en
-  # `brain_ingest_cursor`) e idempotente (el Brain deduplica por source_id).
-  # 30-09-2026 (Dani): PAUSADO. La ingesta por mensaje suelto se sustituye por ventanas de
-  # conversacion de una hora y se reindexa todo WhatsApp/Telegram desde cero (epica nueva).
-  # Seguir metiendo mensajes sueltos solo anade vectores que habra que borrar.
   suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
@@ -221,7 +216,10 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
-      activeDeadlineSeconds: 360
+      # 30-min schedule; the job stops itself at MAX_RUNTIME_MS (24 min) so it
+      # exits 0 before this deadline. Worst case inside: 100 chats recomputed
+      # + 5 LLM windows x (240 s x 3 attempts) / 2 parallel = ~18 min.
+      activeDeadlineSeconds: 1500
       ttlSecondsAfterFinished: 3600
       template:
         spec:
@@ -229,16 +227,16 @@ spec:
           enableServiceLinks: false
           nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
           containers:
-            - name: brain-ingest
+            - name: brain-windows
               image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
               command:
                 - sh
                 - -c
                 - |
                   cd mcp-server
-                  # Guarda de embebido. Sale 0 (no falla el Job) cuando el Brain no
-                  # tiene ni primary ni fallback de TEI: sin embeddings la ingesta
-                  # solo produce 502. Se reintenta en la pasada siguiente.
+                  # Guarda de embebido (misma que tenia brain-ingest): sin TEI
+                  # el push-ingest solo produce 502; saltarse la pasada no
+                  # pierde nada (cursor en brain_windows_cursor).
                   node -e '
                     const url = process.env.BRAIN_URL + "/health";
                     fetch(url, { signal: AbortSignal.timeout(10000) })
@@ -246,55 +244,66 @@ spec:
                       .then((d) => {
                         const t = (d && d.tei) || {};
                         if (t.primary_status !== "ok" && t.fallback_status !== "ok") {
-                          console.log("brain-ingest: sin embeddings (primary=" + t.primary_status + " fallback=" + t.fallback_status + "); se salta esta pasada");
+                          console.log("brain-windows: sin embeddings (primary=" + t.primary_status + " fallback=" + t.fallback_status + "); se salta esta pasada");
                           process.exit(3);
                         }
-                        console.log("brain-ingest: embeddings via " + t.active_tei);
+                        console.log("brain-windows: embeddings via " + t.active_tei);
                       })
                       .catch((e) => {
-                        console.log("brain-ingest: /health inalcanzable (" + e.message + "); se salta esta pasada");
+                        console.log("brain-windows: /health inalcanzable (" + e.message + "); se salta esta pasada");
                         process.exit(3);
                       });
                   ' || exit 0
-                  node --import tsx src/jobs/brain-ingest.ts
+                  node --import tsx src/jobs/brain-windows.ts
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
-                # 30-09-2026: 60 filas en lotes de 2 dejaban `personal` ~80 dias atras
-                # (216k mensajes pendientes; cada pasada tardaba ~30 s de 300). 500 por
-                # cuenta en lotes de 50: mismo trabajo de embeddings, 25x menos peticiones,
-                # y la pasada sigue muy por debajo de activeDeadlineSeconds. El cursor se
-                # guarda por lote, asi que un corte por deadline no pierde nada.
-                - { name: BRAIN_INGEST_BATCH, value: "50" }
-                - { name: BRAIN_INGEST_MAX_ROWS, value: "500" }
-                - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
-                # Reintento de pushToBrain (5xx y errores de red; 4xx no): backoff 1 s x2 con tope
-                # RETRY_MAX_DELAY (30 s). Manda el PRESUPUESTO BRAIN_PUSH_BUDGET_MS (240 s), menor que
-                # BRAIN_INGEST_MAX_RUNTIME_MS (300000) y que activeDeadlineSeconds (360): el job agota
-                # el presupuesto y sale limpio antes de que lo mate el tope. El código lo recorta a
-                # MAX_RUNTIME_MS - 30 s si éste fuera menor.
-                # BRAIN_PUSH_RETRIES es solo techo de seguridad y debe cubrir la ventana: con backoff
-                # 1,2,4,8,16 s y luego 30 s los sueños suman 31 s + 30 s x n; 240 s piden 13 intentos
-                # (12 reintentos). 20 deja margen; con 8 (7 reintentos = 91 s) el tope de intentos
-                # cortaba antes que el presupuesto (INFRA-284, QA). Si subes BUDGET o bajas MAX_DELAY,
-                # recalcula: intentos >= 6 + (BUDGET - 31 s) / MAX_DELAY, redondeado hacia arriba.
+                # Ventana de reintento del push (pushToBrain, heredada de
+                # brain-ingest; la fija brain-ingest-lib.spec). Manda el
+                # PRESUPUESTO BRAIN_PUSH_BUDGET_MS (240 s); BRAIN_PUSH_RETRIES
+                # es solo techo de seguridad y debe cubrir la ventana: con
+                # backoff capped en RETRY_MAX_DELAY (30 s), 20 intentos cubren
+                # >240 s. BRAIN_INGEST_MAX_RUNTIME_MS recorta el presupuesto si
+                # fuera menor (240 < 300-30: no recorta aqui).
                 - { name: BRAIN_PUSH_RETRIES, value: "20" }
                 - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
                 - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "30000" }
                 - { name: BRAIN_PUSH_BUDGET_MS, value: "240000" }
                 - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
+                - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
+                # LLM local (ADR 0002 §5): LiteLLM -> residente de los Sparks,
+                # alias de capacidad `tooling`. La clave debe ser una virtual de
+                # BAJA PRIORIDAD (tipo hermes-batch) via LLM_API_KEY en
+                # whatsapp-mcp-secrets; mientras no exista, el codigo cae a
+                # OPENAI_API_KEY (la que ya usa mcp-sse contra LiteLLM).
+                - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+                - { name: LLM_CHAT_MODEL, value: "tooling" }
+                # Ventanas y topes por pasada (ADR 0002 §7).
+                - { name: BRAIN_WINDOWS_SCAN_ROWS, value: "5000" }
+                - { name: BRAIN_WINDOWS_MAX_CHATS, value: "100" }
+                - { name: BRAIN_WINDOWS_MAX_LLM, value: "5" }
+                - { name: BRAIN_WINDOWS_COLDSTART_LOOKBACK_HOURS, value: "168" }
+                - { name: BRAIN_WINDOWS_MAX_RUNTIME_MS, value: "1440000" }
+                - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
+                # Chats de bot/monitorizacion y canales (se indexan, no pasan
+                # por el LLM): ConfigMap brain-windows.
+                - { name: BRAIN_WINDOWS_CONFIG_FILE, value: "/brain-config/brain-windows-config.yaml" }
                 # Namespaces e instancia del brain por cuenta: registro de cuentas.
                 - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
-                # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (1Password) via envFrom.
+                # BRAIN_API_KEY / OPENAI_API_KEY / LLM_API_KEY salen del
+                # secret whatsapp-mcp-secrets (1Password) via envFrom.
               envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
               volumeMounts:
                 - { name: accounts, mountPath: /accounts, readOnly: true }
+                - { name: brain-config, mountPath: /brain-config, readOnly: true }
               resources:
                 requests: { cpu: 50m, memory: 128Mi }
-                limits:   { memory: 512Mi }
+                limits:   { memory: 1Gi }
           volumes:
             - name: accounts
               configMap: { name: social-accounts }
+            - name: brain-config
+              configMap: { name: brain-windows }
 ---
 apiVersion: apps/v1
 kind: Deployment

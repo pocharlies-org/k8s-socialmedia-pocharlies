@@ -345,6 +345,9 @@ importers:
       typeorm:
         specifier: ^0.3.17
         version: 0.3.31(better-sqlite3@12.11.1)(ioredis@5.11.1(supports-color@8.1.1))(pg@8.22.0)(supports-color@8.1.1)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
     devDependencies:
       '@types/express':
         specifier: ^4.17.21

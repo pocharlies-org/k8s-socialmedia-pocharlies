@@ -28,7 +28,8 @@
 #    syncTolerations in scripts/render-connectors.py), so it is no longer patched here.
 #
 # MOVED to node-pool=ks5-nvme (no IP-bound session): instagram-connector (Graph API tokens),
-# mcp-server, mcp-sse, brain-ingest, and the nats/minio backends. nats/minio carry RWO
+# mcp-server, mcp-sse, brain-windows (INFRA-364; it replaces brain-ingest, whose CronJob was
+# retired with the per-message ingest), and the nats/minio backends. nats/minio carry RWO
 # Longhorn PVCs but use strategy: Recreate, so the cross-node move is safe. topology:null
 # deletes the inherited topology=lan key; mcp-sse also drops its explicit hostname=ubuntu pin.
 ---
@@ -102,7 +103,7 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: brain-ingest
+  name: brain-windows
   namespace: whatsapp-mcp
 spec:
   jobTemplate:
