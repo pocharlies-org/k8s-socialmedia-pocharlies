@@ -109,9 +109,51 @@ Formato `{conversation_id: "bot"|"broadcast"}` (regla 6). Criterio de candidato 
 lectura): `senders=1` o `top_sender_share ≥ 0,95`, `inbound_share` ≈ 1 (alertas) o ≈ 0 (difusión propia), y los nombres que citó Dani
 (Synapse monitor, Alertas Monitoring, Skirmshop ES OP, Pocharlies Operations, Ofertas Chollos).
 
-**Estado: informe de candidatos PENDIENTE.** La consulta a `whatsappmcp` (`kubectl exec` al pod de Postgres) fue denegada a este rol. El
-script está listo para quien tenga lectura sobre esa base. `chat-kinds.json` se entrega como `{}` (JSON válido) hasta tener los
-`conversation_id` reales; los nombres de Dani no se pueden mapear a id sin esa consulta. El tech-lead confirma la lista antes de P6.
+### 7.1 Informe de candidatos
+Fuente: salida de la consulta (solo lectura) ejecutada por `sre` sobre `whatsappmcp` (adjunto `nota-sre-chat-candidates.md` de INFRA-367,
+30-09-2026): 60 chats de mayor volumen + 8 chats por nombre. Recuento = mensajes con texto (regla 4). Los `conversation_id` de la cuenta
+`professional` llevan el prefijo `professional:`; aquí no hay ninguno candidato. `senders`/`top`/`in` = remitentes distintos, cuota del
+remitente más activo y fracción entrante.
+
+**Marcados en `chat-kinds.json` (solo lo claro):**
+
+| conversation_id | nombre | msgs | senders | top | in | avg_len | kind | por qué |
+|---|---|---:|---:|---:|---:|---:|---|---|
+| `tg_-1003785136626` | Synapse monitor | 50.458 | 3 | 1,00 | 1,00 | 1.138 | bot | 3 remitentes, uno solo emite todo; mensajes largos y regulares; nombre de monitorización (citado por Dani) |
+| `tg_-5154502991` | Synapse monitor (grupo previo) | n/d | n/d | n/d | n/d | n/d | bot | mismo nombre que el anterior; no sale en el top 60 (<1.689 msgs), sin métricas |
+| `tg_7934536267` | Alertas Monitoring Skirmshop | 6.762 | 2 | 0,86 | 0,86 | 333 | bot | alertas; 2 remitentes; nombre (citado por Dani) |
+| `tg_-1003975290449` | github pocharlies-org | 2.357 | 2 | 0,92 | 1,00 | 392 | bot | notificaciones de GitHub; 100 % entrante |
+| `tg_-1001052910318` | Ofertas Chollos | 18.415 | 1 | 1,00 | 1,00 | 515 | broadcast | canal, 1 remitente, 2016–2021 (citado por Dani) |
+| `tg_-1001275874234` | Anonymous Catalonia | 11.246 | 1 | 1,00 | 1,00 | 131 | broadcast | canal, 1 remitente |
+| `tg_-1001648452238` | Airsoft4Tiesos | 9.286 | 1 | 1,00 | 1,00 | 247 | broadcast | 1 remitente, 100 % entrante, id de canal (`-100…`) |
+| `tg_-1001980503230` | ᴀɪʀsᴏғᴛ ɪʙᴇ́ʀɪᴄᴏ | 6.878 | 1 | 1,00 | 1,00 | 172 | broadcast | ídem |
+| `tg_-1001059179151` | COPA NACIONAL DE ESPAÑA 2026 | 2.630 | 1 | 1,00 | 1,00 | 64 | broadcast | canal, 1 remitente |
+
+Total marcado con recuento: 59.577 mensajes `bot` + 48.455 `broadcast` (de 787.940 con texto: ≈13,7 %). Los campos `type` de la tabla
+`conversations` (`private` para grupos y canales) no son fiables: por eso el criterio es estructural (remitentes, cuota, dirección), no `type`.
+Los dos de un solo remitente y id `-100…` cuyo tipo no consta (Airsoft4Tiesos, Airsoft Ibérico) son inferencia por estructura, no confirmación del tipo de chat.
+
+**Dudosos (NO marcados; decide el tech-lead antes de P6):** perfil mixto (personas + bots) o conversación con un agente, donde el
+texto puede tener valor de memoria. Mientras no se decida se tratan como `chat` (con LLM).
+
+| conversation_id | nombre | msgs | senders | top | in | avg_len | duda |
+|---|---|---:|---:|---:|---:|---:|---|
+| `tg_-1003984393379` | Skirmshop ES OP | 31.136 | 7 | 0,40 | 0,76 | 408 | 7 remitentes, mezcla de agentes y personas; citado por Dani |
+| `tg_-5055944631` | Skirmshop ES OP (grupo previo) | n/d | n/d | n/d | n/d | n/d | mismo nombre; sin métricas (<1.689) |
+| `tg_-1004409526898` | Pocharlies Operations | 5.683 | 6 | 0,46 | 0,93 | 243 | 93 % entrante, 6 remitentes; citado por Dani |
+| `tg_-5354963698` | Pocharlies Operations (grupo previo) | n/d | n/d | n/d | n/d | n/d | mismo nombre; sin métricas |
+| `tg_-1003749364241` | Hogar | 5.854 | 7 | 0,40 | 0,83 | 591 | misma forma que Skirmshop ES OP (¿agentes por temas?) |
+| `tg_8621739742` | Openclaw | 4.737 | 2 | 0,88 | 0,88 | 251 | DM con un agente |
+| `tg_8745520218` | Hermes Pocharlies | 4.259 | 2 | 0,80 | 0,80 | 250 | DM con un agente |
+| `tg_8906942335` | DGX Studio | 3.503 | 2 | 0,87 | 0,87 | 216 | DM con un agente |
+| `tg_-1003745557294` | Skirmshop Spain Hermes | 2.915 | 4 | 0,72 | 0,87 | 601 | grupo con agente |
+| `tg_-1003710140395` | Daniel & Leila IA | 1.787 | 5 | 0,80 | 0,82 | 556 | grupo con agente |
+
+Subtotal dudosos con recuento: 59.874 mensajes (≈7,6 %). Regla de decisión propuesta: si el contenido es **salida de máquina** sin valor
+de conversación (alertas, estados) ⇒ `bot`; si son personas o un agente con el que Dani razona ⇒ se quedan `chat`.
+El resto del top 60 (personas, grupos de airsoft/Tomorrowland/Sauvage, `@lid`) son conversaciones: no se marcan.
+
+`chat-kinds.json` contiene las 9 entradas de la primera tabla. El tech-lead confirma la lista (y resuelve los dudosos) antes de P6.
 
 ## 8. Calibración pendiente (dry-run del builder, P4)
 Histograma de huecos entre mensajes (¿3.600 s parte bien?), distribución de chars por ventana (cuántas tocan 16 k), nº de ventanas
