@@ -25,6 +25,7 @@
  * idempotent (a replay changes nothing), so our own action and the echo
  * WhatsApp sends back can never double an edit-history entry.
  */
+import type { proto } from '@whiskeysockets/baileys';
 import { accountKey, connectorAccount, getPool, stripAccountKey } from './db-writer';
 
 /** Who told us: this connector's own HTTP action, or WhatsApp (contact / our phone). */
@@ -214,4 +215,71 @@ export async function markMessageDeletedForMe(
     ]
   );
   return (result.rowCount ?? result.rows.length) > 0;
+}
+
+/**
+ * The current text of a message that was edited (the row's `content` once
+ * `is_edited`), undefined when it never was, the row is unknown, or it has no
+ * text. What a quote or forward must show: the stored payload
+ * (whatsapp_message_payloads, the in-memory copy) is the original — an edit
+ * only rewrites the messages row.
+ */
+export async function loadEditedContent(messageId: string): Promise<string | undefined> {
+  const result = await getPool().query(
+    `SELECT content FROM messages
+      WHERE wa_message_id = $1 AND account_id = $2 AND platform = 'whatsapp'
+        AND COALESCE(is_edited, FALSE)
+      LIMIT 1`,
+    [accountKey(stripAccountKey(messageId)), whatsappAccountId()]
+  );
+  const content = result.rows[0]?.content;
+  return typeof content === 'string' ? content : undefined;
+}
+
+/** Wrappers whose `.message` holds the real content. */
+const WRAPPERS = [
+  'ephemeralMessage',
+  'viewOnceMessage',
+  'viewOnceMessageV2',
+  'viewOnceMessageV2Extension',
+  'documentWithCaptionMessage',
+] as const;
+
+/**
+ * `message` with its text (conversation / extendedTextMessage.text) or its
+ * caption (image, video, document) replaced by `text`, wrappers followed; the
+ * rest (context, media keys, secrets) kept. undefined when it carries no
+ * text, or already that one — nothing to change.
+ */
+export function withEditedText(
+  message: proto.IMessage | null | undefined,
+  text: string
+): proto.IMessage | undefined {
+  if (!message) return undefined;
+  for (const wrapper of WRAPPERS) {
+    const inner = message[wrapper]?.message;
+    if (inner) {
+      const replaced = withEditedText(inner, text);
+      return replaced
+        ? { ...message, [wrapper]: { ...message[wrapper], message: replaced } }
+        : undefined;
+    }
+  }
+  if (typeof message.conversation === 'string' && message.conversation) {
+    return message.conversation === text ? undefined : { ...message, conversation: text };
+  }
+  if (message.extendedTextMessage) {
+    return message.extendedTextMessage.text === text
+      ? undefined
+      : { ...message, extendedTextMessage: { ...message.extendedTextMessage, text } };
+  }
+  for (const media of ['imageMessage', 'videoMessage', 'documentMessage'] as const) {
+    const node = message[media];
+    if (node) {
+      return node.caption === text
+        ? undefined
+        : { ...message, [media]: { ...node, caption: text } };
+    }
+  }
+  return undefined;
 }

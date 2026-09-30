@@ -82,12 +82,14 @@ import {
   unixSeconds,
 } from './durable-message-store';
 import {
+  loadEditedContent,
   loadStoredMessage,
   markMessageDeletedForMe,
   markMessageEdited,
   markMessageRevoked,
   MessageMutationError,
   StoredMessage,
+  withEditedText,
 } from './message-mutations';
 import { reactionTime, storeMessageReaction } from './message-reactions';
 import {
@@ -2247,12 +2249,31 @@ export class BaileysClient extends EventEmitter {
   ): Promise<WAMessage | undefined> {
     if (!replyToMessageId) return undefined;
     const id = stripAccountKey(replyToMessageId);
-    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    const original = await this.currentMessage(id);
     if (!original?.message) return undefined;
     return {
       ...original,
       key: { ...original.key, id, remoteJid: chatJid },
     } as WAMessage;
+  }
+
+  /**
+   * A message to quote or forward: memory, else the durable copy — with the
+   * CURRENT text when it was edited since: both copies are the original (an
+   * edit only rewrites the messages row: content, is_edited, edit_history).
+   * The row is read only with ingest; unreadable → the copy as it is.
+   */
+  private async currentMessage(id: string): Promise<WAMessage | undefined> {
+    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    if (!original?.message || !this.ingest) return original;
+    const edited = await loadEditedContent(id).catch((e: any) => {
+      this.logger.warn(
+        `current text of ${id} unreadable, using its stored copy: ${e?.message || e}`
+      );
+      return undefined;
+    });
+    const message = edited === undefined ? undefined : withEditedText(original.message, edited);
+    return message ? ({ ...original, message } as WAMessage) : original;
   }
 
   /** Full WAMessage (key + content) from the in-memory caches. */
@@ -3635,7 +3656,7 @@ export class BaileysClient extends EventEmitter {
     if (!this.isConnected())
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
     const id = stripAccountKey(messageId);
-    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    const original = await this.currentMessage(id);
     if (!original?.message) {
       throw new MessageUnavailableError(
         `forwardMessage: message ${id} of ${chatId} is unavailable (not in memory nor in the durable store)`,
