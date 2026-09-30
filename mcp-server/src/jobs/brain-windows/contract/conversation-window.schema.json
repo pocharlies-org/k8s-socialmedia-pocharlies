@@ -1,0 +1,423 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skirmshop.es/schemas/conversation-window.v1.json",
+  "title": "conversation-window v1 (documento de push-ingest)",
+  "description": "Contrato §C de INFRA-364. Documento {source_id, content, metadata} que socialmedia envía al brain. Validación previa a la regla 5 (422).",
+  "type": "object",
+  "required": [
+    "source_id",
+    "content",
+    "metadata"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "pattern": "^cw:(whatsapp|telegram):(personal|professional|leila):[^:#\\s]+:[^:#\\s]+(#c[0-9]+|#kp)?$"
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "metadata": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/window"
+        },
+        {
+          "$ref": "#/$defs/chunk"
+        },
+        {
+          "$ref": "#/$defs/packet"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "type": {
+                "const": "conversation_window"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_id": {
+            "pattern": "^[^#]+$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "type": {
+                "const": "conversation_chunk"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_id": {
+            "pattern": "#c[0-9]+$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "type": {
+                "const": "conversation_packet"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_id": {
+            "pattern": "#kp$"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "iso_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|\\+00:00)$"
+    },
+    "window_id": {
+      "type": "string",
+      "pattern": "^cw:(whatsapp|telegram):(personal|professional|leila):[^:#\\s]+:[^:#\\s]+$"
+    },
+    "common": {
+      "type": "object",
+      "properties": {
+        "window_id": {
+          "$ref": "#/$defs/window_id"
+        },
+        "source_system": {
+          "enum": [
+            "whatsapp",
+            "telegram"
+          ]
+        },
+        "platform": {
+          "enum": [
+            "whatsapp",
+            "telegram"
+          ]
+        },
+        "account": {
+          "enum": [
+            "personal",
+            "professional",
+            "leila"
+          ]
+        },
+        "conversation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conversation_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "is_group": {
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "chat",
+            "bot",
+            "broadcast"
+          ]
+        },
+        "start_ts": {
+          "$ref": "#/$defs/iso_utc"
+        },
+        "end_ts": {
+          "$ref": "#/$defs/iso_utc"
+        },
+        "wa_timestamp": {
+          "$ref": "#/$defs/iso_utc"
+        },
+        "day": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "message_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "contract_version": {
+          "const": 1
+        }
+      }
+    },
+    "window": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "type": "object",
+      "required": [
+        "type",
+        "window_id",
+        "source",
+        "source_system",
+        "platform",
+        "account",
+        "conversation_id",
+        "conversation_name",
+        "is_group",
+        "kind",
+        "start_ts",
+        "end_ts",
+        "wa_timestamp",
+        "day",
+        "message_count",
+        "contract_version",
+        "window_text",
+        "message_ids",
+        "participants",
+        "window_hash",
+        "llm_status",
+        "truncated_by_size",
+        "patterns"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "type": {
+          "const": "conversation_window"
+        },
+        "source": {
+          "const": "conversation"
+        },
+        "window_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "message_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50
+        },
+        "window_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "llm_status": {
+          "enum": [
+            "pending",
+            "done",
+            "skipped"
+          ]
+        },
+        "truncated_by_size": {
+          "type": "boolean"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3
+        }
+      }
+    },
+    "chunk": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "type": "object",
+      "required": [
+        "type",
+        "window_id",
+        "source",
+        "source_system",
+        "platform",
+        "account",
+        "conversation_id",
+        "conversation_name",
+        "is_group",
+        "kind",
+        "start_ts",
+        "end_ts",
+        "wa_timestamp",
+        "day",
+        "message_count",
+        "contract_version",
+        "chunk_index",
+        "chunk_count",
+        "msg_id_first",
+        "msg_id_last"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "type": {
+          "const": "conversation_chunk"
+        },
+        "source": {
+          "const": "conversation"
+        },
+        "chunk_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "msg_id_first": {
+          "type": "string"
+        },
+        "msg_id_last": {
+          "type": "string"
+        }
+      }
+    },
+    "packet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "type": "object",
+      "required": [
+        "type",
+        "window_id",
+        "source",
+        "source_system",
+        "platform",
+        "account",
+        "conversation_id",
+        "conversation_name",
+        "is_group",
+        "kind",
+        "start_ts",
+        "end_ts",
+        "wa_timestamp",
+        "day",
+        "message_count",
+        "contract_version",
+        "kp_kind",
+        "kp_source_id",
+        "kp_source_type",
+        "kp_source_label",
+        "kp_title",
+        "kp_ts",
+        "kp_date",
+        "kp_participant_count",
+        "kp_permalinks",
+        "kp_sensitivity",
+        "kp_topics",
+        "kp_entities"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "type": {
+          "const": "conversation_packet"
+        },
+        "source": {
+          "const": "knowledge_packet"
+        },
+        "kp_kind": {
+          "const": "summary"
+        },
+        "kp_source_id": {
+          "$ref": "#/$defs/window_id"
+        },
+        "kp_source_type": {
+          "const": "conversation_window"
+        },
+        "kp_source_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kp_title": {
+          "type": "string"
+        },
+        "kp_ts": {
+          "$ref": "#/$defs/iso_utc"
+        },
+        "kp_date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "kp_participant_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kp_permalinks": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "kp_sensitivity": {
+          "const": "personal"
+        },
+        "kp_topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "maxLength": 40
+          },
+          "maxItems": 12
+        },
+        "kp_entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type",
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "maxItems": 12
+        }
+      }
+    }
+  }
+}

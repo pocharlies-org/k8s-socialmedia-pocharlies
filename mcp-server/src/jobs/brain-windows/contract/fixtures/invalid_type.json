@@ -1,0 +1,36 @@
+{
+  "source_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001",
+  "content": "Resumen: Ana y Luis acuerdan el pedido de mañana.",
+  "metadata": {
+    "type": "conversation_message",
+    "source": "conversation",
+    "window_id": "cw:whatsapp:personal:c0a8f1d2-0000-4000-8000-000000000001:0b1f0000-0000-4000-8000-000000000001",
+    "source_system": "whatsapp",
+    "platform": "whatsapp",
+    "account": "personal",
+    "conversation_id": "c0a8f1d2-0000-4000-8000-000000000001",
+    "conversation_name": "Grupo familia",
+    "is_group": true,
+    "kind": "chat",
+    "start_ts": "2026-09-28T09:00:00Z",
+    "end_ts": "2026-09-28T09:20:00Z",
+    "wa_timestamp": "2026-09-28T09:00:00Z",
+    "day": "2026-09-28",
+    "message_count": 3,
+    "contract_version": 1,
+    "window_text": "[whatsapp · Grupo familia] 2026-09-28\n09:00 Ana: hola\n09:10 Luis: 🎙 te paso el pedido mañana\n09:20 Ana: vale (resp. a Luis)",
+    "message_ids": [
+      "0b1f0000-0000-4000-8000-000000000001",
+      "m2",
+      "m3"
+    ],
+    "participants": [
+      "Ana",
+      "Luis"
+    ],
+    "window_hash": "9ed839d1fb14956c1f3c41644d84fe5c7c3041674aefc8c4852c221b6f04feb7",
+    "llm_status": "done",
+    "truncated_by_size": false,
+    "patterns": []
+  }
+}
