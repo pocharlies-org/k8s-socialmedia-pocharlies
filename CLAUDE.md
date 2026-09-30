@@ -141,6 +141,11 @@ commit, distinto byte-code).
 
 - **Norma**: despachar SIEMPRE con `image_tag` (secuencial, p. ej. `v1.3.61`), o desde `deploy/prod`
   (el patrón histórico: runs 36477444351/36135670213 verdes).
+- **Un run fallido quema tags**: publica `sha-<commit>` y a veces el `image_tag` de algunas imágenes antes
+  de morir. Reintentar sobre el mismo commit choca con `sha-<commit>` (medido 30-09: runs 36699101771 →
+  36701685011 sobre `aa547dc`). Para reintentar hace falta un commit nuevo en `deploy/prod` (vía PR) y un
+  `image_tag` que nadie haya usado; mira antes qué tags publicaron los runs fallidos
+  (`gh run view <id> --log | grep image_tag`), también los de otras sesiones.
 - La promoción de la rama deploy (`reusable-manifest-release.yml`, push `HEAD:deploy/prod
   --force-with-lease`) exige que main sea ancestro de deploy/prod: tras el merge #104 lo es; si vuelven
   a divergir (p. ej. un hotfix directo sobre deploy/prod), reconciliar main ANTES de soltar desde main.
