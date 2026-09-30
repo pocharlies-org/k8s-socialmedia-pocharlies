@@ -18,6 +18,23 @@ Repo: `git@github.com:pocharlies/whatsappmcp.git` (the directory is `mcp-socialm
 
 Tool inventory (49 tools across the 3 platforms): see [MCP.md](./MCP.md).
 
+### Reconnect backfill (WhatsApp) and NATS retention/reconnect — INFRA-112
+
+On WhatsApp reconnect the Baileys connector backfills only the dropped window:
+`WA_RECONNECT_BACKFILL_WINDOW_HOURS` (prod: 6) and `WA_RECONNECT_BACKFILL_MAX_MESSAGES`
+(prod: 500) bound it; ingested rows carry the existing `source=baileys_history_sync`
+marker. Both envs are declared in `k8s/base/social-accounts.json` (`deploy.env`, all
+three WhatsApp accounts) and reach the pods through the generated
+`k8s/base/generated/connectors.yaml` (re-run `scripts/render-connectors.py` after
+editing the registry; CI checks freshness). The global `WA_HISTORY_SYNC_ON_LOGIN`
+stays off.
+
+NATS publishers of whatsapp-web and instagram keep a bounded retry buffer (entries +
+age) instead of dropping events during an outage and republish on reconnect without
+duplicating by event id; the telegram publisher reconnects with backoff instead of
+crashing `main.ts`. Backoff knobs: `NATS_RECONNECT_BASE_MS` / `NATS_RECONNECT_MAX_MS`
+(defaults 2000 / 30000). NATS subjects and event shapes are unchanged.
+
 ## Layout
 
 ```

@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { TelegramClientWrapper } from '../telegram-client';
+import { TelegramClientWrapper, TelegramMessageEdit } from '../telegram-client';
+import { MessageMutationError, classifyEditError, sendingDisabledReason } from '../message-edit';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import pino from 'pino';
 
@@ -42,7 +43,41 @@ function authMiddleware(
   };
 }
 
-export function createRouter(client: TelegramClientWrapper, sharedSecret: string): Router {
+/** A Telegram peer as the edit route takes it: marked numeric id or (@)username. */
+const TELEGRAM_PEER_RE = /^(?:-?\d{1,20}|@?[A-Za-z][A-Za-z0-9_]{3,63})$/;
+
+/** Optional `actor` of a mutation body: who asked, for the record (≤ 200 chars). */
+function actorFromBody(value: unknown): string | undefined {
+  const actor = typeof value === 'string' ? value.trim() : '';
+  return actor ? actor.slice(0, 200) : undefined;
+}
+
+/** Error of an edit → status + failureClass (+ Telegram's code), the WhatsApp shape. */
+function mutationErrorResponse(res: Response, error: unknown): void {
+  const e = error instanceof MessageMutationError ? error : classifyEditError(error);
+  if (e.status >= 500) logger.error(`Error editing message: ${e.message}`);
+  if (e.retryAfterSeconds) res.setHeader('Retry-After', String(e.retryAfterSeconds));
+  res.status(e.status).json({
+    error: e.message,
+    failureClass: e.failureClass,
+    ...(e.code ? { code: e.code } : {}),
+    ...(e.retryAfterSeconds ? { retryAfterSeconds: e.retryAfterSeconds } : {}),
+  });
+}
+
+export interface RouterOptions {
+  /**
+   * Hand an edit this connector made to NATS (telegram.MessageEdited, written
+   * by telegram-sync). Returns whether it was published.
+   */
+  publishMessageEdited?: (edit: TelegramMessageEdit) => boolean;
+}
+
+export function createRouter(
+  client: TelegramClientWrapper,
+  sharedSecret: string,
+  options: RouterOptions = {}
+): Router {
   const router = Router();
 
   // Apply auth middleware to all routes
@@ -678,6 +713,74 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
         res.json({ reacted: ok, emoji: emoji || null });
       } catch (e) {
         res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /messages/edit - Edit one of our own text messages.
+   * NOTE: Must be registered BEFORE the POST /messages/:chatId route.
+   *
+   * The edit is recorded through telegram.MessageEdited (telegram-sync writes
+   * the row); `published` says whether that event left. An unchanged text
+   * (MESSAGE_NOT_MODIFIED) is an idempotent 200 with nothing to record.
+   */
+  // CONTRACT: http.telegram-connector.messages-edit.v1 — body {chatId, messageId, content, actor?}, 200 {edited, messageId, chatId, editedAt, unchanged, published}
+  router.post('/messages/edit', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const disabled = sendingDisabledReason();
+        if (disabled) {
+          res.status(403).json({ error: disabled, failureClass: 'disabled_sending' });
+          return;
+        }
+        const body =
+          req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+            ? (req.body as Record<string, unknown>)
+            : {};
+        const chatId =
+          typeof body.chatId === 'string' || typeof body.chatId === 'number'
+            ? String(body.chatId).trim()
+            : '';
+        const messageId = parseTopicId(body.messageId);
+        const content = typeof body.content === 'string' ? body.content : '';
+        if (!TELEGRAM_PEER_RE.test(chatId) || messageId === null || !content.trim()) {
+          res.status(400).json({
+            error:
+              'Missing chatId (Telegram id or @username), messageId (positive integer) or content',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (!client.isClientConnected()) {
+          res
+            .status(503)
+            .json({ error: 'Not connected to Telegram', failureClass: 'disconnected' });
+          return;
+        }
+        const actor = actorFromBody(body.actor);
+        const result = await client.editMessage(chatId, messageId, content);
+        const published = result.unchanged
+          ? false
+          : (options.publishMessageEdited?.({
+              conversationId: result.conversationId,
+              telegramMessageId: String(messageId),
+              content,
+              editedAt: result.editedAt,
+              isOutbound: true,
+              source: 'connector',
+              ...(actor ? { actor } : {}),
+            }) ?? false);
+        res.json({
+          edited: true,
+          messageId,
+          chatId: result.conversationId,
+          editedAt: result.editedAt.toISOString(),
+          unchanged: result.unchanged,
+          published,
+        });
+      } catch (e) {
+        mutationErrorResponse(res, e);
       }
     })();
   });

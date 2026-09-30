@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:29d060fab08e52ad05edf0e82204f5879aa8f550c809f6e88c5e52b580b845b4",
+  "digest": "sha256:dfc9bdee7835487a8e10819b474e71cb6e2df3c9e708812fb2e8f260f3516111",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -1089,6 +1089,183 @@
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_edit_message",
+      "title": "Edit message",
+      "description": "Replace the text of one of our own sent text messages where supported (WhatsApp). The previous text is kept in the message history.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "messages.edit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "messageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "messageId",
+          "message"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true
       }

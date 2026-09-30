@@ -16,6 +16,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_create_draft',
   'social_delete_message',
   'social_discover_business',
+  'social_edit_message',
   'social_forward_message',
   'social_get_conversation',
   'social_get_digest',
@@ -53,6 +54,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_create_draft: 'internalWrite',
   social_delete_message: 'destructive',
   social_discover_business: 'read',
+  social_edit_message: 'externalWrite',
   social_forward_message: 'externalWrite',
   social_get_conversation: 'read',
   social_get_digest: 'read',
@@ -132,6 +134,12 @@ const EXPECTED_ANNOTATIONS: Record<
   social_discover_business: {
     readOnlyHint: true,
     destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_edit_message: {
+    readOnlyHint: false,
+    destructiveHint: true,
     idempotentHint: true,
     openWorldHint: true,
   },
@@ -390,11 +398,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 34 canonical tools in deterministic order', () => {
+  it('contains exactly the 35 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(34);
+    expect(new Set(names).size).toBe(35);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -420,7 +428,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(15);
+    expect(writes).toHaveLength(16);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same

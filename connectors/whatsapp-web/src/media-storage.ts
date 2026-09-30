@@ -32,7 +32,7 @@ const LEGACY_MINIO_USE_SSL =
 const LEGACY_BUCKET =
   process.env.LEGACY_MINIO_BUCKET || process.env.MINIO_BUCKET || 'socialmedia-media';
 // Out-of-cluster S3 endpoint (e.g. the Traefik LAN IngressRoute
-// https://skirmshop-s3.lan.e-dani.com). Used ONLY to presign GET URLs that
+// https://skirmshop-s3.e-dani.com). Used ONLY to presign GET URLs that
 // consumers outside the cluster (synapse adapters on sauvage) can fetch —
 // presigned URLs embed the signed host, so the in-cluster svc endpoint would
 // produce URLs that never resolve out there. Unset ⇒ presigning disabled.

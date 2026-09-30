@@ -19,6 +19,7 @@ import {
   WASocket,
   WAMessage,
   WAMessageKey,
+  WAMessageUpdate,
   proto,
   isJidGroup,
   jidEncode,
@@ -26,8 +27,12 @@ import {
   makeCacheableSignalKeyStore,
   AnyMessageContent,
   CacheStore,
+  ChatModification,
   GroupMetadata,
   Browsers,
+  generateMessageIDV2,
+  generateWAMessageFromContent,
+  normalizeMessageContent,
 } from '@whiskeysockets/baileys';
 import {
   isTcTokenExpired,
@@ -73,7 +78,91 @@ import {
   getRawWAMessage,
   MessageUnavailableError,
   storeRawWAMessage,
+  unixSeconds,
 } from './durable-message-store';
+import {
+  loadStoredMessage,
+  markMessageDeletedForMe,
+  markMessageEdited,
+  markMessageRevoked,
+  MessageMutationError,
+  StoredMessage,
+} from './message-mutations';
+import { reactionTime, storeMessageReaction } from './message-reactions';
+import {
+  buildPollContent,
+  buildPollVoteContent,
+  cryptoUserJid,
+  decryptPollVoteWith,
+  int64Ms,
+  keyAuthorCandidates,
+  messageSecretOf,
+  optionHash,
+  OwnIdentity,
+  parsePollDefinition,
+  PollEventInputError,
+  pollSigningPair,
+  selectedOptionNames,
+  validatePollSelection,
+  ValidatedPoll,
+} from './poll-votes';
+import {
+  buildEventContent,
+  buildEventResponseContent,
+  decryptEventResponseWith,
+  EventResponse,
+  parseEventDefinition,
+  ValidatedEvent,
+} from './event-responses';
+import {
+  aggregateEventResults,
+  aggregatePollResults,
+  EventResults,
+  loadStructuredMetadata,
+  PollResults,
+  readEventResponses,
+  readPollVotes,
+  storeEventResponse,
+  storePollVote,
+} from './poll-event-store';
+import {
+  ChatState,
+  ChatStatePatch,
+  latestMessageId,
+  muteEndTimestamp,
+  muteFromBaileys,
+  MuteState,
+  pinFromBaileys,
+  recordInboundChatState,
+  resolveCanonicalConversation,
+  writeChatState,
+} from './chat-state';
+import {
+  allowsParticipantAction,
+  countResults,
+  findParticipant,
+  GroupActionError,
+  groupCapabilities,
+  GroupParticipantAction,
+  GroupParticipantResult,
+  groupStateView,
+  GroupStateView,
+  GroupUpdate,
+  isCommunityGroup,
+  normalizeGroupParticipantAction,
+  ownParticipant,
+  parseGroupJid,
+  parseGroupParticipants,
+  parseGroupSubject,
+  parseGroupUpdate,
+  participantApiJid,
+  participantIds,
+  participantOutcome,
+  recordGroupChange,
+  recordGroupConversation,
+  recordInboundGroup,
+} from './group-management';
+import { maybeRunRetention } from './retention';
 import {
   appendCompanyToDisplayName,
   displayNameOrPhone,
@@ -134,6 +223,11 @@ export interface WhatsAppMessage {
   senderPnE164?: string;
   /** Baileys `key.fromMe`: true when this account sent the message (any device). */
   fromMe?: boolean;
+  /**
+   * Structured data of a POLL / EVENT row (fase 3 / PR-7): `{poll}` or
+   * `{event}`, merged into messages.metadata. Never key material.
+   */
+  structured?: Record<string, unknown>;
   attachments?: Array<{
     type: string;
     url: string;
@@ -311,6 +405,13 @@ export function classifyWhatsAppSendFailure(error: unknown): WhatsAppSendFailure
   return 'unknown';
 }
 
+/** HTTP status of a send failure class outside the controller (group errors). */
+function statusOfFailureClass(failureClass: WhatsAppSendFailureClass): number {
+  if (failureClass === 'timeout') return 504;
+  if (failureClass === 'disconnected') return 503;
+  return 500;
+}
+
 function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: boolean): string {
   if (failureClass === 'timeout') {
     return isGroup
@@ -344,6 +445,275 @@ function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: b
 // chat) so we can react/forward/delete/download without keeping every message
 // in memory.
 const KEY_CACHE_MAX = 2000;
+
+/**
+ * How long our own edit/revoke/delete-for-me keeps the echo WhatsApp sends
+ * back (messages.update / messages.delete) away from the inbound path: the
+ * explicit call persists it, after WhatsApp accepted it.
+ */
+const OWN_MUTATION_ECHO_MS = 30_000;
+
+/** Options of the outbound edit/delete calls. */
+export interface MessageMutationRequest {
+  /** Who asked (dgx-messages user, MCP caller); recorded in metadata. */
+  actor?: string;
+}
+
+/** POST /groups/create (fase 3 / PR-6). */
+export interface GroupCreateResult {
+  groupId: string;
+  /** conversations.id written (ingest only), else null. */
+  conversationId: string | null;
+  subject: string;
+  persisted: boolean;
+  participants: GroupParticipantResult[];
+  succeeded: number;
+  failed: number;
+  group: GroupStateView;
+}
+
+/** POST /groups/update. */
+export interface GroupUpdateResult {
+  groupId: string;
+  /** What went to WhatsApp, in order (subject, description, announce, restrict). */
+  changed: string[];
+  /** Asked for but already so: not sent. */
+  unchanged: string[];
+  /** The new subject was written on the canonical conversation. */
+  persisted: boolean;
+  group: GroupStateView | null;
+}
+
+/** POST /groups/participants. */
+export interface GroupParticipantsResult {
+  action: GroupParticipantAction;
+  groupId: string;
+  results: GroupParticipantResult[];
+  succeeded: number;
+  failed: number;
+  partial: boolean;
+  persisted: boolean;
+  group: GroupStateView | null;
+}
+
+/**
+ * Chat-level actions of POST /chats/modify (fase 3 / PR-5, the NAS fork's
+ * modifyChat adapted). Starring is not here: WhatsApp stars messages, not
+ * chats — the console's "destacar" is its own conversations.flagged.
+ */
+export type ChatModifyAction =
+  'archive' | 'unarchive' | 'pin' | 'unpin' | 'mute' | 'unmute' | 'markRead' | 'markUnread';
+
+const CHAT_MODIFY_ALIASES: Record<string, ChatModifyAction> = {
+  archive: 'archive',
+  unarchive: 'unarchive',
+  pin: 'pin',
+  unpin: 'unpin',
+  mute: 'mute',
+  unmute: 'unmute',
+  markread: 'markRead',
+  read: 'markRead',
+  markunread: 'markUnread',
+  unread: 'markUnread',
+};
+
+/** `markRead`, `mark-read`, `mark_read`, `read`… → the action; null if unknown. */
+export function normalizeChatModifyAction(value: unknown): ChatModifyAction | null {
+  if (typeof value !== 'string') return null;
+  return (
+    CHAT_MODIFY_ALIASES[
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/[-_\s]/g, '')
+    ] ?? null
+  );
+}
+
+/** Actions whose app-state patch carries a message range (Baileys `lastMessages`). */
+export function chatModifyNeedsLastMessage(action: ChatModifyAction): boolean {
+  return (
+    action === 'archive' ||
+    action === 'unarchive' ||
+    action === 'markRead' ||
+    action === 'markUnread'
+  );
+}
+
+/**
+ * The documented Baileys chatModify shapes. archive / markRead need
+ * `lastMessages` — the newest message of the chat, key + timestamp in
+ * seconds (Baileys takes the LAST entry as lastMessageTimestamp, so one
+ * entry, the newest). Mute takes WhatsApp's muteEndTimestamp (see
+ * muteEndTimestamp), unmute null.
+ */
+export function buildChatModification(
+  action: ChatModifyAction,
+  options: {
+    lastMessages?: Array<{ key: WAMessageKey; messageTimestamp: number }>;
+    mute?: MuteState;
+  } = {}
+): ChatModification {
+  const lastMessages = options.lastMessages || [];
+  if (chatModifyNeedsLastMessage(action) && !lastMessages.length) {
+    throw new MessageUnavailableError(
+      `${action} needs the newest message of the chat (key + timestamp) and none is known`,
+      404,
+      'message_unavailable'
+    );
+  }
+  switch (action) {
+    case 'archive':
+    case 'unarchive':
+      return { archive: action === 'archive', lastMessages };
+    case 'markRead':
+    case 'markUnread':
+      return { markRead: action === 'markRead', lastMessages };
+    case 'pin':
+    case 'unpin':
+      return { pin: action === 'pin' };
+    case 'mute':
+      return { mute: muteEndTimestamp(options.mute || { until: null }) };
+    case 'unmute':
+      return { mute: null };
+  }
+}
+
+/** What an accepted action writes on the canonical conversation. */
+function chatStatePatchFor(action: ChatModifyAction, mute?: MuteState): ChatStatePatch {
+  switch (action) {
+    case 'archive':
+    case 'unarchive':
+      return { archived: action === 'archive' };
+    case 'pin':
+      return { pinnedAt: new Date() };
+    case 'unpin':
+      return { pinnedAt: null };
+    case 'mute':
+      return { mute: mute || { until: null } };
+    case 'unmute':
+      return { mute: null };
+    case 'markRead':
+      return { unread: 'read' };
+    case 'markUnread':
+      return { unread: 'unread' };
+  }
+}
+
+/** Options of POST /chats/modify. */
+export interface ChatModifyRequest {
+  /** For `mute`: until when (null / absent = forever). */
+  mute?: MuteState;
+  /** Who asked (dgx-messages user, MCP caller); logged, never auth. */
+  actor?: string;
+}
+
+export interface ChatModifyResult {
+  action: ChatModifyAction;
+  /** Normalised jid the change went to (the one WhatsApp used last). */
+  chatId: string;
+  /** conversations.id of the canonical conversation; null when not ingesting. */
+  conversationId: string | null;
+  /** The row was written (false: pairing pool, or pin / mute without migration 012). */
+  persisted: boolean;
+  /** The canonical row after the change, when persisted. */
+  state: ChatState | null;
+}
+
+/** A message we can edit or delete: its real WhatsApp key and what we stored of it. */
+interface MutationTarget {
+  /** Bare WhatsApp id. */
+  id: string;
+  key: WAMessageKey;
+  chatJid: string;
+  timestampSeconds?: number;
+  /** true/false when known from the row or the payload, undefined when unknown. */
+  isText?: boolean;
+  stored?: StoredMessage;
+}
+
+// ---------------------------------------------------------------------------
+// Polls and events (fase 3 / PR-7)
+// ---------------------------------------------------------------------------
+
+/** A poll vote or an event response: state of another message, never a chat row. */
+export function isPollOrEventResponse(msg: WAMessage): boolean {
+  const content = normalizeMessageContent(msg.message);
+  return !!(content?.pollUpdateMessage || content?.encEventResponseMessage);
+}
+
+/**
+ * Votes / responses after everything else of a batch: a history batch can
+ * carry a poll and its votes, and a vote is only decryptable once its poll
+ * (and its secret) is known.
+ */
+export function responsesLast<T extends WAMessage>(messages: T[]): T[] {
+  const responses = messages.filter(isPollOrEventResponse);
+  if (!responses.length) return messages;
+  return [...messages.filter(m => !isPollOrEventResponse(m)), ...responses];
+}
+
+/** Types an old row of a poll may have (whatsapp-web.js era, Baileys before PR-7). */
+const POLL_ROW_TYPES = /^(POLL|POLL_CREATION|POLLCREATIONMESSAGE(V\d)?|MESSAGECONTEXTINFO)$/;
+const EVENT_ROW_TYPES = /^(EVENT|EVENTMESSAGE|MESSAGECONTEXTINFO)$/;
+
+/** Chats a poll / event can go to: a group, a phone-number or a LID chat. */
+const STRUCTURED_CHAT_JID = /^(?:\d+(?:-\d+)?@g\.us|\d+@(?:c\.us|s\.whatsapp\.net|lid))$/;
+
+export interface StructuredSendOptions {
+  /** Idempotent sends: the id derived from the Idempotency-Key. */
+  messageId?: string;
+  /** Runs right before the network send (the idempotency claim). */
+  beforeSend?: () => Promise<void>;
+  actor?: string;
+}
+
+export interface StructuredSendResult {
+  messageId: string;
+  conversationId: string;
+  sentAt: string;
+}
+
+export interface PollVoteResult {
+  messageId: string;
+  pollMessageId: string;
+  conversationId: string;
+  options: string[];
+  retracted: boolean;
+  votedAt: string;
+  persisted: boolean;
+}
+
+export interface EventResponseResult {
+  messageId: string;
+  eventMessageId: string;
+  conversationId: string;
+  response: EventResponse;
+  extraGuestCount: number;
+  respondedAt: string;
+  persisted: boolean;
+}
+
+export type PollResultsView = PollResults & {
+  messageId: string;
+  conversationId: string;
+  /** false when the votes table is missing (013 not applied): counts are then empty. */
+  persisted: boolean;
+};
+
+export type EventResultsView = EventResults & {
+  messageId: string;
+  conversationId: string;
+  name: string;
+  description: string | null;
+  startTime: number | null;
+  endTime: number | null;
+  location: unknown;
+  joinLink: string | null;
+  isCanceled: boolean;
+  extraGuestsAllowed: boolean;
+  persisted: boolean;
+};
 
 // ---------------------------------------------------------------------------
 // LID → phone-number (PN) extraction
@@ -445,6 +815,39 @@ export function pnFromLidMessage(msg: WAMessage | undefined | null): LidPnInfo |
 }
 
 /**
+ * INFRA-288 (P1 of INFRA-112): limits for the reconnect history backfill.
+ *
+ * When a Baileys socket drops, WhatsApp keeps the messages that arrived while
+ * offline only in the phone; the reconnect itself replays nothing. So on every
+ * `connection.update: open` we ask for the dropped window — bounded, never
+ * unbounded history. Pure function of env so the constructor and the tests
+ * share one reading of the flags:
+ *
+ * - WA_RECONNECT_BACKFILL_WINDOW_HOURS (default 6): how far back the dropped
+ *   window reaches. Hard defensive ceiling 24h.
+ * - WA_RECONNECT_BACKFILL_MAX_MESSAGES (default 500): total messages asked for
+ *   per burst. Hard defensive ceiling 1000.
+ *
+ * `0` or negative on either flag disables the feature entirely (zero fetches).
+ * Batch per chat is 50 — the maximum the Postgres-side history machinery
+ * (backfillHistory / messaging-history.set) handles per request.
+ */
+export function reconnectBackfillLimitsFromEnv(
+  env: NodeJS.ProcessEnv = process.env
+): { windowMs: number; maxMessages: number; batchSize: number } | null {
+  const rawHours = parseInt(env.WA_RECONNECT_BACKFILL_WINDOW_HOURS ?? '', 10);
+  const rawMax = parseInt(env.WA_RECONNECT_BACKFILL_MAX_MESSAGES ?? '', 10);
+  const hours = Number.isNaN(rawHours) ? 6 : rawHours;
+  const max = Number.isNaN(rawMax) ? 500 : rawMax;
+  if (hours <= 0 || max <= 0) return null;
+  return {
+    windowMs: Math.min(hours, 24) * 60 * 60 * 1000,
+    maxMessages: Math.min(max, 1000),
+    batchSize: 50,
+  };
+}
+
+/**
  * SC-1225: per-instance options. Both default to the legacy behaviour, so a
  * `new BaileysClient(path, key)` (the house connectors) is unchanged.
  */
@@ -507,6 +910,12 @@ export class BaileysClient extends EventEmitter {
   // import source; this flag lets Baileys fill whatever WhatsApp sends during
   // a fresh device link without treating those messages as live events.
   private readonly historySyncOnLogin = process.env.WA_HISTORY_SYNC_ON_LOGIN === 'true';
+  // INFRA-288: bounded backfill of the window dropped between a disconnect and
+  // the reconnect. null = feature off (a 0/negative flag). Read once at
+  // construction like the other WA_* knobs.
+  private readonly reconnectBackfillLimits = reconnectBackfillLimitsFromEnv();
+  private lastReconnectBackfillAt = 0;
+  private reconnectBackfillInFlight = false;
   // F1.7 honest voice — OFF by default. Enabled (with S3_PUBLIC_ENDPOINT) only
   // on the professional deployment: awaits the voice-note upload before the
   // NATS emit so the event carries a presigned audio URL synapse can
@@ -531,6 +940,9 @@ export class BaileysClient extends EventEmitter {
   private presenceSubscribed = new Set<string>();
   private groupMetaCache = new Map<string, GroupMetadata>(); // by raw JID
   private keyCache = new Map<string, { key: WAMessageKey; chatJid: string }>(); // by waMessageId
+  // `<kind>:<bare id>` of our own edits/revokes/deletes-for-me whose echo the
+  // inbound handlers must leave alone (see OWN_MUTATION_ECHO_MS).
+  private ownMutations = new Map<string, ReturnType<typeof setTimeout> | null>();
   private immediateSendFailureWaiters = new Map<string, (failure: ImmediateSendFailure) => void>();
   private recentImmediateSendFailures = new Map<
     string,
@@ -735,6 +1147,13 @@ export class BaileysClient extends EventEmitter {
         // indicators to the dashboard. baileys auto-renews subscriptions
         // while the socket stays open.
         void this.subscribePresenceForActiveChats(200);
+        // INFRA-288: messages that arrived while the socket was down live only
+        // on the phone until we ask for them — pull the dropped window, bounded.
+        // Skipped when WA_HISTORY_SYNC_ON_LOGIN is on: Baileys already syncs
+        // history there. Fire-and-forget; must never break this handler.
+        void this.backfillReconnectWindow().catch(e =>
+          this.logger.warn(`reconnect backfill failed: ${e?.message || e}`)
+        );
         return;
       }
 
@@ -780,7 +1199,7 @@ export class BaileysClient extends EventEmitter {
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify' && type !== 'append') return;
       const isLive = type === 'notify';
-      for (const msg of messages) {
+      for (const msg of responsesLast(messages)) {
         if (!msg.message) continue;
         try {
           await this.ingestMessage(msg, {
@@ -809,6 +1228,11 @@ export class BaileysClient extends EventEmitter {
         });
         // Persist real unread + archived from the history snapshot.
         void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
+        // Pin / mute (fase 3 / PR-5): only what the snapshot says.
+        void recordInboundChatState(norm, {
+          pinnedAt: pinFromBaileys(c),
+          mute: muteFromBaileys(c, 'snapshot'),
+        });
       }
       if (!this.historySyncOnLogin && Date.now() > this.historyBackfillRequestedUntil) return;
       this.logger.info(
@@ -818,7 +1242,7 @@ export class BaileysClient extends EventEmitter {
         string,
         { inserted: number; oldest?: WhatsAppMessage; newest?: WhatsAppMessage }
       >();
-      for (const m of messages) {
+      for (const m of responsesLast(messages)) {
         try {
           const result = await this.ingestMessage(m, {
             source: 'baileys_history_sync',
@@ -857,7 +1281,10 @@ export class BaileysClient extends EventEmitter {
         const norm = this.normalizeJid(u.id);
         const prev = this.chatStore.get(norm);
         if (prev) {
-          if (typeof u.unreadCount === 'number') prev.unreadCount = u.unreadCount;
+          if (typeof u.unreadCount === 'number') {
+            // -1 = marked as unread on the phone: a dot, at least one unread.
+            prev.unreadCount = u.unreadCount < 0 ? Math.max(prev.unreadCount, 1) : u.unreadCount;
+          }
           if (u.conversationTimestamp) prev.timestamp = Number(u.conversationTimestamp);
           if ((u as any).name) prev.name = (u as any).name;
           this.emit('chat-update', {
@@ -866,10 +1293,18 @@ export class BaileysClient extends EventEmitter {
             metadata: { name: prev.name },
           });
         }
-        // chats.update may carry only a delta — persist whichever fields are present.
-        const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount || 0;
+        // chats.update may carry only a delta — persist whichever fields are
+        // present (an archive-only delta for a chat not cached here leaves the
+        // badge alone instead of zeroing it).
+        const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount;
         const arch = typeof (u as any).archived === 'boolean' ? (u as any).archived : undefined;
         void setConversationState(norm, uc, arch).catch(() => {});
+        // Pin / mute from app-state sync (the phone, or the echo of our own
+        // POST /chats/modify — same values), on the canonical conversation.
+        void recordInboundChatState(norm, {
+          pinnedAt: pinFromBaileys(u),
+          mute: muteFromBaileys(u, 'sync-action'),
+        });
       }
     });
 
@@ -887,6 +1322,10 @@ export class BaileysClient extends EventEmitter {
         });
         // Persist real unread badge + archived flag (fire-and-forget).
         void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
+        void recordInboundChatState(norm, {
+          pinnedAt: pinFromBaileys(c),
+          mute: muteFromBaileys(c, 'snapshot'),
+        });
         // Subscribe to presence so we get typing updates for this chat.
         void this.presenceSubscribeSilent(c.id);
       }
@@ -928,14 +1367,8 @@ export class BaileysClient extends EventEmitter {
         const waMessageId = u.key.id;
         const stubParams = (u.update as any)?.messageStubParameters;
         const ackErrorCode = Array.isArray(stubParams) ? String(stubParams[0] || '') : undefined;
-        // Detect deletions
-        const stub = u.update?.messageStubType;
-        const isDeleted =
-          stub === proto.WebMessageInfo.StubType.REVOKE || u.update?.message === null;
-        if (isDeleted) {
-          this.emit('message-update', { waMessageId, updateType: 'DELETED' });
-          void setMessageStatus(waMessageId, 'deleted').catch(() => {});
-        }
+        // Revokes and edits (fase 3 / PR-3).
+        void this.handleInboundMutation(u);
         // Track delivery state from WhatsApp servers (the green ticks).
         const st: number | undefined = (u.update as any)?.status;
         if (typeof st === 'number') {
@@ -957,6 +1390,12 @@ export class BaileysClient extends EventEmitter {
           }
         }
       }
+    });
+
+    // "Delete for me" done on our phone (or another linked device) arrives as
+    // an app-state sync action. Same flag as deleteMessageForMe; no bus event.
+    sock.ev.on('messages.delete', item => {
+      void this.handleDeleteForMeSync(item);
     });
 
     // Receipts from individual recipients (group "✓✓ for everyone" or read).
@@ -992,6 +1431,26 @@ export class BaileysClient extends EventEmitter {
         },
       });
       this.groupMetaCache.delete(id);
+    });
+
+    // A group created (by us or with us in it): its conversation row, so it
+    // is listed before its first message. A new subject: on the canonical row.
+    sock.ev.on('groups.upsert', groups => {
+      for (const meta of groups) {
+        if (!meta?.id) continue;
+        this.cacheGroupMetadata(meta);
+        void recordInboundGroup('upsert', meta);
+      }
+    });
+
+    sock.ev.on('groups.update', updates => {
+      for (const update of updates) {
+        if (!update?.id) continue;
+        this.groupMetaCache.delete(update.id);
+        const chat = this.chatStore.get(this.normalizeJid(update.id));
+        if (chat && update.subject) chat.name = update.subject;
+        void recordInboundGroup('update', update);
+      }
     });
   }
 
@@ -1106,6 +1565,15 @@ export class BaileysClient extends EventEmitter {
       this.rememberMessageForRetry(msg.key, msg.message);
     }
 
+    // Fase 3 / PR-7: a poll vote or an event response is state of the poll /
+    // event, not a chat message (WhatsApp does not list it either): it is
+    // decrypted into whatsapp_poll_votes / whatsapp_event_responses and no
+    // messages row is written (before, an empty POLLUPDATEMESSAGE row).
+    if (isPollOrEventResponse(msg)) {
+      await this.ingestPollOrEventResponse(msg, options);
+      return { inserted: false };
+    }
+
     const waMessage = this.convertMessage(msg);
     if (!waMessage) return { inserted: false };
 
@@ -1211,6 +1679,8 @@ export class BaileysClient extends EventEmitter {
         // and Baileys surfaced the PN. Omitted entirely otherwise — never an
         // invented value. Consumer contract: messages.metadata->>'senderPnE164'.
         senderPnE164: lidPn?.e164,
+        // POLL / EVENT (fase 3 / PR-7): {poll} or {event}, what dgx-messages renders.
+        ...waMessage.structured,
       },
     };
     const msgId = await storeMessage(data);
@@ -1227,12 +1697,16 @@ export class BaileysClient extends EventEmitter {
       )
     );
     // Also for an already-stored row (msgId null): a history replay after a
-    // relink backfills the payloads of the recent window.
+    // relink backfills the payloads of the recent window. A poll / event is
+    // kept whatever its age: its secret is what decrypts the votes / responses.
     await this.persistDurablePayload(
       msg,
       waMessage.conversationId,
-      options.source === 'baileys_history_sync' ? 'history' : 'live'
+      options.source === 'baileys_history_sync' && !waMessage.structured ? 'history' : 'live'
     );
+    // Before the msgId check: prod folds REACTION inserts into the target's
+    // messages.reactions and skips the row, so msgId is always null for them.
+    if (waMessage.messageType === 'REACTION') await this.persistReaction(msg, waMessage);
 
     if (!msgId) return { inserted: false, waMessage };
 
@@ -1291,6 +1765,9 @@ export class BaileysClient extends EventEmitter {
     let body: string | null = null;
     let isForwarded = false;
     let replyToWaId: string | undefined;
+    let poll: ReturnType<typeof parsePollDefinition> = null;
+    let event: ReturnType<typeof parseEventDefinition> = null;
+    let structured: Record<string, unknown> | undefined;
 
     const text = content.conversation;
     const ext = content.extendedTextMessage;
@@ -1331,6 +1808,16 @@ export class BaileysClient extends EventEmitter {
     } else if (content.contactsArrayMessage) {
       messageType = 'CONTACT';
       body = content.contactsArrayMessage.displayName || null;
+    } else if ((poll = parsePollDefinition(content))) {
+      // Fase 3 / PR-7: a proper POLL row (was MESSAGECONTEXTINFO or
+      // POLLCREATIONMESSAGEV3 with no content). The secret stays in the payload.
+      messageType = 'POLL';
+      body = poll.question || null;
+      structured = { poll };
+    } else if ((event = parseEventDefinition(content))) {
+      messageType = 'EVENT';
+      body = event.name || null;
+      structured = { event };
     } else if (content.protocolMessage) {
       // ignore key updates etc.
       return null;
@@ -1355,6 +1842,7 @@ export class BaileysClient extends EventEmitter {
       // Sender display name (attacker-controlled + PII; do NOT log).
       // Omitted when absent (e.g. history sync).
       pushName: msg.pushName || undefined,
+      ...(structured ? { structured } : {}),
     };
   }
 
@@ -1484,13 +1972,49 @@ export class BaileysClient extends EventEmitter {
     source: DurablePayloadSource
   ): Promise<void> {
     if (!this.ingest || !msg?.key?.id) return;
+    // Hourly, in the background: purge expired payloads and send attempts.
+    void maybeRunRetention();
     await storeRawWAMessage(msg, conversationId, source);
   }
 
+  /**
+   * A reaction seen on the socket (a contact, our phone, the echo of our own
+   * react) → whatsapp_message_reactions. The reactor is the message sender:
+   * our own jid when fromMe. SC-1225: a pairing-only socket writes nothing.
+   */
+  private async persistReaction(msg: WAMessage, waMessage: WhatsAppMessage): Promise<void> {
+    const reaction = msg.message?.reactionMessage;
+    const target = reaction?.key?.id;
+    if (!this.ingest || !target) return;
+    await storeMessageReaction({
+      targetMessageId: target,
+      conversationId: waMessage.conversationId,
+      reactorJid: waMessage.senderWaId,
+      emoji: reaction.text || '',
+      // Raw: a key that never said stays unknown instead of reading as a contact.
+      fromMe: msg.key.fromMe ?? null,
+      reactionMessageId: msg.key.id || undefined,
+      reactedAt: reactionTime(reaction.senderTimestampMs, unixSeconds(msg.messageTimestamp)),
+    });
+  }
+
+  /**
+   * Whether this client owns DB state (live ingest, durable payloads, send
+   * idempotency). false for the per-sub pairing pool (SC-1225).
+   */
+  isIngestEnabled(): boolean {
+    return this.ingest;
+  }
+
+  /**
+   * `messageId` overrides Baileys' random id (idempotent sends) and is reused
+   * by the group repair retry; `beforeSend` runs once, after every preflight
+   * and right before the message goes to the network (the idempotency claim).
+   */
   async sendMessage(
     chatId: string,
     content: string,
-    options?: { replyToMessageId?: string }
+    options?: { replyToMessageId?: string; messageId?: string; beforeSend?: () => Promise<void> }
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     if (!this.isConnected())
@@ -1534,11 +2058,13 @@ export class BaileysClient extends EventEmitter {
       });
     }
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
+    await options?.beforeSend?.();
     try {
       const sent = await this.sendTextWithTimeout(raw, content, timeoutMs, {
         useCachedGroupMetadata: isGroup ? false : undefined,
         useUserDevicesCache: isGroup ? false : undefined,
         quoted,
+        messageId: options?.messageId,
       });
       const messageId = sent?.key?.id;
       this.logger.info(
@@ -1587,10 +2113,13 @@ export class BaileysClient extends EventEmitter {
           this.logger.info(
             `Retrying WhatsApp group send after repair rawJid=${raw} normalizedJid=${normalized} groupSubject="${repair.groupSubject}" participants=${repair.participantCount} devices=${repair.deviceCount}`
           );
+          // Same id as the first attempt: if that one did go out, WhatsApp
+          // already holds this message id and the retry is not a new message.
           const retried = await this.sendTextWithTimeout(raw, content, timeoutMs, {
             useCachedGroupMetadata: false,
             useUserDevicesCache: false,
             quoted,
+            messageId: options?.messageId,
           });
           const messageId = retried?.key?.id;
           this.logger.info(
@@ -1720,8 +2249,14 @@ export class BaileysClient extends EventEmitter {
     chatId: string,
     fileUrl: string,
     caption?: string,
-    options?: { asSticker?: boolean; replyToMessageId?: string }
-  ): Promise<void> {
+    options?: {
+      asSticker?: boolean;
+      replyToMessageId?: string;
+      /** Same contract as sendMessage's messageId / beforeSend. */
+      messageId?: string;
+      beforeSend?: () => Promise<void>;
+    }
+  ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
     // A media reply whose quoted message is unknown is rejected (before the
@@ -1763,26 +2298,40 @@ export class BaileysClient extends EventEmitter {
         caption,
       };
 
-    const sent = await this.sock.sendMessage(raw, payload, quoted ? { quoted } : undefined);
+    await options?.beforeSend?.();
+    const sendOptions =
+      quoted || options?.messageId
+        ? {
+            ...(quoted ? { quoted } : {}),
+            ...(options?.messageId ? { messageId: options.messageId } : {}),
+          }
+        : undefined;
+    const sent = await this.sock.sendMessage(raw, payload, sendOptions);
     if (sent?.key?.id) {
       this.rememberKey(sent.key.id, sent.key, raw);
       this.rememberMessageForRetry(sent.key, sent.message);
       await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || raw), 'sent');
     }
+    return sent?.key?.id || undefined;
   }
 
   /** Send an Ogg/Opus clip as a WhatsApp voice note (PTT). */
   async sendVoice(
     chatId: string,
     audio: Buffer,
-    mimetype = 'audio/ogg; codecs=opus'
+    mimetype = 'audio/ogg; codecs=opus',
+    /** Same contract as sendMessage's messageId / beforeSend. */
+    options?: { messageId?: string; beforeSend?: () => Promise<void> }
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     if (!this.isConnected())
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
     const raw = this.toRawJid(chatId);
     const payload: AnyMessageContent = { audio, mimetype, ptt: true };
-    const sent = await this.sock.sendMessage(raw, payload);
+    await options?.beforeSend?.();
+    const sent = options?.messageId
+      ? await this.sock.sendMessage(raw, payload, { messageId: options.messageId })
+      : await this.sock.sendMessage(raw, payload);
     const messageId = sent?.key?.id;
     if (sent?.key) {
       this.rememberKey(messageId || '', sent.key, raw);
@@ -1792,21 +2341,537 @@ export class BaileysClient extends EventEmitter {
     return messageId || undefined;
   }
 
-  async reactToMessage(chatId: string, messageId: string, emoji: string): Promise<void> {
-    if (!this.sock) throw new Error('Client not initialized');
-    const cached = this.keyCache.get(messageId);
-    let key: WAMessageKey | null = cached?.key || null;
-    if (!key) {
-      // Reconstruct from BD: we need fromMe / participant. Best effort.
-      const fallback = await this.reconstructKeyFromDb(messageId, chatId).catch(() => null);
-      if (!fallback) {
-        this.logger.warn(`reactToMessage: message ${messageId} not found in key cache nor DB`);
+  /**
+   * React to a message ('' removes our reaction). The key comes from memory,
+   * the durable payload, whatsapp_message_keys or the messages row (so it
+   * survives restarts); an unknown message is a 404 message_unavailable, never
+   * a silent success. The reaction is recorded (ingest only) once WhatsApp has
+   * it; its echo later lands on the same row.
+   */
+  async reactToMessage(
+    chatId: string,
+    messageId: string,
+    emoji: string
+  ): Promise<{ messageId: string; reactionId?: string; emoji: string; reactedAt: string }> {
+    const sock = this.connectedSocket();
+    const text = typeof emoji === 'string' ? emoji.trim() : '';
+    const target = await this.resolveMutationTarget(chatId, messageId, 'reactToMessage');
+    const sent = await sock.sendMessage(target.chatJid, { react: { text, key: target.key } });
+    const reactedAt = reactionTime(sent?.message?.reactionMessage?.senderTimestampMs) || new Date();
+    if (this.ingest && this.meJid) {
+      await storeMessageReaction({
+        targetMessageId: target.id,
+        conversationId: this.normalizeJid(target.chatJid),
+        reactorJid: this.normalizeJid(this.meJid),
+        emoji: text,
+        fromMe: true,
+        reactionMessageId: sent?.key?.id || undefined,
+        reactedAt,
+      });
+    }
+    this.logger.info(`Reacted with ${text || '(removed)'} to ${target.id}`);
+    return {
+      messageId: target.id,
+      reactionId: sent?.key?.id || undefined,
+      emoji: text,
+      reactedAt: reactedAt.toISOString(),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Polls and events (fase 3 / PR-7)
+  // ---------------------------------------------------------------------------
+
+  /** Our own user jids for the vote / response crypto (PN from meJid when the socket has no user). */
+  private async ownIdentity(): Promise<OwnIdentity> {
+    const ids = await this.ownIds();
+    return {
+      pn: ids.find(id => id.endsWith('@s.whatsapp.net')) || cryptoUserJid(this.meJid),
+      lid: ids.find(id => id.endsWith('@lid')) || null,
+    };
+  }
+
+  /** Candidates plus their PN ↔ LID alternates from Baileys' mapping. */
+  private async withAliases(jids: string[]): Promise<string[]> {
+    const out: string[] = [];
+    for (const jid of jids) {
+      for (const alias of await this.jidAliases(jid)) {
+        const user = cryptoUserJid(alias);
+        if (user && !out.includes(user)) out.push(user);
+      }
+    }
+    return out;
+  }
+
+  /** Poll / event creation message by id: memory, then the durable payload (PR-1). */
+  private async structuredOriginal(id: string): Promise<WAMessage | undefined> {
+    return this.memoryMessage(id) || (await this.durableMessage(id));
+  }
+
+  /**
+   * A vote or a response seen on the socket (a contact, our phone) → its
+   * table. The poll / event must be known with its secret, else the update is
+   * logged and skipped (never a crash): a poll received before the durable
+   * payloads (PR-1) cannot be decrypted. The raw update is kept as a payload.
+   */
+  private async ingestPollOrEventResponse(msg: WAMessage, options: IngestOptions): Promise<void> {
+    if (!this.ingest || !msg.key?.id || !msg.key.remoteJid) return;
+    const content = normalizeMessageContent(msg.message);
+    const conversationId = this.normalizeJid(msg.key.remoteJid);
+    await this.persistDurablePayload(
+      msg,
+      conversationId,
+      options.source === 'baileys_history_sync' ? 'history' : 'live'
+    );
+    const fromMe = !!msg.key.fromMe;
+    const person = this.normalizeJid(
+      fromMe ? this.meJid || msg.key.remoteJid : msg.key.participant || msg.key.remoteJid
+    );
+    const own = await this.ownIdentity();
+    const at = (ms: number | undefined) =>
+      new Date(ms || (unixSeconds(msg.messageTimestamp) || 0) * 1000 || Date.now());
+
+    const update = content?.pollUpdateMessage;
+    if (update) {
+      const pollId = update.pollCreationMessageKey?.id || '';
+      const poll = pollId ? await this.structuredOriginal(pollId) : undefined;
+      const definition = parsePollDefinition(poll?.message);
+      const secret = messageSecretOf(poll?.message);
+      if (!poll || !definition || !secret) {
+        this.logger.info(
+          `Poll vote ${msg.key.id} for ${pollId || 'an unknown poll'} skipped: ${
+            !poll ? 'poll unknown' : !definition ? 'not a poll' : 'poll secret unavailable'
+          }`
+        );
         return;
       }
-      key = fallback;
+      const decrypted = decryptPollVoteWith(update.vote, {
+        pollId,
+        secret,
+        creators: await this.withAliases([
+          ...keyAuthorCandidates(poll.key, own),
+          ...keyAuthorCandidates(update.pollCreationMessageKey as WAMessageKey, own),
+        ]),
+        voters: await this.withAliases(keyAuthorCandidates(msg.key, own)),
+      });
+      if (!decrypted) {
+        this.logger.warn(`Poll vote ${msg.key.id} for ${pollId} could not be decrypted: skipped`);
+        return;
+      }
+      const { names } = selectedOptionNames(definition, decrypted.hashes);
+      await storePollVote({
+        pollMessageId: pollId,
+        conversationId,
+        voterJid: person,
+        selectedOptions: names,
+        selectedHashes: decrypted.hashes,
+        fromMe,
+        voteMessageId: msg.key.id,
+        votedAt: at(int64Ms(update.senderTimestampMs)),
+      });
+      return;
     }
-    await this.sock.sendMessage(this.toRawJid(chatId), { react: { text: emoji, key } });
-    this.logger.info(`Reacted with ${emoji} to ${messageId}`);
+
+    const enc = content?.encEventResponseMessage;
+    const eventId = enc?.eventCreationMessageKey?.id || '';
+    const event = eventId ? await this.structuredOriginal(eventId) : undefined;
+    const secret = messageSecretOf(event?.message);
+    if (!enc || !event || !parseEventDefinition(event.message) || !secret) {
+      this.logger.info(
+        `Event response ${msg.key.id} for ${eventId || 'an unknown event'} skipped: ${
+          !event ? 'event unknown' : !secret ? 'event secret unavailable' : 'not an event'
+        }`
+      );
+      return;
+    }
+    const decrypted = decryptEventResponseWith(enc, {
+      eventId,
+      secret,
+      creators: await this.withAliases([
+        ...keyAuthorCandidates(event.key, own),
+        ...keyAuthorCandidates(enc.eventCreationMessageKey as WAMessageKey, own),
+      ]),
+      responders: await this.withAliases(keyAuthorCandidates(msg.key, own)),
+    });
+    if (!decrypted) {
+      this.logger.warn(
+        `Event response ${msg.key.id} for ${eventId} could not be decrypted: skipped`
+      );
+      return;
+    }
+    await storeEventResponse({
+      eventMessageId: eventId,
+      conversationId,
+      responderJid: person,
+      response: decrypted.response,
+      extraGuestCount: decrypted.extraGuestCount,
+      fromMe,
+      responseMessageId: msg.key.id,
+      respondedAt: at(decrypted.timestampMs),
+    });
+  }
+
+  /**
+   * The chat a new poll / event goes to: the canonical conversation's jid
+   * (a merged PN twin sends to its @lid), else the id as given. Only groups,
+   * phone-number and LID chats (a broadcast, newsletter or another account's
+   * prefix is 400).
+   */
+  private async structuredSendTarget(
+    chatId: string,
+    what: string
+  ): Promise<{ raw: string; conversationId: string }> {
+    const requested = stripAccountKey(String(chatId || '').trim());
+    if (!STRUCTURED_CHAT_JID.test(requested)) {
+      throw new MessageMutationError(
+        `${what}: ${requested || 'conversationId'} is not a WhatsApp group, phone or LID chat`,
+        400,
+        'invalid_request'
+      );
+    }
+    const conversation = this.ingest ? await resolveCanonicalConversation(requested) : undefined;
+    const raw = this.toRawJid(conversation?.externalId || requested);
+    return { raw, conversationId: this.normalizeJid(raw) };
+  }
+
+  /** The poll / event behind a vote / response, or the precise reason it cannot be used. */
+  private async structuredTarget(
+    chatId: string,
+    messageId: string,
+    kind: 'poll' | 'event'
+  ): Promise<{ target: MutationTarget; original: WAMessage; secret: Uint8Array }> {
+    const target = await this.resolveMutationTarget(
+      chatId,
+      messageId,
+      kind === 'poll' ? 'vote' : 'respond'
+    );
+    const original = await this.structuredOriginal(target.id);
+    const parsed =
+      kind === 'poll'
+        ? parsePollDefinition(original?.message)
+        : parseEventDefinition(original?.message);
+    if (!original || !parsed) {
+      const rowType = target.stored?.messageType || '';
+      const maybe = (kind === 'poll' ? POLL_ROW_TYPES : EVENT_ROW_TYPES).test(rowType);
+      if (original || (target.stored && !maybe)) {
+        throw new MessageMutationError(
+          `Message ${target.id} is not a${kind === 'poll' ? ' poll' : 'n event'}`,
+          422,
+          kind === 'poll' ? 'not_a_poll' : 'not_an_event'
+        );
+      }
+      throw new MessageMutationError(
+        `The ${kind} ${target.id} is not stored with its content (received before the connector kept payloads): answer it from the phone`,
+        422,
+        `${kind}_secret_unavailable`
+      );
+    }
+    const secret = messageSecretOf(original.message);
+    if (!secret) {
+      throw new MessageMutationError(
+        `The ${kind} ${target.id} has no encryption secret: answer it from the phone`,
+        422,
+        `${kind}_secret_unavailable`
+      );
+    }
+    const key = { ...original.key, ...target.key, id: target.id };
+    return { target: { ...target, key }, original: { ...original, key }, secret };
+  }
+
+  /** A relayed control message (vote / response): kept for retries and restarts. */
+  private async relayStructured(
+    sock: WASocket,
+    chatJid: string,
+    content: proto.IMessage,
+    options: StructuredSendOptions,
+    userJid: string
+  ): Promise<string> {
+    const messageId = options.messageId || generateMessageIDV2(sock.user?.id);
+    const full = generateWAMessageFromContent(chatJid, content, { messageId, userJid });
+    await options.beforeSend?.();
+    await sock.relayMessage(chatJid, full.message as proto.IMessage, { messageId });
+    this.rememberKey(messageId, full.key, chatJid);
+    this.rememberMessageForRetry(full.key, full.message);
+    await this.persistDurablePayload(full, this.normalizeJid(chatJid), 'sent');
+    return messageId;
+  }
+
+  /**
+   * Send a poll. Its POLL row comes from the echo Baileys emits (like every
+   * send); the payload with the secret is stored now, so votes can be read
+   * and cast after a restart.
+   */
+  async sendPoll(
+    chatId: string,
+    poll: ValidatedPoll,
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(chatId, 'sendPoll');
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(
+      target.raw,
+      buildPollContent(poll),
+      options.messageId ? { messageId: options.messageId } : undefined
+    );
+    return this.afterStructuredSend(sent, target, 'Poll', options.actor);
+  }
+
+  async sendEvent(
+    chatId: string,
+    event: ValidatedEvent,
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(chatId, 'sendEvent');
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(
+      target.raw,
+      buildEventContent(event),
+      options.messageId ? { messageId: options.messageId } : undefined
+    );
+    return this.afterStructuredSend(sent, target, 'Event', options.actor);
+  }
+
+  private async afterStructuredSend(
+    sent: WAMessage | undefined,
+    target: { raw: string; conversationId: string },
+    what: 'Poll' | 'Event',
+    actor?: string
+  ): Promise<StructuredSendResult> {
+    const messageId = sent?.key?.id;
+    if (!sent || !messageId)
+      throw new Error(`WhatsApp returned no message id for the ${what.toLowerCase()}`);
+    this.rememberKey(messageId, sent.key, target.raw);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, target.conversationId, 'sent');
+    this.logger.info(`${what} ${messageId} sent to ${target.raw}${actor ? ` by ${actor}` : ''}`);
+    return { messageId, conversationId: target.conversationId, sentAt: new Date().toISOString() };
+  }
+
+  /**
+   * Vote on a poll (the complete selection; [] retracts). The poll comes from
+   * memory or its durable payload (needs its secret); the vote is signed with
+   * the identities the chat is addressed with (poll-votes.ts) and recorded
+   * as ours once WhatsApp has it.
+   */
+  async sendPollVote(
+    chatId: string,
+    messageId: string,
+    options: unknown,
+    sendOptions: StructuredSendOptions = {}
+  ): Promise<PollVoteResult> {
+    const sock = this.connectedSocket();
+    const { target, original, secret } = await this.structuredTarget(chatId, messageId, 'poll');
+    const definition = parsePollDefinition(original.message)!;
+    const selection = validatePollSelection(definition, options);
+    const own = await this.ownIdentity();
+    const lidAddressed = isJidGroup(target.chatJid)
+      ? (await this.fetchGroupMetadata(target.chatJid).catch(() => undefined))?.addressingMode ===
+        'lid'
+      : target.chatJid.endsWith('@lid');
+    const pair = pollSigningPair(target.key, own, lidAddressed);
+    if (!pair) {
+      throw new MessageMutationError(
+        `Cannot tell which identity signs a vote on ${target.id}`,
+        422,
+        'identity_unavailable'
+      );
+    }
+    const votedAtMs = Date.now();
+    const content = buildPollVoteContent({
+      creationKey: { ...target.key, remoteJid: target.chatJid },
+      secret,
+      creator: pair.creator,
+      voter: pair.voter,
+      options: selection,
+      senderTimestampMs: votedAtMs,
+    });
+    const voteId = await this.relayStructured(
+      sock,
+      target.chatJid,
+      content,
+      sendOptions,
+      pair.voter
+    );
+    const conversationId = this.normalizeJid(target.chatJid);
+    const persisted =
+      this.ingest && !!this.meJid
+        ? await storePollVote({
+            pollMessageId: target.id,
+            conversationId,
+            voterJid: this.normalizeJid(this.meJid),
+            selectedOptions: selection,
+            selectedHashes: selection.map(optionHash),
+            fromMe: true,
+            voteMessageId: voteId,
+            votedAt: new Date(votedAtMs),
+          })
+        : false;
+    this.logger.info(
+      `Poll vote ${voteId} on ${target.id} (${selection.length ? `${selection.length} option(s)` : 'retracted'})${
+        sendOptions.actor ? ` by ${sendOptions.actor}` : ''
+      }`
+    );
+    return {
+      messageId: voteId,
+      pollMessageId: target.id,
+      conversationId,
+      options: selection,
+      retracted: selection.length === 0,
+      votedAt: new Date(votedAtMs).toISOString(),
+      persisted,
+    };
+  }
+
+  /**
+   * Answer an event (going / not_going / maybe). Signed with phone jids (see
+   * event-responses.ts); recorded as ours once WhatsApp has it.
+   */
+  async respondToEvent(
+    chatId: string,
+    messageId: string,
+    answer: { response: EventResponse; extraGuestCount: number },
+    sendOptions: StructuredSendOptions = {}
+  ): Promise<EventResponseResult> {
+    const sock = this.connectedSocket();
+    const { target, original, secret } = await this.structuredTarget(chatId, messageId, 'event');
+    const definition = parseEventDefinition(original.message)!;
+    if (definition.isCanceled) {
+      throw new MessageMutationError(
+        `The event ${target.id} was cancelled`,
+        422,
+        'event_cancelled'
+      );
+    }
+    if (answer.extraGuestCount > 0 && !definition.extraGuestsAllowed) {
+      throw new PollEventInputError('This event does not allow extra guests', {
+        field: 'extraGuestCount',
+      });
+    }
+    const own = await this.ownIdentity();
+    const ownPn = own.pn;
+    const creator = target.key.fromMe
+      ? ownPn
+      : (await this.withAliases(keyAuthorCandidates(target.key, own))).find(jid =>
+          jid.endsWith('@s.whatsapp.net')
+        ) || null;
+    if (!ownPn || !creator) {
+      throw new MessageMutationError(
+        `Cannot resolve the phone identities that sign a response to ${target.id}`,
+        422,
+        'identity_unavailable'
+      );
+    }
+    const respondedAtMs = Date.now();
+    const content = buildEventResponseContent({
+      eventKey: { ...target.key, remoteJid: target.chatJid },
+      secret,
+      creator,
+      responder: ownPn,
+      response: answer.response,
+      extraGuestCount: answer.extraGuestCount,
+      timestampMs: respondedAtMs,
+    });
+    const responseId = await this.relayStructured(
+      sock,
+      target.chatJid,
+      content,
+      sendOptions,
+      ownPn
+    );
+    const conversationId = this.normalizeJid(target.chatJid);
+    const persisted =
+      this.ingest && !!this.meJid
+        ? await storeEventResponse({
+            eventMessageId: target.id,
+            conversationId,
+            responderJid: this.normalizeJid(this.meJid),
+            response: answer.response,
+            extraGuestCount: answer.extraGuestCount,
+            fromMe: true,
+            responseMessageId: responseId,
+            respondedAt: new Date(respondedAtMs),
+          })
+        : false;
+    this.logger.info(
+      `Event response ${responseId} on ${target.id} (${answer.response})${
+        sendOptions.actor ? ` by ${sendOptions.actor}` : ''
+      }`
+    );
+    return {
+      messageId: responseId,
+      eventMessageId: target.id,
+      conversationId,
+      response: answer.response,
+      extraGuestCount: answer.response === 'going' ? answer.extraGuestCount : 0,
+      respondedAt: new Date(respondedAtMs).toISOString(),
+      persisted,
+    };
+  }
+
+  /** Definition of a poll / event for its results: memory, payload, then metadata of its row. */
+  private async structuredDefinition<K extends 'poll' | 'event'>(
+    messageId: string,
+    kind: K
+  ): Promise<{
+    id: string;
+    conversationId: string;
+    definition: K extends 'poll'
+      ? NonNullable<ReturnType<typeof parsePollDefinition>>
+      : NonNullable<ReturnType<typeof parseEventDefinition>>;
+  }> {
+    const id = stripAccountKey(String(messageId || '').trim());
+    if (!id) throw new MessageMutationError('messageId is required', 400, 'invalid_request');
+    const original = await this.structuredOriginal(id);
+    const meta = this.ingest ? await loadStructuredMetadata(id) : undefined;
+    const parsed =
+      kind === 'poll'
+        ? parsePollDefinition(original?.message) || meta?.poll
+        : parseEventDefinition(original?.message) || meta?.event;
+    if (!parsed) {
+      if (!original && !meta) {
+        throw new MessageUnavailableError(
+          `Message ${id} is unavailable`,
+          404,
+          'message_unavailable'
+        );
+      }
+      throw new MessageMutationError(
+        `Message ${id} is not a${kind === 'poll' ? ' poll' : 'n event'}`,
+        422,
+        kind === 'poll' ? 'not_a_poll' : 'not_an_event'
+      );
+    }
+    const conversationId =
+      meta?.conversationId ||
+      (original?.key.remoteJid ? this.normalizeJid(original.key.remoteJid) : '');
+    return { id, conversationId, definition: parsed as never };
+  }
+
+  /** Current results of a poll: its definition + the stored votes (read-only). */
+  async getPollResults(chatId: string, messageId: string): Promise<PollResultsView> {
+    const { id, conversationId, definition } = await this.structuredDefinition(messageId, 'poll');
+    const votes = this.ingest ? await readPollVotes(id) : { available: false, votes: [] };
+    return {
+      messageId: id,
+      conversationId: conversationId || this.normalizeJid(this.toRawJid(stripAccountKey(chatId))),
+      ...aggregatePollResults(definition, votes.votes),
+      persisted: votes.available,
+    };
+  }
+
+  /** Current responses of an event: its definition + the stored responses (read-only). */
+  async getEventResults(chatId: string, messageId: string): Promise<EventResultsView> {
+    const { id, conversationId, definition } = await this.structuredDefinition(messageId, 'event');
+    const stored = this.ingest ? await readEventResponses(id) : { available: false, responses: [] };
+    return {
+      messageId: id,
+      conversationId: conversationId || this.normalizeJid(this.toRawJid(stripAccountKey(chatId))),
+      ...definition,
+      ...aggregateEventResults(stored.responses),
+      persisted: stored.available,
+    };
   }
 
   /**
@@ -1848,16 +2913,474 @@ export class BaileysClient extends EventEmitter {
     return sentId || undefined;
   }
 
-  async deleteMessage(chatId: string, messageId: string): Promise<void> {
-    if (!this.sock) throw new Error('Client not initialized');
-    const cached = this.keyCache.get(messageId);
-    let key: WAMessageKey | null = cached?.key || null;
-    if (!key) {
-      const fallback = await this.reconstructKeyFromDb(messageId, chatId).catch(() => null);
-      if (!fallback) throw new Error(`deleteMessage: ${messageId} not found`);
-      key = fallback;
+  // ---------------------------------------------------------------------------
+  // Edit / delete (fase 3 / PR-3). Persistence: message-mutations.ts.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Edit one of our own text messages. WhatsApp's time window is WhatsApp's:
+   * an edit it refuses comes back as a MessageMutationError
+   * (`rejected_by_whatsapp`) and nothing is written.
+   */
+  async editMessage(
+    chatId: string,
+    messageId: string,
+    content: string,
+    request: MessageMutationRequest = {}
+  ): Promise<{ messageId: string; editId?: string; editedAt: string }> {
+    const sock = this.connectedSocket();
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new MessageMutationError('editMessage: content is required', 400, 'invalid_request');
     }
-    await this.sock.sendMessage(this.toRawJid(chatId), { delete: key });
+    const target = await this.resolveMutationTarget(chatId, messageId, 'editMessage');
+    if (!target.key.fromMe) {
+      throw new MessageMutationError(
+        `editMessage: ${target.id} was not sent by this account; WhatsApp only lets the author edit`,
+        422,
+        'not_own_message'
+      );
+    }
+    if (target.stored?.isDeleted) {
+      throw new MessageMutationError(`editMessage: ${target.id} was deleted`, 422, 'not_editable');
+    }
+    if (target.isText !== true) {
+      throw new MessageMutationError(
+        `editMessage: ${target.id} is not a text message (only text can be edited here)`,
+        422,
+        'not_editable'
+      );
+    }
+    return this.withOwnMutation('edit', target.id, async () => {
+      const sent = await sock.sendMessage(target.chatJid, { text: content, edit: target.key });
+      await this.throwIfMutationRejected(sent?.key?.id, 'edit', target.id);
+      const editedAt = new Date();
+      if (this.ingest) {
+        await this.persistMutation('edit', target.id, () =>
+          markMessageEdited(target.id, content, {
+            source: 'connector',
+            actor: request.actor,
+            at: editedAt,
+          })
+        );
+      }
+      this.emit('message-update', {
+        waMessageId: target.id,
+        updateType: 'EDITED',
+        newContent: content,
+      });
+      this.logger.info(`Edited ${target.id} in ${target.chatJid}`);
+      return {
+        messageId: target.id,
+        editId: sent?.key?.id || undefined,
+        editedAt: editedAt.toISOString(),
+      };
+    });
+  }
+
+  /**
+   * Delete for everyone (revoke). Our own messages, or someone else's in a
+   * group (WhatsApp checks we are admin). The row keeps its content.
+   */
+  async deleteMessage(
+    chatId: string,
+    messageId: string,
+    request: MessageMutationRequest = {}
+  ): Promise<{ messageId: string; deletedAt: string }> {
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(chatId, messageId, 'deleteMessage');
+    if (!target.key.fromMe && !isJidGroup(target.chatJid)) {
+      throw new MessageMutationError(
+        `deleteMessage: ${target.id} was not sent by this account; only the author can delete it for everyone`,
+        422,
+        'not_own_message'
+      );
+    }
+    return this.withOwnMutation('revoke', target.id, async () => {
+      const sent = await sock.sendMessage(target.chatJid, { delete: target.key });
+      await this.throwIfMutationRejected(sent?.key?.id, 'delete', target.id);
+      const deletedAt = new Date();
+      if (this.ingest) {
+        await this.persistMutation('delete', target.id, () =>
+          markMessageRevoked(target.id, {
+            source: 'connector',
+            actor: request.actor,
+            at: deletedAt,
+          })
+        );
+      }
+      this.emit('message-update', { waMessageId: target.id, updateType: 'DELETED' });
+      this.logger.info(`Deleted ${target.id} for everyone in ${target.chatJid}`);
+      return { messageId: target.id, deletedAt: deletedAt.toISOString() };
+    });
+  }
+
+  /**
+   * Delete for me: an app-state patch keyed by the message key AND its
+   * timestamp, both rebuilt from the durable copies after a restart. Media on
+   * the phone is left alone (deleteMedia: false). Local to this account: no
+   * MessageUpdated event (see MessageUpdatedEvent).
+   */
+  async deleteMessageForMe(
+    chatId: string,
+    messageId: string,
+    request: MessageMutationRequest = {}
+  ): Promise<{ messageId: string; deletedAt: string }> {
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(chatId, messageId, 'deleteMessageForMe');
+    if (!target.timestampSeconds) {
+      throw new MessageUnavailableError(
+        `deleteMessageForMe: the timestamp of ${target.id} is unknown (WhatsApp needs it)`,
+        404,
+        'message_unavailable'
+      );
+    }
+    return this.withOwnMutation('forme', target.id, async () => {
+      await sock.chatModify(
+        {
+          deleteForMe: {
+            deleteMedia: false,
+            key: target.key,
+            timestamp: target.timestampSeconds!,
+          },
+        },
+        target.chatJid
+      );
+      const deletedAt = new Date();
+      if (this.ingest) {
+        await this.persistMutation('delete-for-me', target.id, () =>
+          markMessageDeletedForMe(target.id, {
+            source: 'connector',
+            actor: request.actor,
+            at: deletedAt,
+          })
+        );
+      }
+      this.logger.info(`Deleted ${target.id} for me in ${target.chatJid}`);
+      return { messageId: target.id, deletedAt: deletedAt.toISOString() };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat state (fase 3 / PR-5). Persistence: chat-state.ts.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Archive / pin / mute / read-unread a chat as the phone does (an app-state
+   * patch). `chatId` is resolved to the canonical conversation (tombstones
+   * and contact aliases followed); the patch goes to the jid of its newest
+   * message's key — memory, whatsapp_message_payloads, whatsapp_message_keys
+   * or the messages row, so it survives restarts — which is also the
+   * `lastMessages` entry archive and read need. The result is written on the
+   * canonical row once WhatsApp accepted it (ingest only); the echo that
+   * chats.update brings back carries the same values.
+   */
+  async modifyChat(
+    chatId: string,
+    action: ChatModifyAction,
+    request: ChatModifyRequest = {}
+  ): Promise<ChatModifyResult> {
+    const sock = this.connectedSocket();
+    const requested = stripAccountKey(String(chatId || '').trim());
+    if (!requested) {
+      throw new MessageMutationError(
+        'modifyChat: conversationId is required',
+        400,
+        'invalid_request'
+      );
+    }
+    const conversation = this.ingest ? await resolveCanonicalConversation(requested) : undefined;
+    if (this.ingest && !conversation) {
+      throw new MessageMutationError(
+        `modifyChat: conversation ${requested} is unavailable (unknown to this account)`,
+        404,
+        'conversation_unavailable'
+      );
+    }
+    const externalId = conversation?.externalId || this.normalizeJid(this.toRawJid(requested));
+    const last = conversation
+      ? await this.newestMessageTarget(conversation.id, externalId)
+      : undefined;
+    const chatJid = last?.chatJid || this.toRawJid(externalId);
+    const lastMessages =
+      last && last.timestampSeconds
+        ? [{ key: last.key, messageTimestamp: last.timestampSeconds }]
+        : [];
+
+    // markRead: read receipts for what is pending (the /messages/read path),
+    // then the app-state mark, which is what clears a "marked unread" dot.
+    // Without a known newest message the receipts are all there is to do.
+    const receipts = action === 'markRead' && this.ingest;
+    if (receipts) await this.markAsRead(externalId);
+    if (!receipts || lastMessages.length) {
+      const modification = buildChatModification(action, { lastMessages, mute: request.mute });
+      await this.applyChatModification(sock, modification, chatJid, action);
+    }
+
+    const chat = this.chatStore.get(this.normalizeJid(chatJid));
+    if (chat && action === 'markRead') chat.unreadCount = 0;
+    if (chat && action === 'markUnread') chat.unreadCount = Math.max(chat.unreadCount, 1);
+
+    let state: ChatState | undefined;
+    if (this.ingest && conversation) {
+      const patch = chatStatePatchFor(action, request.mute);
+      try {
+        state = await writeChatState(conversation.id, patch);
+      } catch (e: any) {
+        throw new Error(
+          `${action} of ${conversation.id} reached WhatsApp but was not saved: ${e?.message || e}`
+        );
+      }
+    }
+    this.logger.info(
+      `Chat ${action} ${chatJid}${request.actor ? ` by ${request.actor}` : ''}${state ? '' : ' (not recorded)'}`
+    );
+    return {
+      action,
+      chatId: this.normalizeJid(chatJid),
+      conversationId: conversation?.id ?? null,
+      persisted: !!state,
+      state: state ?? null,
+    };
+  }
+
+  /** Key + timestamp of the newest message of a conversation (undefined if none is usable). */
+  private async newestMessageTarget(
+    conversationId: string,
+    externalId: string
+  ): Promise<MutationTarget | undefined> {
+    const id = await latestMessageId(conversationId);
+    if (!id) return undefined;
+    let target: MutationTarget;
+    try {
+      target = await this.resolveMutationTarget(externalId, id, 'modifyChat');
+    } catch (e) {
+      if (e instanceof MessageUnavailableError) return undefined;
+      throw e;
+    }
+    // Baileys refuses a group message of someone else without its participant.
+    if (isJidGroup(target.chatJid) && !target.key.fromMe && !target.key.participant) {
+      return undefined;
+    }
+    return target;
+  }
+
+  /** chatModify, with WhatsApp's own refusals as 422 rejected_by_whatsapp. */
+  private async applyChatModification(
+    sock: WASocket,
+    modification: ChatModification,
+    chatJid: string,
+    action: ChatModifyAction
+  ): Promise<void> {
+    try {
+      await sock.chatModify(modification, chatJid);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      const connectionStatus = [401, 408, 428, 440].includes(status);
+      if (e?.isBoom && status >= 400 && status < 500 && !connectionStatus) {
+        throw new MessageMutationError(
+          `WhatsApp rejected ${action} of ${chatJid}: ${e?.message || e}`,
+          422,
+          'rejected_by_whatsapp',
+          String(status)
+        );
+      }
+      throw e;
+    }
+  }
+
+  private connectedSocket(): WASocket {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!this.isConnected())
+      throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
+    return this.sock;
+  }
+
+  /**
+   * The real WhatsApp key of a message we have seen (bare or namespaced id):
+   * memory, then the durable payload (PR-1), then whatsapp_message_keys, then
+   * the messages row — so it survives restarts. The chat comes from the key,
+   * not from the request: a merged conversation keeps the jid WhatsApp used.
+   * A pairing-only socket (ingest off) only has its memory. Unknown → 404.
+   */
+  private async resolveMutationTarget(
+    chatId: string,
+    messageId: string,
+    action: string
+  ): Promise<MutationTarget> {
+    const id = stripAccountKey(String(messageId || '').trim());
+    if (!id)
+      throw new MessageMutationError(`${action}: messageId is required`, 400, 'invalid_request');
+    const cached = this.keyCache.get(id);
+    const memory = this.memoryMessage(id);
+    const stored = this.ingest ? await loadStoredMessage(id) : undefined;
+    const durable = memory ? undefined : await this.durableMessage(id);
+    const fallbackJid = chatId ? this.toRawJid(stripAccountKey(chatId)) : '';
+
+    let key: WAMessageKey | undefined = cached?.key || durable?.key;
+    if (!key && stored?.key) {
+      key = {
+        remoteJid: stored.key.remoteJid,
+        fromMe: stored.key.fromMe,
+        participant: stored.key.participant,
+      };
+    }
+    if (!key && stored) {
+      const remoteJid =
+        (stored.conversationId && this.toRawJid(stripAccountKey(stored.conversationId))) ||
+        fallbackJid;
+      key = {
+        remoteJid,
+        fromMe: stored.direction === 'OUTBOUND',
+        participant:
+          isJidGroup(remoteJid) && stored.senderWaId
+            ? this.toRawJid(stripAccountKey(stored.senderWaId))
+            : undefined,
+      };
+    }
+    const chatJid = key?.remoteJid || cached?.chatJid || fallbackJid;
+    if (!key || !chatJid) {
+      throw new MessageUnavailableError(
+        `${action}: message ${id} of ${chatId || 'an unknown chat'} is unavailable (not in memory nor in the database)`,
+        404,
+        'message_unavailable'
+      );
+    }
+
+    const content = (memory || durable)?.message;
+    let isText: boolean | undefined;
+    if (stored) isText = stored.messageType === 'TEXT';
+    else if (content) isText = !!(content.conversation || content.extendedTextMessage);
+
+    return {
+      id,
+      key: { ...key, id, remoteJid: key.remoteJid || chatJid },
+      chatJid,
+      timestampSeconds:
+        unixSeconds(durable?.messageTimestamp) ||
+        stored?.key?.timestampSeconds ||
+        stored?.waTimestampSeconds,
+      isText,
+      stored,
+    };
+  }
+
+  /**
+   * Keep the echo of our own mutation away from the inbound handlers while it
+   * is in flight and for OWN_MUTATION_ECHO_MS after (Baileys may flush it late).
+   */
+  private async withOwnMutation<T>(
+    kind: 'edit' | 'revoke' | 'forme',
+    id: string,
+    run: () => Promise<T>
+  ): Promise<T> {
+    const flag = `${kind}:${id}`;
+    const previous = this.ownMutations.get(flag);
+    if (previous) clearTimeout(previous);
+    this.ownMutations.set(flag, null);
+    try {
+      return await run();
+    } finally {
+      const timer = setTimeout(() => this.ownMutations.delete(flag), OWN_MUTATION_ECHO_MS);
+      timer.unref?.();
+      this.ownMutations.set(flag, timer);
+    }
+  }
+
+  private isOwnMutation(kind: 'edit' | 'revoke' | 'forme', id: string): boolean {
+    return this.ownMutations.has(`${kind}:${id}`);
+  }
+
+  /** WhatsApp answered the edit/revoke stanza with an error ack (time window, not allowed…). */
+  private async throwIfMutationRejected(
+    stanzaId: string | null | undefined,
+    what: 'edit' | 'delete',
+    id: string
+  ): Promise<void> {
+    const failure = stanzaId ? await this.waitForImmediateSendFailure(stanzaId) : undefined;
+    if (!failure) return;
+    throw new MessageMutationError(
+      `WhatsApp rejected the ${what} of ${id}${failure.code ? ` (ack error ${failure.code})` : ''}`,
+      422,
+      'rejected_by_whatsapp',
+      failure.code
+    );
+  }
+
+  /** WhatsApp already has it: a DB failure is reported as such, never as a send failure. */
+  private async persistMutation(
+    what: string,
+    id: string,
+    write: () => Promise<boolean>
+  ): Promise<void> {
+    try {
+      await write();
+    } catch (e: any) {
+      throw new Error(`${what} of ${id} reached WhatsApp but was not saved: ${e?.message || e}`);
+    }
+  }
+
+  /**
+   * messages.update: a revoke or an edit made by a contact or on our phone.
+   * The echo of our own mutation is skipped — the explicit call persists it
+   * once WhatsApp accepted it.
+   */
+  private async handleInboundMutation(u: WAMessageUpdate): Promise<void> {
+    const waMessageId = u.key?.id;
+    if (!this.ingest || !waMessageId) return;
+    const stub = u.update?.messageStubType;
+    const isRevoke = stub === proto.WebMessageInfo.StubType.REVOKE || u.update?.message === null;
+    if (isRevoke && !this.isOwnMutation('revoke', waMessageId)) {
+      await this.recordInboundRevoke(waMessageId);
+    }
+    // Baileys unwraps MESSAGE_EDIT protocol messages into this shape.
+    const editedPayload = (u.update as any)?.message?.editedMessage?.message as
+      proto.IMessage | undefined;
+    if (editedPayload && !this.isOwnMutation('edit', waMessageId)) {
+      await this.recordInboundEdit(u.key, editedPayload);
+    }
+  }
+
+  /** messages.delete with keys = "delete for me" synced from our phone. */
+  private async handleDeleteForMeSync(
+    item: { keys: WAMessageKey[] } | { jid: string; all: true }
+  ): Promise<void> {
+    if (!this.ingest || !('keys' in item)) return;
+    for (const key of item.keys || []) {
+      if (!key?.id || this.isOwnMutation('forme', key.id)) continue;
+      await markMessageDeletedForMe(key.id, { source: 'whatsapp' }).catch(e =>
+        this.logger.warn(`delete-for-me persist failed for ${key.id}: ${e?.message || e}`)
+      );
+    }
+  }
+
+  /** A contact (or our phone) revoked a message: flag the row, keep its content. */
+  private async recordInboundRevoke(waMessageId: string): Promise<void> {
+    await markMessageRevoked(waMessageId, { source: 'whatsapp' }).catch(e =>
+      this.logger.warn(`revoke persist failed for ${waMessageId}: ${e?.message || e}`)
+    );
+    this.emit('message-update', { waMessageId, updateType: 'DELETED' });
+  }
+
+  /** A contact (or our phone) edited a message: new text, the old one to edit_history. */
+  private async recordInboundEdit(key: WAMessageKey, editedPayload: proto.IMessage): Promise<void> {
+    const waMessageId = key.id || '';
+    const edited = this.convertMessage({ key, message: editedPayload } as WAMessage);
+    const content = edited?.content;
+    if (!waMessageId || typeof content !== 'string') {
+      this.logger.warn(`edit of ${waMessageId} carries no text; row left as is`);
+      return;
+    }
+    let changed: boolean;
+    try {
+      changed = await markMessageEdited(waMessageId, content, { source: 'whatsapp' });
+    } catch (e: any) {
+      this.logger.warn(`edit persist failed for ${waMessageId}: ${e?.message || e}`);
+      return;
+    }
+    // A replay (history re-delivery, a late echo) changes nothing and is not re-published.
+    if (changed) {
+      this.emit('message-update', { waMessageId, updateType: 'EDITED', newContent: content });
+    }
   }
 
   async markAsRead(chatId: string): Promise<void> {
@@ -1954,6 +3477,423 @@ export class BaileysClient extends EventEmitter {
       isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
       isSuperAdmin: p.admin === 'superadmin',
     }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Group management (fase 3 / PR-6; the helpers live in group-management.ts)
+  // ---------------------------------------------------------------------------
+
+  /** Our own ids (PN and LID), to find this account among a group's participants. */
+  private async ownIds(): Promise<string[]> {
+    const user = this.sock?.user as { id?: string; lid?: string } | undefined;
+    const pn = user?.id ? jidNormalizedUser(user.id) : null;
+    let lid = user?.lid ? jidNormalizedUser(user.lid) : null;
+    if (!lid && pn) {
+      lid = await Promise.resolve(this.sock?.signalRepository?.lidMapping?.getLIDForPN?.(pn))
+        .then(found => (found ? jidNormalizedUser(found) : null))
+        .catch(() => null);
+    }
+    return [pn, lid].filter((id): id is string => !!id);
+  }
+
+  /** The other id (PN ↔ LID) Baileys knows for a user jid, if any. */
+  private async jidAliases(jid: string): Promise<string[]> {
+    const mapping = this.sock?.signalRepository?.lidMapping;
+    const other = await Promise.resolve(
+      jid.endsWith('@lid') ? mapping?.getPNForLID?.(jid) : mapping?.getLIDForPN?.(jid)
+    ).catch(() => null);
+    return [jid, other ? jidNormalizedUser(other) : null].filter((id): id is string => !!id);
+  }
+
+  /**
+   * A group call to WhatsApp. Its refusals come back as Boom with the IQ
+   * error code: 403 → 403 not_group_admin (WhatsApp says we may not), 404 →
+   * 404 group_unavailable, other 4xx → 422 rejected_by_whatsapp; connection
+   * statuses (401, 408, 428, 440) and the rest go on as send failures.
+   */
+  private async groupCall<T>(what: string, raw: string, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      const connectionStatus = [401, 408, 428, 440].includes(status);
+      if (!e?.isBoom || !(status >= 400 && status < 500) || connectionStatus) throw e;
+      const reason = `WhatsApp rejected ${what} of ${raw}: ${e?.message || e}`;
+      if (status === 403) {
+        throw new GroupActionError(reason, 403, 'not_group_admin', { code: '403' });
+      }
+      if (status === 404) {
+        throw new GroupActionError(reason, 404, 'group_unavailable', { code: '404' });
+      }
+      throw new GroupActionError(reason, 422, 'rejected_by_whatsapp', { code: String(status) });
+    }
+  }
+
+  /**
+   * Fresh metadata of a group we are about to act on (the cache may predate
+   * an admin change). 403 from WhatsApp here = we are not in the group.
+   */
+  private async groupMetadataForAction(raw: string): Promise<GroupMetadata> {
+    try {
+      return await this.groupCall('reading the group', raw, () =>
+        this.fetchGroupMetadata(raw, true)
+      );
+    } catch (e) {
+      if (e instanceof GroupActionError && e.failureClass === 'not_group_admin') {
+        throw new GroupActionError(
+          `This account is not a participant of ${raw}`,
+          403,
+          'not_group_member',
+          { code: e.code }
+        );
+      }
+      throw e;
+    }
+  }
+
+  private groupView(meta: GroupMetadata, ownIds: string[]): GroupStateView {
+    const view = groupStateView(meta, ownParticipant(meta, ownIds), p => {
+      for (const id of [p.id, p.phoneNumber, p.lid]) {
+        const name = id ? this.contactNames.get(id) : undefined;
+        if (name) return name;
+      }
+      return null;
+    });
+    return { ...view, groupId: this.normalizeJid(view.groupId) };
+  }
+
+  /**
+   * Metadata + what this account may do there (POST /groups/state): our
+   * participant row (PN or LID) decides — admin, superadmin, or a member of a
+   * group that lets members edit info / add people.
+   */
+  async getGroupState(groupId: string): Promise<GroupStateView> {
+    const raw = parseGroupJid(groupId);
+    this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    return this.groupView(meta, await this.ownIds());
+  }
+
+  /**
+   * Create a group with `subject` and `participants` (phone numbers or PN /
+   * LID jids). WhatsApp answers with the group's metadata; Baileys drops the
+   * per-participant errors of the create answer, so each requested person is
+   * reported as added when they are in that metadata and `not_added`
+   * otherwise (typically their privacy settings: they need an invite). The
+   * conversation row is written here (ingest only) — the same upsert as the
+   * groups.upsert notification, which may or may not reach its creator.
+   */
+  async createGroup(
+    subject: unknown,
+    participants: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<GroupCreateResult> {
+    const cleanSubject = parseGroupSubject(subject);
+    const members = parseGroupParticipants(participants);
+    const sock = this.connectedSocket();
+    const own = await this.ownIds();
+    if (members.some(m => own.includes(m.jid))) {
+      throw new GroupActionError(
+        'Do not list this account among the participants: the creator is always in the group',
+        422,
+        'self_participant'
+      );
+    }
+    const meta = await this.groupCall('the group creation', '@g.us', () =>
+      sock.groupCreate(
+        cleanSubject,
+        members.map(m => m.jid)
+      )
+    );
+    this.cacheGroupMetadata(meta);
+    const results: GroupParticipantResult[] = [];
+    for (const member of members) {
+      let found = findParticipant(meta, member.jid);
+      if (!found) {
+        for (const alias of await this.jidAliases(member.jid)) {
+          found = findParticipant(meta, alias);
+          if (found) break;
+        }
+      }
+      results.push({
+        participant: member.input,
+        jid: participantApiJid(member.jid),
+        status: null,
+        ok: !!found,
+        reason: found ? 'added' : 'not_added',
+      });
+    }
+    let conversationId: string | null = null;
+    if (this.ingest) {
+      conversationId =
+        (await recordGroupConversation(meta).catch((e: any) => {
+          this.logger.warn(`group ${meta.id} created but not recorded: ${e?.message || e}`);
+          return undefined;
+        })) ?? null;
+    }
+    const counts = countResults(results);
+    this.logger.info(
+      `Group created ${meta.id} participants=${members.length} added=${counts.succeeded}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    return {
+      groupId: this.normalizeJid(meta.id),
+      conversationId,
+      subject: meta.subject || cleanSubject,
+      persisted: !!conversationId,
+      participants: results,
+      ...counts,
+      group: this.groupView(meta, own),
+    };
+  }
+
+  /**
+   * Subject, description and settings of a group. Checked against fresh
+   * metadata first: a member of the group; subject / description need admin
+   * unless the group is not `restrict`ed; settings always need admin. What
+   * already has the asked value is not sent (each change notifies every
+   * member). A failure after an earlier change went out says what was
+   * applied. A new subject is written on the canonical conversation.
+   */
+  async updateGroup(
+    groupId: string,
+    update: GroupUpdate | Record<string, unknown>,
+    request: MessageMutationRequest = {}
+  ): Promise<GroupUpdateResult> {
+    const raw = parseGroupJid(groupId);
+    const wanted = parseGroupUpdate(update as Record<string, unknown>);
+    const sock = this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    const editsInfo = wanted.subject !== undefined || wanted.description !== undefined;
+    if (editsInfo && !capabilities.editInfo) {
+      throw new GroupActionError(
+        `Only admins can change the subject or description of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+    if (wanted.settings && !capabilities.changeSettings) {
+      throw new GroupActionError(
+        `Only admins can change the settings of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+
+    const steps: Array<{ name: string; run: () => Promise<void> }> = [];
+    const unchanged: string[] = [];
+    const plan = (name: string, same: boolean, run: () => Promise<void>): void => {
+      if (same) unchanged.push(name);
+      else steps.push({ name, run });
+    };
+    if (wanted.subject !== undefined) {
+      const subject = wanted.subject;
+      plan('subject', subject === meta.subject, () => sock.groupUpdateSubject(raw, subject));
+    }
+    if (wanted.description !== undefined) {
+      const description = wanted.description;
+      plan('description', description === (meta.desc || '').trim(), () =>
+        sock.groupUpdateDescription(raw, description || undefined)
+      );
+    }
+    const { announce, restrict } = wanted.settings || {};
+    if (announce !== undefined) {
+      plan('announce', announce === (meta.announce === true), () =>
+        sock.groupSettingUpdate(raw, announce ? 'announcement' : 'not_announcement')
+      );
+    }
+    if (restrict !== undefined) {
+      plan('restrict', restrict === (meta.restrict === true), () =>
+        sock.groupSettingUpdate(raw, restrict ? 'locked' : 'unlocked')
+      );
+    }
+
+    const applied: string[] = [];
+    for (const step of steps) {
+      try {
+        await this.groupCall(`the ${step.name} change`, raw, step.run);
+        applied.push(step.name);
+      } catch (e: any) {
+        if (!applied.length) throw e;
+        this.groupMetaCache.delete(raw);
+        // What already went out is recorded before the error is answered.
+        if (this.ingest && applied.includes('subject')) {
+          await recordGroupChange(raw, { subject: wanted.subject }).catch((err: any) => {
+            this.logger.warn(`subject of ${raw} changed but not recorded: ${err?.message || err}`);
+            return false;
+          });
+        }
+        const details = { applied, failed: step.name };
+        const message = `${e?.message || e} (already applied: ${applied.join(', ')})`;
+        if (e instanceof MessageMutationError) {
+          throw new GroupActionError(message, e.status, e.failureClass, { code: e.code, details });
+        }
+        const failureClass = classifyWhatsAppSendFailure(e);
+        throw new GroupActionError(message, statusOfFailureClass(failureClass), failureClass, {
+          details,
+        });
+      }
+    }
+
+    let group: GroupStateView | null = null;
+    let persisted = false;
+    if (applied.length) {
+      this.groupMetaCache.delete(raw);
+      const refreshed = await this.fetchGroupMetadata(raw, true).catch(() => undefined);
+      if (refreshed) group = this.groupView(refreshed, own);
+      if (this.ingest && applied.includes('subject')) {
+        persisted = await recordGroupChange(raw, { subject: wanted.subject }).catch((e: any) => {
+          this.logger.warn(`subject of ${raw} changed but not recorded: ${e?.message || e}`);
+          return false;
+        });
+      }
+    } else {
+      group = this.groupView(meta, own);
+    }
+    this.logger.info(
+      `Group ${raw} updated changed=${applied.join(',') || '-'}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    return { groupId: this.normalizeJid(raw), changed: applied, unchanged, persisted, group };
+  }
+
+  /**
+   * Add / remove / promote / demote participants (phone numbers or PN / LID
+   * jids). Checked against fresh metadata: add needs admin (or member-add
+   * mode on), the rest admin. A member is addressed by the jid the group
+   * knows them by (a PN given for a LID group goes as its LID). WhatsApp
+   * answers per participant; each answer is reported (200 done, 403 invite
+   * required, 408 recently left, 409 already in…). Nobody done → 422 with
+   * the results; some done → 200 with `partial`.
+   */
+  async updateGroupParticipants(
+    groupId: string,
+    action: string,
+    participants: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<GroupParticipantsResult> {
+    const raw = parseGroupJid(groupId);
+    const verb = normalizeGroupParticipantAction(action);
+    if (!verb) {
+      throw new GroupActionError(
+        'action must be one of add, remove, promote, demote',
+        400,
+        'invalid_request'
+      );
+    }
+    const members = parseGroupParticipants(participants);
+    const sock = this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    if (!allowsParticipantAction(capabilities, verb)) {
+      throw new GroupActionError(
+        verb === 'add'
+          ? `Only admins can add participants to ${raw}`
+          : `Only admins can ${verb} participants of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+    const self = ownParticipant(meta, own);
+    const targets: Array<{ input: string; sent: string; aliases: string[] }> = [];
+    for (const member of members) {
+      const found = findParticipant(meta, member.jid);
+      if (own.includes(member.jid) || (found && found === self)) {
+        throw new GroupActionError(
+          `This account cannot ${verb} itself here`,
+          422,
+          'self_participant'
+        );
+      }
+      const sent = found ? jidNormalizedUser(found.id) : member.jid;
+      if (targets.some(t => t.sent === sent)) continue;
+      const aliases = found ? participantIds(found) : await this.jidAliases(member.jid);
+      targets.push({ input: member.input, sent, aliases: Array.from(new Set([sent, ...aliases])) });
+    }
+
+    const answer = await this.groupCall(`the ${verb} of participants`, raw, () =>
+      sock.groupParticipantsUpdate(
+        raw,
+        targets.map(t => t.sent),
+        verb
+      )
+    );
+    this.groupMetaCache.delete(raw);
+    const entries = (answer || []).map(entry => ({
+      status: entry?.status === undefined || entry?.status === null ? null : String(entry.status),
+      jid: entry?.jid ? jidNormalizedUser(entry.jid) : '',
+      used: false,
+    }));
+    const matched = targets.map(target => {
+      const entry = entries.find(e => !e.used && !!e.jid && target.aliases.includes(e.jid));
+      if (entry) entry.used = true;
+      return entry;
+    });
+    // An answer under an id we did not know (a PN WhatsApp maps to a LID):
+    // pair the leftovers in order, as WhatsApp answers in request order.
+    const leftovers = entries.filter(e => !e.used);
+    const results: GroupParticipantResult[] = targets.map((target, index) => {
+      const entry = matched[index] ?? leftovers.shift();
+      const status = entry?.status ?? null;
+      return {
+        participant: target.input,
+        jid: participantApiJid(target.sent),
+        status,
+        ...participantOutcome(verb, status),
+      };
+    });
+    const counts = countResults(results);
+    this.logger.info(
+      `Group ${raw} ${verb} participants=${targets.length} done=${counts.succeeded}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    if (!counts.succeeded) {
+      throw new GroupActionError(
+        `WhatsApp did not ${verb} any of the ${targets.length} participant(s) of ${raw}`,
+        422,
+        'rejected_by_whatsapp',
+        { details: { action: verb, results, ...counts } }
+      );
+    }
+    const refreshed = await this.fetchGroupMetadata(raw, true).catch(() => undefined);
+    let persisted = false;
+    if (this.ingest && refreshed) {
+      persisted = await recordGroupChange(raw, {
+        participantCount: refreshed.participants?.length,
+      }).catch((e: any) => {
+        this.logger.warn(`participants of ${raw} changed but not recorded: ${e?.message || e}`);
+        return false;
+      });
+    }
+    return {
+      action: verb,
+      groupId: this.normalizeJid(raw),
+      results,
+      ...counts,
+      partial: counts.failed > 0,
+      persisted,
+      group: refreshed ? this.groupView(refreshed, own) : null,
+    };
+  }
+
+  /** Member of a non-community group, or 403 / 422; the capabilities otherwise. */
+  private checkGroupAccess(meta: GroupMetadata, own: string[], raw: string) {
+    if (isCommunityGroup(meta)) {
+      throw new GroupActionError(
+        `${raw} is a community (or its announcement group): manage it from WhatsApp`,
+        422,
+        'community_unsupported'
+      );
+    }
+    const capabilities = groupCapabilities(meta, ownParticipant(meta, own));
+    if (!capabilities.isMember) {
+      throw new GroupActionError(
+        `This account is not a participant of ${raw}`,
+        403,
+        'not_group_member'
+      );
+    }
+    return capabilities;
   }
 
   /**
@@ -2369,6 +4309,97 @@ export class BaileysClient extends EventEmitter {
     return { requested, candidates };
   }
 
+  /**
+   * INFRA-288 (P1 INFRA-112): backfill the window dropped while the socket was
+   * down, triggered from the `connection.update: open` branch.
+   *
+   * Newer-first with a volume cap: for each chat the anchor is the NEWEST known
+   * message at or before the window start (`now - windowHours`); asking
+   * Baileys from that anchor replays the gap forward into
+   * `messaging-history.set`, which ingests it as `baileys_history_sync` while
+   * `historyBackfillRequestedUntil` is armed. Requests stop as soon as the
+   * total asked reaches WA_RECONNECT_BACKFILL_MAX_MESSAGES — never unbounded.
+   *
+   * Chain-reconnect safety: a 60s cooldown between bursts plus an in-flight
+   * flag, so flapping sockets ask for history once, not once per `open`.
+   */
+  async backfillReconnectWindow(): Promise<{ requested: number; chats: number }> {
+    // historySyncOnLogin ON means Baileys already syncs history on login —
+    // asking again would double-fetch the same window.
+    if (!this.sock || this.historySyncOnLogin || !this.reconnectBackfillLimits)
+      return { requested: 0, chats: 0 };
+    if (this.reconnectBackfillInFlight) return { requested: 0, chats: 0 };
+    const now = Date.now();
+    if (now - this.lastReconnectBackfillAt < 60_000) return { requested: 0, chats: 0 };
+    this.reconnectBackfillInFlight = true;
+    this.lastReconnectBackfillAt = now;
+
+    try {
+      const { windowMs, maxMessages, batchSize } = this.reconnectBackfillLimits;
+      const windowStart = now - windowMs;
+      await ensureHistoryTables();
+
+      // whatsapp_message_keys.conversation_id is stored namespaced (see
+      // accountKey); the wire contract speaks bare ids, stripped below. The
+      // table has no account column, so anchors are scoped through messages
+      // (m.account = this connector's account) — same pattern as the unread
+      // keys query in db-writer. Without it the MAX_MESSAGES budget would be
+      // spent on OTHER accounts' chats in the shared DB and this account's
+      // dropped window would stay unfilled.
+      const anchors = (
+        await getPool().query(
+          `SELECT DISTINCT ON (k.conversation_id)
+              k.conversation_id, k.wa_message_id, k.remote_jid, k.from_me,
+              k.participant_jid, k.message_timestamp_ms
+           FROM whatsapp_message_keys k
+           JOIN messages m ON m.wa_message_id = k.wa_message_id
+           WHERE k.message_timestamp_ms <= $1
+             AND m.account = $2
+           ORDER BY k.conversation_id, k.message_timestamp_ms DESC
+           LIMIT $3`,
+          [windowStart, connectorAccount(), 200]
+        )
+      ).rows;
+
+      let requested = 0;
+      let chats = 0;
+      for (const row of anchors) {
+        const remaining = maxMessages - requested;
+        if (remaining <= 0) break;
+        const bareConversationId = stripAccountKey(row.conversation_id);
+        const bareWaMessageId = stripAccountKey(row.wa_message_id);
+        const key: WAMessageKey = {
+          remoteJid: row.remote_jid,
+          id: bareWaMessageId,
+          fromMe: row.from_me,
+          participant: row.participant_jid || undefined,
+        };
+        // Arm the ingest window so messaging-history.set accepts the replay
+        // (same pattern as backfillHistory).
+        this.historyBackfillRequestedUntil = Date.now() + 5 * 60 * 1000;
+        await (this.sock as any).fetchMessageHistory(
+          Math.min(batchSize, remaining),
+          key,
+          Math.floor(Number(row.message_timestamp_ms) / 1000)
+        );
+        requested += Math.min(batchSize, remaining);
+        chats += 1;
+        await recordHistorySyncProgress({
+          conversationId: bareConversationId,
+          oldestMessageId: bareWaMessageId,
+          oldestTimestamp: new Date(Number(row.message_timestamp_ms)),
+          insertedCount: 0,
+          status: 'requested',
+        });
+      }
+      if (requested > 0)
+        this.logger.info(`reconnect backfill requested=${requested} chats=${chats}`);
+      return { requested, chats };
+    } finally {
+      this.reconnectBackfillInFlight = false;
+    }
+  }
+
   async getHistorySyncStatus(limit: number = 200): Promise<HistorySyncState[]> {
     await ensureHistoryTables();
     return getHistorySyncStatus(limit);
@@ -2677,6 +4708,7 @@ export class BaileysClient extends EventEmitter {
       useCachedGroupMetadata?: boolean;
       useUserDevicesCache?: boolean;
       quoted?: WAMessage;
+      messageId?: string;
     }
   ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
@@ -2688,6 +4720,7 @@ export class BaileysClient extends EventEmitter {
       sendOpts.useUserDevicesCache = options.useUserDevicesCache;
     }
     if (options?.quoted) sendOpts.quoted = options.quoted;
+    if (options?.messageId) sendOpts.messageId = options.messageId;
     return this.race(
       this.sock.sendMessage(rawJid, { text: content }, sendOpts),
       timeoutMs,

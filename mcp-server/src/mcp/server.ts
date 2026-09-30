@@ -671,6 +671,8 @@ export class MCPServer {
         return this.canonicalForwardMessage(args);
       case 'deleteMessage':
         return this.canonicalDeleteMessage(args);
+      case 'editMessage':
+        return this.canonicalEditMessage(args);
       case 'markRead':
         return this.canonicalMarkRead(args);
       case 'createDraft':
@@ -751,6 +753,9 @@ export class MCPServer {
     const candidate = error as { canonicalCode?: string; code?: number; name?: string };
     if (candidate?.canonicalCode) return candidate.canonicalCode;
     const message = safeError(error).toLowerCase();
+    // fase 3 / PR-2: the WhatsApp connector's Idempotency-Key answers (409).
+    if (message.includes('send_outcome_uncertain')) return 'outcome_unknown';
+    if (message.includes('idempotency_key_reused')) return 'conflict';
     if (
       candidate?.name === 'TimeoutError' ||
       candidate?.name === 'AbortError' ||
@@ -1781,15 +1786,18 @@ export class MCPServer {
       } else if (message) {
         const sent =
           channelName === 'whatsapp'
-            ? await this.handleSendMessage({
-                chatId: destination,
-                text: message,
-                account: accountIdValue,
-                replyTo:
-                  args.replyTo === null || args.replyTo === undefined
-                    ? undefined
-                    : String(args.replyTo),
-              })
+            ? await this.handleSendMessage(
+                {
+                  chatId: destination,
+                  text: message,
+                  account: accountIdValue,
+                  replyTo:
+                    args.replyTo === null || args.replyTo === undefined
+                      ? undefined
+                      : String(args.replyTo),
+                },
+                ...this.connectorIdempotency(args, 'text')
+              )
             : await this.handleTelegramSendMessage({
                 chatId: destination,
                 text: message,
@@ -1800,21 +1808,24 @@ export class MCPServer {
         operations.push(this.legacyResultData(sent));
       }
 
-      for (const item of mediaGroup ? [] : attachments) {
+      for (const [index, item] of (mediaGroup ? [] : attachments).entries()) {
         const attachmentValue = asObject(item);
         const location = pickString(attachmentValue, ['url']);
         const sent =
           channelName === 'whatsapp'
-            ? await this.handleSendFile({
-                conversationId: destination,
-                fileUrl: location,
-                caption: pickString(attachmentValue, ['caption']) || undefined,
-                account: accountIdValue,
-                replyTo:
-                  args.replyTo === null || args.replyTo === undefined
-                    ? undefined
-                    : String(args.replyTo),
-              })
+            ? await this.handleSendFile(
+                {
+                  conversationId: destination,
+                  fileUrl: location,
+                  caption: pickString(attachmentValue, ['caption']) || undefined,
+                  account: accountIdValue,
+                  replyTo:
+                    args.replyTo === null || args.replyTo === undefined
+                      ? undefined
+                      : String(args.replyTo),
+                },
+                ...this.connectorIdempotency(args, `attachment:${index}`)
+              )
             : await this.handleTelegramSendFile({
                 chatId: destination,
                 filePath: location,
@@ -1848,6 +1859,25 @@ export class MCPServer {
       providerMessageIds,
       operations,
     });
+  }
+
+  /**
+   * The connector-side Idempotency-Key of one WhatsApp sub-operation of a
+   * canonical send (fase 3 / PR-2): the caller's idempotencyKey scoped like its
+   * Redis record (tool, channel, account) plus the sub-operation, so the text
+   * and each attachment of one call never share a key. [] without a key, so
+   * the legacy handlers keep their one-argument call.
+   */
+  private connectorIdempotency(
+    args: Record<string, any>,
+    operation: string
+  ): [] | [{ idempotencyKey: string }] {
+    const key = typeof args.idempotencyKey === 'string' ? args.idempotencyKey.trim() : '';
+    if (!key) return [];
+    const digest = createHash('sha256')
+      .update(`social_send_message\0${args.channel}\0${args.accountId}\0${key}\0${operation}`)
+      .digest('hex');
+    return [{ idempotencyKey: `mcp-${digest}` }];
   }
 
   private async canonicalForwardMessage(args: Record<string, any>): Promise<any> {
@@ -1894,6 +1924,30 @@ export class MCPServer {
     throw this.canonicalError(
       'unsupported_capability',
       'Instagram DM deletion is not supported by the deployed connector'
+    );
+  }
+
+  private async canonicalEditMessage(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') {
+      return this.handleEditMessage({
+        chatId: this.whatsAppProviderTarget(args),
+        messageId: this.string(args, 'messageId'),
+        content: this.string(args, 'message'),
+        account: this.account(args),
+      });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramEditMessage({
+        chatId: this.target(args),
+        messageId: this.string(args, 'messageId'),
+        content: this.string(args, 'message'),
+        account: this.account(args),
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      `Message editing is not supported by the deployed ${channelName} connector`
     );
   }
 
@@ -2842,15 +2896,19 @@ export class MCPServer {
     }
   }
 
-  private async handleSendMessage(args: {
-    chatId: string;
-    text: string;
-    account?: string;
-    replyTo?: string;
-    phone?: string;
-    phoneE164?: string;
-    manualOpenUrl?: string;
-  }) {
+  private async handleSendMessage(
+    args: {
+      chatId: string;
+      text: string;
+      account?: string;
+      replyTo?: string;
+      phone?: string;
+      phoneE164?: string;
+      manualOpenUrl?: string;
+    },
+    // Set only by canonicalSendMessage, never from tool arguments.
+    options?: { idempotencyKey?: string }
+  ) {
     if (process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending is disabled (ENABLE_SENDING != true)');
     }
@@ -2883,6 +2941,8 @@ export class MCPServer {
           'X-Connector-Timestamp': timestamp.toString(),
           // SC-705: forward the verified caller identity to the connector.
           ...actorRequestHeaders(),
+          // fase 3 / PR-2: opt-in connector idempotency (never the sendToken).
+          ...(options?.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
         },
         body: JSON.stringify(body),
       });
@@ -3840,6 +3900,75 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
+  /**
+   * Edit one of our own Telegram text messages through the connector's POST
+   * /messages/edit. The connector checks the message (ours, text), applies
+   * its sending gate and publishes telegram.MessageEdited; telegram-sync
+   * writes the row (replaced text kept in metadata.edit_history), so the MCP
+   * writes nothing itself. Telegram's own limits come back as 422
+   * rejected_by_telegram.
+   */
+  // CONTRACT: http.telegram-connector.messages-edit.v1
+  private async handleTelegramEditMessage(args: {
+    chatId: string;
+    messageId: string;
+    content: string;
+    account?: string;
+  }) {
+    const account = normalizeAccount(args.account);
+    const target = stripAccount(String(args.chatId).trim());
+    if (target.account !== 'personal' && target.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `target belongs to the ${target.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const { chatId } = this.telegramTopicTarget(args.chatId);
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      '/api/v1/messages/edit',
+      {
+        chatId,
+        messageId: this.telegramMessageNumber(args.messageId, chatId, account),
+        content: args.content,
+        ...this.connectorActor(),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /**
+   * Telegram message id (per chat) from what a caller holds: the bare number
+   * or the stored id `[<account>:]tg_<chat>_<msg>`, whose chat and account
+   * must be the ones addressed.
+   */
+  private telegramMessageNumber(messageId: string, chatId: string, account: Account): number {
+    const parsed = stripAccount(String(messageId).trim());
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId belongs to the ${parsed.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const stored = parsed.id.match(/^tg_(-?\d+)_(\d+)$/);
+    if (stored && stored[1] !== chatId) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId ${messageId} belongs to Telegram chat ${stored[1]}, not ${chatId}`
+      );
+    }
+    const raw = stored ? stored[2] : parsed.id;
+    const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(n) || n <= 0) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId must be a Telegram message number or tg_<chat>_<message>, got '${messageId}'`
+      );
+    }
+    return n;
+  }
+
   private async handleTelegramMarkAsRead(args: { chatId: string; account?: string }) {
     const data = await this.connectorCall(
       this.tgUrl(args.account),
@@ -3952,7 +4081,8 @@ export class MCPServer {
     method: string,
     path: string,
     body?: any,
-    timeoutMs = 15000
+    timeoutMs = 15000,
+    extraHeaders: Record<string, string> = {}
   ): Promise<any> {
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = body || {};
@@ -3966,6 +4096,7 @@ export class MCPServer {
         'X-Connector-Timestamp': timestamp.toString(),
         // SC-705: forward the verified caller identity to the connector.
         ...actorRequestHeaders(),
+        ...extraHeaders,
       },
       ...(method !== 'GET' && method !== 'DELETE' ? { body: JSON.stringify(payload) } : {}),
       signal: AbortSignal.timeout(timeoutMs),
@@ -3992,24 +4123,32 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
-  private async handleSendFile(args: {
-    conversationId: string;
-    fileUrl: string;
-    caption?: string;
-    replyTo?: string;
-    account?: string;
-  }) {
+  private async handleSendFile(
+    args: {
+      conversationId: string;
+      fileUrl: string;
+      caption?: string;
+      replyTo?: string;
+      account?: string;
+    },
+    // Set only by canonicalSendMessage, never from tool arguments.
+    options?: { idempotencyKey?: string }
+  ) {
     if (process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
     const { account, ...body } = args;
     body.conversationId = bareWhatsAppJid(body.conversationId);
-    const data = await this.connectorCall(
-      this.waUrl(account),
-      'POST',
-      '/api/v1/messages/media/send',
-      body
-    );
+    const data = options?.idempotencyKey
+      ? await this.connectorCall(
+          this.waUrl(account),
+          'POST',
+          '/api/v1/messages/media/send',
+          body,
+          undefined,
+          { 'Idempotency-Key': options.idempotencyKey }
+        )
+      : await this.connectorCall(this.waUrl(account), 'POST', '/api/v1/messages/media/send', body);
     return this.jsonResponse(data);
   }
 
@@ -4033,15 +4172,71 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
+  /**
+   * Delete for everyone (revoke) through the connector's POST /messages/delete
+   * (fase 3 / PR-3): ids travel inside the HMAC-signed body, the connector
+   * rebuilds the real key from its durable copies, applies ENABLE_SENDING and
+   * flags the row (content kept). messageId may be bare or namespaced to this
+   * account; another account's id is refused like a foreign target.
+   */
   private async handleDeleteMessage(args: { chatId: string; messageId: string; account?: string }) {
     const data = await this.connectorCall(
       this.waUrl(args.account),
-      'DELETE',
-      `/api/v1/messages/${encodeURIComponent(
-        bareWhatsAppJid(args.chatId)
-      )}/${encodeURIComponent(args.messageId)}`
+      'POST',
+      '/api/v1/messages/delete',
+      {
+        chatId: bareWhatsAppJid(args.chatId),
+        messageId: this.bareWhatsAppMessageId(args.messageId, args.account),
+        ...this.connectorActor(),
+      }
     );
     return this.jsonResponse(data);
+  }
+
+  /**
+   * Edit one of our own text messages through the connector's POST
+   * /messages/edit (fase 3 / PR-3). Same id rules as handleDeleteMessage; the
+   * connector applies ENABLE_SENDING, rebuilds the key and keeps the replaced
+   * text in metadata.edit_history. WhatsApp's own limits (its edit window)
+   * come back as 422 rejected_by_whatsapp.
+   */
+  private async handleEditMessage(args: {
+    chatId: string;
+    messageId: string;
+    content: string;
+    account?: string;
+  }) {
+    const data = await this.connectorCall(
+      this.waUrl(args.account),
+      'POST',
+      '/api/v1/messages/edit',
+      {
+        chatId: bareWhatsAppJid(args.chatId),
+        messageId: this.bareWhatsAppMessageId(args.messageId, args.account),
+        content: args.content,
+        ...this.connectorActor(),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /** messageId bare or namespaced to `account`; another account's id is refused like a foreign target. */
+  private bareWhatsAppMessageId(messageId: string, accountArg?: string): string {
+    const account = normalizeAccount(accountArg);
+    const parsed = stripAccount(messageId);
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId belongs to the ${parsed.account} WhatsApp namespace but accountId is '${account}'`
+      );
+    }
+    return parsed.id;
+  }
+
+  /** The caller recorded by the connector (never used for auth). */
+  private connectorActor(): { actor?: string } {
+    const actor = getRequestActor();
+    return actor.name || actor.sub ? { actor: actor.name || actor.sub } : {};
   }
 
   private async handleGetMe(args?: { account?: string }) {

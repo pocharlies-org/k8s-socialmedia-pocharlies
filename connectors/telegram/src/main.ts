@@ -1,7 +1,11 @@
 import express from 'express';
 import { PostgresCredentialStore, credentialSessionKeyFromEnv } from '@mcp-socialmedia/shared';
-import { TelegramClientWrapper, TelegramMessage } from './telegram-client';
-import { TelegramEventPublisher, TelegramMessageReceivedEvent } from './events/publisher';
+import { TelegramClientWrapper, TelegramMessage, TelegramMessageEdit } from './telegram-client';
+import {
+  TelegramEventPublisher,
+  TelegramMessageReceivedEvent,
+  toMessageEditedEvent,
+} from './events/publisher';
 import { createRouter } from './api/controller';
 import { getPool } from './db-pool';
 import {
@@ -100,13 +104,22 @@ async function main() {
     if (typeof sub === 'string' && sub) console.log(`API request carries x-user-sub=${sub}`);
     next();
   });
-  app.use('/api/v1', createRouter(client, CONNECTOR_SHARED_SECRET));
+  app.use(
+    '/api/v1',
+    createRouter(client, CONNECTOR_SHARED_SECRET, {
+      publishMessageEdited: edit =>
+        eventPublisher.publishMessageEdited(toMessageEditedEvent(CONNECTOR_ACCOUNT, edit)),
+    })
+  );
 
-  // Health check endpoint
-  app.get('/health', (req, res) => {
+  // Health check endpoint. INFRA-291 (P4): readiness reports the REAL NATS
+  // state (eventPublisher.isConnected()) — the publisher no longer kills the
+  // process when NATS is down, so /health must not pretend events flow.
+  app.get('/health', (_req, res) => {
     res.json({
       status: 'ok',
       connected: client.isClientConnected(),
+      natsConnected: eventPublisher.isConnected(),
       platform: 'telegram',
     });
   });
@@ -115,7 +128,9 @@ async function main() {
     console.log(`Telegram Connector API listening on port ${PORT}`);
   });
 
-  // Connect to NATS
+  // Connect to NATS. INFRA-291 (P4): connect() never throws — a NATS that is
+  // down at boot used to kill main.ts here (CrashLoop); now the publisher
+  // retries with backoff and /health's natsConnected reflects the real state.
   await eventPublisher.connect();
 
   // Handle connection
@@ -146,6 +161,11 @@ async function main() {
     };
 
     await eventPublisher.publishMessageReceived(event);
+  });
+
+  // Edits Telegram tells us about (a contact's, our phone's) → telegram-sync.
+  client.on('messageEdited', (edit: TelegramMessageEdit) => {
+    eventPublisher.publishMessageEdited(toMessageEditedEvent(CONNECTOR_ACCOUNT, edit));
   });
 
   // Connect to Telegram

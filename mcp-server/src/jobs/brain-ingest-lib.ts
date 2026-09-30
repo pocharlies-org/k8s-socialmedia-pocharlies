@@ -227,29 +227,82 @@ export async function fetchBatch(
   return r.rows as Row[];
 }
 
+export interface PushRetryOpts {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+function envInt(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// Presupuesto efectivo de reintento: BRAIN_PUSH_BUDGET_MS (240 s), recortado a
+// BRAIN_INGEST_MAX_RUNTIME_MS - 30 s para agotar y salir antes del tope del job.
+function pushBudgetMs(): number {
+  const budget = envInt('BRAIN_PUSH_BUDGET_MS', 240000);
+  const maxRuntime = Number(process.env.BRAIN_INGEST_MAX_RUNTIME_MS);
+  if (Number.isFinite(maxRuntime) && maxRuntime > 0) {
+    return Math.max(0, Math.min(budget, maxRuntime - 30000));
+  }
+  return budget;
+}
+
+// BRAIN_PUSH_RETRIES es techo de seguridad: manda el presupuesto y los intentos deben cubrirlo
+// con el backoff real (1,2,4,8,16 s y luego maxDelay): 240 s / 30 s piden 13 intentos.
 export async function pushToBrain(
   config: BrainPushConfig,
   instance: string,
   adapter: string,
-  documents: BrainDoc[]
+  documents: BrainDoc[],
+  opts: PushRetryOpts = {}
 ): Promise<number> {
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+  const maxAttempts = envInt('BRAIN_PUSH_RETRIES', 20);
+  const maxDelay = envInt('BRAIN_PUSH_RETRY_MAX_DELAY_MS', 30000);
+  const budget = pushBudgetMs();
+  const start = now();
   const url = `${config.brainUrl.replace(/\/$/, '')}/instances/${instance}/push-ingest`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
-    },
-    body: JSON.stringify({ adapter, documents }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(
-      `brain push-ingest ${instance}/${adapter} -> ${resp.status}: ${text.slice(0, 300)}`
+  const label = `brain push-ingest ${instance}/${adapter}`;
+
+  for (let attempt = 1; ; attempt++) {
+    let lastError: Error;
+    let fatal = false;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
+        },
+        body: JSON.stringify({ adapter, documents }),
+      });
+      if (resp.ok) {
+        const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+        return Number(body.chunks_ingested ?? 0);
+      }
+      const text = await resp.text().catch(() => '');
+      lastError = new Error(`${label} -> ${resp.status}: ${text.slice(0, 300)}`);
+      fatal = resp.status < 500; // 4xx: no se reintenta
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e)); // error de red
+    }
+    if (fatal) throw lastError;
+
+    const elapsed = now() - start;
+    if (attempt >= maxAttempts || elapsed >= budget) {
+      throw new Error(
+        `${lastError.message} (tras ${attempt - 1} reintentos, ${elapsed} ms gastados de ${budget} ms)`
+      );
+    }
+    // El último sueño se recorta al presupuesto restante: hay un intento final justo en el límite.
+    const delay = Math.min(1000 * 2 ** (attempt - 1), maxDelay, budget - elapsed);
+    console.warn(
+      `${label} fallo (${lastError.message}); reintento ${attempt}/${maxAttempts - 1} en ${delay} ms`
     );
+    await sleep(delay);
   }
-  const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
-  return Number(body.chunks_ingested ?? 0);
 }
 
 export function toDoc(row: Row): BrainDoc {

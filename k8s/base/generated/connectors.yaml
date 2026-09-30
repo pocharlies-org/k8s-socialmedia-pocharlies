@@ -104,6 +104,10 @@ spec:
           value: bge-m3
         - name: EMBEDDING_DIMENSION
           value: '1024'
+        - name: WA_RECONNECT_BACKFILL_WINDOW_HOURS
+          value: '6'
+        - name: WA_RECONNECT_BACKFILL_MAX_MESSAGES
+          value: '500'
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets
@@ -289,6 +293,10 @@ spec:
           value: bge-m3
         - name: EMBEDDING_DIMENSION
           value: '1024'
+        - name: WA_RECONNECT_BACKFILL_WINDOW_HOURS
+          value: '6'
+        - name: WA_RECONNECT_BACKFILL_MAX_MESSAGES
+          value: '500'
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets
@@ -474,6 +482,10 @@ spec:
           value: bge-m3
         - name: EMBEDDING_DIMENSION
           value: '1024'
+        - name: WA_RECONNECT_BACKFILL_WINDOW_HOURS
+          value: '6'
+        - name: WA_RECONNECT_BACKFILL_MAX_MESSAGES
+          value: '500'
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets

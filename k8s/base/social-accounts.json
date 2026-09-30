@@ -11,7 +11,17 @@
       "connectorAccountEnv": false,
       "lanIngress": "whatsapp-lan",
       "lanHost": "whatsapp.lan.e-dani.com",
-      "qrPublicUrl": "https://whatsapp.e-dani.com/qr/page"
+      "qrPublicUrl": "https://whatsapp.e-dani.com/qr/page",
+      "env": [
+        {
+          "name": "WA_RECONNECT_BACKFILL_WINDOW_HOURS",
+          "value": "6"
+        },
+        {
+          "name": "WA_RECONNECT_BACKFILL_MAX_MESSAGES",
+          "value": "500"
+        }
+      ]
     },
     "brainInstance": "personal"
   },
@@ -26,7 +36,17 @@
       "lanHost": "whatsapp-pro.lan.e-dani.com",
       "qrPublicUrl": "https://whatsapp-pro.e-dani.com/qr/page",
       "emitAudioAttachments": true,
-      "allowWebRenew": true
+      "allowWebRenew": true,
+      "env": [
+        {
+          "name": "WA_RECONNECT_BACKFILL_WINDOW_HOURS",
+          "value": "6"
+        },
+        {
+          "name": "WA_RECONNECT_BACKFILL_MAX_MESSAGES",
+          "value": "500"
+        }
+      ]
     },
     "brainInstance": "skirmshop"
   },
@@ -38,7 +58,17 @@
     "connectorUrl": "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001",
     "deploy": {
       "emitAudioAttachments": true,
-      "allowWebRenew": true
+      "allowWebRenew": true,
+      "env": [
+        {
+          "name": "WA_RECONNECT_BACKFILL_WINDOW_HOURS",
+          "value": "6"
+        },
+        {
+          "name": "WA_RECONNECT_BACKFILL_MAX_MESSAGES",
+          "value": "500"
+        }
+      ]
     },
     "brainInstance": "personal"
   },

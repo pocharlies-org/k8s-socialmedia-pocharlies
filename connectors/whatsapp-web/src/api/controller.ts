@@ -3,8 +3,10 @@ import { createHash } from 'crypto';
 import {
   BaileysClient,
   classifyWhatsAppSendFailure,
+  normalizeChatModifyAction,
   WhatsAppSendFailureClass,
 } from '../baileys-client';
+import { MuteState } from '../chat-state';
 import { QRHandler } from '../qr-handler';
 import { createHMACAuth, AuthenticatedRequest } from './auth';
 import {
@@ -24,6 +26,30 @@ import {
   WhatsAppContactSeedInput,
 } from '../contact-sync';
 import { MessageUnavailableError } from '../durable-message-store';
+import { MessageMutationError } from '../message-mutations';
+import { PollEventInputError, validatePollInput } from '../poll-votes';
+import { validateEventInput, validateEventResponse } from '../event-responses';
+import {
+  GroupActionError,
+  normalizeGroupParticipantAction,
+  parseGroupJid,
+  parseGroupParticipants,
+  parseGroupSubject,
+  parseGroupUpdate,
+} from '../group-management';
+import {
+  claimSendAttempt,
+  confirmSend,
+  mediaRequestHash,
+  readIdempotencyKey,
+  recordSendFailure,
+  reserveSend,
+  SendAlreadyClaimedError,
+  SendReservation,
+  structuredRequestHash,
+  textRequestHash,
+  voiceRequestHash,
+} from '../send-idempotency';
 
 function statusForSendFailure(
   failureClass: WhatsAppSendFailureClass | 'disabled_sending' | 'invalid_request'
@@ -81,6 +107,90 @@ function optionalObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * Edits, deletes and reactions go out to WhatsApp: the same two kill switches
+ * as sends. Answers 403 and returns true when sending is off.
+ */
+function rejectWhenSendingDisabled(res: Response): boolean {
+  const disabled = process.env.ENABLE_SENDING !== 'true';
+  if (!disabled && process.env.EMERGENCY_DISABLE_SENDING !== 'true') return false;
+  res.status(statusForSendFailure('disabled_sending')).json({
+    error: disabled ? 'Sending is disabled' : 'Sending is emergency disabled',
+    failureClass: 'disabled_sending',
+  });
+  return true;
+}
+
+/** Optional `actor` of a mutation body: who asked, for the record (≤ 200 chars). */
+function actorFromBody(value: unknown): string | undefined {
+  const actor = typeof value === 'string' ? value.trim() : '';
+  return actor ? actor.slice(0, 200) : undefined;
+}
+
+/** Error of an edit/delete/reaction → status + failureClass (same classes as sends). */
+function mutationErrorResponse(res: Response, error: unknown, what: string): void {
+  if (error instanceof PollEventInputError) {
+    res.status(error.status).json({
+      error: error.message,
+      failureClass: error.failureClass,
+      ...(error.details ? { details: error.details } : {}),
+    });
+    return;
+  }
+  if (error instanceof MessageUnavailableError || error instanceof MessageMutationError) {
+    res.status(error.status).json({
+      error: error.message,
+      failureClass: error.failureClass,
+      ...(error instanceof MessageMutationError && error.code ? { code: error.code } : {}),
+      // Group actions: per-participant results, what was already applied.
+      ...(error instanceof GroupActionError && error.details ? error.details : {}),
+    });
+    return;
+  }
+  const failureClass = classifyWhatsAppSendFailure(error);
+  res.status(statusForSendFailure(failureClass)).json({
+    error: `Failed to ${what}: ${errorMessage(error)}`,
+    failureClass,
+  });
+}
+
+/** Longest timed mute accepted; beyond that, mute without an end ("always"). */
+const MAX_MUTE_MS = 366 * 24 * 60 * 60 * 1000;
+
+/**
+ * Mute end of a /chats/modify body: `durationMs` (from now) or `muteUntil`
+ * (ISO-8601 or epoch ms), neither = forever. A string is the 400 reason.
+ */
+function muteFromBody(body: Record<string, unknown>): MuteState | string {
+  const hasDuration = body.durationMs !== undefined && body.durationMs !== null;
+  const hasUntil = body.muteUntil !== undefined && body.muteUntil !== null;
+  if (hasDuration && hasUntil) return 'Pass durationMs or muteUntil, not both';
+  const now = Date.now();
+  let until: number | undefined;
+  if (hasDuration) {
+    const ms = typeof body.durationMs === 'number' ? body.durationMs : Number(body.durationMs);
+    if (!Number.isInteger(ms) || ms <= 0) return 'durationMs must be a positive integer';
+    until = now + ms;
+  } else if (hasUntil) {
+    const raw = body.muteUntil;
+    until = typeof raw === 'number' ? raw : typeof raw === 'string' ? Date.parse(raw) : NaN;
+    if (!Number.isFinite(until) || until <= now) return 'muteUntil must be a future time';
+  }
+  if (until !== undefined && until - now > MAX_MUTE_MS) {
+    return 'A timed mute is at most 366 days (omit durationMs / muteUntil to mute always)';
+  }
+  return { until: until === undefined ? null : new Date(until) };
+}
+
+function rejectWhenDisconnected(client: BaileysClient, res: Response): boolean {
+  if (client.isConnected()) return false;
+  res.status(statusForSendFailure('disconnected')).json({
+    error: `WhatsApp is not connected (state=${client.getCachedState() || 'unknown'})`,
+    failureClass: 'disconnected',
+  });
+  return true;
+}
+
 function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
   const status = optionalString(value);
   if (
@@ -94,6 +204,135 @@ function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
     return status;
   }
   return null;
+}
+
+/**
+ * One send under an explicit Idempotency-Key (fase 3 / PR-2). `beforeSend`
+ * claims the attempt right before the network send; `claimed` says whether it
+ * did, i.e. whether a failure may have reached WhatsApp.
+ */
+interface IdempotentSend {
+  key: string;
+  messageId?: string;
+  claimed: boolean;
+  beforeSend: () => Promise<void>;
+}
+
+function uncertainOutcomeBody(messageId: string | undefined): Record<string, unknown> {
+  return {
+    error:
+      'The outcome of an earlier send with this Idempotency-Key is unknown; check the chat before sending again',
+    failureClass: 'send_outcome_uncertain',
+    messageId,
+  };
+}
+
+// CONTRACT: http.whatsapp-connector.send-idempotency.v1 — opt-in Idempotency-Key, replay + deduplicated, 409 idempotency_key_reused / send_outcome_uncertain
+/**
+ * Opt-in idempotency for a send route. Returns null when the request carries
+ * no key (or the client keeps no DB state, or the store is unavailable): the
+ * route then runs its legacy path, byte for byte. 'answered' when the response
+ * is already sent (invalid key, replay, 409).
+ */
+async function beginIdempotentSend(
+  client: BaileysClient,
+  req: AuthenticatedRequest,
+  res: Response,
+  requestHash: () => string,
+  replayBody: (reservation: SendReservation) => Record<string, unknown>
+): Promise<IdempotentSend | null | 'answered'> {
+  const { key, error } = readIdempotencyKey(req.headers, req.body);
+  if (error) {
+    res.status(400).json({ error, failureClass: 'invalid_request' });
+    return 'answered';
+  }
+  // SC-1225: a pairing-only client (ingest off) never touches the table.
+  if (!key || !client.isIngestEnabled()) return null;
+  const hash = requestHash();
+  const reservation = await reserveSend(key, hash);
+  switch (reservation.state) {
+    case 'unavailable':
+      return null;
+    case 'conflict':
+      res.status(409).json({
+        error: 'Idempotency-Key was already used for a different request',
+        failureClass: 'idempotency_key_reused',
+      });
+      return 'answered';
+    case 'pending':
+      res.status(409).json(uncertainOutcomeBody(reservation.messageId));
+      return 'answered';
+    case 'sent':
+      console.info(`WhatsApp send replayed messageId=${reservation.messageId || ''}`);
+      res.json({ ...replayBody(reservation), deduplicated: true });
+      return 'answered';
+    default: {
+      const attempt: IdempotentSend = {
+        key,
+        messageId: reservation.messageId,
+        claimed: false,
+        beforeSend: async () => {
+          await claimSendAttempt(key, hash);
+          attempt.claimed = true;
+        },
+      };
+      return attempt;
+    }
+  }
+}
+
+/** Error path of an idempotent send: true when the response was answered here. */
+async function failIdempotentSend(
+  attempt: IdempotentSend | null,
+  error: unknown,
+  res: Response
+): Promise<boolean> {
+  if (!attempt) return false;
+  if (error instanceof SendAlreadyClaimedError) {
+    res.status(409).json(uncertainOutcomeBody(attempt.messageId));
+    return true;
+  }
+  await recordSendFailure(attempt.key, attempt.claimed, error);
+  return false;
+}
+
+/**
+ * Polls, votes, events and responses (fase 3 / PR-7): the send gate, the
+ * connection and the opt-in Idempotency-Key, after the body was validated.
+ * null when the response was already sent (403 / 503 / replay / 409);
+ * otherwise the attempt (null inside when there is no key) to hand the client.
+ */
+async function beginStructuredSend(
+  client: BaileysClient,
+  req: AuthenticatedRequest,
+  res: Response,
+  requestHash: () => string
+): Promise<{ attempt: IdempotentSend | null } | null> {
+  if (rejectWhenSendingDisabled(res)) return null;
+  if (rejectWhenDisconnected(client, res)) return null;
+  const begun = await beginIdempotentSend(client, req, res, requestHash, reservation => ({
+    messageId: reservation.messageId,
+    sentAt: reservation.sentAt,
+  }));
+  if (begun === 'answered') return null;
+  return { attempt: begun };
+}
+
+function structuredSendOptions(attempt: IdempotentSend | null, actor: string | undefined) {
+  return attempt
+    ? { messageId: attempt.messageId, beforeSend: attempt.beforeSend, actor }
+    : { actor };
+}
+
+/** Error path of a structured send: the idempotency bookkeeping, then the usual mapping. */
+async function failStructuredSend(
+  attempt: IdempotentSend | null,
+  error: unknown,
+  res: Response,
+  what: string
+): Promise<void> {
+  if (await failIdempotentSend(attempt, error, res)) return;
+  mutationErrorResponse(res, error, what);
 }
 
 function manualOpenIdempotencyKey(phoneE164: string, text: string): string {
@@ -536,6 +775,7 @@ export function createRouter(
       let requestConversationId: unknown;
       let requestContent: unknown;
       let requestSendToken: unknown;
+      let idempotent: IdempotentSend | null = null;
       try {
         const body = req.body as {
           sendToken?: string;
@@ -595,16 +835,40 @@ export function createRouter(
           return;
         }
 
-        const messageId = await client.sendMessage(conversationId, content, { replyToMessageId });
+        // Opt-in: only an explicit Idempotency-Key, never sendToken (callers reuse it).
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () => textRequestHash({ conversationId, content, replyToMessageId }),
+          reservation => ({ messageId: reservation.messageId, sentAt: reservation.sentAt })
+        );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        const messageId = await client.sendMessage(
+          conversationId,
+          content,
+          idempotent
+            ? {
+                replyToMessageId,
+                messageId: idempotent.messageId,
+                beforeSend: idempotent.beforeSend,
+              }
+            : { replyToMessageId }
+        );
         console.info(
           `WhatsApp send ok conversationId=${conversationId} messageId=${messageId || ''}`
         );
 
         res.json({
           messageId,
-          sentAt: new Date().toISOString(),
+          sentAt: idempotent
+            ? await confirmSend(idempotent.key, messageId)
+            : new Date().toISOString(),
         });
       } catch (error) {
+        if (await failIdempotentSend(idempotent, error, res)) return;
         const failureClass = classifyWhatsAppSendFailure(error);
         const details = (error as any)?.details || {};
         console.error(
@@ -644,6 +908,7 @@ export function createRouter(
   // Send a voice note (requires auth) — {conversationId, audioBase64, mimeType}
   router.post('/messages/audio', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
+      let idempotent: IdempotentSend | null = null;
       try {
         const body = req.body as {
           conversationId?: string;
@@ -674,17 +939,35 @@ export function createRouter(
           return;
         }
 
-        const buf = Buffer.from(audioBase64, 'base64');
-        const messageId = await client.sendVoice(
-          conversationId,
-          buf,
-          mimeType || 'audio/ogg; codecs=opus'
+        const effectiveMimeType = mimeType || 'audio/ogg; codecs=opus';
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () => voiceRequestHash({ conversationId, audioBase64, mimeType: effectiveMimeType }),
+          reservation => ({ messageId: reservation.messageId, sentAt: reservation.sentAt })
         );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        const buf = Buffer.from(audioBase64, 'base64');
+        const messageId = idempotent
+          ? await client.sendVoice(conversationId, buf, effectiveMimeType, {
+              messageId: idempotent.messageId,
+              beforeSend: idempotent.beforeSend,
+            })
+          : await client.sendVoice(conversationId, buf, effectiveMimeType);
         console.info(
           `WhatsApp voice sent conversationId=${conversationId} messageId=${messageId || ''}`
         );
-        res.json({ messageId, sentAt: new Date().toISOString() });
+        res.json({
+          messageId,
+          sentAt: idempotent
+            ? await confirmSend(idempotent.key, messageId)
+            : new Date().toISOString(),
+        });
       } catch (error) {
+        if (await failIdempotentSend(idempotent, error, res)) return;
         const failureClass = classifyWhatsAppSendFailure(error);
         res.status(statusForSendFailure(failureClass)).json({
           error: `Failed to send voice: ${errorMessage(error)}`,
@@ -694,35 +977,233 @@ export function createRouter(
     })();
   });
 
-  // React to a message (requires auth)
+  // React to a message ('' removes our reaction). Fase 3 / PR-4: same gate
+  // as every send, the key survives restarts, an unknown message is a 404
+  // instead of a silent 200, and the reaction is recorded.
+  // CONTRACT: http.whatsapp-connector.messages-react.v1 — body {conversationId, messageId, emoji}, 200 {reacted, emoji, messageId, reactedAt}
   router.post('/messages/react', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
       try {
-        const body = req.body as { conversationId?: string; messageId?: string; emoji?: string };
-        const { conversationId, messageId, emoji } = body;
-
-        // Empty `emoji` is a valid signal to REMOVE the reaction. Baileys
-        // accepts `{ react: { text: '', key } }` for un-react.
-        if (!conversationId || !messageId) {
-          res.status(400).json({ error: 'Missing conversationId or messageId' });
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId);
+        const emoji = body.emoji ?? '';
+        if (!chatId || !messageId || typeof emoji !== 'string') {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId (emoji must be a string)',
+            failureClass: 'invalid_request',
+          });
           return;
         }
-
-        if (process.env.ENABLE_SENDING !== 'true') {
-          res.status(403).json({ error: 'Sending is disabled' });
-          return;
-        }
-
-        await client.reactToMessage(conversationId, messageId, emoji || '');
-
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.reactToMessage(chatId, messageId, emoji);
         res.json({
           reacted: true,
-          emoji: emoji || '',
+          emoji: result.emoji,
+          // As before: the id the caller sent (bare or namespaced).
           messageId,
-          reactedAt: new Date().toISOString(),
+          reactionId: result.reactionId,
+          reactedAt: result.reactedAt,
         });
       } catch (error) {
-        res.status(500).json({ error: 'Failed to react: ' + String(error) });
+        mutationErrorResponse(res, error, 'react');
+      }
+    })();
+  });
+
+  // Polls and events (fase 3 / PR-7). Ids inside the signed body. The body is
+  // validated first (400), then — for the four that reach people — the same
+  // gate as every send (403), the connection (503) and the opt-in
+  // Idempotency-Key (PR-2). Results are reads: no gate.
+
+  // CONTRACT: http.whatsapp-connector.messages-poll.v1 — body {conversationId, name, options[2..12], selectableCount?, actor?}, 200 {sent, messageId, conversationId, sentAt}
+  router.post('/messages/poll', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (!chatId) {
+          res
+            .status(400)
+            .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+          return;
+        }
+        const poll = validatePollInput({
+          name: body.name,
+          options: body.options,
+          selectableCount: body.selectableCount,
+        });
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('poll', chatId, poll)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.sendPoll(
+          chatId,
+          poll,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          sent: true,
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'send poll');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-poll-vote.v1 — body {conversationId, messageId, options[], actor?} ([] retracts), 200 {voted, messageId, pollMessageId, conversationId, options, retracted, votedAt, persisted}
+  router.post('/messages/poll/vote', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId);
+        const options = body.options;
+        if (
+          !chatId ||
+          !messageId ||
+          !Array.isArray(options) ||
+          options.some(option => typeof option !== 'string')
+        ) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId, or options is not a list of option names',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('poll-vote', chatId, { messageId, options })
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.sendPollVote(
+          chatId,
+          messageId,
+          options,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        if (attempt) await confirmSend(attempt.key, result.messageId);
+        res.json({ voted: true, ...result });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'vote');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-poll-results.v1 — body {conversationId, messageId}, 200 {poll: {messageId, conversationId, question, selectableCount, options: [{name, votes, voters}], totalVoters, myVote, persisted}}
+  router.post('/messages/poll/results', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId);
+        if (!chatId || !messageId) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        res.json({ poll: await client.getPollResults(chatId, messageId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read poll results');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-event.v1 — body {conversationId, name, description?, startTime, endTime?, location?, call?, extraGuestsAllowed?, actor?}, 200 {sent, messageId, conversationId, sentAt}
+  router.post('/messages/event', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (!chatId) {
+          res
+            .status(400)
+            .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+          return;
+        }
+        const event = validateEventInput(body);
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('event', chatId, event)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.sendEvent(
+          chatId,
+          event,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          sent: true,
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'send event');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-event-respond.v1 — body {conversationId, messageId, response: going|not_going|maybe, extraGuestCount?, actor?}, 200 {responded, messageId, eventMessageId, conversationId, response, extraGuestCount, respondedAt, persisted}
+  router.post('/messages/event/respond', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId);
+        if (!chatId || !messageId) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const answer = validateEventResponse(body.response, body.extraGuestCount);
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('event-response', chatId, { messageId, ...answer })
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.respondToEvent(
+          chatId,
+          messageId,
+          answer,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        if (attempt) await confirmSend(attempt.key, result.messageId);
+        res.json({ responded: true, ...result });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'respond to event');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-event-results.v1 — body {conversationId, messageId}, 200 {event: {messageId, conversationId, name, startTime, endTime, location, isCanceled, counts, extraGuests, responses, myResponse, persisted}}
+  router.post('/messages/event/results', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId);
+        if (!chatId || !messageId) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        res.json({ event: await client.getEventResults(chatId, messageId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read event results');
       }
     })();
   });
@@ -818,6 +1299,42 @@ export function createRouter(
     })();
   });
 
+  // Archive / pin / mute / read-unread a chat (fase 3 / PR-5): an app-state
+  // patch to WhatsApp, same gate as every send, recorded on the canonical
+  // conversation. Ids travel inside the signed body.
+  // CONTRACT: http.whatsapp-connector.chats-modify.v1 — body {conversationId, action, durationMs?, muteUntil?, actor?}, 200 {modified, action, chatId, conversationId, persisted, state}
+  router.post('/chats/modify', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const action = normalizeChatModifyAction(body.action);
+        if (!chatId || !action) {
+          res.status(400).json({
+            error:
+              'Missing conversationId or action (archive, unarchive, pin, unpin, mute, unmute, markRead, markUnread)',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const mute = action === 'mute' ? muteFromBody(body) : undefined;
+        if (typeof mute === 'string') {
+          res.status(400).json({ error: mute, failureClass: 'invalid_request' });
+          return;
+        }
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.modifyChat(chatId, action, {
+          mute,
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ modified: true, ...result });
+      } catch (error) {
+        mutationErrorResponse(res, error, 'modify chat');
+      }
+    })();
+  });
+
   // Force app-state resync → persists current unread/archived to the DB.
   router.post('/chats/resync-state', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
@@ -850,6 +1367,97 @@ export function createRouter(
         res.json({ participants });
       } catch (e) {
         res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  // Group management (fase 3 / PR-6). Ids inside the signed body; only group
+  // jids (…@g.us). The body is validated before anything else (400), then —
+  // for the three that change the group, which notify its members — the same
+  // gate as every send, then the connection. What this account may do comes
+  // from its own participant row in fresh metadata (403 not_group_admin /
+  // not_group_member).
+
+  // CONTRACT: http.whatsapp-connector.groups-state.v1 — body {groupId}, 200 {group: {groupId, subject, description, announce, restrict, memberAddMode, community, size, createdAt, owner, capabilities, participants}}
+  router.post('/groups/state', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ group: await client.getGroupState(groupId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-create.v1 — body {subject, participants[], actor?}, 200 {created, groupId, conversationId, subject, persisted, participants, succeeded, failed, group}
+  router.post('/groups/create', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const subject = parseGroupSubject(body.subject);
+        const participants = parseGroupParticipants(body.participants);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.createGroup(
+          subject,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ created: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'create group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-update.v1 — body {groupId, subject?, description?, settings?: {announce?, restrict?}, actor?}, 200 {updated, groupId, changed, unchanged, persisted, group}
+  router.post('/groups/update', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const update = parseGroupUpdate(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateGroup(groupId, update, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-participants.v1 — body {groupId, action: add|remove|promote|demote, participants[], actor?}, 200 {updated, action, groupId, results, succeeded, failed, partial, persisted, group}
+  router.post('/groups/participants', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const action = normalizeGroupParticipantAction(body.action);
+        if (!action) {
+          res.status(400).json({
+            error: 'action must be one of add, remove, promote, demote',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const participants = parseGroupParticipants(body.participants);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateGroupParticipants(
+          groupId,
+          action,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update group participants');
       }
     })();
   });
@@ -923,6 +1531,7 @@ export function createRouter(
   // Send file/media
   router.post('/messages/media/send', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
+      let idempotent: IdempotentSend | null = null;
       try {
         if (process.env.ENABLE_SENDING !== 'true') {
           res.status(403).json({ error: 'Sending disabled' });
@@ -940,12 +1549,51 @@ export function createRouter(
           res.status(400).json({ error: 'Missing conversationId or fileUrl' });
           return;
         }
-        await client.sendFile(conversationId, fileUrl, caption, {
-          asSticker: !!asSticker || kind === 'sticker',
-          replyToMessageId: optionalString(replyTo),
+        const sticker = !!asSticker || kind === 'sticker';
+        const replyToMessageId = optionalString(replyTo);
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () =>
+            mediaRequestHash({
+              conversationId,
+              fileUrl,
+              caption,
+              asSticker: sticker,
+              replyToMessageId,
+            }),
+          reservation => ({
+            sent: true,
+            sentAt: reservation.sentAt,
+            messageId: reservation.messageId,
+          })
+        );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        if (!idempotent) {
+          await client.sendFile(conversationId, fileUrl, caption, {
+            asSticker: sticker,
+            replyToMessageId,
+          });
+          res.json({ sent: true, sentAt: new Date().toISOString() });
+          return;
+        }
+        // Idempotent sends also answer the message id (additive).
+        const messageId = await client.sendFile(conversationId, fileUrl, caption, {
+          asSticker: sticker,
+          replyToMessageId,
+          messageId: idempotent.messageId,
+          beforeSend: idempotent.beforeSend,
         });
-        res.json({ sent: true, sentAt: new Date().toISOString() });
+        res.json({
+          sent: true,
+          sentAt: await confirmSend(idempotent.key, messageId),
+          messageId,
+        });
       } catch (e) {
+        if (await failIdempotentSend(idempotent, e, res)) return;
         if (e instanceof MessageUnavailableError) {
           res.status(e.status).json({ error: e.message, failureClass: e.failureClass });
           return;
@@ -960,7 +1608,10 @@ export function createRouter(
   router.post('/messages/forward', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
-        if (process.env.ENABLE_SENDING !== 'true') {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
@@ -981,17 +1632,81 @@ export function createRouter(
     })();
   });
 
-  // Delete message
+  // Edit one of our own text messages (fase 3 / PR-3).
+  // CONTRACT: http.whatsapp-connector.messages-edit.v1 — body {chatId, messageId, content}, 200 {edited, messageId, editId, editedAt}
+  router.post('/messages/edit', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenSendingDisabled(res)) return;
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.chatId ?? body.conversationId);
+        const messageId = optionalString(body.messageId);
+        const content = typeof body.content === 'string' ? body.content : '';
+        if (!chatId || !messageId || !content.trim()) {
+          res.status(400).json({
+            error: 'Missing chatId, messageId or content',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.editMessage(chatId, messageId, content, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ edited: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'edit message');
+      }
+    })();
+  });
+
+  // Delete for everyone (revoke) or, with forMe: true, only for this account.
+  // CONTRACT: http.whatsapp-connector.messages-delete.v1 — body {chatId, messageId, forMe?}, 200 {deleted, scope, messageId, deletedAt}
+  router.post('/messages/delete', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenSendingDisabled(res)) return;
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.chatId ?? body.conversationId);
+        const messageId = optionalString(body.messageId);
+        if (
+          !chatId ||
+          !messageId ||
+          (body.forMe !== undefined && typeof body.forMe !== 'boolean')
+        ) {
+          res.status(400).json({
+            error: 'Missing chatId or messageId (forMe must be a boolean)',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const request = { actor: actorFromBody(body.actor) };
+        const forMe = body.forMe === true;
+        const result = forMe
+          ? await client.deleteMessageForMe(chatId, messageId, request)
+          : await client.deleteMessage(chatId, messageId, request);
+        res.json({ deleted: true, scope: forMe ? 'me' : 'everyone', ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'delete message');
+      }
+    })();
+  });
+
+  // Legacy delete for everyone (path params are not covered by the HMAC:
+  // prefer POST /messages/delete). Same gate and behaviour.
   router.delete(
     '/messages/:chatId/:msgId',
     auth,
     (req: AuthenticatedRequest, res: Response): void => {
       void (async () => {
         try {
-          await client.deleteMessage(req.params.chatId, req.params.msgId);
-          res.json({ deleted: true });
+          if (rejectWhenSendingDisabled(res)) return;
+          if (rejectWhenDisconnected(client, res)) return;
+          const result = await client.deleteMessage(req.params.chatId, req.params.msgId);
+          res.json({ deleted: true, scope: 'everyone', ...result });
         } catch (e) {
-          res.status(500).json({ error: String(e) });
+          mutationErrorResponse(res, e, 'delete message');
         }
       })();
     }

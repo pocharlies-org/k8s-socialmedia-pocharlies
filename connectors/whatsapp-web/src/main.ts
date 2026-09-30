@@ -35,7 +35,7 @@ const CONNECTOR_SHARED_SECRET =
   process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
 // When true, the public /qr/page renders a "Generate new QR" button wired to an
 // unauthenticated POST /qr/renew. Only enable on LAN-only deployments (e.g. the
-// professional connector at whatsapp-pro.lan.e-dani.com) — never on the
+// professional connector at whatsapp-pro.e-dani.com) — never on the
 // internet-exposed personal page, where anyone with the URL could disconnect.
 const ALLOW_WEB_RENEW = process.env.ALLOW_WEB_RENEW === 'true';
 
@@ -246,14 +246,18 @@ ${renewScript}
     eventPublisher.publishMessageReceived(event);
   });
 
-  client.on('message-update', (update: { waMessageId: string; updateType: string }) => {
-    eventPublisher.publishMessageUpdated({
-      eventType: EventType.MESSAGE_UPDATED,
-      waMessageId: update.waMessageId,
-      updateType: update.updateType as 'EDITED' | 'DELETED',
-      updatedAt: new Date().toISOString(),
-    });
-  });
+  client.on(
+    'message-update',
+    (update: { waMessageId: string; updateType: string; newContent?: string }) => {
+      eventPublisher.publishMessageUpdated({
+        eventType: EventType.MESSAGE_UPDATED,
+        waMessageId: update.waMessageId,
+        updateType: update.updateType as 'EDITED' | 'DELETED',
+        newContent: update.newContent,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  );
 
   client.on(
     'chat-update',
