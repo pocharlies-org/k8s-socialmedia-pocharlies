@@ -1985,18 +1985,24 @@ export class BaileysClient extends EventEmitter {
       },
     };
     const msgId = await storeMessage(data);
-    await storeMessageKey({
-      waMessageId: waMessage.waMessageId,
-      conversationId: waMessage.conversationId,
-      remoteJid: rawChatJid,
-      fromMe: !!msg.key.fromMe,
-      participantJid: msg.key.participant || undefined,
-      messageTimestampMs: waMessage.waTimestamp.getTime(),
-    }).catch(e =>
-      this.logger.warn(
-        `message key persist failed for ${waMessage.waMessageId}: ${e?.message || e}`
-      )
-    );
+    // Not for a REACTION: prod folds it into the target's messages.reactions
+    // and never writes its row, so the key's FK to messages.wa_message_id can
+    // only fail (a warning per reaction). Nothing reads a reaction's key: it
+    // cannot be quoted, edited nor reacted to.
+    if (waMessage.messageType !== 'REACTION') {
+      await storeMessageKey({
+        waMessageId: waMessage.waMessageId,
+        conversationId: waMessage.conversationId,
+        remoteJid: rawChatJid,
+        fromMe: !!msg.key.fromMe,
+        participantJid: msg.key.participant || undefined,
+        messageTimestampMs: waMessage.waTimestamp.getTime(),
+      }).catch(e =>
+        this.logger.warn(
+          `message key persist failed for ${waMessage.waMessageId}: ${e?.message || e}`
+        )
+      );
+    }
     // Also for an already-stored row (msgId null): a history replay after a
     // relink backfills the payloads of the recent window. A poll / event is
     // kept whatever its age: its secret is what decrypts the votes / responses.
@@ -2008,6 +2014,9 @@ export class BaileysClient extends EventEmitter {
     // Before the msgId check: prod folds REACTION inserts into the target's
     // messages.reactions and skips the row, so msgId is always null for them.
     if (waMessage.messageType === 'REACTION') await this.persistReaction(msg, waMessage);
+    // History sync carries each message's current reactions on the message
+    // itself (no REACTION message of their own): same table, same rules.
+    await this.persistCarriedReactions(msg, waMessage);
 
     if (!msgId) return { inserted: false, waMessage };
 
@@ -2327,6 +2336,39 @@ export class BaileysClient extends EventEmitter {
       reactionMessageId: msg.key.id || undefined,
       reactedAt: reactionTime(reaction.senderTimestampMs, unixSeconds(msg.messageTimestamp)),
     });
+  }
+
+  /**
+   * The reactions a message carries (WebMessageInfo.reactions — what a
+   * history sync brings: the current reaction of each person, no REACTION
+   * message) → whatsapp_message_reactions, with the rules of a live one: the
+   * reactor from the reaction's own key (ours when fromMe; a group needs its
+   * participant, else skipped), an empty text a removal, and an older one
+   * never replacing a newer one (reacted_at = its senderTimestampMs).
+   * SC-1225: a pairing-only socket writes nothing.
+   */
+  private async persistCarriedReactions(msg: WAMessage, waMessage: WhatsAppMessage): Promise<void> {
+    const reactions = (msg as { reactions?: proto.IReaction[] | null }).reactions;
+    if (!this.ingest || !Array.isArray(reactions) || !reactions.length) return;
+    const chatRaw = msg.key.remoteJid || '';
+    const isGroup = !!isJidGroup(chatRaw);
+    for (const item of reactions) {
+      const key = item?.key;
+      if (!key) continue;
+      const reactorRaw = key.fromMe
+        ? this.meJid
+        : key.participant || (isGroup ? null : key.remoteJid || chatRaw);
+      if (!reactorRaw || isJidGroup(reactorRaw)) continue;
+      await storeMessageReaction({
+        targetMessageId: waMessage.waMessageId,
+        conversationId: waMessage.conversationId,
+        reactorJid: this.normalizeJid(reactorRaw),
+        emoji: item.text || '',
+        fromMe: key.fromMe ?? null,
+        reactionMessageId: key.id || undefined,
+        reactedAt: reactionTime(item.senderTimestampMs),
+      });
+    }
   }
 
   /**
