@@ -19,6 +19,14 @@ import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 import { isSessionInvalidatedError } from './credential-session';
 import {
+  ADMIN_RIGHT_NAMES,
+  ModerationError,
+  RESTRICTIONS,
+  classifyModerationError,
+  requireNumericTarget,
+  type Restriction,
+} from './moderation';
+import {
   EditDeduper,
   EditResult,
   EditSource,
@@ -984,6 +992,174 @@ export class TelegramClientWrapper extends EventEmitter {
       ...(rank !== undefined ? { rank } : {}),
     });
     return { chatId, userId, rights, rank: rank || null };
+  }
+
+  /**
+   * Member moderation (INFRA-218). Every call answers a canonical
+   * ModerationError on failure (moderation.ts), never a raw mtcute error.
+   */
+  private async moderate<T>(action: string, run: () => Promise<T>): Promise<T> {
+    try {
+      if (!this.connected) throw new Error('Not connected');
+      return await run();
+    } catch (e) {
+      throw classifyModerationError(e, action);
+    }
+  }
+
+  /** Basic group (`inputPeerChat`) or supergroup/channel; anything else is no chat. */
+  private async moderationChatKind(chatId: string): Promise<'basic' | 'super'> {
+    const peer = await this.client.resolvePeer(toMtcutePeer(chatId));
+    if (peer._ === 'inputPeerChannel' || peer._ === 'inputPeerChannelFromMessage') return 'super';
+    if (peer._ === 'inputPeerChat') return 'basic';
+    throw new ModerationError('unsupported_chat_type', 'chat_id debe ser un grupo o supergrupo');
+  }
+
+  private async requireSupergroup(action: string, chatId: string): Promise<void> {
+    if ((await this.moderationChatKind(chatId)) !== 'super') {
+      throw new ModerationError(
+        'unsupported_chat_type',
+        `${action} solo existe en supergrupos; este chat es un grupo básico`
+      );
+    }
+  }
+
+  /** Ban a member (until: never when omitted). Supergroups only. */
+  async banChatMember(chatId: string, userId: string, until?: Date): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('ban', async () => {
+      await this.requireSupergroup('ban', chat);
+      await this.client.banChatMember({
+        chatId: toMtcutePeer(chat),
+        participantId: toMtcutePeer(user),
+        ...(until ? { untilDate: until } : {}),
+      });
+      return { chatId: chat, userId: user, action: 'ban', until: until?.toISOString() ?? null };
+    });
+  }
+
+  /** Lift a ban (also lets the user rejoin). Supergroups only. */
+  async unbanChatMember(chatId: string, userId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('unban', async () => {
+      await this.requireSupergroup('unban', chat);
+      await this.client.unbanChatMember({
+        chatId: toMtcutePeer(chat),
+        participantId: toMtcutePeer(user),
+      });
+      return { chatId: chat, userId: user, action: 'unban' };
+    });
+  }
+
+  /**
+   * Remove a member without keeping them out. Supergroup: ban then an immediate
+   * unban (MTProto has no kick without a ban in channels). Basic group:
+   * mtcute's kickChatMember (messages.deleteChatUser).
+   */
+  async kickChatMember(chatId: string, userId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('kick', async () => {
+      const kind = await this.moderationChatKind(chat);
+      if (kind === 'basic') {
+        await this.client.kickChatMember({
+          chatId: toMtcutePeer(chat),
+          userId: toMtcutePeer(user),
+        });
+      } else {
+        await this.client.banChatMember({
+          chatId: toMtcutePeer(chat),
+          participantId: toMtcutePeer(user),
+        });
+        try {
+          await this.client.unbanChatMember({
+            chatId: toMtcutePeer(chat),
+            participantId: toMtcutePeer(user),
+          });
+        } catch (e) {
+          const cause = classifyModerationError(e, 'unban tras el kick');
+          throw new ModerationError(
+            cause.failureClass,
+            `El usuario fue baneado pero el unban posterior falló: sigue baneado (${cause.message})`,
+            cause.code,
+            cause.retryAfterSeconds,
+            cause.missingRight
+          );
+        }
+      }
+      return { chatId: chat, userId: user, action: 'kick' };
+    });
+  }
+
+  /** Restrict a member with one of the closed `restriction` values. Supergroups only. */
+  async restrictChatMember(
+    chatId: string,
+    userId: string,
+    restriction: Restriction,
+    until?: Date
+  ): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('restrict', async () => {
+      await this.requireSupergroup('restrict', chat);
+      await this.client.restrictChatMember({
+        chatId: toMtcutePeer(chat),
+        userId: toMtcutePeer(user),
+        restrictions: RESTRICTIONS[restriction],
+        ...(until ? { until } : {}),
+      });
+      return {
+        chatId: chat,
+        userId: user,
+        action: 'restrict',
+        restriction,
+        until: until?.toISOString() ?? null,
+      };
+    });
+  }
+
+  /** Clear every restriction of a member. Supergroups only. */
+  async unrestrictChatMember(chatId: string, userId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('unrestrict', async () => {
+      await this.requireSupergroup('unrestrict', chat);
+      await this.client.unrestrictChatMember({
+        chatId: toMtcutePeer(chat),
+        participantId: toMtcutePeer(user),
+      });
+      return { chatId: chat, userId: user, action: 'unrestrict' };
+    });
+  }
+
+  /** This account's own rights in a chat, read from its real participant record. */
+  async getOwnChatAdminRights(chatId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    return this.moderate('get_admin_rights', async () => {
+      const member = await this.client.getChatMember({
+        chatId: toMtcutePeer(chat),
+        userId: 'me',
+      });
+      if (!member) {
+        throw new ModerationError(
+          'user_not_participant',
+          'Esta cuenta no es miembro del chat',
+          'USER_NOT_PARTICIPANT'
+        );
+      }
+      const raw = (member.permissions ?? {}) as Record<string, unknown>;
+      const rights: Record<string, boolean> = {};
+      for (const name of ADMIN_RIGHT_NAMES) rights[name] = raw[name] === true;
+      return {
+        chatId: chat,
+        is_admin: member.status === 'admin' || member.status === 'creator',
+        is_creator: member.status === 'creator',
+        status: member.status,
+        rights,
+      };
+    });
   }
 
   /**
