@@ -135,20 +135,24 @@ El workflow `release.yml` corre con `workflow_dispatch` y usa `version = image_t
 El tronco `main` **no puede** despacharse sin `image_tag` explícito: intentarlo deja el tag Harbor
 inmutable `whatsappmcp-*:main` apuntando al primer digest que lo publicó (medido 29-09: `main` →
 `d1bb1da3`, run 36511436174; los builds de los runs 36517053696/36519841473 generan otros digests y
-mueren en `Harbor immutable tag collision: main is not attached to …`). Los tags `sha-<commit>`
-también colisionan si un run anterior publicó el mismo commit con otro digest (caché de capas: mismo
-commit, distinto byte-code).
+mueren en `Harbor immutable tag collision: main is not attached to …`). El build no es reproducible
+(mismo commit, otro digest), así que los reusables resuelven los tags ANTES de construir (INFRA-352,
+pin `4f59c69` de `k8s-gitops-pocharlies`):
 
 - **Norma**: despachar SIEMPRE con `image_tag` (secuencial, p. ej. `v1.3.61`), o desde `deploy/prod`
   (el patrón histórico: runs 36477444351/36135670213 verdes).
-- **Un run fallido quema tags**: publica `sha-<commit>` y a veces el `image_tag` de algunas imágenes antes
-  de morir. Reintentar sobre el mismo commit choca con `sha-<commit>` (medido 30-09: runs 36699101771 →
-  36701685011 sobre `aa547dc`). Para reintentar hace falta un commit nuevo en `deploy/prod` (vía PR) y un
-  `image_tag` que nadie haya usado; mira antes qué tags publicaron los runs fallidos
-  (`gh run view <id> --log | grep image_tag`), también los de otras sesiones.
+- **Reintentar es relanzar lo mismo**: sobre el mismo commit y con el mismo `image_tag`, el release
+  reutiliza lo que el run fallido ya publicó (`sha-<commit>` de imágenes y bundle, re-verificados por
+  firma) y solo crea lo que falta. Un `image_tag` que ya es de OTRO commit falla en el preflight, en el
+  primer minuto y sin crear ningún tag: elige otro. Nada se borra ni se mueve en Harbor.
 - La promoción de la rama deploy (`reusable-manifest-release.yml`, push `HEAD:deploy/prod
-  --force-with-lease`) exige que main sea ancestro de deploy/prod: tras el merge #104 lo es; si vuelven
-  a divergir (p. ej. un hotfix directo sobre deploy/prod), reconciliar main ANTES de soltar desde main.
+  --force-with-lease` contra el tip del checkout) es un no-op si `deploy/prod` ya contiene el commit
+  (release despachado desde `deploy/prod` mientras avanzaba, o reintento de un run viejo): nunca la
+  rebobina. Soltar desde main sigue exigiendo que main sea ancestro de deploy/prod (tras el merge #104
+  lo es); si vuelven a divergir (p. ej. un hotfix directo sobre deploy/prod), reconciliar main ANTES.
+- Los runs anteriores al pin `4f59c69` (p. ej. 36699101771/36701685011 sobre `aa547dc`) dejaron tags
+  huérfanos (`whatsapp-connector:sha-aa547dcdbb33`): esos commits se quedan como están; se suelta un
+  commit posterior.
 - El `main` de Harbor es un cadáver inmutable: no borrarlo (protección del registro); ignorarlo como
   referencia de despliegue — el overlay prod fija imágenes por digest, nunca por tag `main`.
 
