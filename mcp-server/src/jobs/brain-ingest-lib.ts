@@ -277,6 +277,7 @@ export async function pushToBrain(
           ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
         },
         body: JSON.stringify({ adapter, documents }),
+        signal: AbortSignal.timeout(envInt('BRAIN_PUSH_TIMEOUT_MS', 120000)),
       });
       if (resp.ok) {
         const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;

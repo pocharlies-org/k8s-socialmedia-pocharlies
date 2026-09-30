@@ -165,6 +165,19 @@ commit, distinto byte-code).
 - El `main` de Harbor es un cadáver inmutable: no borrarlo (protección del registro); ignorarlo como
   referencia de despliegue — el overlay prod fija imágenes por digest, nunca por tag `main`.
 
+## Ingesta al brain: ventanas de conversación (INFRA-364 / INFRA-370, `contract v1`)
+
+Las conversaciones de WhatsApp y Telegram entran al brain por **ventanas**, no por mensaje (Instagram sigue por `brain-ingest` hasta su retirada). Código en `mcp-server/src/jobs/brain-windows/`; el contrato (ids, metadata, reglas) está vendorizado en `contract/` con checksum y es normativo: cambiarlo = pedir al architect; un cambio roto es `v2` al lado.
+
+- `window-builder.ts` (pura): mensajes de una conversación → ventanas. Orden `(wa_timestamp, id)`; corta si el hueco es **> 3.600 s** (3.600 no corta) o antes de pasar de 16.000 chars de líneas; un mensaje >16.000 chars tiene ventana propia, cortado por párrafos, `truncated_by_size=true` (**v1: lo que excede del tope no se indexa**; `window_hash` sí cubre el contenido completo). Cuentan `is_deleted=false AND btrim(content)<>''`; solo-media sin texto queda fuera en v1.
+- `chunker.ts` (pura): 800–1.600 chars por chunk (estimador chars/4), frontera de mensaje, solape = último mensaje anterior (≤200 chars). `doc-builder.ts` es la ÚNICA fuente de nombres de campo de §C; todo `BrainDoc` valida contra el schema vendorizado (test).
+- `llm-extract.ts` + `llm-pool.ts`: LiteLLM modelo `tooling`, `temperature 0`, JSON validado con zod (JSON inválido: 1 reintento, luego `llm_status=skipped`), **máx. 2 peticiones en vuelo** (semáforo propio; reintentos dentro del mismo hueco). Sin LLM (`kind != chat`, triviales): ventana + chunks, sin packet. `kp_topics + kp_entities ≤ 12` (tope conjunto en `packetDoc`).
+- `state.ts` + migración `016_brain_window_state.sql`: `brain_window_state` (hashes: mismo `window_id`+`window_hash` ⇒ no reempuja; `llm_json` guardado ⇒ no repite la llamada al LLM), `brain_window_cursor`, y lee el buzón `brain_window_dirty` (INFRA-368; si la tabla aún no existe se ignora). Un solo proceso: `pg_try_advisory_lock(hashtext('brain-windows'))`; el segundo sale 0.
+- `brain-windows.ts` (entrypoint): detecta conversaciones con mensajes nuevos `(created_at,id) > cursor` o sucias, y las recalcula **desde el inicio de la última ventana conocida anterior al mensaje más antiguo** (buzón sucio: conversación entera). Mismo código para carga inicial e incremental. Fase 1 empuja ventana+chunks (`llm_status=pending`, ya buscable); fase 2 (LLM, más recientes primero, tope `MAX_LLM_PER_RUN` solo en incremental) re-empuja con el resumen y el packet solo si cambia `packet_hash`. Ventana que desaparece (cambió el primer mensaje) ⇒ `delete-window`. 4xx del brain = veneno: se registra (`push_error`) y se sigue.
+- **`DRY_RUN=true` por defecto**: solo lectura de Postgres, imprime el histograma de ventanas y de elegibles para el LLM (objetivo ~18–20k). Para ejecutar de verdad: `DRY_RUN=false` + `BRAIN_URL`, `BRAIN_API_KEY`, `LLM_BASE_URL`, `LLM_API_KEY`.
+- `chat-kinds.json` (`{conversation_id: "bot"|"broadcast"}`): lista de bots de INFRA-367; vacía (stub) hasta que se entregue y la confirme el tech-lead.
+- Test contra Postgres real (`state.integration.spec.ts`): solo con `TEST_DATABASE_URL` a una base desechable; en CI se salta.
+
 ## Estructura
 
 Tras el refactor del 2026-05-07 (commit `6791fae`), todo bajo carpetas dedicadas:
