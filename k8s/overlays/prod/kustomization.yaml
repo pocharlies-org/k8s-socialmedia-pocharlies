@@ -56,9 +56,13 @@ images:
   # tool social_edit_message (#112); v1.3.67 (run 36623083265, deploy/prod@e015709) añade
   # la migración 011 (reacciones, #115) y editar en Telegram en el MCP (#114);
   # v1.3.68 (run 36642557180, deploy/prod@625b95d) añade la migración 012 (fijar/silenciar, #118).
+  # v1.3.70 (run 36682303779, deploy/prod@57c825c) añade la migración 013 (votos de
+  # encuestas y respuestas a eventos, #125) e imágenes sin pnpm (INFRA-285, #122).
+  # v1.3.73 (run 36705379093, deploy/prod@fadad16) añade la migración 014 (temporizador de
+  # mensajes temporales, #128). v1.3.71/v1.3.72 quemados por runs fallidos.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.68
-    digest: sha256:d5e712fb06add85a27ebc67205c965576db6b4db553f6ce425fa4fc47b85e9cc
+    newTag: v1.3.73
+    digest: sha256:34801dd789d0fd9ad6eb97d903d243e2d7534a74bf4507b2021104cdc6142396
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

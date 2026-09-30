@@ -11,9 +11,10 @@ packages:
 # HIGH/CRITICAL. Each entry is a transitive dep we cannot bump via a direct
 # dependency; revisit when the parent package ships the fix itself.
 overrides:
-  # CVE-2026-14257 and CVE-2026-69152 are fixed on the 5.x line. 5.0.9 still publishes a
-  # CommonJS build and requires node 20 || >=22, so the consumers keep working.
-  brace-expansion: ^5.0.9
+  # CVE-2026-14257 and CVE-2026-69152 are fixed on the 5.x line; CVE-2026-102276 in
+  # 5.0.10 and CVE-2026-102278 in 5.0.11. The 5.x line still publishes a CommonJS
+  # build and requires node 20 || >=22, so the consumers keep working.
+  brace-expansion: ^5.0.11
   # GHSA-5p4m-2wfm-xmqj is fixed in 4.3.1 and CVE-2026-84375 in 4.3.2/3.15.2.
   # Keep the older 3.x Istanbul branch on its own major until that parent
   # dependency updates.

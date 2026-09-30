@@ -11,7 +11,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import { InstagramAPI } from './instagram-api';
-import { createInstagramCredentialStore, resolveInstagramEntry } from './credential-resolution';
+import {
+  createInstagramCredentialStore,
+  resolveHealthForActor,
+  resolveInstagramEntry,
+} from './credential-resolution';
 import { IG_MIN_LONG_LIVED_EXPIRES_IN, PairingFetch } from './oauth-pairing';
 
 class FakeStore implements CredentialStore {
@@ -304,4 +308,74 @@ test('store bootstrap is dark with the flag off and strict with it on', () => {
     () => createInstagramCredentialStore({ CREDENTIAL_STORE_ENABLED: 'true' }),
     /DATABASE_URL is unset/
   );
+});
+
+// ── SC-1256: per-actor /health (epic criterion 4) ────────────────────────
+
+function houseWithProfile(name: string, followers: number) {
+  const house = houseAccount(name, `HOUSE-${name}`);
+  house.api.getProfile = (async () => ({
+    username: `${name}-house`,
+    followers_count: followers,
+  })) as unknown as InstagramAPI['getProfile'];
+  return house;
+}
+
+test('health: flag ON + sub without rows → no_credential per account, zero house names/data', async () => {
+  const store = new FakeStore();
+  const houses = new Map([
+    ['skirmshop', houseWithProfile('skirmshop', 6956)],
+    ['barbelpapis', houseWithProfile('barbelpapis', 10)],
+  ]);
+  const results = (await resolveHealthForActor({
+    headers: { 'x-user-sub': 'pm-test-sin-fila' },
+    accountNames: [...houses.keys()],
+    store,
+    legacyLookup: name => houses.get(name),
+    log: () => {},
+  })) as Record<string, { status: string; error?: string; message?: string }>;
+  for (const name of houses.keys()) {
+    assert.equal(results[name].status, 'no_credential');
+    assert.equal(results[name].error, 'no_instagram_credential');
+    assert.match(results[name].message ?? '', /no instagram credential for this user/);
+  }
+  const wire = JSON.stringify(results);
+  assert.ok(!wire.includes('skirmshop-house') && !wire.includes('6956'), 'no house profile data');
+});
+
+test('health: flag ON + sub with a row → ok with the sub profile, never the house profile', async () => {
+  const store = new FakeStore();
+  store.seed('daniel-sub', pairedPayload());
+  const original = InstagramAPI.prototype.getProfile;
+  InstagramAPI.prototype.getProfile = (async () => ({
+    username: 'mi_cuenta',
+    followers_count: 42,
+  })) as unknown as InstagramAPI['getProfile'];
+  try {
+    const house = houseWithProfile('skirmshop', 6956);
+    const results = (await resolveHealthForActor({
+      headers: { 'x-user-sub': 'daniel-sub' },
+      accountNames: ['skirmshop'],
+      store,
+      legacyLookup: () => house,
+      log: () => {},
+    })) as Record<string, { status: string; username?: string; followers?: number }>;
+    assert.deepEqual(results.skirmshop, { status: 'ok', username: 'mi_cuenta', followers: 42 });
+  } finally {
+    InstagramAPI.prototype.getProfile = original;
+  }
+});
+
+test('health: flag OFF or no sub → null (caller keeps the legacy probe loop), zero store reads', async () => {
+  const store = new FakeStore();
+  const opts = {
+    accountNames: ['skirmshop'],
+    legacyLookup: () => houseWithProfile('skirmshop', 1),
+  };
+  assert.equal(
+    await resolveHealthForActor({ ...opts, headers: { 'x-user-sub': 'x' }, store: null }),
+    null
+  );
+  assert.equal(await resolveHealthForActor({ ...opts, headers: {}, store }), null);
+  assert.equal(store.reads, 0);
 });

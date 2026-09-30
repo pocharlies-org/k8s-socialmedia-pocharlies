@@ -206,6 +206,15 @@ export function voiceRequestHash(input: {
     .digest('hex');
 }
 
+/** Polls, votes, events and event responses (fase 3 / PR-7): the validated request. */
+export function structuredRequestHash(
+  kind: 'poll' | 'poll-vote' | 'event' | 'event-response',
+  conversationId: string,
+  request: unknown
+): string {
+  return sha256(JSON.stringify([kind, conversationId, request]));
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------

@@ -968,21 +968,41 @@ export class MCPServer {
   private async canonicalListAccounts(args: Record<string, any>): Promise<any> {
     const status = this.legacyResultData(await this.handleMessagingStatus());
     const selectedChannel = args.channel === undefined ? undefined : this.channel(args);
-    const accounts = getAccounts()
+    const igStatus = (accountId: string) =>
+      asObject(asObject(asObject(status).instagram).accounts)[accountId] || null;
+    // SC-1256: the connector answers `no_credential` per account when the
+    // caller's sub has no row; those entries are omitted, never listed.
+    const noCredential = (item: { channel: string; accountId: string }) =>
+      item.channel === 'instagram' && asObject(igStatus(item.accountId)).status === 'no_credential';
+    const candidates = getAccounts()
       .map(item => ({
         channel: item.channel,
         accountId: item.accountId,
         transport: item.transport,
         capabilities: item.capabilities,
       }))
-      .filter(item => !selectedChannel || item.channel === selectedChannel)
+      .filter(item => !selectedChannel || item.channel === selectedChannel);
+    const omitted = candidates.filter(noCredential);
+    const accounts = candidates
+      .filter(item => !noCredential(item))
       .map(item => ({
         ...item,
         status:
           item.channel === 'instagram'
-            ? asObject(asObject(asObject(status).instagram).accounts)[item.accountId] || null
+            ? igStatus(item.accountId)
             : asObject(asObject(status)[item.channel])[item.accountId] || null,
       }));
+    if (omitted.length) {
+      const first = asObject(igStatus(omitted[0].accountId));
+      const code = String(first.error || 'no_instagram_credential');
+      const message = String(first.message || 'no instagram credential for this user');
+      if (!accounts.length) throw this.canonicalError(code, message);
+      return this.jsonResponse({
+        contractDigest: SOCIALMEDIA_CONTRACT_DIGEST,
+        accounts,
+        partialErrors: [{ channel: 'instagram', code, message }],
+      });
+    }
     return this.jsonResponse({
       contractDigest: SOCIALMEDIA_CONTRACT_DIGEST,
       accounts,
@@ -4515,7 +4535,11 @@ export class MCPServer {
     const checks = await Promise.all(
       targets.map(async ([kind, account, url, endpoint]) => {
         try {
-          const resp = await fetch(`${url}${endpoint}`, { signal: AbortSignal.timeout(3000) });
+          const resp = await fetch(`${url}${endpoint}`, {
+            // SC-1256: only the instagram connector resolves /health per actor.
+            ...(kind === 'instagram' ? { headers: actorRequestHeaders() } : {}),
+            signal: AbortSignal.timeout(3000),
+          });
           const body = await resp.json();
           return [kind, account, body] as const;
         } catch (e: any) {

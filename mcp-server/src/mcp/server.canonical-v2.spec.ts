@@ -256,4 +256,98 @@ describe('Socialmedia canonical v2 adapter', () => {
       },
     });
   });
+
+  describe('SC-1256 social_list_accounts per-actor gate', () => {
+    const noCred = {
+      status: 'no_credential',
+      error: 'no_instagram_credential',
+      message: 'no instagram credential for this user (sub pm-test-sin-fila)',
+    };
+    const statusOf = (instagram: unknown) => ({
+      whatsapp: { personal: { status: 'ok' } },
+      telegram: { personal: { status: 'ok' } },
+      instagram,
+    });
+    const setup = (health: unknown) => {
+      const server = createServer();
+      server.handleMessagingStatus = jest.fn(async () => legacy(health));
+      return server;
+    };
+
+    test('channel=instagram + sub without rows: explicit error, zero house names', async () => {
+      const server = setup(
+        statusOf({ status: 'ok', accounts: { skirmshop: noCred, barbelpapis: noCred } })
+      );
+      const result = await server.executeCanonicalTool(definition('social_list_accounts'), {
+        channel: 'instagram',
+      });
+      expect(result).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: 'no_instagram_credential' } },
+      });
+      const wire = JSON.stringify(result);
+      expect(wire).not.toContain('skirmshop');
+      expect(wire).not.toContain('barbelpapis');
+      expect(wire).toContain('pm-test-sin-fila');
+    });
+
+    test('no channel: WA/TG stay, IG omitted, partialErrors carries the instagram entry', async () => {
+      const server = setup(
+        statusOf({ status: 'ok', accounts: { skirmshop: noCred, barbelpapis: noCred } })
+      );
+      const result = await server.executeCanonicalTool(definition('social_list_accounts'), {});
+      const data = result.structuredContent.data;
+      expect(data.accounts.length).toBeGreaterThan(0);
+      expect(data.accounts.every((a: any) => a.channel !== 'instagram')).toBe(true);
+      expect(data.partialErrors).toEqual([
+        {
+          channel: 'instagram',
+          code: 'no_instagram_credential',
+          message: noCred.message,
+        },
+      ]);
+      expect(JSON.stringify(data)).not.toContain('barbelpapis');
+    });
+
+    test('flag OFF / no sub: legacy listing intact, no partialErrors', async () => {
+      const server = setup(
+        statusOf({
+          status: 'ok',
+          accounts: {
+            skirmshop: { status: 'ok', username: 'skirmshopes', followers: 6956 },
+            barbelpapis: { status: 'ok', username: 'barbel', followers: 10 },
+          },
+        })
+      );
+      const result = await server.executeCanonicalTool(definition('social_list_accounts'), {
+        channel: 'instagram',
+      });
+      const data = result.structuredContent.data;
+      expect(data.accounts.map((a: any) => a.accountId).sort()).toEqual([
+        'barbelpapis',
+        'skirmshop',
+      ]);
+      expect(data.partialErrors).toBeUndefined();
+      expect(data.accounts[0].status.status).toBe('ok');
+    });
+
+    test('handleMessagingStatus forwards actor headers only to the instagram connector', async () => {
+      const server = createServer();
+      const fetchMock = jest.fn(async () => ({ json: async () => ({ status: 'ok' }) }));
+      const original = global.fetch;
+      global.fetch = fetchMock as any;
+      try {
+        await server.handleMessagingStatus();
+        const calls = fetchMock.mock.calls as unknown as Array<[string, any]>;
+        const ig = calls.find(([url]) => url.endsWith('/health') && url.includes('instagram'));
+        expect(ig).toBeDefined();
+        expect(ig![1]).toHaveProperty('headers');
+        for (const [url, init] of calls) {
+          if (!url.includes('instagram')) expect(init.headers).toBeUndefined();
+        }
+      } finally {
+        global.fetch = original;
+      }
+    });
+  });
 });

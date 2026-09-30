@@ -6,7 +6,7 @@ RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 # npm only exists here to place pnpm/tsx. It is removed right after: the npm
 # bundled with Node ships its own fixable advisories and nothing at runtime
-# uses it (services start through pnpm/tsx).
+# uses it (services start through node/tsx).
 RUN npm install -g pnpm@11.18.0 tsx@4.23.1 \
  && npm cache clean --force \
  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm
@@ -32,6 +32,13 @@ RUN pnpm exec tsc --skipLibCheck --noEmit false || true
 WORKDIR /app
 RUN cd connectors/instagram && pnpm build
 
+# pnpm only exists here to install and build. It leaves the image here, like npm
+# above: the undici bundled inside pnpm ships fixable advisories and nothing at
+# runtime calls it (the CMD runs node/tsx directly). /root/.cache/pnpm is its
+# metadata cache.
+RUN rm -rf /usr/local/lib/node_modules/pnpm /usr/local/bin/pnpm /usr/local/bin/pnpx /root/.cache/pnpm
+
 EXPOSE 3003
 
-CMD ["sh", "-c", "cd connectors/instagram && pnpm start"]
+# = `pnpm start` of connectors/instagram, without pnpm.
+CMD ["sh", "-c", "cd connectors/instagram && exec node dist/main.js"]

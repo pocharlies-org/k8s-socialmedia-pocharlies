@@ -138,7 +138,7 @@ INSTAGRAM_BARBELPAPIS_BUSINESS_ACCOUNT_ID=
 FACEBOOK_APP_ID=
 FACEBOOK_APP_SECRET=
 INSTAGRAM_WEBHOOK_VERIFY_TOKEN=
-# Per-user Instagram pairing (SC-1194) — inert while CREDENTIAL_STORE_ENABLED=false
+# Per-user Instagram pairing (SC-1194) — inert while CREDENTIAL_STORE_ENABLED is off (base manifest: false; prod overlay: true on instagram-connector only)
 INSTAGRAM_LOGIN_APP_ID=          # Instagram Login app id (falls back to FACEBOOK_APP_ID)
 INSTAGRAM_LOGIN_APP_SECRET=      # its secret (falls back to FACEBOOK_APP_SECRET)
 INSTAGRAM_OAUTH_REDIRECT_URI=    # must match a Valid OAuth Redirect URI on the Meta app
@@ -171,8 +171,17 @@ MCP_SSE_AUTH_TOKEN=
 Each chat.e-dani.com user can pair **their own** Instagram account, stored in the
 SC-705 credential store (`user_channel_credentials`, envelope-encrypted, keyed by the
 gateway-verified `x-user-sub`). Everything below is inert while
-`CREDENTIAL_STORE_ENABLED=false` — the env accounts (`INSTAGRAM_<NAME>_*`) keep serving
-their routes untouched.
+`CREDENTIAL_STORE_ENABLED` is off. Live state (k8s/overlays/prod): ON on the
+instagram-connector only, since b03f60f (SC-1214 C8, `patch-credential-store.yaml`; the
+base manifest stays `false`); the WhatsApp connector keeps an explicit `false`, the
+telegram connectors and mcp-server/mcp-sse do not set it (absent = OFF), and the
+social-api / pairing pods run it ON (`patch-social-pairing-on.yaml`). Requests without
+`x-user-sub` — webhook, jobs, the house accounts — keep the env accounts
+(`INSTAGRAM_<NAME>_*`) serving their routes untouched. With the flag ON, `GET /health` with a
+verified `x-user-sub` answers per actor (SC-1256, `http.instagram-connector.health.v1`):
+a sub with no row gets `no_credential`, never the house accounts. The registry name
+(`skirmshop`, `barbelpapis`) is not the Instagram name: a sub with a row shows up under
+every registry account name, by design.
 
 Flow (Instagram API with Instagram Login — Meta's standard OAuth, per the CTO ruling):
 
@@ -184,7 +193,9 @@ Flow (Instagram API with Instagram Login — Meta's standard OAuth, per the CTO 
 2. The user approves in the browser; Instagram redirects to
    `GET /oauth/instagram/callback` on the connector (exact-path rule on
    `whatsapp.e-dani.com` at the edge, mirrored for LAN/tailnet by
-   `lan-instagram-callback` in k8s-infra — SC-1254). Code → short-lived token → 60-day long-lived exchange
+   `lan-instagram-callback` in k8s-infra, 5bcfb28 — SC-1254; the netpol
+   `whatsapp-mcp-allow-traefik-instagram` admits the traefik-edge hostNetwork sources as a per-node /32
+   allowlist, 8bfa7d1). Code → short-lived token → 60-day long-lived exchange
    (`graph.instagram.com/v21.0/access_token?grant_type=ig_exchange_token`) runs
    server-side; tokens under 5.184.000 s of `expires_in` are refused.
 3. The credential lands via `store.put` under `session_key = <sub>` (or
