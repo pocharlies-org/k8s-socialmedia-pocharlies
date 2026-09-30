@@ -6,7 +6,7 @@ import {
   TelegramMessageReceivedEvent,
   toMessageEditedEvent,
 } from './events/publisher';
-import { createRouter } from './api/controller';
+import { createRouter, requireSending } from './api/controller';
 import { getPool } from './db-pool';
 import {
   TelegramCredentialWriteBack,
@@ -198,7 +198,7 @@ async function main() {
     }
   });
 
-  app.post('/api/public/send/:chatId', async (req, res) => {
+  app.post('/api/public/send/:chatId', requireSending, async (req, res) => {
     try {
       if (!client.isClientConnected()) {
         res.status(503).json({ error: 'Not connected' });

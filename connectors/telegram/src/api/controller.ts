@@ -65,6 +65,20 @@ function mutationErrorResponse(res: Response, error: unknown): void {
   });
 }
 
+/**
+ * The sending gate of every outward route (sends, media, reactions, forwards,
+ * deletes, button clicks, group/admin/topic changes): 403 disabled_sending
+ * before Telegram is touched. Reads and mark-as-read stay open, like WhatsApp.
+ */
+export function requireSending(req: Request, res: Response, next: NextFunction): void {
+  const disabled = sendingDisabledReason();
+  if (disabled) {
+    res.status(403).json({ error: disabled, failureClass: 'disabled_sending' });
+    return;
+  }
+  next();
+}
+
 export interface RouterOptions {
   /**
    * Hand an edit this connector made to NATS (telegram.MessageEdited, written
@@ -146,6 +160,7 @@ export function createRouter(
   /**
    * GET /chats/:id/info - Get chat info
    */
+  // CONTRACT: http.telegram-connector.chats-info.v1
   router.get('/chats/:id/info', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -160,6 +175,7 @@ export function createRouter(
   /**
    * GET /chats/:id/participants - Get chat participants
    */
+  // CONTRACT: http.telegram-connector.chats-participants.v1
   router.get('/chats/:id/participants', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -175,7 +191,8 @@ export function createRouter(
   /**
    * POST /groups - Create a group, supergroup/forum, or channel.
    */
-  router.post('/groups', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.groups.v1
+  router.post('/groups', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { title, type, description, forum, members } = req.body;
@@ -209,7 +226,8 @@ export function createRouter(
   /**
    * POST /chats/:id/members - Add members to a group, supergroup, or channel.
    */
-  router.post('/chats/:id/members', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-members.v1
+  router.post('/chats/:id/members', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { members, forwardCount } = req.body;
@@ -242,7 +260,8 @@ export function createRouter(
   /**
    * PUT /chats/:id/admins/:userId - Set or revoke Telegram admin permissions.
    */
-  router.put('/chats/:id/admins/:userId', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-admins.v1
+  router.put('/chats/:id/admins/:userId', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { rights, rank } = req.body;
@@ -297,6 +316,7 @@ export function createRouter(
   /**
    * GET /chats/:id/topics - List forum topics for a supergroup
    */
+  // CONTRACT: http.telegram-connector.chats-topics.v1
   router.get('/chats/:id/topics', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -327,7 +347,7 @@ export function createRouter(
   /**
    * POST /chats/:id/topics - Create a forum topic
    */
-  router.post('/chats/:id/topics', (req: Request, res: Response): void => {
+  router.post('/chats/:id/topics', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -358,136 +378,161 @@ export function createRouter(
   /**
    * PATCH /chats/:id/topics/:topicId - Edit a forum topic
    */
-  router.patch('/chats/:id/topics/:topicId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.patch(
+    '/chats/:id/topics/:topicId',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
 
-        const { title, closed, hidden, clearIcon } = req.body;
-        if (
-          title === undefined &&
-          closed === undefined &&
-          hidden === undefined &&
-          clearIcon === undefined
-        ) {
-          res.status(400).json({ error: 'Nothing to update' });
-          return;
-        }
+          const { title, closed, hidden, clearIcon } = req.body;
+          if (
+            title === undefined &&
+            closed === undefined &&
+            hidden === undefined &&
+            clearIcon === undefined
+          ) {
+            res.status(400).json({ error: 'Nothing to update' });
+            return;
+          }
 
-        const topic = await client.editForumTopic(req.params.id, topicId, {
-          title,
-          closed,
-          hidden,
-          clearIcon,
-        });
-        res.json(topic);
-      } catch (e) {
-        logger.error(`Error editing forum topic: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const topic = await client.editForumTopic(req.params.id, topicId, {
+            title,
+            closed,
+            hidden,
+            clearIcon,
+          });
+          res.json(topic);
+        } catch (e) {
+          logger.error(`Error editing forum topic: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * POST /chats/:id/topics/:topicId/closed - Open/close a forum topic
    */
-  router.post('/chats/:id/topics/:topicId/closed', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.post(
+    '/chats/:id/topics/:topicId/closed',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
-        if (typeof req.body.closed !== 'boolean') {
-          res.status(400).json({ error: 'closed must be a boolean' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
+          if (typeof req.body.closed !== 'boolean') {
+            res.status(400).json({ error: 'closed must be a boolean' });
+            return;
+          }
 
-        const topic = await client.toggleForumTopicClosed(req.params.id, topicId, req.body.closed);
-        res.json(topic);
-      } catch (e) {
-        logger.error(`Error toggling forum topic closed: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const topic = await client.toggleForumTopicClosed(
+            req.params.id,
+            topicId,
+            req.body.closed
+          );
+          res.json(topic);
+        } catch (e) {
+          logger.error(`Error toggling forum topic closed: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * POST /chats/:id/topics/:topicId/pinned - Pin/unpin a forum topic
    */
-  router.post('/chats/:id/topics/:topicId/pinned', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.post(
+    '/chats/:id/topics/:topicId/pinned',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
-        if (typeof req.body.pinned !== 'boolean') {
-          res.status(400).json({ error: 'pinned must be a boolean' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
+          if (typeof req.body.pinned !== 'boolean') {
+            res.status(400).json({ error: 'pinned must be a boolean' });
+            return;
+          }
 
-        const topic = await client.toggleForumTopicPinned(req.params.id, topicId, req.body.pinned);
-        res.json(topic);
-      } catch (e) {
-        logger.error(`Error toggling forum topic pinned: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const topic = await client.toggleForumTopicPinned(
+            req.params.id,
+            topicId,
+            req.body.pinned
+          );
+          res.json(topic);
+        } catch (e) {
+          logger.error(`Error toggling forum topic pinned: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * DELETE /chats/:id/topics/:topicId - Delete a forum topic and all its history
    * NOTE: topicId is in the path because the MCP server sends no body on DELETE.
    */
-  router.delete('/chats/:id/topics/:topicId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.delete(
+    '/chats/:id/topics/:topicId',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
 
-        const result = await client.deleteForumTopic(req.params.id, topicId);
-        res.json(result);
-      } catch (e) {
-        logger.error(`Error deleting forum topic: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const result = await client.deleteForumTopic(req.params.id, topicId);
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error deleting forum topic: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * POST /chats/:id/forum-settings - Toggle forum mode for a supergroup (owner only)
    */
-  router.post('/chats/:id/forum-settings', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-forum-settings.v1
+  router.post('/chats/:id/forum-settings', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -517,7 +562,8 @@ export function createRouter(
   /**
    * PATCH /chats/:id/title - Change the chat title
    */
-  router.patch('/chats/:id/title', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-title.v1
+  router.patch('/chats/:id/title', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -543,7 +589,8 @@ export function createRouter(
   /**
    * PATCH /chats/:id/description - Change the chat description ('' clears it)
    */
-  router.patch('/chats/:id/description', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-description.v1
+  router.patch('/chats/:id/description', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -569,7 +616,8 @@ export function createRouter(
   /**
    * PATCH /chats/:id/photo - Change the chat photo/video
    */
-  router.patch('/chats/:id/photo', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-photo.v1
+  router.patch('/chats/:id/photo', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -599,6 +647,7 @@ export function createRouter(
   /**
    * GET /messages/:chatId - Get messages for a chat
    */
+  // CONTRACT: http.telegram-connector.messages-list.v1
   router.get('/messages/:chatId', (req: Request, res: Response): void => {
     void (async (): Promise<void> => {
       try {
@@ -676,6 +725,7 @@ export function createRouter(
    * even when `reactors` is shorter: the list is paged at 100 per Telegram
    * call and `limit` (default 100) bounds how many pages we walk.
    */
+  // CONTRACT: http.telegram-connector.messages-reactors.v1
   router.get('/messages/reactors/:chatId/:msgId', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -696,7 +746,8 @@ export function createRouter(
   /**
    * POST /messages/react - Add or clear an emoji reaction on a message
    */
-  router.post('/messages/react', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-react.v1
+  router.post('/messages/react', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, messageId, emoji } = req.body as {
@@ -726,14 +777,9 @@ export function createRouter(
    * (MESSAGE_NOT_MODIFIED) is an idempotent 200 with nothing to record.
    */
   // CONTRACT: http.telegram-connector.messages-edit.v1 — body {chatId, messageId, content, actor?}, 200 {edited, messageId, chatId, editedAt, unchanged, published}
-  router.post('/messages/edit', (req: Request, res: Response): void => {
+  router.post('/messages/edit', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
-        const disabled = sendingDisabledReason();
-        if (disabled) {
-          res.status(403).json({ error: disabled, failureClass: 'disabled_sending' });
-          return;
-        }
         const body =
           req.body && typeof req.body === 'object' && !Array.isArray(req.body)
             ? (req.body as Record<string, unknown>)
@@ -788,7 +834,8 @@ export function createRouter(
   /**
    * POST /messages/callback - Click a Telegram inline callback button.
    */
-  router.post('/messages/callback', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-callback.v1
+  router.post('/messages/callback', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -842,7 +889,8 @@ export function createRouter(
   /**
    * POST /messages/forward - Forward a message
    */
-  router.post('/messages/forward', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-forward.v1
+  router.post('/messages/forward', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { fromChatId, messageId, toChatId, threadId } = req.body as {
@@ -877,7 +925,8 @@ export function createRouter(
   /**
    * POST /messages/media/send - Send a file
    */
-  router.post('/messages/media/send', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-media-send.v1
+  router.post('/messages/media/send', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, filePath, caption, voiceNote, videoNote, sticker, replyTo, threadId } =
@@ -925,7 +974,8 @@ export function createRouter(
   /**
    * POST /messages/media/group - Send 2-10 images as one native Telegram album.
    */
-  router.post('/messages/media/group', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-media-group.v1
+  router.post('/messages/media/group', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, attachments, replyTo, threadId } = req.body as {
@@ -992,7 +1042,7 @@ export function createRouter(
   /**
    * POST /messages/voice - Send a voice note from base64 audio bytes.
    */
-  router.post('/messages/voice', (req: Request, res: Response): void => {
+  router.post('/messages/voice', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, audioBase64, caption, mimeType, voiceNote } = req.body as {
@@ -1021,6 +1071,7 @@ export function createRouter(
   /**
    * POST /messages/read/:chatId - Mark chat as read
    */
+  // CONTRACT: http.telegram-connector.messages-read.v1
   router.post('/messages/read/:chatId', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -1035,6 +1086,7 @@ export function createRouter(
   /**
    * GET /messages/media/:chatId/:msgId - Download media
    */
+  // CONTRACT: http.telegram-connector.messages-media-download.v1
   router.get('/messages/media/:chatId/:msgId', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -1054,6 +1106,7 @@ export function createRouter(
    * GET /peers/:id/photo - Download a peer's profile photo (big size).
    * Returns {data: base64, size, contentType: 'image/jpeg'} or 404 if no photo.
    */
+  // CONTRACT: http.telegram-connector.peers-photo.v1
   router.get('/peers/:id/photo', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -1078,42 +1131,10 @@ export function createRouter(
   });
 
   /**
-   * POST /messages/voice - Send a voice note from base64 audio bytes.
-   *
-   * This route must be registered before /messages/:chatId so "voice" is not
-   * interpreted as a chat id by Express.
-   */
-  router.post('/messages/voice', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        const { chatId, audioBase64, caption, mimeType, voiceNote } = req.body as {
-          chatId?: string;
-          audioBase64?: string;
-          caption?: string;
-          mimeType?: string;
-          voiceNote?: boolean;
-        };
-        if (!chatId || !audioBase64) {
-          res.status(400).json({ error: 'Missing chatId or audioBase64' });
-          return;
-        }
-
-        const audio = Buffer.from(audioBase64, 'base64');
-        await client.sendFile(chatId, audio, {
-          caption,
-          voiceNote: voiceNote !== false,
-        });
-        res.json({ sent: true, mimeType: mimeType || 'audio/ogg' });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
-
-  /**
    * POST /messages/:chatId - Send a message
    */
-  router.post('/messages/:chatId', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-send.v1
+  router.post('/messages/:chatId', requireSending, (req: Request, res: Response): void => {
     void (async (): Promise<void> => {
       try {
         if (!client.isClientConnected()) {
@@ -1161,7 +1182,8 @@ export function createRouter(
   /**
    * DELETE /messages/:chatId/:msgId - Delete a message
    */
-  router.delete('/messages/:chatId/:msgId', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-delete.v1
+  router.delete('/messages/:chatId/:msgId', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         await client.deleteMessage(req.params.chatId, parseInt(req.params.msgId));

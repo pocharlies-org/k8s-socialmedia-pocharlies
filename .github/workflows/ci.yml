@@ -31,6 +31,39 @@ jobs:
       - run: python3 scripts/render-connectors.py --check
       - run: python3 -m unittest scripts/test_render_connectors.py
 
+  # telegram-sync (Python): the unit tests and the SQL of the edits against a
+  # throwaway Postgres (tests/test_edits.py; without the DSN those are skipped).
+  telegram-sync-tests:
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
+    runs-on: arc-k8s
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TELEGRAM_SYNC_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
+      PYTHONPYCACHEPREFIX: /tmp/telegram-sync-pycache
+    defaults:
+      run:
+        working-directory: connectors/telegram-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # faster-whisper (the transcriber, imported lazily) is left out: no test
+      # loads it and it drags in the CTranslate2 wheels.
+      - run: pip install pytest==8.3.3 $(grep -v '^faster-whisper' requirements.txt)
+      - run: python -m pytest -p no:cacheprovider -rs tests
+
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
     runs-on: arc-k8s

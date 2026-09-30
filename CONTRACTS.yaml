@@ -833,6 +833,412 @@ contracts:
       (telegram-pairing) never publishes it. The subject, the field names and
       the source values are contract: changing any is breaking — a new `.v2`
       entry beside this one.
+  - id: http.telegram-connector.messages-send.v1
+    kind: http-route
+    value: /messages/:chatId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/messages/:chatId (send a
+      text), consumed by dgx-messages (routes_messages.py send → Telegram) and
+      the MCP tool social_send_message. Body {text, topicId?, replyTo?}; 200
+      {success: true, messageId}. 400 on missing text or a bad topicId, 503
+      not connected, 500 {error} otherwise. 403 disabled_sending {error,
+      failureClass} before Telegram is touched when ENABLE_SENDING is set to
+      anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset
+      ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-list.v1
+    kind: http-route
+    value: /messages/:chatId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). GET
+      /api/v1/messages/:chatId?limit&offsetId (read, ungated), consumed by the
+      MCP tool social_list_messages; 200 {messages: [...]}, 503 not connected.
+      Registered with the sending gate (the route predates the registry). The
+      path, the body fields and the 200 shape are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
+  - id: http.telegram-connector.messages-react.v1
+    kind: http-route
+    value: /messages/react
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/messages/react (add or
+      clear — emoji null/absent — our reaction), consumed by dgx-messages
+      (react_message, /messages → reaction picker) and the MCP tool
+      social_react_message (handleTelegramReactMessage). Body {chatId,
+      messageId (number or numeric string), emoji?}; 200 {reacted, emoji}; 400
+      missing chatId/messageId, 500 {error} otherwise. 403 disabled_sending
+      {error, failureClass} before Telegram is touched when ENABLE_SENDING is
+      set to anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset
+      ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-reactors.v1
+    kind: http-route
+    value: /messages/reactors/:chatId/:msgId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). GET
+      /api/v1/messages/reactors/:chatId/:msgId?limit (read, ungated), consumed
+      by dgx-messages ("who reacted?" tooltip). 200 {total, reactors: [{emoji,
+      userId, displayName, mine}]}; 400 bad msgId. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-media-send.v1
+    kind: http-route
+    value: /messages/media/send
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/messages/media/send (send
+      a file: photo, video, document, voice/video note, sticker), consumed by
+      dgx-messages (attachments, stickers) and the MCP tool
+      social_send_message (attachments). Body {chatId, filePath, caption?,
+      voiceNote?, videoNote?, sticker?, replyTo?, threadId?}; 200 {sent:
+      true}; 400 missing chatId/filePath or bad replyTo/threadId. 403
+      disabled_sending {error, failureClass} before Telegram is touched when
+      ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-media-group.v1
+    kind: http-route
+    value: /messages/media/group
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/messages/media/group
+      (2-10 images as one album), consumed by the MCP tool social_send_message
+      (attachments). Body {chatId, attachments: [{filePath, caption?,
+      mimeType?}], replyTo?, threadId?}; 200 {sent: true, messageId,
+      messageIds}; 400 on a bad album. 403 disabled_sending {error,
+      failureClass} before Telegram is touched when ENABLE_SENDING is set to
+      anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset
+      ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-media-download.v1
+    kind: http-route
+    value: /messages/media/:chatId/:msgId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). GET
+      /api/v1/messages/media/:chatId/:msgId (read, ungated), consumed by
+      dgx-messages (media proxy) and the MCP tool social_get_media. 200 {data:
+      base64, size}; 404 no media. Registered with the sending gate (the route
+      predates the registry). The path, the body fields and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.telegram-connector.messages-forward.v1
+    kind: http-route
+    value: /messages/forward
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/messages/forward,
+      consumed by the MCP tool social_forward_message. Body {fromChatId,
+      messageId, toChatId, threadId?}; 200 {forwarded: true}; 400 missing
+      fields. 403 disabled_sending {error, failureClass} before Telegram is
+      touched when ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-callback.v1
+    kind: http-route
+    value: /messages/callback
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/messages/callback (click
+      an inline callback button), consumed by the MCP tool
+      social_click_interaction. Body {chatId, messageId, data | dataB64,
+      timeoutMs?, fireAndForget?}; 200 {clicked: true, answer}. 403
+      disabled_sending {error, failureClass} before Telegram is touched when
+      ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-delete.v1
+    kind: http-route
+    value: /messages/:chatId/:msgId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). DELETE
+      /api/v1/messages/:chatId/:msgId, consumed by the MCP tool
+      social_delete_message (Telegram). 200 {deleted: true}, 500 {error}. 403
+      disabled_sending {error, failureClass} before Telegram is touched when
+      ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.messages-read.v1
+    kind: http-route
+    value: /messages/read/:chatId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/messages/read/:chatId
+      (mark the chat read), consumed by dgx-messages and the MCP tool
+      social_mark_read. Not gated (like WhatsApp's mark-read). 200
+      {markedAsRead: true}. Registered with the sending gate (the route
+      predates the registry). The path, the body fields and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.telegram-connector.groups.v1
+    kind: http-route
+    value: /groups
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/groups (create a group,
+      supergroup/forum or channel), consumed by the MCP tool
+      social_manage_group. Body {title, type: group|supergroup|channel,
+      description?, forum?, members?}. 403 disabled_sending {error,
+      failureClass} before Telegram is touched when ENABLE_SENDING is set to
+      anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset
+      ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.chats-members.v1
+    kind: http-route
+    value: /chats/:id/members
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/chats/:id/members (add
+      members), consumed by the MCP tool social_manage_group. Body {members:
+      [peer], forwardCount? 0-100}. 403 disabled_sending {error, failureClass}
+      before Telegram is touched when ENABLE_SENDING is set to anything but
+      "true" or EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on),
+      the gate of http.telegram-connector.messages-edit.v1. Registered with
+      the sending gate (the route predates the registry). The path, the body
+      fields and the 200 shape are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.telegram-connector.chats-admins.v1
+    kind: http-route
+    value: /chats/:id/admins/:userId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). PUT /api/v1/chats/:id/admins/:userId
+      (set or revoke admin rights), consumed by the MCP tool
+      social_manage_group. Body {rights: {<right>: boolean}, rank?}. 403
+      disabled_sending {error, failureClass} before Telegram is touched when
+      ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.chats-topics.v1
+    kind: http-route
+    value: /chats/:id/topics
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). Forum topics of a supergroup, consumed
+      by the MCP tools social_get_forum / social_manage_forum: GET
+      /api/v1/chats/:id/topics?limit&query (read, ungated) → {topics}; POST
+      (create, body {title, icon?}), PATCH /:topicId (body {title?, closed?,
+      hidden?, clearIcon?}), POST /:topicId/closed {closed}, POST
+      /:topicId/pinned {pinned}, DELETE /:topicId (topicId in the path) — the
+      mutations are gated. 403 disabled_sending {error, failureClass} before
+      Telegram is touched when ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.chats-forum-settings.v1
+    kind: http-route
+    value: /chats/:id/forum-settings
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). POST /api/v1/chats/:id/forum-settings
+      (forum mode on/off, owner only), consumed by the MCP server
+      (mcp-server/src/mcp/server.ts, Telegram forum/chat admin). Body
+      {isForum, threadsMode?: list|tabs}. 403 disabled_sending {error,
+      failureClass} before Telegram is touched when ENABLE_SENDING is set to
+      anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset
+      ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.chats-title.v1
+    kind: http-route
+    value: /chats/:id/title
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). PATCH /api/v1/chats/:id/title,
+      consumed by the MCP server (mcp-server/src/mcp/server.ts, Telegram
+      forum/chat admin). Body {title}. 403 disabled_sending {error,
+      failureClass} before Telegram is touched when ENABLE_SENDING is set to
+      anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset
+      ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.chats-description.v1
+    kind: http-route
+    value: /chats/:id/description
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). PATCH /api/v1/chats/:id/description
+      ('' clears it), consumed by the MCP server
+      (mcp-server/src/mcp/server.ts, Telegram forum/chat admin). Body
+      {description}. 403 disabled_sending {error, failureClass} before
+      Telegram is touched when ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.chats-photo.v1
+    kind: http-route
+    value: /chats/:id/photo
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). PATCH /api/v1/chats/:id/photo,
+      consumed by the MCP server (mcp-server/src/mcp/server.ts, Telegram
+      forum/chat admin). Body {filePath, type?: photo|video}. 403
+      disabled_sending {error, failureClass} before Telegram is touched when
+      ENABLE_SENDING is set to anything but "true" or
+      EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+      http.telegram-connector.messages-edit.v1. Registered with the sending
+      gate (the route predates the registry). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.telegram-connector.chats-info.v1
+    kind: http-route
+    value: /chats/:id/info
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). GET /api/v1/chats/:id/info (read,
+      ungated), consumed by dgx-messages (inspect) and the MCP server.
+      Registered with the sending gate (the route predates the registry). The
+      path, the body fields and the 200 shape are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
+  - id: http.telegram-connector.chats-participants.v1
+    kind: http-route
+    value: /chats/:id/participants
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). GET
+      /api/v1/chats/:id/participants?limit (read, ungated), consumed by
+      dgx-messages (participant name backfill) and the MCP tool
+      social_list_participants; 200 {participants}. Registered with the
+      sending gate (the route predates the registry). The path, the body
+      fields and the 200 shape are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.telegram-connector.peers-photo.v1
+    kind: http-route
+    value: /peers/:id/photo
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      HMAC-signed route of the house Telegram connectors (telegram-connector,
+      telegram-connector-professional). GET /api/v1/peers/:id/photo (read,
+      ungated), consumed by dgx-messages (avatars). 200 {data: base64, size,
+      contentType: image/jpeg}; 404 no photo; 503 not connected. Registered
+      with the sending gate (the route predates the registry). The path, the
+      body fields and the 200 shape are contract: changing any is breaking — a
+      new `.v2` entry beside this one.
   - id: http.instagram-connector.health.v1
     kind: http-route
     value: /health
