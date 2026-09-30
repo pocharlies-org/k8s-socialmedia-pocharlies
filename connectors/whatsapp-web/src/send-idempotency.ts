@@ -208,7 +208,15 @@ export function voiceRequestHash(input: {
 
 /** Polls, votes, events and event responses (fase 3 / PR-7): the validated request. */
 export function structuredRequestHash(
-  kind: 'poll' | 'poll-vote' | 'event' | 'event-response',
+  kind:
+    | 'poll'
+    | 'poll-vote'
+    | 'event'
+    | 'event-response'
+    | 'sticker'
+    | 'gif'
+    | 'contact-share'
+    | 'start-chat',
   conversationId: string,
   request: unknown
 ): string {

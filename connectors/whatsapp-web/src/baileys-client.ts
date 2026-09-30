@@ -126,6 +126,7 @@ import {
   storePollVote,
 } from './poll-event-store';
 import {
+  CanonicalConversation,
   ChatState,
   ChatStatePatch,
   latestMessageId,
@@ -189,8 +190,29 @@ import {
   writeConversationEphemeral,
 } from './disappearing';
 import {
+  buildContactShareContent,
+  ContactCard,
+  ContactListEntry,
+  conversationName,
+  CreatedContact,
+  insertStartedConversation,
+  listAccountContacts,
+  recordContactName,
+  sharedContactsFromMessage,
+  StartedChat,
+} from './contacts';
+import {
+  fetchLimited,
+  GIF_MAX_BYTES,
+  STICKER_MAX_BYTES,
+  stickerGifContent,
+  StickerGifKind,
+  StickerGifRequest,
+} from './sticker-gif';
+import {
   appendCompanyToDisplayName,
   displayNameOrPhone,
+  NormalizedWhatsAppPhone,
   normalizePhoneForWhatsApp,
   WhatsAppContactSeedInput,
   WhatsAppContactSeedResult,
@@ -1932,12 +1954,13 @@ export class BaileysClient extends EventEmitter {
       messageType = 'LOCATION';
       const loc = content.locationMessage;
       body = `${loc.degreesLatitude},${loc.degreesLongitude}`;
-    } else if (content.contactMessage) {
+    } else if (content.contactMessage || content.contactsArrayMessage) {
+      // Fase 3 / PR-9: the cards' names and numbers ride as metadata.contact
+      // (what dgx-messages renders as a card with "Abrir chat"), never the raw vCard.
       messageType = 'CONTACT';
-      body = content.contactMessage.displayName || null;
-    } else if (content.contactsArrayMessage) {
-      messageType = 'CONTACT';
-      body = content.contactsArrayMessage.displayName || null;
+      const shared = sharedContactsFromMessage(content);
+      body = shared?.displayName || null;
+      if (shared) structured = { contact: shared };
     } else if ((poll = parsePollDefinition(content))) {
       // Fase 3 / PR-7: a proper POLL row (was MESSAGECONTEXTINFO or
       // POLLCREATIONMESSAGEV3 with no content). The secret stays in the payload.
@@ -2469,6 +2492,272 @@ export class BaileysClient extends EventEmitter {
       await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || raw), 'sent');
     }
     return messageId || undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Start chat, stickers / GIFs, contacts (fase 3 / PR-9; the helpers live in
+  // contacts.ts and sticker-gif.ts)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The chat of a phone number — never a twin. First what this account already
+   * has for it (the phone jid or, through 008's aliases, its LID conversation,
+   * merged tombstones followed): then WhatsApp is not even asked. Otherwise
+   * onWhatsApp (not on WhatsApp → 422 not_on_whatsapp) and the LID WhatsApp
+   * gives for the number, which is looked up again (a LID conversation may
+   * exist without an alias). Only when nothing exists is a row inserted, under
+   * the LID when known (the jid replies arrive on), with the phone in
+   * wa_chat_id so 008 records the alias — and only with ingest on.
+   */
+  async startChat(
+    phone: NormalizedWhatsAppPhone,
+    options: { actor?: string } = {}
+  ): Promise<StartedChat> {
+    const sock = this.connectedSocket();
+    const known = this.ingest ? await resolveCanonicalConversation(phone.rawJid) : undefined;
+    if (known) return this.startedChatView(known, phone, { created: false });
+
+    const results = await sock.onWhatsApp(phone.rawJid);
+    const found = (results || []).find(item => item?.exists && typeof item.jid === 'string');
+    if (!found) {
+      throw new MessageMutationError(
+        `${phone.phoneE164} is not on WhatsApp`,
+        422,
+        'not_on_whatsapp'
+      );
+    }
+    const pnJid = jidNormalizedUser(found.jid) || phone.rawJid;
+    const lidFound = await Promise.resolve(
+      sock.signalRepository?.lidMapping?.getLIDForPN?.(pnJid)
+    ).catch(() => null);
+    const lid = lidFound ? jidNormalizedUser(lidFound) : null;
+    if (this.ingest) {
+      const twin =
+        (lid ? await resolveCanonicalConversation(lid) : undefined) ||
+        (pnJid !== phone.rawJid ? await resolveCanonicalConversation(pnJid) : undefined);
+      if (twin) return this.startedChatView(twin, phone, { created: false, lid });
+    }
+
+    const chatJid = lid || this.normalizeJid(pnJid);
+    const name =
+      this.contactNames.get(pnJid) ||
+      (lid ? this.contactNames.get(lid) : undefined) ||
+      this.contactNames.get(this.normalizeJid(pnJid)) ||
+      phone.phoneE164;
+    let conversationId: string | null = null;
+    let created = false;
+    if (this.ingest) {
+      const row = await insertStartedConversation({ jid: chatJid, name, pnJid });
+      conversationId = row.id;
+      created = row.created;
+    }
+    this.logger.info(
+      `Chat started with ${chatJid}${created ? ' (new conversation)' : ''}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      conversationId,
+      chatId: chatJid,
+      phone: phone.phoneE164,
+      lid,
+      name,
+      created,
+      existing: false,
+      persisted: !!conversationId,
+    };
+  }
+
+  private async startedChatView(
+    conversation: CanonicalConversation,
+    phone: NormalizedWhatsAppPhone,
+    extra: { created: boolean; lid?: string | null }
+  ): Promise<StartedChat> {
+    const name = await conversationName(conversation.id).catch(() => null);
+    const chatId = stripAccountKey(conversation.externalId);
+    return {
+      conversationId: conversation.id,
+      chatId,
+      phone: phone.phoneE164,
+      lid: chatId.endsWith('@lid') ? chatId : extra.lid || null,
+      name: name || phone.phoneE164,
+      created: extra.created,
+      existing: true,
+      persisted: true,
+    };
+  }
+
+  /**
+   * A sticker (WebP) or a GIF (MP4 with gifPlayback) to a chat's canonical jid.
+   * The file is fetched with its ceiling and checked by its bytes before the
+   * idempotency claim (`beforeSend`): a refused file never burns a key.
+   */
+  async sendStickerOrGif(
+    kind: StickerGifKind,
+    request: StickerGifRequest,
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult & { kind: StickerGifKind; animated?: boolean }> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(
+      request.conversationId,
+      kind === 'sticker' ? 'sendSticker' : 'sendGif'
+    );
+    const quoted = request.replyToMessageId
+      ? await this.buildQuotedFromId(request.replyToMessageId, target.raw)
+      : undefined;
+    if (request.replyToMessageId && !quoted) {
+      throw new MessageUnavailableError(
+        `Quoted message ${request.replyToMessageId} is unavailable (not in memory nor in the durable store); send without replyTo`,
+        422,
+        'quoted_message_unavailable'
+      );
+    }
+    const file = await fetchLimited(
+      request.fileUrl,
+      kind === 'sticker' ? STICKER_MAX_BYTES : GIF_MAX_BYTES
+    );
+    const content = stickerGifContent(kind, file.bytes, file.contentType, request.caption);
+    await options.beforeSend?.();
+    const sendOptions =
+      quoted || options.messageId
+        ? {
+            ...(quoted ? { quoted } : {}),
+            ...(options.messageId ? { messageId: options.messageId } : {}),
+          }
+        : undefined;
+    const sent = await sock.sendMessage(target.raw, content, sendOptions);
+    const messageId = sent?.key?.id;
+    if (!sent || !messageId) throw new Error(`WhatsApp returned no message id for the ${kind}`);
+    this.rememberKey(messageId, sent.key, target.raw);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, target.conversationId, 'sent');
+    this.logger.info(
+      `${kind} ${messageId} sent to ${target.raw}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      messageId,
+      conversationId: target.conversationId,
+      sentAt: new Date().toISOString(),
+      kind,
+      ...('sticker' in content ? { animated: content.isAnimated } : {}),
+    };
+  }
+
+  /** One or several contact cards (vCard) to a chat's canonical jid. */
+  async shareContacts(
+    chatId: string,
+    cards: ContactCard[],
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult & { contacts: number }> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(chatId, 'shareContact');
+    const content = buildContactShareContent(cards);
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(
+      target.raw,
+      content,
+      options.messageId ? { messageId: options.messageId } : undefined
+    );
+    const messageId = sent?.key?.id;
+    if (!sent || !messageId) throw new Error('WhatsApp returned no message id for the contact');
+    this.rememberKey(messageId, sent.key, target.raw);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, target.conversationId, 'sent');
+    this.logger.info(
+      `Contact card ${messageId} (${cards.length}) sent to ${target.raw}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      messageId,
+      conversationId: target.conversationId,
+      sentAt: new Date().toISOString(),
+      contacts: cards.length,
+    };
+  }
+
+  /**
+   * The people this account knows (read only; one entry per person, PN and
+   * LID collapsed). A pairing-only client keeps no DB state: an empty list.
+   */
+  async listContacts(
+    options: { query?: string; limit?: number } = {}
+  ): Promise<ContactListEntry[]> {
+    if (!this.ingest) return [];
+    const own = this.sock ? await this.ownIds().catch(() => [] as string[]) : [];
+    const me = this.meJid ? [jidNormalizedUser(this.meJid)] : [];
+    return listAccountContacts({
+      ...options,
+      ownJids: [...own, ...me].map(jid => this.normalizeJid(jid)),
+    });
+  }
+
+  /**
+   * Save a contact in the account's address book: WhatsApp's own app-state
+   * mutation (contactAction on the `critical_unblock_low` collection, the one
+   * WhatsApp Web's "New contact" writes and /contacts/seed already uses), keyed
+   * by the phone jid with the LID when WhatsApp gives one and
+   * saveOnPrimaryAddressbook so the phone keeps it too. The number must be on
+   * WhatsApp (422 not_on_whatsapp). With ingest, the name also lands on the
+   * rows that already exist for that person (no row is created).
+   */
+  async createContact(
+    input: { phone: NormalizedWhatsAppPhone; name: string; firstName?: string },
+    options: { actor?: string } = {}
+  ): Promise<CreatedContact> {
+    const sock = this.connectedSocket();
+    const results = await sock.onWhatsApp(input.phone.rawJid);
+    const found = (results || []).find(item => item?.exists && typeof item.jid === 'string');
+    if (!found) {
+      throw new MessageMutationError(
+        `${input.phone.phoneE164} is not on WhatsApp`,
+        422,
+        'not_on_whatsapp'
+      );
+    }
+    const pnJid = jidNormalizedUser(found.jid) || input.phone.rawJid;
+    const lidFound = await Promise.resolve(
+      sock.signalRepository?.lidMapping?.getLIDForPN?.(pnJid)
+    ).catch(() => null);
+    const lid = lidFound ? jidNormalizedUser(lidFound) : null;
+    try {
+      await sock.addOrEditContact(pnJid, {
+        fullName: input.name,
+        firstName: input.firstName || input.name,
+        pnJid,
+        ...(lid ? { lidJid: lid } : {}),
+        saveOnPrimaryAddressbook: true,
+      } satisfies proto.SyncActionValue.IContactAction);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      if (e?.isBoom && status >= 400 && status < 500 && ![401, 408, 428, 440].includes(status)) {
+        throw new MessageMutationError(
+          `WhatsApp rejected the contact: ${e?.message || e}`,
+          422,
+          'rejected_by_whatsapp',
+          String(status)
+        );
+      }
+      throw e;
+    }
+    for (const jid of [pnJid, this.normalizeJid(pnJid), ...(lid ? [lid] : [])]) {
+      this.contactNames.set(jid, input.name);
+    }
+    let persisted = false;
+    if (this.ingest) {
+      try {
+        persisted = (await recordContactName([pnJid, ...(lid ? [lid] : [])], input.name)) > 0;
+      } catch (error: any) {
+        this.logger.warn(`contact name persist failed: ${error?.message || error}`);
+      }
+    }
+    this.logger.info(
+      `Contact saved for ${lid || pnJid}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      phone: input.phone.phoneE164,
+      jid: this.normalizeJid(pnJid),
+      lid,
+      name: input.name,
+      addressBookSync: true,
+      persisted,
+    };
   }
 
   /**

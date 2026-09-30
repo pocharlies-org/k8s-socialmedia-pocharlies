@@ -997,3 +997,145 @@ contracts:
       NATS event. The path, the body fields, the 200 shape and the
       failureClass values are contract: changing any is breaking — a new
       `.v2` entry beside this one.
+  - id: http.whatsapp-connector.chats-start.v1
+    kind: http-route
+    value: /chats/start
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/chats/start of the house WhatsApp connectors (fase 3 /
+      PR-9), consumed by dgx-messages ("Nuevo chat"). HMAC-signed body {phone,
+      message?, actor?}: phone E.164 (or 9 digits of WA_DEFAULT_COUNTRY_CODE),
+      message ≤ 4096 characters — else 400 invalid_request. Then 403
+      disabled_sending (same gate as every send, also without a message: it
+      asks WhatsApp about a number), 503 disconnected. Resolves to the
+      conversation this account ALREADY has (the phone jid, or its LID through
+      social_contact_aliases, merged tombstones followed) without asking
+      WhatsApp; otherwise onWhatsApp (not on WhatsApp → 422 not_on_whatsapp)
+      and WhatsApp's LID for the number, looked up again. Never creates a PN
+      twin: only when nothing exists (and only with ingest) one conversations
+      row is inserted, under the LID when known with the phone jid in
+      wa_chat_id (008's trigger records the alias), else under `digits@c.us`.
+      Answers 200 {started: true, chat: {conversationId (namespaced, null when
+      not persisted), chatId (bare jid sends address), phone, lid, name,
+      created, existing, persisted}, message?: {sent, messageId, sentAt}}. The
+      optional first message goes through /messages/send's path to chatId,
+      opt-in Idempotency-Key (hash over phone + message; replay adds
+      deduplicated: true). If only the message fails: the send failure status
+      with {error, failureClass, started: true, chat, message: {sent: false},
+      fallback? (account_restricted: manual wa.me URL)}. The path, the body
+      fields, the 200 shape and the failureClass values are contract: changing
+      any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-sticker.v1
+    kind: http-route
+    value: /messages/sticker
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/sticker of the house WhatsApp connectors (fase 3 /
+      PR-9), consumed by dgx-messages (composer sticker picker). HMAC-signed
+      body {conversationId, fileUrl (http(s) or data:), replyTo?, actor?}; no
+      caption, no viewOnce. The file must be a WebP (static or animated) of at
+      most 1 MiB — checked by its bytes (RIFF…WEBP); nothing is converted: 400
+      invalid_request code sticker_not_webp | sticker_too_large |
+      file_too_large | file_unavailable, before the socket and before the
+      Idempotency-Key claim. Then 403 disabled_sending, 503 disconnected; the
+      chat resolves to its canonical jid (merged tombstones / aliases) like
+      messages-poll.v1. Answers 200 {sent: true, messageId, conversationId,
+      sentAt, kind: 'sticker', animated}; opt-in Idempotency-Key (replay adds
+      deduplicated: true, 409 idempotency_key_reused / send_outcome_uncertain).
+      The row is written by the echo (messages.upsert) as STICKER. The path,
+      the body fields and the 200 shape are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-gif.v1
+    kind: http-route
+    value: /messages/gif
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/gif of the house WhatsApp connectors (fase 3 /
+      PR-9), consumed by dgx-messages (composer GIF). HMAC-signed body
+      {conversationId, fileUrl, caption? (≤ 1024), replyTo?, actor?}. A GIF is
+      an MP4 (…ftyp) of at most 16 MiB sent as a video with gifPlayback: true
+      (WhatsApp's looping GIF); a .gif file is 400 invalid_request code
+      gif_not_mp4 (the connector does not transcode), other refusals as
+      messages-sticker.v1. Same gate, canonical chat, idempotency and 200
+      shape as messages-sticker.v1 with kind: 'gif' (no animated). The row is
+      written by the echo as VIDEO. The path, the body fields and the 200
+      shape are contract: changing any is breaking — a new `.v2` entry beside
+      this one.
+  - id: http.whatsapp-connector.contacts-list.v1
+    kind: http-route
+    value: /contacts
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/contacts?q=&limit= of the house WhatsApp connectors (fase 3
+      / PR-9), consumed by dgx-messages (contacts panel). HMAC over "{}" (the
+      query only filters a read; ungated). The people this account knows, one
+      entry per person, read only from participants + live 1:1 conversations
+      + social_contact_aliases (blocked ignored): PN (@c.us / @s.whatsapp.net)
+      and LID of the same person collapse into one entry; our own jids are
+      left out. q matches name / push name (ILIKE) or ≥ 3 digits of a jid;
+      limit 1..500 (default 200; 0 or not an integer → 400 invalid_request).
+      Newest activity first. Answers 200 {contacts: [{id (canonical jid, the
+      LID when known), name (null when only a jid / number), pushName, phone
+      (E.164 from a phone jid, never LID digits; null when unknown), jids,
+      conversationId (live 1:1 conversations.id or null), lastActivityAt}],
+      count}. A pairing-only client answers []. The path, the query and the
+      200 shape are contract: changing any is breaking — a new `.v2` entry
+      beside this one. POST /contacts is contacts-create.v1.
+  - id: http.whatsapp-connector.contacts-create.v1
+    kind: http-route
+    value: /contacts/create
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/contacts/create (alias POST /api/v1/contacts) of the house
+      WhatsApp connectors (fase 3 / PR-9), consumed by dgx-messages ("Guardar
+      contacto"). HMAC-signed body {phone, name (≤ 100), firstName?, actor?}
+      — else 400 invalid_request. Then 403 disabled_sending, 503
+      disconnected, onWhatsApp (not on WhatsApp → 422 not_on_whatsapp). Saves
+      the contact with WhatsApp's own app-state mutation (Baileys
+      addOrEditContact: contactAction {fullName, firstName, pnJid, lidJid?,
+      saveOnPrimaryAddressbook: true}, index the phone jid — the same call
+      /contacts/seed makes); a WhatsApp 4xx → 422 rejected_by_whatsapp.
+      Answers 200 {created: true, contact: {phone, jid, lid, name,
+      addressBookSync, persisted}}. DB effect (ingest only): the name on the
+      person's EXISTING participant rows and live 1:1 conversation; no row is
+      created. Whether the phone's address book shows it is WhatsApp's
+      (saveOnPrimaryAddressbook is a request). The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2`
+      entry beside this one.
+  - id: http.whatsapp-connector.contacts-share.v1
+    kind: http-route
+    value: /contacts/share
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/contacts/share of the house WhatsApp connectors (fase 3 /
+      PR-9), consumed by dgx-messages ("Compartir contacto"). HMAC-signed body
+      {conversationId, displayName + phone (+ organization?, email?) or
+      contacts: [1..5 of those], actor?} — else 400 invalid_request. Then 403
+      disabled_sending, 503 disconnected; canonical chat as
+      messages-poll.v1. Sends a vCard 3.0 per card (FN, N, ORG, EMAIL,
+      TEL;type=CELL;type=VOICE;waid=<digits>:+<digits>, RFC 6350 escaping) as
+      a contactMessage / contactsArrayMessage. Answers 200 {sent: true,
+      messageId, conversationId, sentAt, contacts (count)}; opt-in
+      Idempotency-Key as messages-sticker.v1. Received (and echoed) cards land
+      as CONTACT rows with metadata.contact {displayName, contacts:
+      [{displayName, phones (E.164, waid first), waids, organization?}]} —
+      never the raw vCard. The path, the body fields and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.

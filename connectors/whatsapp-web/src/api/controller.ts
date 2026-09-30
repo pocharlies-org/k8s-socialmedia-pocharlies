@@ -33,6 +33,13 @@ import { availablePresenceAllowed, parsePresenceRequest } from '../presence';
 import { parsePrivacyRequest } from '../privacy-settings';
 import { parseDisappearingExpiration } from '../disappearing';
 import {
+  parseCreateContactRequest,
+  parseShareContactRequest,
+  parseStartChatRequest,
+  StartedChat,
+} from '../contacts';
+import { parseStickerGifRequest, stickerGifHashInput } from '../sticker-gif';
+import {
   GroupActionError,
   normalizeGroupParticipantAction,
   parseGroupJid,
@@ -1593,6 +1600,187 @@ export function createRouter(
         res.json({ updated: true, ...result });
       } catch (e) {
         mutationErrorResponse(res, e, 'change the disappearing timer');
+      }
+    })();
+  });
+
+  // Start chat, stickers / GIFs and contacts (fase 3 / PR-9). Ids inside the
+  // signed body (GET /contacts: its query only filters a read). The body is
+  // validated first (400); what reaches WhatsApp then takes the same gate as
+  // every send (403) and the connection (503), and sends take the opt-in
+  // Idempotency-Key. Starting a chat is gated even without a first message:
+  // it asks WhatsApp about a number, and bulk number lookups are what gets an
+  // account restricted. The contact list is a read: no gate.
+
+  // CONTRACT: http.whatsapp-connector.chats-start.v1 — body {phone, message?, actor?}, 200 {started, chat: {conversationId, chatId, phone, lid, name, created, existing, persisted}, message?: {sent, messageId, sentAt}}, 422 not_on_whatsapp
+  router.post('/chats/start', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      let attempt: IdempotentSend | null = null;
+      let chat: StartedChat | undefined;
+      try {
+        const body = optionalObject(req.body);
+        const request = parseStartChatRequest(body);
+        const actor = actorFromBody(body.actor);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        chat = await client.startChat(request.phone, { actor });
+        if (!request.message) {
+          res.json({ started: true, chat });
+          return;
+        }
+        const started = chat;
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () =>
+            structuredRequestHash('start-chat', request.phone.phoneE164, {
+              message: request.message,
+            }),
+          reservation => ({
+            started: true,
+            chat: started,
+            message: { sent: true, messageId: reservation.messageId, sentAt: reservation.sentAt },
+          })
+        );
+        if (begun === 'answered') return;
+        attempt = begun;
+        // The normal send path, to the chat's own jid (the LID when it has one):
+        // the echo then lands on this conversation, not on a phone-jid twin.
+        const messageId = await client.sendMessage(
+          chat.chatId,
+          request.message,
+          attempt ? { messageId: attempt.messageId, beforeSend: attempt.beforeSend } : undefined
+        );
+        const sentAt = attempt
+          ? await confirmSend(attempt.key, messageId)
+          : new Date().toISOString();
+        res.json({ started: true, chat, message: { sent: true, messageId, sentAt } });
+      } catch (e) {
+        if (await failIdempotentSend(attempt, e, res)) return;
+        if (!chat) {
+          mutationErrorResponse(res, e, 'start chat');
+          return;
+        }
+        // The chat exists; only the first message failed.
+        const failureClass = classifyWhatsAppSendFailure(e);
+        res.status(statusForSendFailure(failureClass)).json({
+          error: `Chat started but the first message failed: ${errorMessage(e)}`,
+          failureClass,
+          started: true,
+          chat,
+          message: { sent: false },
+          ...(failureClass === 'account_restricted'
+            ? { fallback: accountRestrictedFallback(chat.phone, optionalObject(req.body).message) }
+            : {}),
+        });
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-sticker.v1 — body {conversationId, fileUrl (image/webp ≤ 1 MiB), replyTo?, actor?}, 200 {sent, messageId, conversationId, sentAt, kind, animated}
+  // CONTRACT: http.whatsapp-connector.messages-gif.v1 — body {conversationId, fileUrl (video/mp4 ≤ 16 MiB, never .gif), caption?, replyTo?, actor?}, 200 {sent, messageId, conversationId, sentAt, kind}
+  for (const [path, kind] of [
+    ['/messages/sticker', 'sticker'],
+    ['/messages/gif', 'gif'],
+  ] as const) {
+    router.post(path, auth, (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        let attempt: IdempotentSend | null = null;
+        try {
+          const body = optionalObject(req.body);
+          const request = parseStickerGifRequest(kind, body);
+          const begun = await beginStructuredSend(client, req, res, () =>
+            structuredRequestHash(kind, request.conversationId, stickerGifHashInput(kind, request))
+          );
+          if (!begun) return;
+          attempt = begun.attempt;
+          const result = await client.sendStickerOrGif(
+            kind,
+            request,
+            structuredSendOptions(attempt, actorFromBody(body.actor))
+          );
+          res.json({
+            sent: true,
+            ...result,
+            ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+          });
+        } catch (e) {
+          await failStructuredSend(attempt, e, res, `send ${kind}`);
+        }
+      })();
+    });
+  }
+
+  // CONTRACT: http.whatsapp-connector.contacts-list.v1 — GET ?q&limit (signed over "{}"), 200 {contacts: [{id, name, pushName, phone, jids, conversationId, lastActivityAt}], count}
+  router.get('/contacts', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+        const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+          res
+            .status(400)
+            .json({ error: 'limit must be a positive integer', failureClass: 'invalid_request' });
+          return;
+        }
+        const contacts = await client.listContacts({ query: q, limit });
+        res.json({ contacts, count: contacts.length });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list contacts');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.contacts-create.v1 — body {phone, name, firstName?, actor?} (POST /contacts/create or POST /contacts), 200 {created, contact: {phone, jid, lid, name, addressBookSync, persisted}}, 422 not_on_whatsapp
+  const createContactRoute = (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseCreateContactRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const contact = await client.createContact(request, { actor: actorFromBody(body.actor) });
+        res.json({ created: true, contact });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'create contact');
+      }
+    })();
+  };
+  router.post('/contacts/create', auth, createContactRoute);
+  router.post('/contacts', auth, createContactRoute);
+
+  // CONTRACT: http.whatsapp-connector.contacts-share.v1 — body {conversationId, displayName + phone (+ organization?, email?) | contacts[1..5], actor?}, 200 {sent, messageId, conversationId, sentAt, contacts}
+  router.post('/contacts/share', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (!chatId) {
+          res
+            .status(400)
+            .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+          return;
+        }
+        const cards = parseShareContactRequest(body);
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('contact-share', chatId, cards)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.shareContacts(
+          chatId,
+          cards,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          sent: true,
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'share contact');
       }
     })();
   });
