@@ -6,6 +6,9 @@ resources:
   # scripts/render-connectors.py (CI fails if stale: --check).
   - generated/connectors.yaml
   - whatsapp-synapse-bridge.yaml
+  # INFRA-364 fase 0: transcripción de notas de voz de WhatsApp (ruta viva +
+  # backfill suspendido).
+  - whatsapp-voice.yaml
   - networkpolicy.yaml
   # SC-1197 P3 (SC-1226): API de emparejamientos por sub, inerte (replicas 0, flag off).
   - social-pairing.yaml

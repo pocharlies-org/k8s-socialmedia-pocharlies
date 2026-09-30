@@ -666,6 +666,33 @@ export async function getParticipantAvatar(id: string): Promise<string | null> {
   return r.rows[0]?.profile_pic_url || null;
 }
 
+/**
+ * INFRA-364 fase 0: las notas de voz de WhatsApp (AUDIO/PTT, con o sin `ptt`,
+ * INBOUND y OUTBOUND) se transcriben a `content` por el worker
+ * `mcp-server/src/jobs/voice-transcribe.ts`, con el MISMO contrato de metadata
+ * que Telegram (sync/db.py): `needs_transcription` + `transcription_status`
+ * pending → processing → done/failed + `transcription_attempts`. Marcarlas en el
+ * insert para que el worker las coja al instante; las filas viejas sin marcar las
+ * adopta el backfill (`voice-backfill.ts`) o la ventana de gracia del worker.
+ *
+ * Pure and idempotent: if the metadata already carries a transcription_status
+ * (replay after relink, or a row the worker already touched) it is left
+ * untouched — never reset a done/failed row back to pending here.
+ */
+export function withVoiceTranscriptionMetadata(
+  messageType: string,
+  metadata: Record<string, unknown>
+): Record<string, unknown> {
+  if (messageType !== 'AUDIO' && messageType !== 'PTT') return metadata;
+  if (metadata.transcription_status !== undefined) return metadata;
+  return {
+    ...metadata,
+    needs_transcription: true,
+    transcription_status: 'pending',
+    transcription_attempts: 0,
+  };
+}
+
 export async function storeMessage(data: MessageData): Promise<bigint | null> {
   const pool = getPool();
   try {
@@ -685,7 +712,7 @@ export async function storeMessage(data: MessageData): Promise<bigint | null> {
         data.isForwarded,
         data.replyToWaId ? accountKey(data.replyToWaId) : null,
         data.platform || 'whatsapp',
-        JSON.stringify(data.metadata || {}),
+        JSON.stringify(withVoiceTranscriptionMetadata(data.messageType, data.metadata || {})),
         connectorAccount(),
       ]
     );

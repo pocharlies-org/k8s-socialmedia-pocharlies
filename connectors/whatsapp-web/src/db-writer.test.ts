@@ -180,3 +180,65 @@ test('linkParticipantToConversation surfaces FK failures with full context', asy
     (pg.Pool.prototype as any).query = original;
   }
 });
+
+// --- INFRA-364 fase 0: voice-note transcription marking -----------------------
+
+test('withVoiceTranscriptionMetadata marks AUDIO/PTT pending, leaves others alone', async () => {
+  const w = await loadWriter('personal');
+  // AUDIO and PTT get the Telegram-shaped queue keys.
+  const audio = w.withVoiceTranscriptionMetadata('AUDIO', { source: 'live' });
+  assert.equal(audio.needs_transcription, true);
+  assert.equal(audio.transcription_status, 'pending');
+  assert.equal(audio.transcription_attempts, 0);
+  assert.equal(audio.source, 'live');
+  assert.equal(w.withVoiceTranscriptionMetadata('PTT', {}).transcription_status, 'pending');
+  // Other types are untouched (same object identity).
+  const text = { source: 'live' };
+  assert.equal(w.withVoiceTranscriptionMetadata('TEXT', text), text);
+  assert.equal(w.withVoiceTranscriptionMetadata('VOICE', text), text);
+  // An existing status (replay after relink) is never reset.
+  const done = w.withVoiceTranscriptionMetadata('AUDIO', { transcription_status: 'done' });
+  assert.equal(done.transcription_status, 'done');
+  assert.equal(done.needs_transcription, undefined);
+});
+
+test('storeMessage persists pending transcription metadata for voice rows only', async () => {
+  const { calls, restore } = stubPoolQuery();
+  try {
+    const w = await loadWriter('personal');
+    await w.storeMessage({
+      waMessageId: 'VOICE1',
+      conversationId: '34600111222@s.whatsapp.net',
+      senderWaId: '34600111222@s.whatsapp.net',
+      waTimestamp: new Date(),
+      direction: 'INBOUND',
+      content: null,
+      messageType: 'AUDIO',
+      isForwarded: false,
+      metadata: { source: 'live' },
+    });
+    await w.storeMessage({
+      waMessageId: 'TXT1',
+      conversationId: '34600111222@s.whatsapp.net',
+      senderWaId: '34600111222@s.whatsapp.net',
+      waTimestamp: new Date(),
+      direction: 'INBOUND',
+      content: 'hola',
+      messageType: 'TEXT',
+      isForwarded: false,
+      metadata: { source: 'live' },
+    });
+    const inserts = calls.filter(c => tableOf(c.sql) === 'messages');
+    assert.equal(inserts.length, 2);
+    // metadata is the 11th bound param ($11)
+    const voiceMeta = JSON.parse(inserts[0].params[10] as string);
+    assert.equal(voiceMeta.transcription_status, 'pending');
+    assert.equal(voiceMeta.needs_transcription, true);
+    assert.equal(voiceMeta.transcription_attempts, 0);
+    const textMeta = JSON.parse(inserts[1].params[10] as string);
+    assert.equal(textMeta.transcription_status, undefined);
+    assert.equal(textMeta.needs_transcription, undefined);
+  } finally {
+    restore();
+  }
+});
