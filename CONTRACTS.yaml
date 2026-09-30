@@ -310,6 +310,133 @@ contracts:
       No NATS event. The path, the body fields, the action names, the 200
       shape and the failureClass values are contract: changing any is breaking
       — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.groups-state.v1
+    kind: http-route
+    value: /groups/state
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/groups/state of the house WhatsApp connectors (fase 3 /
+      PR-6), consumed by dgx-messages (/messages → group detail panel: who is
+      admin, what this account may do). HMAC-signed, id inside the signed body:
+      {groupId} (`conversationId` accepted; a group jid `…@g.us`, bare or
+      account-namespaced — a direct chat, LID, broadcast or another account's
+      prefix is 400 invalid_request before anything goes out). A read: no
+      sending gate. Fresh metadata from WhatsApp (never the cache). Answers 200
+      {group: {groupId, subject, description, announce, restrict,
+      memberAddMode, community, size, createdAt (ISO | null), owner, capabilities:
+      {isMember, isAdmin, isSuperAdmin, editInfo, changeSettings,
+      addParticipants, manageParticipants}, participants: [{jid (…@c.us |
+      …@lid), phone (E.164 | null), lid, name (in-memory | null), isAdmin,
+      isSuperAdmin, isSelf}]}}. Capabilities come from this account's own
+      participant row (matched by its PN or LID): editInfo = admin, or member of
+      a group without `restrict`; changeSettings / manageParticipants = admin;
+      addParticipants = admin, or member with WhatsApp's member-add mode on;
+      communities (parent or announcement group) = all false. Errors {error,
+      failureClass}: 400 invalid_request, 503 disconnected, 403
+      not_group_member (WhatsApp: not a participant), 404 group_unavailable.
+      The path, the body fields, the 200 shape and the failureClass values are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.groups-create.v1
+    kind: http-route
+    value: /groups/create
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/groups/create of the house WhatsApp connectors (fase 3 /
+      PR-6), consumed by dgx-messages (/messages → Nuevo grupo). HMAC-signed
+      body {subject, participants[], actor?}: subject 1–100 characters;
+      participants 1–50 phone numbers (E.164, 00…, or 9-digit national with
+      WA_DEFAULT_COUNTRY_CODE) or user jids (…@c.us, …@s.whatsapp.net,
+      …@lid), deduplicated — any other entry rejects the request (400
+      invalid_request with `invalid`), our own number is 422
+      self_participant; actor ≤ 200 chars, logged, never auth. Same gate as
+      every send (ENABLE_SENDING + EMERGENCY_DISABLE_SENDING → 403
+      disabled_sending), after the 400s. Answers 200 {created: true, groupId,
+      conversationId (conversations.id written, null without ingest), subject,
+      persisted, participants: [{participant (as sent), jid, status: null, ok,
+      reason: added | not_added}], succeeded, failed, group (the
+      groups-state.v1 view)}. Baileys drops WhatsApp's per-participant errors of
+      the create answer: `ok` = the person is in the returned metadata
+      (not_added is typically privacy: they need an invite). DB effect (ingest
+      only): the group's conversations row (namespaced id, account_id,
+      external_id, is_group, name, participant_count, last_message_at =
+      creation) — the same upsert as the groups.upsert notification; an existing
+      live row only gets name / participant_count. Errors {error,
+      failureClass, code?}: 400, 403 disabled_sending, 503 disconnected, 422
+      self_participant | rejected_by_whatsapp (`code` = WhatsApp's), other send
+      failure classes as /messages/send. No NATS event. The path, the body
+      fields, the 200 shape and the failureClass values are contract: changing
+      any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.groups-update.v1
+    kind: http-route
+    value: /groups/update
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/groups/update of the house WhatsApp connectors (fase 3 /
+      PR-6), consumed by dgx-messages (/messages → group detail panel: rename,
+      description, only-admins settings). HMAC-signed body {groupId, subject?,
+      description?, settings?: {announce?, restrict?}, actor?}: groupId as in
+      groups-state.v1; subject 1–100 characters; description ≤ 2048 ("" removes
+      it); settings booleans (announce = only admins send, restrict = only
+      admins edit info); at least one of them (else 400 invalid_request). Same
+      gate as every send (403 disabled_sending), after the 400s. Checked against
+      fresh metadata before anything goes out: 403 not_group_member, 403
+      not_group_admin (subject / description need editInfo, settings need
+      admin), 422 community_unsupported. What already has the asked value is
+      not sent (each change notifies the members). Answers 200 {updated: true,
+      groupId, changed (what went out, in order subject, description,
+      announce, restrict), unchanged, persisted (new subject written), group
+      (groups-state.v1 view, null if the re-read failed)}. A failure after an
+      earlier change went out answers its error with {applied, failed}. DB
+      effect (ingest only): a new subject → name of the canonical conversation
+      (account_id + external_id, merged_into followed), only when it differs;
+      the same write follows groups.update from WhatsApp (a subject changed by
+      anyone). Description and settings are not stored. Errors {error,
+      failureClass, code?, applied?, failed?}: 400, 403, 404 group_unavailable,
+      422 rejected_by_whatsapp, 503, other send failure classes. No NATS event.
+      The path, the body fields, the 200 shape and the failureClass values are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.groups-participants.v1
+    kind: http-route
+    value: /groups/participants
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/groups/participants of the house WhatsApp connectors (fase
+      3 / PR-6), consumed by dgx-messages (/messages → group detail panel: add,
+      remove, make / dismiss admin). Distinct from the pre-existing GET
+      /groups/:id/participants (unchanged, unregistered). HMAC-signed body
+      {groupId, action, participants[], actor?}: action add | remove | promote
+      | demote; participants as in groups-create.v1 (1–50, phones or PN / LID
+      jids; a member is addressed by the jid the group knows them by — a PN of
+      a LID member goes as its LID). Same gate as every send (403
+      disabled_sending), after the 400s. Checked against fresh metadata: 403
+      not_group_member, 403 not_group_admin (add needs admin or member-add
+      mode; remove / promote / demote need admin), 422 self_participant (this
+      account in the list), 422 community_unsupported. WhatsApp answers per
+      participant and each answer is reported: {participant, jid, status
+      (WhatsApp's code: '200', '403', '404', '406', '408', '409'…), ok, reason
+      (added | removed | promoted | demoted | invite_required | not_on_whatsapp
+      | not_a_participant | not_allowed | recently_left | already_participant
+      | conflict | not_authorized | bad_request | no_answer | failed)}. Some
+      done → 200 {updated: true, action, groupId, results, succeeded, failed,
+      partial, persisted, group}; nobody done → 422 rejected_by_whatsapp with
+      {action, results, succeeded: 0, failed}. DB effect (ingest only):
+      participant_count of the canonical conversation after a change. No NATS
+      event of its own (WhatsApp's group-participants.update keeps publishing
+      whatsapp.ChatUpdated as before). The path, the body fields, the action
+      names, the 200 shape, the reasons and the failureClass values are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
   - id: http.social-api.pairing-whatsapp.v1
     kind: http-route
     value: /pairing/whatsapp

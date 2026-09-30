@@ -28,6 +28,14 @@ import {
 import { MessageUnavailableError } from '../durable-message-store';
 import { MessageMutationError } from '../message-mutations';
 import {
+  GroupActionError,
+  normalizeGroupParticipantAction,
+  parseGroupJid,
+  parseGroupParticipants,
+  parseGroupSubject,
+  parseGroupUpdate,
+} from '../group-management';
+import {
   claimSendAttempt,
   confirmSend,
   mediaRequestHash,
@@ -123,6 +131,8 @@ function mutationErrorResponse(res: Response, error: unknown, what: string): voi
       error: error.message,
       failureClass: error.failureClass,
       ...(error instanceof MessageMutationError && error.code ? { code: error.code } : {}),
+      // Group actions: per-participant results, what was already applied.
+      ...(error instanceof GroupActionError && error.details ? error.details : {}),
     });
     return;
   }
@@ -1111,6 +1121,97 @@ export function createRouter(
         res.json({ participants });
       } catch (e) {
         res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  // Group management (fase 3 / PR-6). Ids inside the signed body; only group
+  // jids (…@g.us). The body is validated before anything else (400), then —
+  // for the three that change the group, which notify its members — the same
+  // gate as every send, then the connection. What this account may do comes
+  // from its own participant row in fresh metadata (403 not_group_admin /
+  // not_group_member).
+
+  // CONTRACT: http.whatsapp-connector.groups-state.v1 — body {groupId}, 200 {group: {groupId, subject, description, announce, restrict, memberAddMode, community, size, createdAt, owner, capabilities, participants}}
+  router.post('/groups/state', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ group: await client.getGroupState(groupId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-create.v1 — body {subject, participants[], actor?}, 200 {created, groupId, conversationId, subject, persisted, participants, succeeded, failed, group}
+  router.post('/groups/create', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const subject = parseGroupSubject(body.subject);
+        const participants = parseGroupParticipants(body.participants);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.createGroup(
+          subject,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ created: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'create group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-update.v1 — body {groupId, subject?, description?, settings?: {announce?, restrict?}, actor?}, 200 {updated, groupId, changed, unchanged, persisted, group}
+  router.post('/groups/update', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const update = parseGroupUpdate(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateGroup(groupId, update, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-participants.v1 — body {groupId, action: add|remove|promote|demote, participants[], actor?}, 200 {updated, action, groupId, results, succeeded, failed, partial, persisted, group}
+  router.post('/groups/participants', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const action = normalizeGroupParticipantAction(body.action);
+        if (!action) {
+          res.status(400).json({
+            error: 'action must be one of add, remove, promote, demote',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const participants = parseGroupParticipants(body.participants);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateGroupParticipants(
+          groupId,
+          action,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update group participants');
       }
     })();
   });

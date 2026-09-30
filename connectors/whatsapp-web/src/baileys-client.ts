@@ -98,6 +98,31 @@ import {
   resolveCanonicalConversation,
   writeChatState,
 } from './chat-state';
+import {
+  allowsParticipantAction,
+  countResults,
+  findParticipant,
+  GroupActionError,
+  groupCapabilities,
+  GroupParticipantAction,
+  GroupParticipantResult,
+  groupStateView,
+  GroupStateView,
+  GroupUpdate,
+  isCommunityGroup,
+  normalizeGroupParticipantAction,
+  ownParticipant,
+  parseGroupJid,
+  parseGroupParticipants,
+  parseGroupSubject,
+  parseGroupUpdate,
+  participantApiJid,
+  participantIds,
+  participantOutcome,
+  recordGroupChange,
+  recordGroupConversation,
+  recordInboundGroup,
+} from './group-management';
 import { maybeRunRetention } from './retention';
 import {
   appendCompanyToDisplayName,
@@ -336,6 +361,13 @@ export function classifyWhatsAppSendFailure(error: unknown): WhatsAppSendFailure
   return 'unknown';
 }
 
+/** HTTP status of a send failure class outside the controller (group errors). */
+function statusOfFailureClass(failureClass: WhatsAppSendFailureClass): number {
+  if (failureClass === 'timeout') return 504;
+  if (failureClass === 'disconnected') return 503;
+  return 500;
+}
+
 function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: boolean): string {
   if (failureClass === 'timeout') {
     return isGroup
@@ -381,6 +413,43 @@ const OWN_MUTATION_ECHO_MS = 30_000;
 export interface MessageMutationRequest {
   /** Who asked (dgx-messages user, MCP caller); recorded in metadata. */
   actor?: string;
+}
+
+/** POST /groups/create (fase 3 / PR-6). */
+export interface GroupCreateResult {
+  groupId: string;
+  /** conversations.id written (ingest only), else null. */
+  conversationId: string | null;
+  subject: string;
+  persisted: boolean;
+  participants: GroupParticipantResult[];
+  succeeded: number;
+  failed: number;
+  group: GroupStateView;
+}
+
+/** POST /groups/update. */
+export interface GroupUpdateResult {
+  groupId: string;
+  /** What went to WhatsApp, in order (subject, description, announce, restrict). */
+  changed: string[];
+  /** Asked for but already so: not sent. */
+  unchanged: string[];
+  /** The new subject was written on the canonical conversation. */
+  persisted: boolean;
+  group: GroupStateView | null;
+}
+
+/** POST /groups/participants. */
+export interface GroupParticipantsResult {
+  action: GroupParticipantAction;
+  groupId: string;
+  results: GroupParticipantResult[];
+  succeeded: number;
+  failed: number;
+  partial: boolean;
+  persisted: boolean;
+  group: GroupStateView | null;
 }
 
 /**
@@ -1235,6 +1304,26 @@ export class BaileysClient extends EventEmitter {
         },
       });
       this.groupMetaCache.delete(id);
+    });
+
+    // A group created (by us or with us in it): its conversation row, so it
+    // is listed before its first message. A new subject: on the canonical row.
+    sock.ev.on('groups.upsert', groups => {
+      for (const meta of groups) {
+        if (!meta?.id) continue;
+        this.cacheGroupMetadata(meta);
+        void recordInboundGroup('upsert', meta);
+      }
+    });
+
+    sock.ev.on('groups.update', updates => {
+      for (const update of updates) {
+        if (!update?.id) continue;
+        this.groupMetaCache.delete(update.id);
+        const chat = this.chatStore.get(this.normalizeJid(update.id));
+        if (chat && update.subject) chat.name = update.subject;
+        void recordInboundGroup('update', update);
+      }
     });
   }
 
@@ -2739,6 +2828,416 @@ export class BaileysClient extends EventEmitter {
       isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
       isSuperAdmin: p.admin === 'superadmin',
     }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Group management (fase 3 / PR-6; the helpers live in group-management.ts)
+  // ---------------------------------------------------------------------------
+
+  /** Our own ids (PN and LID), to find this account among a group's participants. */
+  private async ownIds(): Promise<string[]> {
+    const user = this.sock?.user as { id?: string; lid?: string } | undefined;
+    const pn = user?.id ? jidNormalizedUser(user.id) : null;
+    let lid = user?.lid ? jidNormalizedUser(user.lid) : null;
+    if (!lid && pn) {
+      lid = await Promise.resolve(this.sock?.signalRepository?.lidMapping?.getLIDForPN?.(pn))
+        .then(found => (found ? jidNormalizedUser(found) : null))
+        .catch(() => null);
+    }
+    return [pn, lid].filter((id): id is string => !!id);
+  }
+
+  /** The other id (PN ↔ LID) Baileys knows for a user jid, if any. */
+  private async jidAliases(jid: string): Promise<string[]> {
+    const mapping = this.sock?.signalRepository?.lidMapping;
+    const other = await Promise.resolve(
+      jid.endsWith('@lid') ? mapping?.getPNForLID?.(jid) : mapping?.getLIDForPN?.(jid)
+    ).catch(() => null);
+    return [jid, other ? jidNormalizedUser(other) : null].filter((id): id is string => !!id);
+  }
+
+  /**
+   * A group call to WhatsApp. Its refusals come back as Boom with the IQ
+   * error code: 403 → 403 not_group_admin (WhatsApp says we may not), 404 →
+   * 404 group_unavailable, other 4xx → 422 rejected_by_whatsapp; connection
+   * statuses (401, 408, 428, 440) and the rest go on as send failures.
+   */
+  private async groupCall<T>(what: string, raw: string, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      const connectionStatus = [401, 408, 428, 440].includes(status);
+      if (!e?.isBoom || !(status >= 400 && status < 500) || connectionStatus) throw e;
+      const reason = `WhatsApp rejected ${what} of ${raw}: ${e?.message || e}`;
+      if (status === 403) {
+        throw new GroupActionError(reason, 403, 'not_group_admin', { code: '403' });
+      }
+      if (status === 404) {
+        throw new GroupActionError(reason, 404, 'group_unavailable', { code: '404' });
+      }
+      throw new GroupActionError(reason, 422, 'rejected_by_whatsapp', { code: String(status) });
+    }
+  }
+
+  /**
+   * Fresh metadata of a group we are about to act on (the cache may predate
+   * an admin change). 403 from WhatsApp here = we are not in the group.
+   */
+  private async groupMetadataForAction(raw: string): Promise<GroupMetadata> {
+    try {
+      return await this.groupCall('reading the group', raw, () =>
+        this.fetchGroupMetadata(raw, true)
+      );
+    } catch (e) {
+      if (e instanceof GroupActionError && e.failureClass === 'not_group_admin') {
+        throw new GroupActionError(
+          `This account is not a participant of ${raw}`,
+          403,
+          'not_group_member',
+          { code: e.code }
+        );
+      }
+      throw e;
+    }
+  }
+
+  private groupView(meta: GroupMetadata, ownIds: string[]): GroupStateView {
+    const view = groupStateView(meta, ownParticipant(meta, ownIds), p => {
+      for (const id of [p.id, p.phoneNumber, p.lid]) {
+        const name = id ? this.contactNames.get(id) : undefined;
+        if (name) return name;
+      }
+      return null;
+    });
+    return { ...view, groupId: this.normalizeJid(view.groupId) };
+  }
+
+  /**
+   * Metadata + what this account may do there (POST /groups/state): our
+   * participant row (PN or LID) decides — admin, superadmin, or a member of a
+   * group that lets members edit info / add people.
+   */
+  async getGroupState(groupId: string): Promise<GroupStateView> {
+    const raw = parseGroupJid(groupId);
+    this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    return this.groupView(meta, await this.ownIds());
+  }
+
+  /**
+   * Create a group with `subject` and `participants` (phone numbers or PN /
+   * LID jids). WhatsApp answers with the group's metadata; Baileys drops the
+   * per-participant errors of the create answer, so each requested person is
+   * reported as added when they are in that metadata and `not_added`
+   * otherwise (typically their privacy settings: they need an invite). The
+   * conversation row is written here (ingest only) — the same upsert as the
+   * groups.upsert notification, which may or may not reach its creator.
+   */
+  async createGroup(
+    subject: unknown,
+    participants: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<GroupCreateResult> {
+    const cleanSubject = parseGroupSubject(subject);
+    const members = parseGroupParticipants(participants);
+    const sock = this.connectedSocket();
+    const own = await this.ownIds();
+    if (members.some(m => own.includes(m.jid))) {
+      throw new GroupActionError(
+        'Do not list this account among the participants: the creator is always in the group',
+        422,
+        'self_participant'
+      );
+    }
+    const meta = await this.groupCall('the group creation', '@g.us', () =>
+      sock.groupCreate(
+        cleanSubject,
+        members.map(m => m.jid)
+      )
+    );
+    this.cacheGroupMetadata(meta);
+    const results: GroupParticipantResult[] = [];
+    for (const member of members) {
+      let found = findParticipant(meta, member.jid);
+      if (!found) {
+        for (const alias of await this.jidAliases(member.jid)) {
+          found = findParticipant(meta, alias);
+          if (found) break;
+        }
+      }
+      results.push({
+        participant: member.input,
+        jid: participantApiJid(member.jid),
+        status: null,
+        ok: !!found,
+        reason: found ? 'added' : 'not_added',
+      });
+    }
+    let conversationId: string | null = null;
+    if (this.ingest) {
+      conversationId =
+        (await recordGroupConversation(meta).catch((e: any) => {
+          this.logger.warn(`group ${meta.id} created but not recorded: ${e?.message || e}`);
+          return undefined;
+        })) ?? null;
+    }
+    const counts = countResults(results);
+    this.logger.info(
+      `Group created ${meta.id} participants=${members.length} added=${counts.succeeded}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    return {
+      groupId: this.normalizeJid(meta.id),
+      conversationId,
+      subject: meta.subject || cleanSubject,
+      persisted: !!conversationId,
+      participants: results,
+      ...counts,
+      group: this.groupView(meta, own),
+    };
+  }
+
+  /**
+   * Subject, description and settings of a group. Checked against fresh
+   * metadata first: a member of the group; subject / description need admin
+   * unless the group is not `restrict`ed; settings always need admin. What
+   * already has the asked value is not sent (each change notifies every
+   * member). A failure after an earlier change went out says what was
+   * applied. A new subject is written on the canonical conversation.
+   */
+  async updateGroup(
+    groupId: string,
+    update: GroupUpdate | Record<string, unknown>,
+    request: MessageMutationRequest = {}
+  ): Promise<GroupUpdateResult> {
+    const raw = parseGroupJid(groupId);
+    const wanted = parseGroupUpdate(update as Record<string, unknown>);
+    const sock = this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    const editsInfo = wanted.subject !== undefined || wanted.description !== undefined;
+    if (editsInfo && !capabilities.editInfo) {
+      throw new GroupActionError(
+        `Only admins can change the subject or description of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+    if (wanted.settings && !capabilities.changeSettings) {
+      throw new GroupActionError(
+        `Only admins can change the settings of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+
+    const steps: Array<{ name: string; run: () => Promise<void> }> = [];
+    const unchanged: string[] = [];
+    const plan = (name: string, same: boolean, run: () => Promise<void>): void => {
+      if (same) unchanged.push(name);
+      else steps.push({ name, run });
+    };
+    if (wanted.subject !== undefined) {
+      const subject = wanted.subject;
+      plan('subject', subject === meta.subject, () => sock.groupUpdateSubject(raw, subject));
+    }
+    if (wanted.description !== undefined) {
+      const description = wanted.description;
+      plan('description', description === (meta.desc || '').trim(), () =>
+        sock.groupUpdateDescription(raw, description || undefined)
+      );
+    }
+    const { announce, restrict } = wanted.settings || {};
+    if (announce !== undefined) {
+      plan('announce', announce === (meta.announce === true), () =>
+        sock.groupSettingUpdate(raw, announce ? 'announcement' : 'not_announcement')
+      );
+    }
+    if (restrict !== undefined) {
+      plan('restrict', restrict === (meta.restrict === true), () =>
+        sock.groupSettingUpdate(raw, restrict ? 'locked' : 'unlocked')
+      );
+    }
+
+    const applied: string[] = [];
+    for (const step of steps) {
+      try {
+        await this.groupCall(`the ${step.name} change`, raw, step.run);
+        applied.push(step.name);
+      } catch (e: any) {
+        if (!applied.length) throw e;
+        this.groupMetaCache.delete(raw);
+        const details = { applied, failed: step.name };
+        const message = `${e?.message || e} (already applied: ${applied.join(', ')})`;
+        if (e instanceof MessageMutationError) {
+          throw new GroupActionError(message, e.status, e.failureClass, { code: e.code, details });
+        }
+        const failureClass = classifyWhatsAppSendFailure(e);
+        throw new GroupActionError(message, statusOfFailureClass(failureClass), failureClass, {
+          details,
+        });
+      }
+    }
+
+    let group: GroupStateView | null = null;
+    let persisted = false;
+    if (applied.length) {
+      this.groupMetaCache.delete(raw);
+      const refreshed = await this.fetchGroupMetadata(raw, true).catch(() => undefined);
+      if (refreshed) group = this.groupView(refreshed, own);
+      if (this.ingest && applied.includes('subject')) {
+        persisted = await recordGroupChange(raw, { subject: wanted.subject }).catch((e: any) => {
+          this.logger.warn(`subject of ${raw} changed but not recorded: ${e?.message || e}`);
+          return false;
+        });
+      }
+    } else {
+      group = this.groupView(meta, own);
+    }
+    this.logger.info(
+      `Group ${raw} updated changed=${applied.join(',') || '-'}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    return { groupId: this.normalizeJid(raw), changed: applied, unchanged, persisted, group };
+  }
+
+  /**
+   * Add / remove / promote / demote participants (phone numbers or PN / LID
+   * jids). Checked against fresh metadata: add needs admin (or member-add
+   * mode on), the rest admin. A member is addressed by the jid the group
+   * knows them by (a PN given for a LID group goes as its LID). WhatsApp
+   * answers per participant; each answer is reported (200 done, 403 invite
+   * required, 408 recently left, 409 already in…). Nobody done → 422 with
+   * the results; some done → 200 with `partial`.
+   */
+  async updateGroupParticipants(
+    groupId: string,
+    action: string,
+    participants: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<GroupParticipantsResult> {
+    const raw = parseGroupJid(groupId);
+    const verb = normalizeGroupParticipantAction(action);
+    if (!verb) {
+      throw new GroupActionError(
+        'action must be one of add, remove, promote, demote',
+        400,
+        'invalid_request'
+      );
+    }
+    const members = parseGroupParticipants(participants);
+    const sock = this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    if (!allowsParticipantAction(capabilities, verb)) {
+      throw new GroupActionError(
+        verb === 'add'
+          ? `Only admins can add participants to ${raw}`
+          : `Only admins can ${verb} participants of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+    const self = ownParticipant(meta, own);
+    const targets: Array<{ input: string; sent: string; aliases: string[] }> = [];
+    for (const member of members) {
+      const found = findParticipant(meta, member.jid);
+      if (own.includes(member.jid) || (found && found === self)) {
+        throw new GroupActionError(
+          `This account cannot ${verb} itself here`,
+          422,
+          'self_participant'
+        );
+      }
+      const sent = found ? jidNormalizedUser(found.id) : member.jid;
+      if (targets.some(t => t.sent === sent)) continue;
+      const aliases = found ? participantIds(found) : await this.jidAliases(member.jid);
+      targets.push({ input: member.input, sent, aliases: Array.from(new Set([sent, ...aliases])) });
+    }
+
+    const answer = await this.groupCall(`the ${verb} of participants`, raw, () =>
+      sock.groupParticipantsUpdate(
+        raw,
+        targets.map(t => t.sent),
+        verb
+      )
+    );
+    this.groupMetaCache.delete(raw);
+    const entries = (answer || []).map(entry => ({
+      status: entry?.status === undefined || entry?.status === null ? null : String(entry.status),
+      jid: entry?.jid ? jidNormalizedUser(entry.jid) : '',
+      used: false,
+    }));
+    const matched = targets.map(target => {
+      const entry = entries.find(e => !e.used && !!e.jid && target.aliases.includes(e.jid));
+      if (entry) entry.used = true;
+      return entry;
+    });
+    // An answer under an id we did not know (a PN WhatsApp maps to a LID):
+    // pair the leftovers in order, as WhatsApp answers in request order.
+    const leftovers = entries.filter(e => !e.used);
+    const results: GroupParticipantResult[] = targets.map((target, index) => {
+      const entry = matched[index] ?? leftovers.shift();
+      const status = entry?.status ?? null;
+      return {
+        participant: target.input,
+        jid: participantApiJid(target.sent),
+        status,
+        ...participantOutcome(verb, status),
+      };
+    });
+    const counts = countResults(results);
+    this.logger.info(
+      `Group ${raw} ${verb} participants=${targets.length} done=${counts.succeeded}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    if (!counts.succeeded) {
+      throw new GroupActionError(
+        `WhatsApp did not ${verb} any of the ${targets.length} participant(s) of ${raw}`,
+        422,
+        'rejected_by_whatsapp',
+        { details: { action: verb, results, ...counts } }
+      );
+    }
+    const refreshed = await this.fetchGroupMetadata(raw, true).catch(() => undefined);
+    let persisted = false;
+    if (this.ingest && refreshed) {
+      persisted = await recordGroupChange(raw, {
+        participantCount: refreshed.participants?.length,
+      }).catch((e: any) => {
+        this.logger.warn(`participants of ${raw} changed but not recorded: ${e?.message || e}`);
+        return false;
+      });
+    }
+    return {
+      action: verb,
+      groupId: this.normalizeJid(raw),
+      results,
+      ...counts,
+      partial: counts.failed > 0,
+      persisted,
+      group: refreshed ? this.groupView(refreshed, own) : null,
+    };
+  }
+
+  /** Member of a non-community group, or 403 / 422; the capabilities otherwise. */
+  private checkGroupAccess(meta: GroupMetadata, own: string[], raw: string) {
+    if (isCommunityGroup(meta)) {
+      throw new GroupActionError(
+        `${raw} is a community (or its announcement group): manage it from WhatsApp`,
+        422,
+        'community_unsupported'
+      );
+    }
+    const capabilities = groupCapabilities(meta, ownParticipant(meta, own));
+    if (!capabilities.isMember) {
+      throw new GroupActionError(
+        `This account is not a participant of ${raw}`,
+        403,
+        'not_group_member'
+      );
+    }
+    return capabilities;
   }
 
   /**
