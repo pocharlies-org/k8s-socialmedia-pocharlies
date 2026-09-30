@@ -733,9 +733,11 @@ test('update as admin: only what changes goes out, the subject lands on the cano
   }
 });
 
-test('update: a failure after an earlier change says what was already applied', async () => {
+test('update: a failure after an earlier change says what was already applied (and records it)', async () => {
   useAccount('personal');
-  const { restore } = stubPool(() => []);
+  const { calls: db, restore } = stubPool(sql =>
+    isResolve(sql) ? [{ id: GROUP, external_id: GROUP }] : isGroupUpdate(sql) ? [{}] : []
+  );
   try {
     const { client, calls } = makeClient(
       {},
@@ -755,6 +757,11 @@ test('update: a failure after an earlier change says what was already applied', 
           JSON.stringify({ applied: ['subject'], failed: 'description' })
     );
     assert.equal(calls.subject.length, 1);
+    assert.deepEqual(
+      db.filter(c => isGroupUpdate(c.sql)).map(c => c.params),
+      [[GROUP, 'whatsapp:personal', 'Nuevo']],
+      'the applied subject is on the canonical row'
+    );
     // Refused on the first change: nothing applied, the plain error.
     const { client: second } = makeClient(
       {},

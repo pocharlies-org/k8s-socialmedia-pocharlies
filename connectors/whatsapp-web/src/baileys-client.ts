@@ -3068,6 +3068,13 @@ export class BaileysClient extends EventEmitter {
       } catch (e: any) {
         if (!applied.length) throw e;
         this.groupMetaCache.delete(raw);
+        // What already went out is recorded before the error is answered.
+        if (this.ingest && applied.includes('subject')) {
+          await recordGroupChange(raw, { subject: wanted.subject }).catch((err: any) => {
+            this.logger.warn(`subject of ${raw} changed but not recorded: ${err?.message || err}`);
+            return false;
+          });
+        }
         const details = { applied, failed: step.name };
         const message = `${e?.message || e} (already applied: ${applied.join(', ')})`;
         if (e instanceof MessageMutationError) {
