@@ -161,8 +161,33 @@ import {
   recordGroupChange,
   recordGroupConversation,
   recordInboundGroup,
+  toParticipantJid,
 } from './group-management';
 import { maybeRunRetention } from './retention';
+import {
+  availablePresenceAllowed,
+  ChatPresenceState,
+  isChatPresenceState,
+  OutgoingPresenceState,
+  PresenceCache,
+  PresenceSendThrottle,
+  PresenceView,
+} from './presence';
+import {
+  buildPrivacyUpdate,
+  currentPrivacyValue,
+  PrivacyView,
+  privacyView,
+} from './privacy-settings';
+import {
+  disappearingLabel,
+  ephemeralFromBaileys,
+  groupEphemeral,
+  parseDisappearingExpiration,
+  readConversationEphemeral,
+  recordInboundEphemeral,
+  writeConversationEphemeral,
+} from './disappearing';
 import {
   appendCompanyToDisplayName,
   displayNameOrPhone,
@@ -620,6 +645,86 @@ export interface ChatModifyResult {
   state: ChatState | null;
 }
 
+/** The chat a presence / disappearing request is about (fase 3 / PR-8). */
+interface ChatTarget {
+  /** Baileys jid WhatsApp gets (`…@s.whatsapp.net`, `…@lid`, `…@g.us`). */
+  raw: string;
+  /** Legacy jid of the API (`…@c.us`, `…@lid`, `…@g.us`). */
+  chatId: string;
+  /** conversations.id of the canonical conversation; null when not ingesting. */
+  conversationId: string | null;
+  isGroup: boolean;
+}
+
+export interface PresenceSendResult {
+  state: OutgoingPresenceState;
+  /** 'chat' = a chat-state in chatId; 'account' = every chat sees it. */
+  scope: 'chat' | 'account';
+  chatId: string | null;
+  conversationId: string | null;
+  /** It went to WhatsApp (false: the same state went to this chat moments ago). */
+  sent: boolean;
+  throttled: boolean;
+}
+
+export interface PresenceReadResult {
+  chatId: string;
+  conversationId: string | null;
+  isGroup: boolean;
+  /** Freshest presence (typing wins); status 'unknown' when nothing fresh is known. */
+  presence: PresenceView;
+  /** Every fresh participant (groups: who is typing / online). */
+  participants: PresenceView[];
+  /** Nothing fresh: the chat was re-subscribed, ask again in a few seconds. */
+  refreshing: boolean;
+}
+
+export interface PrivacyUpdateResult {
+  setting: string;
+  value: string | number;
+  /** Value before the call; null when WhatsApp did not report it. */
+  previous: string | number | null;
+  /** The call went to WhatsApp (false: it already had that value). */
+  changed: boolean;
+  /** Settings read back after the change (null if the read-back failed). */
+  privacy: PrivacyView | null;
+}
+
+export interface DisappearingView {
+  chatId: string;
+  conversationId: string | null;
+  isGroup: boolean;
+  /** Seconds (0 = off); null = unknown. */
+  expiration: number | null;
+  /** 'off' | '24h' | '7d' | '90d' (or `<n>s`); null = unknown. */
+  label: string | null;
+  known: boolean;
+  /** ISO, when WhatsApp said when it was set. */
+  setAt: string | null;
+  source: 'group_metadata' | 'conversation' | 'unknown';
+  /** Whether this account may change it (groups: admin, or members when not restricted). */
+  canChange: boolean;
+  /**
+   * Direct chats: the contact's DEFAULT timer for new chats (USync
+   * disappearing_mode) — not this chat's timer. null when not shared / not read.
+   */
+  contactDefault: { expiration: number; label: string | null; setAt: string | null } | null;
+}
+
+export interface DisappearingUpdateResult {
+  chatId: string;
+  conversationId: string | null;
+  isGroup: boolean;
+  expiration: number;
+  label: string | null;
+  /** Timer before, when known. */
+  previous: number | null;
+  /** It went to WhatsApp (false: the chat already had it). */
+  changed: boolean;
+  /** Recorded on the canonical conversation (false: pairing pool, or migration 014 missing). */
+  persisted: boolean;
+}
+
 /** A message we can edit or delete: its real WhatsApp key and what we stored of it. */
 interface MutationTarget {
   /** Bare WhatsApp id. */
@@ -659,6 +764,8 @@ const EVENT_ROW_TYPES = /^(EVENT|EVENTMESSAGE|MESSAGECONTEXTINFO)$/;
 
 /** Chats a poll / event can go to: a group, a phone-number or a LID chat. */
 const STRUCTURED_CHAT_JID = /^(?:\d+(?:-\d+)?@g\.us|\d+@(?:c\.us|s\.whatsapp\.net|lid))$/;
+/** A presence read that finds nothing re-subscribes the chat at most this often. */
+const PRESENCE_REFRESH_MS = 30_000;
 
 export interface StructuredSendOptions {
   /** Idempotent sends: the id derived from the Idempotency-Key. */
@@ -937,7 +1044,14 @@ export class BaileysClient extends EventEmitter {
   // a message; used by the presence.update handler to label "X is typing…".
   private contactNames = new Map<string, string>();
   // Track which JIDs we've already presenceSubscribed to so we don't spam.
+  // Subscriptions belong to a socket: cleared on every open / close.
   private presenceSubscribed = new Set<string>();
+  // Fase 3 / PR-8: what presence.update told us (60 s, typing 8 s), never
+  // stored; cleared with the socket so a reader gets `unknown`, not stale.
+  private presenceCache = new PresenceCache();
+  private presenceThrottle = new PresenceSendThrottle();
+  // Last forced re-subscribe per chat (a read refreshes an expired presence).
+  private presenceRefreshedAt = new Map<string, number>();
   private groupMetaCache = new Map<string, GroupMetadata>(); // by raw JID
   private keyCache = new Map<string, { key: WAMessageKey; chatJid: string }>(); // by waMessageId
   // `<kind>:<bare id>` of our own edits/revokes/deletes-for-me whose echo the
@@ -1134,6 +1248,9 @@ export class BaileysClient extends EventEmitter {
       if (connection === 'open') {
         this.meJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null;
         this.meName = sock.user?.name || null;
+        // Presence subscriptions and snapshots belong to the old socket: a
+        // reconnect resubscribes and never shows a stale "online".
+        this.resetPresence();
         this.markConnected('connection.update open');
         // SC-1225: a pairing-only socket (ingest off) touches no DB state.
         if (!this.ingest) return;
@@ -1159,6 +1276,7 @@ export class BaileysClient extends EventEmitter {
 
       if (connection === 'close') {
         this.ready = false;
+        this.resetPresence();
         this.lastDisconnectedAt = new Date();
         const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
         const reason = lastDisconnect?.error?.message || `close (${statusCode || 'unknown'})`;
@@ -1233,6 +1351,8 @@ export class BaileysClient extends EventEmitter {
           pinnedAt: pinFromBaileys(c),
           mute: muteFromBaileys(c, 'snapshot'),
         });
+        // Disappearing timer (fase 3 / PR-8): never over a newer one.
+        void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
       }
       if (!this.historySyncOnLogin && Date.now() > this.historyBackfillRequestedUntil) return;
       this.logger.info(
@@ -1305,6 +1425,9 @@ export class BaileysClient extends EventEmitter {
           pinnedAt: pinFromBaileys(u),
           mute: muteFromBaileys(u, 'sync-action'),
         });
+        // A timer change of either side (EPHEMERAL_SETTING, also the echo of
+        // our own POST /chats/disappearing) arrives as this delta.
+        void recordInboundEphemeral(norm, ephemeralFromBaileys(u, 'change'));
       }
     });
 
@@ -1326,6 +1449,7 @@ export class BaileysClient extends EventEmitter {
           pinnedAt: pinFromBaileys(c),
           mute: muteFromBaileys(c, 'snapshot'),
         });
+        void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
         // Subscribe to presence so we get typing updates for this chat.
         void this.presenceSubscribeSilent(c.id);
       }
@@ -1341,6 +1465,12 @@ export class BaileysClient extends EventEmitter {
         if (!chatJid || !presences) return;
         const convId = this.normalizeJid(chatJid);
         for (const [participantJid, p] of Object.entries(presences)) {
+          // Fase 3 / PR-8: kept in memory for POST /chats/presence/read.
+          this.presenceCache.record(
+            convId,
+            this.normalizeJid(jidNormalizedUser(participantJid) || participantJid),
+            p
+          );
           const status = p?.lastKnownPresence;
           if (status !== 'composing' && status !== 'recording') continue;
           // Lookup display name from the participants we've seen
@@ -3894,6 +4024,392 @@ export class BaileysClient extends EventEmitter {
       );
     }
     return capabilities;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Presence, privacy and disappearing messages (fase 3 / PR-8)
+  // ---------------------------------------------------------------------------
+
+  /** Forget everything presence of the current socket (on open / close). */
+  private resetPresence(): void {
+    this.presenceSubscribed.clear();
+    this.presenceCache.clear();
+    this.presenceThrottle.clear();
+    this.presenceRefreshedAt.clear();
+  }
+
+  /**
+   * The chat a presence / timer request is about: a group, phone or LID chat
+   * (400 otherwise). With ingest it is resolved to its canonical conversation
+   * (a merged alias acts on the canonical's jid); `requireKnown` → a chat this
+   * account has no conversation for is 404 conversation_unavailable.
+   */
+  private async chatTarget(
+    chatId: unknown,
+    what: string,
+    requireKnown: boolean
+  ): Promise<ChatTarget> {
+    const requested = stripAccountKey(String(chatId ?? '').trim());
+    if (!STRUCTURED_CHAT_JID.test(requested)) {
+      throw new MessageMutationError(
+        `${what}: ${requested.slice(0, 80) || 'conversationId'} is not a WhatsApp group, phone or LID chat`,
+        400,
+        'invalid_request'
+      );
+    }
+    const conversation = this.ingest ? await resolveCanonicalConversation(requested) : undefined;
+    if (this.ingest && requireKnown && !conversation) {
+      throw new MessageMutationError(
+        `${what}: conversation ${requested} is unavailable (unknown to this account)`,
+        404,
+        'conversation_unavailable'
+      );
+    }
+    const raw = this.toRawJid(conversation?.externalId || requested);
+    return {
+      raw,
+      chatId: this.normalizeJid(raw),
+      conversationId: conversation?.id ?? null,
+      isGroup: this.isGroupJid(raw),
+    };
+  }
+
+  /** WhatsApp's own refusals (Boom 4xx, not a connection status) as 422 rejected_by_whatsapp. */
+  private async whatsappCall<T>(what: string, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      const connectionStatus = [401, 408, 428, 440].includes(status);
+      if (e?.isBoom && status >= 400 && status < 500 && !connectionStatus) {
+        throw new MessageMutationError(
+          `WhatsApp rejected ${what}: ${e?.message || e}`,
+          422,
+          'rejected_by_whatsapp',
+          String(status)
+        );
+      }
+      throw e;
+    }
+  }
+
+  /** The ids presence of a chat may arrive under: its jid, and PN <-> LID for a person. */
+  private async presenceKeys(raw: string): Promise<string[]> {
+    if (this.isGroupJid(raw)) return [this.normalizeJid(raw)];
+    const user = jidNormalizedUser(raw) || raw;
+    return (await this.jidAliases(user)).map(jid => this.normalizeJid(jid));
+  }
+
+  /**
+   * Send our presence. composing / recording / paused go to ONE chat as a
+   * chat-state (the typing indicator; the account's availability does not
+   * change). unavailable / available are account-wide; `available` only with
+   * WA_PRESENCE_ALLOW_AVAILABLE=true (it silences the phone's notifications)
+   * — nothing in the connector ever sends it on its own. The same chat-state
+   * to the same chat within a few seconds is not re-sent.
+   */
+  async sendPresence(
+    state: OutgoingPresenceState,
+    chatId?: string,
+    request: MessageMutationRequest = {}
+  ): Promise<PresenceSendResult> {
+    if (state === 'available' && !availablePresenceAllowed()) {
+      throw new MessageMutationError(
+        'Presence available is disabled on this connector (WA_PRESENCE_ALLOW_AVAILABLE): being online on a linked device silences the phone',
+        403,
+        'presence_available_disabled'
+      );
+    }
+    const sock = this.connectedSocket();
+    if (isChatPresenceState(state)) {
+      const target = await this.chatTarget(chatId, 'presence', true);
+      const base = {
+        state,
+        scope: 'chat' as const,
+        chatId: target.chatId,
+        conversationId: target.conversationId,
+      };
+      if (!this.presenceThrottle.shouldSend(target.raw, state)) {
+        return { ...base, sent: false, throttled: true };
+      }
+      await this.whatsappCall(`presence ${state} in ${target.raw}`, () =>
+        sock.sendPresenceUpdate(state as ChatPresenceState, target.raw)
+      );
+      this.presenceThrottle.sent(target.raw, state);
+      this.logger.debug(
+        `Presence ${state} in ${target.raw}${request.actor ? ` by ${request.actor}` : ''}`
+      );
+      return { ...base, sent: true, throttled: false };
+    }
+    // Baileys drops available / unavailable silently when the account has no
+    // push name: say so instead of answering a success that did not happen.
+    const me = (sock as { authState?: { creds?: { me?: { name?: string } } } }).authState?.creds
+      ?.me;
+    if (me && !me.name) {
+      throw new MessageMutationError(
+        `Presence ${state} cannot be sent: the account has no push name`,
+        422,
+        'presence_unsupported'
+      );
+    }
+    await this.whatsappCall(`presence ${state}`, () => sock.sendPresenceUpdate(state));
+    this.logger.info(
+      `Presence ${state} (account-wide)${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    return {
+      state,
+      scope: 'account',
+      chatId: null,
+      conversationId: null,
+      sent: true,
+      throttled: false,
+    };
+  }
+
+  /**
+   * What WhatsApp last told us about a chat's presence, if still fresh (60 s,
+   * typing 8 s): otherwise `unknown`, never an old "online". A read that
+   * finds nothing re-subscribes the chat (at most every 30 s) so WhatsApp
+   * sends its current presence — `refreshing: true`, ask again shortly.
+   * Subscribing reveals nothing about us.
+   */
+  async getPresence(chatId: unknown, participant?: unknown): Promise<PresenceReadResult> {
+    const sock = this.connectedSocket();
+    const target = await this.chatTarget(chatId, 'presence', false);
+    const chatKeys = await this.presenceKeys(target.raw);
+    let participantKeys: string[] = [];
+    if (participant !== undefined && participant !== null && participant !== '') {
+      const who = toParticipantJid(participant);
+      if (!who) {
+        throw new MessageMutationError(
+          'participant must be a phone number or a user jid (…@c.us, …@s.whatsapp.net, …@lid)',
+          400,
+          'invalid_request'
+        );
+      }
+      participantKeys = (await this.jidAliases(who)).map(jid => this.normalizeJid(jid));
+    }
+    const { presence, participants } = this.presenceCache.read(chatKeys, participantKeys);
+    let refreshing = false;
+    if (presence.status === 'unknown') {
+      const now = Date.now();
+      const last = this.presenceRefreshedAt.get(target.raw) || 0;
+      if (now - last >= PRESENCE_REFRESH_MS) {
+        this.presenceRefreshedAt.set(target.raw, now);
+        refreshing = true;
+        void Promise.resolve(sock.presenceSubscribe(target.raw))
+          .then(() => this.presenceSubscribed.add(target.raw))
+          .catch(() => {});
+      }
+    }
+    return {
+      chatId: target.chatId,
+      conversationId: target.conversationId,
+      isGroup: target.isGroup,
+      presence: {
+        ...presence,
+        participantId:
+          presence.status === 'unknown' && !target.isGroup ? target.chatId : presence.participantId,
+      },
+      participants: target.isGroup ? participants : [],
+      refreshing,
+    };
+  }
+
+  /** Default timer of new chats as the account last told us (account_sync), null if unknown. */
+  private defaultDisappearingSeconds(sock: WASocket): number | null {
+    const mode = (
+      sock as {
+        authState?: {
+          creds?: {
+            accountSettings?: { defaultDisappearingMode?: { ephemeralExpiration?: unknown } };
+          };
+        };
+      }
+    ).authState?.creds?.accountSettings?.defaultDisappearingMode;
+    const seconds = Number(mode?.ephemeralExpiration);
+    return mode && Number.isFinite(seconds) ? seconds : null;
+  }
+
+  /** The account's privacy settings, fresh from WhatsApp (never Baileys' cache). */
+  async getPrivacySettings(): Promise<PrivacyView> {
+    const sock = this.connectedSocket();
+    const raw = await this.whatsappCall('the privacy settings read', () =>
+      sock.fetchPrivacySettings(true)
+    );
+    return privacyView(raw, this.defaultDisappearingSeconds(sock));
+  }
+
+  /**
+   * Change ONE privacy setting of the account (every contact sees it). Values
+   * are re-validated here; the current value is read first and an equal one
+   * is not sent. The caller (POST /privacy) already required confirm: true
+   * and the sending gate.
+   */
+  async updatePrivacySetting(
+    setting: unknown,
+    value: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<PrivacyUpdateResult> {
+    const update = buildPrivacyUpdate(setting, value);
+    const sock = this.connectedSocket();
+    const before = await this.getPrivacySettings();
+    const previous = currentPrivacyValue(before, update.setting);
+    if (previous === update.value) {
+      return {
+        setting: update.setting,
+        value: update.value,
+        previous,
+        changed: false,
+        privacy: before,
+      };
+    }
+    await this.whatsappCall(`the ${update.setting} privacy change`, () =>
+      update.method === 'updateDefaultDisappearingMode'
+        ? sock.updateDefaultDisappearingMode(update.value)
+        : (sock[update.method] as (v: string) => Promise<void>)(update.value)
+    );
+    this.logger.info(
+      `Privacy ${update.setting} ${String(previous)} -> ${String(update.value)}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    const privacy = await this.getPrivacySettings().catch(() => null);
+    return { setting: update.setting, value: update.value, previous, changed: true, privacy };
+  }
+
+  /** A contact's default timer for new chats (USync disappearing_mode), best effort. */
+  private async contactDefaultDisappearing(
+    raw: string
+  ): Promise<DisappearingView['contactDefault']> {
+    const sock = this.sock;
+    if (!sock || !this.isConnected() || typeof sock.fetchDisappearingDuration !== 'function') {
+      return null;
+    }
+    const timeout = new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 3000));
+    const list = await Promise.race([
+      sock.fetchDisappearingDuration(jidNormalizedUser(raw) || raw).catch(() => undefined),
+      timeout,
+    ]);
+    const first = (Array.isArray(list) ? list[0] : undefined) as Record<string, any> | undefined;
+    // Baileys' USync protocol answers `disappearing_mode: {duration, setAt}`.
+    const mode = first?.disappearing_mode || first?.disappearingMode;
+    const seconds = Number(mode?.duration ?? mode?.ephemeralExpiration);
+    if (!mode || !Number.isFinite(seconds) || seconds < 0) return null;
+    const setAt =
+      mode.setAt instanceof Date && mode.setAt.getTime() > 0 ? mode.setAt.toISOString() : null;
+    return { expiration: seconds, label: disappearingLabel(seconds), setAt };
+  }
+
+  /**
+   * The disappearing timer of a chat. A group: its fresh metadata (and
+   * whether we may change it). A direct chat: what the connector learnt and
+   * stored (014) — unknown until a change or a snapshot went through the
+   * socket — plus the contact's default for new chats, apart.
+   */
+  async getDisappearing(chatId: unknown): Promise<DisappearingView> {
+    const target = await this.chatTarget(chatId, 'disappearing', false);
+    const base = {
+      chatId: target.chatId,
+      conversationId: target.conversationId,
+      isGroup: target.isGroup,
+    };
+    if (target.isGroup) {
+      this.connectedSocket();
+      const meta = await this.groupMetadataForAction(target.raw);
+      const capabilities = groupCapabilities(meta, ownParticipant(meta, await this.ownIds()));
+      const expiration = groupEphemeral(meta);
+      return {
+        ...base,
+        expiration,
+        label: disappearingLabel(expiration),
+        known: true,
+        setAt: null,
+        source: 'group_metadata',
+        canChange: capabilities.editInfo,
+        contactDefault: null,
+      };
+    }
+    const stored =
+      this.ingest && target.conversationId
+        ? await readConversationEphemeral(target.conversationId)
+        : undefined;
+    const expiration = stored ? stored.expiration : null;
+    return {
+      ...base,
+      expiration,
+      label: disappearingLabel(expiration),
+      known: !!stored,
+      setAt: stored?.setAt ? stored.setAt.toISOString() : null,
+      source: stored ? 'conversation' : 'unknown',
+      canChange: true,
+      contactDefault: await this.contactDefaultDisappearing(target.raw),
+    };
+  }
+
+  /**
+   * Set the disappearing timer of a chat (0 / 24 h / 7 d / 90 d). A group:
+   * checked against fresh metadata — a member, and admin when the group
+   * restricts its settings (the "edit group info" rule of PR-6) — then
+   * groupToggleEphemeral. A direct chat: the timer message WhatsApp's own
+   * clients send (the contact sees "X turned on disappearing messages"). A
+   * known equal timer is not re-sent. Recorded on the canonical conversation.
+   */
+  async setDisappearing(
+    chatId: unknown,
+    expiration: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<DisappearingUpdateResult> {
+    const seconds = parseDisappearingExpiration(expiration);
+    const sock = this.connectedSocket();
+    const target = await this.chatTarget(chatId, 'disappearing', true);
+    let previous: number | null = null;
+    if (target.isGroup) {
+      const meta = await this.groupMetadataForAction(target.raw);
+      const capabilities = this.checkGroupAccess(meta, await this.ownIds(), target.raw);
+      if (!capabilities.editInfo) {
+        throw new GroupActionError(
+          `Only admins can change the disappearing timer of ${target.raw}: its settings are restricted to admins`,
+          403,
+          'not_group_admin'
+        );
+      }
+      previous = groupEphemeral(meta);
+    } else if (this.ingest && target.conversationId) {
+      previous = (await readConversationEphemeral(target.conversationId))?.expiration ?? null;
+    }
+    const base = {
+      chatId: target.chatId,
+      conversationId: target.conversationId,
+      isGroup: target.isGroup,
+      expiration: seconds,
+      label: disappearingLabel(seconds),
+      previous,
+    };
+    if (previous === seconds) return { ...base, changed: false, persisted: false };
+
+    if (target.isGroup) {
+      await this.groupCall('the disappearing timer change', target.raw, () =>
+        sock.groupToggleEphemeral(target.raw, seconds)
+      );
+      this.groupMetaCache.delete(target.raw);
+    } else {
+      await this.whatsappCall(`the disappearing timer of ${target.raw}`, () =>
+        sock.sendMessage(target.raw, { disappearingMessagesInChat: seconds })
+      );
+    }
+    let persisted = false;
+    if (this.ingest && target.conversationId) {
+      persisted = await writeConversationEphemeral(target.conversationId, {
+        expiration: seconds,
+        setAt: new Date(),
+      }).catch((e: any) => {
+        this.logger.warn(`timer of ${target.raw} changed but not recorded: ${e?.message || e}`);
+        return false;
+      });
+    }
+    this.logger.info(
+      `Disappearing ${target.raw} ${String(previous)} -> ${seconds}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    return { ...base, changed: true, persisted };
   }
 
   /**

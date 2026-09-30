@@ -821,3 +821,158 @@ contracts:
       (telegram-pairing) never publishes it. The subject, the field names and
       the source values are contract: changing any is breaking — a new `.v2`
       entry beside this one.
+  - id: http.whatsapp-connector.chats-presence.v1
+    kind: http-route
+    value: /chats/presence
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/chats/presence of the house WhatsApp connectors (fase 3 /
+      PR-8), consumed by dgx-messages (/messages → "escribiendo…" while an
+      operator types in the WhatsApp composer). HMAC-signed body
+      {conversationId?, state, actor?}: state composing | recording | paused
+      needs the chat (a group, `…@c.us` / `…@s.whatsapp.net` or `…@lid`, bare or
+      account-namespaced; a merged conversation acts on its canonical jid; a
+      chat unknown to this account is 404 conversation_unavailable) and goes as
+      a chat-state to that chat only — the account's availability does not
+      change; state unavailable | available is account-wide and refuses a
+      conversationId (400). The connector NEVER sends available on its own
+      (markOnlineOnConnect false): online on a linked device silences the
+      phone's push notifications, so an explicit available is 403
+      presence_available_disabled unless the deployment sets
+      WA_PRESENCE_ALLOW_AVAILABLE=true (default off). Order: 400
+      invalid_request → 403 disabled_sending (same gate as every send) → 403
+      presence_available_disabled → 503 disconnected. The same state to the
+      same chat within 3 s is not re-sent (sent false, throttled true). Answers
+      200 {ok: true, state, scope: chat|account, chatId, conversationId, sent,
+      throttled}. Errors {error, failureClass, code?}: also 422
+      rejected_by_whatsapp | presence_unsupported (no push name), other send
+      failure classes as /messages/send. Nothing stored, no NATS event. The
+      path, the body fields, the 200 shape and the failureClass values are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.chats-presence-read.v1
+    kind: http-route
+    value: /chats/presence/read
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/chats/presence/read of the house WhatsApp connectors (fase
+      3 / PR-8), consumed by dgx-messages (/messages → contact presence in the
+      chat header). HMAC-signed body {conversationId, participant?}
+      (participant: phone or user jid, for one member of a group). A read: no
+      sending gate; 503 disconnected. Presence lives in the connector's memory
+      only (from WhatsApp's presence.update; 60 s for online / offline, 8 s
+      for typing / recording; cleared on every reconnect) and is looked up
+      under the chat's PN and LID ids. Answers 200 {presence: {chatId,
+      conversationId, isGroup, presence: {participantId, status: available |
+      unavailable | composing | recording | unknown, lastSeen (ISO | null),
+      observedAt (ISO | null)}, participants (groups: each fresh member, typing
+      first), refreshing}}. Nothing fresh → status unknown (never a stale
+      online) and the chat is re-subscribed at most every 30 s (refreshing
+      true: ask again shortly; subscribing reveals nothing about us). Errors
+      {error, failureClass}: 400 invalid_request, 404, 503. The path, the body
+      fields, the 200 shape and the status values are contract: changing any
+      is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.privacy-read.v1
+    kind: http-route
+    value: /privacy
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/privacy of the house WhatsApp connectors (fase 3 / PR-8),
+      consumed by dgx-messages (/messages → privacy panel of a WhatsApp
+      account). HMAC-signed (empty body). A read: no sending gate; 503
+      disconnected. Fresh from WhatsApp (never Baileys' cache). Answers 200
+      {privacy: {settings: {lastSeen, online, profilePicture, status,
+      readReceipts, groupsAdd, call, messages} (WhatsApp's value or null when
+      not reported), defaultDisappearing (seconds | null = unknown), other
+      (categories WhatsApp reported that the API does not name), allowed
+      (setting → accepted values)}}. Nothing stored. The path, the 200 shape
+      and the setting names are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.whatsapp-connector.privacy-update.v1
+    kind: http-route
+    value: /privacy
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/privacy of the house WhatsApp connectors (fase 3 / PR-8),
+      consumed by dgx-messages (privacy panel, edit with confirmation). It
+      changes the ACCOUNT for every contact. HMAC-signed body {setting, value,
+      confirm: true, actor?}: one setting per call, Baileys' exact values —
+      lastSeen / profilePicture / status: all | contacts | contact_blacklist |
+      none; online: all | match_last_seen; readReceipts: all | none;
+      groupsAdd: all | contacts | contact_blacklist; call: all | known;
+      messages: all | contacts; defaultDisappearing (new chats' timer): 0 |
+      86400 | 604800 | 7776000 — anything else 400 invalid_request; without
+      confirm === true 400 invalid_request code confirm_required. Then 403
+      disabled_sending (same gate as every send), 503 disconnected. The
+      current value is read first and an equal one is not sent. Answers 200
+      {updated: true, setting, value, previous, changed, privacy (the
+      privacy-read.v1 view after the change, null if the read-back failed)}.
+      Errors {error, failureClass, code?}: also 422 rejected_by_whatsapp
+      (code = WhatsApp's). Nothing stored, no NATS event. The path, the body
+      fields, the 200 shape and the failureClass values are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.chats-disappearing-read.v1
+    kind: http-route
+    value: /chats/disappearing/read
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/chats/disappearing/read of the house WhatsApp connectors
+      (fase 3 / PR-8), consumed by dgx-messages (chat detail → timer badge and
+      selector). HMAC-signed body {conversationId}. A read: no sending gate.
+      A group: fresh metadata (503 / 403 not_group_member / 404 when WhatsApp
+      says so). A direct chat: the timer the connector learnt and stored on
+      the canonical conversation (conversations.ephemeral_expiration /
+      ephemeral_setting_at, migration 014) — unknown until a change or a
+      snapshot went through the socket; works while disconnected. Answers 200
+      {disappearing: {chatId, conversationId, isGroup, expiration (seconds, 0
+      = off, null = unknown), label (off | 24h | 7d | 90d | null), known,
+      setAt (ISO | null), source: group_metadata | conversation | unknown,
+      canChange (groups: admin, or members when the group does not restrict
+      its settings), contactDefault ({expiration, label, setAt} = the
+      contact's default for NEW chats from USync, not this chat's timer; null
+      when not shared)}}. The path, the body fields and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.chats-disappearing.v1
+    kind: http-route
+    value: /chats/disappearing
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/chats/disappearing of the house WhatsApp connectors (fase 3
+      / PR-8), consumed by dgx-messages (chat detail → disappearing-messages
+      selector, with confirmation). HMAC-signed body {conversationId,
+      expiration, actor?}: expiration 0 | 86400 | 604800 | 7776000 seconds
+      (or off | 24h | 7d | 90d) — anything else 400 invalid_request; chat as
+      in chats-presence.v1 (unknown to this account → 404
+      conversation_unavailable). Then 403 disabled_sending (same gate as every
+      send), 503 disconnected. A group: fresh metadata — 403 not_group_member,
+      403 not_group_admin when the group restricts its settings and we are not
+      admin, 422 community_unsupported — then groupToggleEphemeral (members
+      see the system notice). A direct chat: the timer message WhatsApp's own
+      clients send (the contact sees it). A known equal timer is not re-sent
+      (changed false). Answers 200 {updated: true, chatId, conversationId,
+      isGroup, expiration, label, previous (null = unknown), changed,
+      persisted}. DB effect (ingest only, migration 014): the timer on the
+      canonical conversation with ephemeral_setting_at = now; inbound changes
+      (either side, chats.update) and snapshots land there too, never over a
+      newer timer. Errors {error, failureClass, code?}: also 422
+      rejected_by_whatsapp, other send failure classes as /messages/send. No
+      NATS event. The path, the body fields, the 200 shape and the
+      failureClass values are contract: changing any is breaking — a new
+      `.v2` entry beside this one.

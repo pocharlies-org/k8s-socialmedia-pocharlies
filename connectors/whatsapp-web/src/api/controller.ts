@@ -29,6 +29,9 @@ import { MessageUnavailableError } from '../durable-message-store';
 import { MessageMutationError } from '../message-mutations';
 import { PollEventInputError, validatePollInput } from '../poll-votes';
 import { validateEventInput, validateEventResponse } from '../event-responses';
+import { availablePresenceAllowed, parsePresenceRequest } from '../presence';
+import { parsePrivacyRequest } from '../privacy-settings';
+import { parseDisappearingExpiration } from '../disappearing';
 import {
   GroupActionError,
   normalizeGroupParticipantAction,
@@ -1458,6 +1461,138 @@ export function createRouter(
         res.json({ updated: true, ...result });
       } catch (e) {
         mutationErrorResponse(res, e, 'update group participants');
+      }
+    })();
+  });
+
+  // Presence, privacy settings and disappearing messages (fase 3 / PR-8).
+  // Ids inside the signed body. Reads are not gated; what reaches WhatsApp
+  // (our typing indicator, a privacy change, a timer) is validated first
+  // (400), then the same gate as every send (403), then the connection (503).
+
+  // CONTRACT: http.whatsapp-connector.chats-presence.v1 — body {conversationId?, state: composing|recording|paused|unavailable|available, actor?}, 200 {ok, state, scope, chatId, conversationId, sent, throttled}
+  router.post('/chats/presence', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parsePresenceRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        // Never online by default: `available` stops the phone's push
+        // notifications. Only with the deployment's explicit opt-in.
+        if (request.state === 'available' && !availablePresenceAllowed()) {
+          res.status(403).json({
+            error:
+              'Presence available is disabled on this connector (WA_PRESENCE_ALLOW_AVAILABLE): being online on a linked device silences the phone',
+            failureClass: 'presence_available_disabled',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.sendPresence(request.state, request.conversationId, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ ok: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'send presence');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.chats-presence-read.v1 — body {conversationId, participant?}, 200 {presence: {chatId, conversationId, isGroup, presence: {participantId, status, lastSeen, observedAt}, participants, refreshing}}
+  router.post('/chats/presence/read', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (!chatId) {
+          res
+            .status(400)
+            .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ presence: await client.getPresence(chatId, body.participant) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read presence');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.privacy-read.v1 — GET, 200 {privacy: {settings: {lastSeen, online, profilePicture, status, readReceipts, groupsAdd, call, messages}, defaultDisappearing, other, allowed}}
+  router.get('/privacy', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ privacy: await client.getPrivacySettings() });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read privacy settings');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.privacy-update.v1 — body {setting, value, confirm: true, actor?}, 200 {updated, setting, value, previous, changed, privacy}
+  router.post('/privacy', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        // Setting + value (Baileys' exact names) and confirm: true, or 400.
+        const update = parsePrivacyRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updatePrivacySetting(update.setting, update.value, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update privacy settings');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.chats-disappearing-read.v1 — body {conversationId}, 200 {disappearing: {chatId, conversationId, isGroup, expiration, label, known, setAt, source, canChange, contactDefault}}
+  router.post(
+    '/chats/disappearing/read',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          const body = optionalObject(req.body);
+          const chatId = optionalString(body.conversationId ?? body.chatId);
+          if (!chatId) {
+            res
+              .status(400)
+              .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+            return;
+          }
+          res.json({ disappearing: await client.getDisappearing(chatId) });
+        } catch (e) {
+          mutationErrorResponse(res, e, 'read the disappearing timer');
+        }
+      })();
+    }
+  );
+
+  // CONTRACT: http.whatsapp-connector.chats-disappearing.v1 — body {conversationId, expiration: 0|86400|604800|7776000 (or off|24h|7d|90d), actor?}, 200 {updated, chatId, conversationId, isGroup, expiration, label, previous, changed, persisted}
+  router.post('/chats/disappearing', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (!chatId) {
+          res
+            .status(400)
+            .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+          return;
+        }
+        const expiration = parseDisappearingExpiration(body.expiration);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.setDisappearing(chatId, expiration, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'change the disappearing timer');
       }
     })();
   });
