@@ -235,7 +235,44 @@ export async function runPushPhase(
   return totals;
 }
 
-/** Fase 3 loop: closed pending windows newest-first, resumable, 2 in parallel. */
+type LlmOutcome = 'done' | 'failed' | 'skipped';
+
+/**
+ * Run `fn` over `rows` through `limit`, all admitted at once so the limiter
+ * really keeps N in flight. Rows start in order; once the budget is out the
+ * rest are not started, so the processed rows are always a prefix (`processed`)
+ * and the keyset cursor can move to the last of them. A crash in one window
+ * counts as `failed` and does not sink the batch.
+ */
+export async function runLimitedBatch<T>(
+  rows: T[],
+  limit: <R>(fn: () => Promise<R>) => Promise<R>,
+  budget: { out(): boolean },
+  fn: (row: T) => Promise<LlmOutcome>
+): Promise<{ results: LlmOutcome[]; processed: number }> {
+  let stopped = false;
+  const outcomes = await Promise.all(
+    rows.map(row =>
+      limit(async (): Promise<LlmOutcome | null> => {
+        if (stopped || budget.out()) {
+          stopped = true;
+          return null;
+        }
+        try {
+          return await fn(row);
+        } catch (e) {
+          logger.error({ err: String(e) }, 'llm window crashed');
+          return 'failed';
+        }
+      })
+    )
+  );
+  const firstSkipped = outcomes.indexOf(null);
+  const processed = firstSkipped === -1 ? outcomes.length : firstSkipped;
+  return { results: outcomes.slice(0, processed) as LlmOutcome[], processed };
+}
+
+/** Fase 3 loop: closed pending windows newest-first, resumable, BRAIN_WINDOWS_LLM_CONCURRENCY in parallel (2 by default). */
 export async function runLlmPhase(
   pool: Pool,
   brain: BrainPushConfig,
@@ -265,21 +302,29 @@ export async function runLlmPhase(
       logger.info({ scanned: stats.scanned }, 'DRY_RUN llm phase: counting, not extracting');
       break;
     }
-    for (const row of rows) {
-      if (budget.out()) {
-        logger.warn('llm phase stopping: runtime budget exhausted (resumable)');
-        return stats;
-      }
+    // The whole batch goes through the limiter at once: awaiting each window
+    // before admitting the next ran them one by one whatever the limit was
+    // (02-10-2026: 2 configured, 1 observed in LiteLLM).
+    const { results, processed } = await runLimitedBatch(rows, limit, budget, row =>
+      processLlmWindow(pool, llmSink, llm, row, false)
+    );
+    for (const r of results) {
       stats.scanned++;
-      const r = await limit(() => processLlmWindow(pool, llmSink, llm, row, false));
       if (r === 'done') stats.done++;
       else if (r === 'failed') stats.failed++;
       else stats.skipped++;
-      after = { end_ts: new Date(row.end_ts), source_id: row.source_id };
+    }
+    if (processed > 0) {
+      const last = rows[processed - 1];
+      after = { end_ts: new Date(last.end_ts), source_id: last.source_id };
       await setBackfillCursor(pool, opts.runId, 'llm', {
-        last_end_ts: row.end_ts,
-        last_source_id: row.source_id,
+        last_end_ts: last.end_ts,
+        last_source_id: last.source_id,
       });
+    }
+    if (processed < rows.length) {
+      logger.warn('llm phase stopping: runtime budget exhausted (resumable)');
+      return stats;
     }
     if (rows.length < opts.batchWindows) break;
   }

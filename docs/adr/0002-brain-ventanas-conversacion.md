@@ -243,7 +243,7 @@ mete en el brain el correo, los pedidos y los productos.
   del tipo de entidad, listas y resumen recortados, sentimiento desconocido → `neutro`. Solo se reintenta si falta el
   resumen.
 
-Todo corre en el x86 (embedder GPU `bge-m3-embedding`); en los Sparks solo el LLM residente, a 2 peticiones.
+Todo corre en el x86 (embedder GPU `bge-m3-embedding`); en los Sparks solo el LLM residente, a 2 peticiones por defecto (4 en la primera carga).
 
 ## Fuera de alcance
 
