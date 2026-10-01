@@ -32,6 +32,11 @@ spec:
     deletionPolicy: Retain
   dataFrom:
     - extract: { key: whatsapp-mcp }
+  # INFRA-364 (01-10-2026): LLM_API_KEY = virtual key `brain` de LiteLLM (prioridad minima,
+  # bot, sin fallback). La lee el LLM de las ventanas del brain; vive en su propio item.
+  data:
+    - secretKey: LLM_API_KEY
+      remoteRef: { key: brain-litellm/api_key }
 
 ---
 apiVersion: v1
