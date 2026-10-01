@@ -162,6 +162,20 @@ describe('header and transcript (ADR 0002 §2)', () => {
     const t = renderTranscript([msg({ content: 'una\ndos' })], chat(), CFG);
     expect(t).toBe('18:04 Ana: una dos');
   });
+
+  it('unwraps an ASR echo body to prose (INFRA-364), never renders raw JSON', () => {
+    const t = renderTranscript(
+      [
+        // Real row 1254112: bot echo with the raw STT body, still unfixed.
+        msg({ id: '1', wa_message_id: 'a', content: '🎙️ "{"text":"La prueba de voz.","usage":null}"' }),
+        // Prose that merely mentions the JSON shape stays verbatim.
+        msg({ id: '2', wa_message_id: 'b', content: 'dice 🎙️ "{"text":"x"}" al final null' }),
+      ],
+      chat(),
+      CFG
+    );
+    expect(t).toBe('18:04 Ana: 🎙️ La prueba de voz.\n18:04 Ana: dice 🎙️ "{"text":"x"}" al final null');
+  });
 });
 
 describe('sessionize (ADR 0002 §1)', () => {

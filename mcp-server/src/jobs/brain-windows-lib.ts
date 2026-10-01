@@ -17,6 +17,7 @@ import {
   instanceForAccount,
   pushToBrain,
 } from './brain-ingest-lib';
+import { unwrapAsrJson } from './voice-json-fix-lib';
 
 // CONTRACT: http.brain.push-ingest.conversation-window.v1
 // (the parent/child document shapes built here are the consumer contract;
@@ -238,13 +239,18 @@ export function authorOf(msg: WindowMessage, chat: ChatRef, config: WindowsConfi
 
 const VOICE_TYPES = new Set(['VOICE', 'AUDIO']);
 
-/** One transcript line: `18:04 Ana [voz]: texto` — newlines collapsed. */
+/** One transcript line: `18:04 Ana [voz]: texto` — newlines collapsed.
+ * Defensive unwrap (INFRA-364): a voice-note echo whose `content` still stores
+ * the raw STT body (`🎙️ "{"text":"…"}"`) renders as prose, never as JSON —
+ * ingest normalizes new rows and voice-json-fix heals history, but a window
+ * built over an unfixed row must not carry the body into the brain. */
 export function renderLine(msg: WindowMessage, author: string): string {
   const markers: string[] = [];
   if (VOICE_TYPES.has((msg.message_type ?? '').toUpperCase())) markers.push('voz');
   if (msg.is_forwarded) markers.push('reenviado');
   const suffix = markers.length ? ` ${markers.map(m => `[${m}]`).join(' ')}` : '';
-  const text = msg.content.replace(/\s*\n\s*/g, ' ').trim();
+  const raw = unwrapAsrJson(msg.content) ?? msg.content;
+  const text = raw.replace(/\s*\n\s*/g, ' ').trim();
   return `${madridTime(msg.wa_timestamp)} ${author}${suffix}: ${text}`;
 }
 
