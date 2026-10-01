@@ -162,6 +162,35 @@ export async function resolveCanonicalConversation(
   }
 }
 
+/**
+ * Whether the person behind a 1:1 chat ever wrote to this account: an INBOUND
+ * message on the canonical conversation of any of `chatIds` (its PN and its
+ * LID) or on a twin merged into it. False when there is no such conversation.
+ */
+export async function hasInboundHistory(chatIds: string[]): Promise<boolean> {
+  const canonical = new Set<string>();
+  for (const chatId of chatIds) {
+    const conversation = await resolveCanonicalConversation(chatId);
+    if (conversation) canonical.add(conversation.id);
+  }
+  if (!canonical.size) return false;
+  const result = await getPool().query(
+    `WITH RECURSIVE twin(id, depth) AS (
+       SELECT unnest($1::text[]), 0
+       UNION ALL
+       SELECT c.id, t.depth + 1
+         FROM twin t JOIN conversations c ON c.merged_into = t.id
+        WHERE t.depth < $2
+     )
+     SELECT EXISTS (
+       SELECT 1 FROM messages m
+        WHERE m.conversation_id IN (SELECT id FROM twin) AND m.direction = 'INBOUND'
+     ) AS hit`,
+    [[...canonical], MAX_MERGE_HOPS]
+  );
+  return result.rows[0]?.hit === true;
+}
+
 /** Bare id of the newest message of a conversation of this account (for lastMessages). */
 export async function latestMessageId(conversationId: string): Promise<string | undefined> {
   const result = await getPool().query(

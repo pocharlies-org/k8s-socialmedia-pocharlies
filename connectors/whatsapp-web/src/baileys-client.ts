@@ -137,6 +137,7 @@ import {
   muteEndTimestamp,
   muteFromBaileys,
   MuteState,
+  hasInboundHistory,
   pinFromBaileys,
   recordInboundChatState,
   resolveCanonicalConversation,
@@ -2439,19 +2440,7 @@ export class BaileysClient extends EventEmitter {
     this.logger.info(
       `Sending WhatsApp message rawJid=${raw} normalizedJid=${normalized} type=${isGroup ? 'group' : 'direct'}${groupRepair?.groupSubject ? ` groupSubject="${groupRepair.groupSubject}" participants=${groupRepair.participantCount}` : ''}`
     );
-    if (!isGroup && this.isDirectUserJid(raw)) {
-      await this.prepareDirectPrivacyToken(raw, normalized, started).catch(e => {
-        throw this.buildSendError(
-          classifyWhatsAppSendFailure(e),
-          raw,
-          normalized,
-          false,
-          started,
-          0,
-          e
-        );
-      });
-    }
+    await this.guardDirectSend(raw, started);
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
     const ephemeralExpiration = await this.outgoingEphemeral(raw);
     await options?.beforeSend?.();
@@ -2657,6 +2646,7 @@ export class BaileysClient extends EventEmitter {
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     const raw = this.toRawJid(chatId);
+    await this.guardDirectSend(raw);
     // A media reply whose quoted message is unknown is rejected (before the
     // file is fetched) instead of going out as an unrelated, unquoted media.
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
@@ -2728,6 +2718,7 @@ export class BaileysClient extends EventEmitter {
     if (!this.isConnected())
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
     const raw = this.toRawJid(chatId);
+    await this.guardDirectSend(raw);
     const payload: AnyMessageContent = { audio, mimetype, ptt: true };
     const sendOptions = withEphemeralExpiration(
       options?.messageId ? { messageId: options.messageId } : undefined,
@@ -2852,6 +2843,7 @@ export class BaileysClient extends EventEmitter {
       request.conversationId,
       kind === 'sticker' ? 'sendSticker' : 'sendGif'
     );
+    await this.guardDirectSend(target.raw);
     const quoted = request.replyToMessageId
       ? await this.buildQuotedFromId(request.replyToMessageId, target.raw)
       : undefined;
@@ -2904,6 +2896,7 @@ export class BaileysClient extends EventEmitter {
   ): Promise<StructuredSendResult & { contacts: number }> {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'shareContact');
+    await this.guardDirectSend(target.raw);
     const content = buildContactShareContent(cards);
     const sendOptions = withEphemeralExpiration(
       options.messageId ? { messageId: options.messageId } : undefined,
@@ -3376,6 +3369,7 @@ export class BaileysClient extends EventEmitter {
   ): Promise<StructuredSendResult> {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'sendPoll');
+    await this.guardDirectSend(target.raw);
     const sendOptions = withEphemeralExpiration(
       options.messageId ? { messageId: options.messageId } : undefined,
       await this.outgoingEphemeral(target.raw, target.canonicalId)
@@ -3392,6 +3386,7 @@ export class BaileysClient extends EventEmitter {
   ): Promise<StructuredSendResult> {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'sendEvent');
+    await this.guardDirectSend(target.raw);
     const sendOptions = withEphemeralExpiration(
       options.messageId ? { messageId: options.messageId } : undefined,
       await this.outgoingEphemeral(target.raw, target.canonicalId)
@@ -3666,6 +3661,7 @@ export class BaileysClient extends EventEmitter {
       );
     }
     const rawTarget = this.toRawJid(toChatId);
+    await this.guardDirectSend(rawTarget);
     const sendOptions = withEphemeralExpiration(undefined, await this.outgoingEphemeral(rawTarget));
     const sent = sendOptions
       ? await this.sock.sendMessage(rawTarget, { forward: original }, sendOptions)
@@ -4788,6 +4784,7 @@ export class BaileysClient extends EventEmitter {
         : undefined;
       const chatJid = this.toRawJid(conversation?.externalId || member.jid);
       try {
+        await this.guardDirectSend(chatJid);
         // Baileys fetches the group's picture for the card's thumbnail and a
         // group without one answers 404, which would fail the whole send:
         // no picture → a card without thumbnail.
@@ -6187,6 +6184,90 @@ export class BaileysClient extends EventEmitter {
       ok: tokenLength > 0 && !isTcTokenExpired(entry?.timestamp),
       storageJid,
     };
+  }
+
+  /**
+   * The one policy for every new 1:1 send (text, file, voice, sticker/GIF,
+   * contact cards, poll, event, forward, group-invite card). Someone who
+   * already talks to this account always gets it: Baileys attaches their
+   * tctoken when fresh, else a cstoken when the NCT salt exists, else
+   * nothing — as WA Web and whatsmeow, which never hold a send back for a
+   * missing or expired tctoken. Only a true first contact goes through the
+   * token preflight, which refuses (account_restricted) when no token can be
+   * attached: a token-less first message counts as a reach-out.
+   */
+  private async guardDirectSend(rawJid: string, started = Date.now()): Promise<void> {
+    if (this.isGroupJid(rawJid) || !this.isDirectUserJid(rawJid)) return;
+    if (process.env.WA_DIRECT_PRIVACY_PREFLIGHT === 'false') return;
+    if (!(this.sock as any)?.authState?.keys) return;
+    const normalized = this.normalizeJid(rawJid);
+    const evidence = await this.knownDirectContactEvidence(rawJid);
+    if (evidence) {
+      if (evidence !== 'tctoken') {
+        this.logger.info(
+          `WhatsApp direct send to a known contact without a fresh trusted-contact token evidence=${evidence} rawJid=${rawJid} normalizedJid=${normalized}`
+        );
+      }
+      return;
+    }
+    await this.prepareDirectPrivacyToken(rawJid, normalized, started).catch(e => {
+      throw this.buildSendError(
+        classifyWhatsAppSendFailure(e),
+        rawJid,
+        normalized,
+        false,
+        started,
+        0,
+        e
+      );
+    });
+  }
+
+  /**
+   * Why a 1:1 target is not a first contact, or null when it is: a fresh
+   * tctoken; any tctoken record (theirs, expired or emptied by Baileys'
+   * cleanup, or ours issued after an earlier send to them); an INBOUND
+   * message on the canonical conversation of their PN or LID (ingest only —
+   * tctokens expire in 4 weekly buckets and Baileys prunes the records).
+   */
+  private async knownDirectContactEvidence(
+    rawJid: string
+  ): Promise<'tctoken' | 'token_record' | 'inbound_history' | null> {
+    const sock = this.sock as any;
+    const keys = sock?.authState?.keys;
+    const lidMapping = sock?.signalRepository?.lidMapping;
+    const getLIDForPN =
+      lidMapping?.getLIDForPN?.bind(lidMapping) || (async () => null as string | null);
+    const getPNForLID =
+      lidMapping?.getPNForLID?.bind(lidMapping) || (async () => null as string | null);
+    if (keys) {
+      const storageJid = await resolveTcTokenJid(rawJid, getLIDForPN);
+      const entry = (await keys.get('tctoken', [storageJid]))?.[storageJid];
+      if (entry) {
+        const tokenLength = typeof entry.token?.length === 'number' ? entry.token.length : 0;
+        if (tokenLength > 0 && !isTcTokenExpired(entry.timestamp)) return 'tctoken';
+        if (tokenLength > 0 || entry.timestamp !== undefined || entry.senderTimestamp !== undefined)
+          return 'token_record';
+      }
+    }
+    if (!this.ingest) return null;
+    try {
+      const twin = isLidJid(rawJid)
+        ? await getPNForLID(rawJid).catch(() => null)
+        : await getLIDForPN(rawJid).catch(() => null);
+      const ids = [rawJid, ...(twin ? [jidNormalizedUser(twin)] : [])];
+      return (await this.directInboundHistory(ids)) ? 'inbound_history' : null;
+    } catch (error) {
+      this.logger.warn(
+        `WhatsApp direct send: inbound history lookup failed rawJid=${rawJid}: ${errorMessage(error)}`
+      );
+      return null;
+    }
+  }
+
+  /** Seam for tests (no DB): see hasInboundHistory. */
+  private directInboundHistory(chatIds: string[]): Promise<boolean> {
+    return hasInboundHistory(chatIds);
   }
 
   private async prepareDirectPrivacyToken(

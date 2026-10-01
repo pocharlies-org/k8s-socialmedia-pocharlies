@@ -6,6 +6,7 @@ import {
   normalizeChatModifyAction,
   ProfilePictureDownloadError,
   ProfilePictureTimeoutError,
+  WhatsAppSendError,
   WhatsAppSendFailureClass,
 } from '../baileys-client';
 import { MuteState } from '../chat-state';
@@ -78,6 +79,18 @@ function statusForSendFailure(
   if (failureClass === 'invalid_recipient') return 422;
   if (failureClass === 'auth') return 401;
   return 500;
+}
+
+/**
+ * The first-contact guard of a 1:1 send (or another classified send failure)
+ * keeps its status — 403 account_restricted — on routes that otherwise
+ * answer 500.
+ */
+function directSendRefused(res: Response, error: unknown): boolean {
+  if (!(error instanceof WhatsAppSendError)) return false;
+  const failureClass = classifyWhatsAppSendFailure(error);
+  res.status(statusForSendFailure(failureClass)).json({ error: errorMessage(error), failureClass });
+  return true;
 }
 
 function errorMessage(error: unknown): string {
@@ -1996,6 +2009,7 @@ export function createRouter(
           res.status(e.status).json({ error: e.message, failureClass: e.failureClass });
           return;
         }
+        if (directSendRefused(res, e)) return;
         res.status(500).json({ error: String(e) });
       }
     })();
@@ -2025,6 +2039,7 @@ export function createRouter(
           res.status(e.status).json({ error: e.message, failureClass: e.failureClass });
           return;
         }
+        if (directSendRefused(res, e)) return;
         res.status(500).json({ error: String(e) });
       }
     })();
