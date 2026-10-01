@@ -7,8 +7,8 @@
  *                                    parent + children, batches of 25)
  *   brain_window.<tenant>.deleted  → brain.delete_document (one doc per event)
  *
- * tenant: account `personal` → family (brain instance personal), anything else
- * → skirmshop (instance skirmshop). Workflows live in pocharlies-org/synapse
+ * tenant: follows the account's brain instance in the account registry —
+ * instance `personal` → family, anything else (`skirmshop`) → skirmshop. Workflows live in pocharlies-org/synapse
  * `workflows/{family,skirmshop}/brain/conversation-window-*.v1.yaml`.
  *
  * Publishing goes straight to the `events` topic exchange of vhost /synapse
@@ -17,22 +17,14 @@
 import { createHash, randomUUID } from 'crypto';
 import * as amqp from 'amqplib';
 import { BrainDoc, adapterForPlatform } from './brain-ingest-lib';
-import { WindowSink, wellFormedDeep } from './brain-windows-lib';
+import { WindowSink, instanceForNamespace, wellFormedDeep } from './brain-windows-lib';
 
 export const SYNAPSE_EVENTS_EXCHANGE = 'events';
 export const UPSERT_BATCH = 25;
 
+/** Synapse tenant of an account: its brain instance decides (registry), not its name. */
 export function tenantForAccount(account: string): string {
-  return account === 'personal' ? 'family' : 'skirmshop';
-}
-
-/** A UUID-shaped id derived from a hex digest (the engine dedups on UUID message ids). */
-export function uuidFromHex(hex: string): string {
-  const h = hex.slice(0, 32).padEnd(32, '0');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${(
-    (parseInt(h[16], 16) & 0x3) |
-    0x8
-  ).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+  return instanceForNamespace(account) === 'personal' ? 'family' : 'skirmshop';
 }
 
 export interface SynapseEvent {
@@ -45,7 +37,10 @@ export interface SynapseEvent {
 // CONTRACT: amqp.synapse.brain-window-upserted.v1 — routing key
 // brain_window.{tenant}.upserted, body {data: {adapter, source_id,
 // payload_hash, documents[]}} (consumer: synapse workflow
-// <tenant>.brain.conversation-window-upserted).
+// <tenant>.brain.conversation-window-upserted). message_id is random: the
+// engine inbox keeps ids for days, and a deliberate re-publish of the same
+// documents (recovery, ADR 0002 §7.1) must not be swallowed — push-ingest is
+// already an idempotent upsert by source_id.
 export function upsertEvents(account: string, docs: BrainDoc[]): SynapseEvent[] {
   if (!docs.length) return [];
   const tenant = tenantForAccount(account);
@@ -59,7 +54,7 @@ export function upsertEvents(account: string, docs: BrainDoc[]): SynapseEvent[] 
     out.push({
       routingKey: `brain_window.${tenant}.upserted`,
       tenant,
-      messageId: uuidFromHex(payloadHash),
+      messageId: randomUUID(),
       body: {
         data: { adapter, source_id: documents[0].source_id, payload_hash: payloadHash, documents },
       },
@@ -80,8 +75,7 @@ export function deleteEvents(
   const tenant = tenantForAccount(account);
   const adapter = adapterForPlatform(platform);
   const ids = [sourceId, ...Array.from({ length: chunkCount }, (_, i) => `${sourceId}#c${i + 1}`)];
-  // Deletes are idempotent in the brain; a random id keeps a later delete of a
-  // re-created source_id from being swallowed by the engine's inbox dedup.
+  // Random ids, as for upserts: deletes are idempotent in the brain.
   return ids.map(id => ({
     routingKey: `brain_window.${tenant}.deleted`,
     tenant,

@@ -170,14 +170,33 @@ mete en el brain el correo, los pedidos y los productos.
   reintentos 60 s / 10 min / 60 min.
 - `brain_window.<tenant>.deleted`: un evento por documento retirado; el workflow
   llama a `brain.delete_document`.
-- tenant `family` = cuenta personal (instancia `personal`); `skirmshop` = el
-  resto (instancia `skirmshop`).
+- tenant: lo decide la instancia del brain de la cuenta en el registro de
+  cuentas — `personal` → `family`, `skirmshop` → `skirmshop`.
 - El cron conserva su papel de detector: que una ventana se ha cerrado (1 h de
   silencio) lo dice el reloj, no un mensaje, y el corte se calcula con Postgres,
   que es de este repo.
 - El ledger se escribe cuando el broker confirma el evento; los reintentos del
-  ingest son de Synapse. Un fallo definitivo queda como instancia fallida en el
-  engine, no en un log del cron.
+  ingest son de Synapse (60 s / 10 min / 60 min). Un fallo definitivo queda como
+  instancia fallida en el engine y el cron **no** la reintenta solo (con el push
+  HTTP sí lo hacía), así que hay alerta y procedimiento:
+  - Alerta: `SynapseWorkflowFailed` (k8s-observability) con
+    `workflow` = `family.brain.conversation-window-upserted` o
+    `skirmshop.brain.conversation-window-upserted` (los `-deleted` igual).
+  - Las ventanas afectadas son el `event.data.source_id` (y los `documents`) de
+    las instancias fallidas de ese workflow en el engine.
+  - Reenvío (BD `whatsappmcp`): invalidar el hash del ledger y tocar los mensajes
+    de esa ventana para que el cursor vuelva a ver el chat:
+    ```sql
+    UPDATE brain_windows SET content_hash = '' WHERE source_id = ANY($1);
+    UPDATE messages m SET updated_at = now()
+      FROM brain_windows w
+     WHERE w.source_id = ANY($1) AND m.account = w.account AND m.platform = w.platform
+       AND m.conversation_id = w.conversation_id
+       AND m.wa_timestamp BETWEEN w.start_ts AND w.end_ts;
+    ```
+    La siguiente pasada (≤ 30 min) recalcula esos chats, ve el hash distinto y
+    vuelve a publicar. El `message_id` es aleatorio, así que el inbox del engine
+    no se traga el reenvío; push-ingest es un upsert por `source_id`.
 - Publica con un usuario propio (`whatsapp_mcp_brain_windows`, solo escritura en
   `events`), secret `whatsapp-mcp-synapse-rabbitmq`.
 - `BRAIN_WINDOWS_SINK=http` vuelve al push-ingest directo sin cambiar código.

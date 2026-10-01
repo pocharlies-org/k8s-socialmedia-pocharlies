@@ -1,3 +1,4 @@
+import { useTestAccounts } from '../domain/test-accounts';
 import { BrainDoc } from './brain-ingest-lib';
 import {
   EventPublisher,
@@ -7,8 +8,9 @@ import {
   synapseSink,
   tenantForAccount,
   upsertEvents,
-  uuidFromHex,
 } from './brain-windows-synapse';
+
+useTestAccounts({ whatsapp: { personal: 'http://wa', professional: 'http://wa-pro' } });
 
 const doc = (id: string, platform = 'telegram', content = 'hola'): BrainDoc => ({
   source_id: id,
@@ -17,15 +19,13 @@ const doc = (id: string, platform = 'telegram', content = 'hola'): BrainDoc => (
 });
 
 describe('brain-windows-synapse', () => {
-  it('maps accounts to Synapse tenants', () => {
+  it('maps accounts to Synapse tenants through their brain instance', () => {
     expect(tenantForAccount('personal')).toBe('family');
     expect(tenantForAccount('professional')).toBe('skirmshop');
   });
 
-  it('derives a stable UUID-shaped message id', () => {
-    const id = uuidFromHex('a'.repeat(64));
-    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    expect(uuidFromHex('a'.repeat(64))).toBe(id);
+  it('rejects an account the registry does not know', () => {
+    expect(() => tenantForAccount('nobody')).toThrow(/account registry/);
   });
 
   it('builds one upsert event per batch with adapter, hash and the documents', () => {
@@ -39,16 +39,20 @@ describe('brain-windows-synapse', () => {
     expect(evs[0].body.data.documents).toHaveLength(UPSERT_BATCH);
     expect(evs[1].body.data.documents).toHaveLength(1);
     expect(evs[0].body.data.payload_hash).not.toBe(evs[1].body.data.payload_hash);
-    // Same documents → same id, so the engine's inbox dedups a re-publish.
-    expect(upsertEvents('personal', docs)[0].messageId).toBe(evs[0].messageId);
+    // Same documents → same hash but a fresh message id: a deliberate
+    // re-publish (recovery) must not be swallowed by the engine's inbox.
+    const again = upsertEvents('personal', docs)[0];
+    expect(again.body.data.payload_hash).toBe(evs[0].body.data.payload_hash);
+    expect(again.messageId).not.toBe(evs[0].messageId);
+    expect(again.messageId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('changes the message id when the content changes (e.g. the LLM summary)', () => {
+  it('changes the payload hash when the content changes (e.g. the LLM summary)', () => {
     const a = upsertEvents('professional', [doc('win:w:1', 'whatsapp', 'v1')])[0];
     const b = upsertEvents('professional', [doc('win:w:1', 'whatsapp', 'v2')])[0];
     expect(a.routingKey).toBe('brain_window.skirmshop.upserted');
     expect(a.body.data.adapter).toBe('whatsapp');
-    expect(a.messageId).not.toBe(b.messageId);
+    expect(a.body.data.payload_hash).not.toBe(b.body.data.payload_hash);
   });
 
   it('replaces lone surrogates before publishing', () => {
