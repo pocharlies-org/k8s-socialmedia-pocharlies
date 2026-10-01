@@ -1,12 +1,15 @@
+import { runWithRequestActor } from '@mcp-socialmedia/shared';
 import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
 import { SOCIAL_TOOL_REGISTRY } from './tool-registry';
 
 /**
  * Statuses and channel posts (WhatsApp): social_list_statuses,
- * social_list_channel_posts reach their connector routes with bare ids inside
- * the signed body, refuse another account's namespaced ids and answer
- * unsupported_capability on other channels and on the local index.
+ * social_list_channel_posts and social_publish_status reach their connector
+ * routes with bare ids inside the signed body, refuse another account's
+ * namespaced ids, force confirm + an explicit audience for a publish, keep the
+ * connector's failureClass (status_publish_disabled, disabled_sending…) as the
+ * code and answer unsupported_capability on other channels.
  */
 function serverWith() {
   const server = Object.create(MCPServer.prototype) as MCPServer;
@@ -30,6 +33,8 @@ function serverWith() {
 }
 
 const wa = { channel: 'whatsapp', accountId: 'professional' };
+const connectorError = (status: number, payload: unknown) =>
+  new Error(`Connector error ${status}: ${JSON.stringify(payload)}`);
 
 describe('social_list_statuses', () => {
   it('lists through POST /statuses: defaults untouched, a contact bare, flags and page passed', async () => {
@@ -124,5 +129,126 @@ describe('social_list_channel_posts', () => {
     });
     expect(foreign.structuredContent.error).toMatchObject({ code: 'invalid_request' });
     expect(connectorCall).not.toHaveBeenCalled();
+  });
+});
+
+describe('social_publish_status', () => {
+  const text = {
+    ...wa,
+    type: 'text',
+    text: 'Abrimos el sábado',
+    recipients: ['+34600111222', 'professional:2222@lid'],
+    confirm: true,
+  };
+
+  it('publishes with confirm, bare recipients, the caller and a scoped Idempotency-Key', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({ published: true, messageId: 'ST1', audienceSize: 2 });
+    const out = await runWithRequestActor({ sub: 'sub-1', name: 'dani' }, () =>
+      run('social_publish_status', {
+        ...text,
+        backgroundColor: '#112233',
+        font: 2,
+        idempotencyKey: 'k1',
+      })
+    );
+    const [url, method, path, body, timeout, headers] = connectorCall.mock.calls[0] as unknown[];
+    expect([url, method, path, timeout]).toEqual([
+      'http://wa-professional',
+      'POST',
+      '/api/v1/statuses/publish',
+      undefined,
+    ]);
+    expect(body).toEqual({
+      type: 'text',
+      text: 'Abrimos el sábado',
+      backgroundColor: '#112233',
+      font: 2,
+      recipients: ['+34600111222', '2222@lid'],
+      confirm: true,
+      actor: 'dani',
+    });
+    expect((headers as Record<string, string>)['Idempotency-Key']).toMatch(/^mcp-[0-9a-f]{64}$/);
+    expect(out.structuredContent).toMatchObject({ ok: true, data: { messageId: 'ST1' } });
+
+    await run('social_publish_status', {
+      ...wa,
+      type: 'image',
+      url: 'https://cdn.example/x.png',
+      recipients: ['2222@lid'],
+      confirm: true,
+    });
+    expect(connectorCall.mock.calls[1][3]).toEqual({
+      type: 'image',
+      url: 'https://cdn.example/x.png',
+      recipients: ['2222@lid'],
+      confirm: true,
+    });
+  });
+
+  it('schema: confirm, an audience and the fields of each type are required before the connector', async () => {
+    const { run, connectorCall } = serverWith();
+    for (const args of [
+      { ...text, confirm: undefined },
+      { ...text, confirm: false },
+      { ...text, recipients: [] },
+      { ...text, recipients: undefined },
+      { ...text, text: undefined },
+      { ...text, url: 'https://cdn.example/x.png' },
+      { ...text, type: 'video' },
+      { ...wa, type: 'image', recipients: ['2222@lid'], confirm: true },
+      {
+        ...wa,
+        type: 'image',
+        url: 'https://cdn.example/x.png',
+        font: 1,
+        recipients: ['2222@lid'],
+        confirm: true,
+      },
+      { ...wa, type: 'image', url: 'file:///x.png', recipients: ['2222@lid'], confirm: true },
+    ]) {
+      await expect(
+        run('social_publish_status', args as Record<string, unknown>)
+      ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    }
+    const foreign = await run('social_publish_status', {
+      ...text,
+      accountId: 'personal',
+    });
+    expect(foreign.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    const telegram = await run('social_publish_status', {
+      ...text,
+      channel: 'telegram',
+      accountId: 'personal',
+      recipients: ['123'],
+    });
+    expect(telegram.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('keeps the connector refusal: flag off, sending disabled', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockRejectedValueOnce(
+      connectorError(403, {
+        error: 'Publishing statuses is disabled on this connector (WA_STATUS_PUBLISH_ENABLED)',
+        failureClass: 'status_publish_disabled',
+      })
+    );
+    const off = await run('social_publish_status', text);
+    expect(off.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: 'status_publish_disabled', details: { status: 403 } },
+    });
+    connectorCall.mockRejectedValueOnce(
+      connectorError(403, { error: 'Sending is disabled', failureClass: 'disabled_sending' })
+    );
+    const gated = await run('social_publish_status', text);
+    expect(gated.structuredContent.error).toMatchObject({ code: 'disabled_sending' });
+  });
+
+  it('is destructive and not idempotent in its annotations', () => {
+    const tool = SOCIAL_TOOL_REGISTRY.find(t => t.name === 'social_publish_status')!;
+    expect(tool.effect).toBe('destructive');
+    expect(tool.annotations).toMatchObject({ destructiveHint: true, idempotentHint: false });
   });
 });

@@ -1356,6 +1356,78 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     idempotent: true,
   }),
   tool({
+    name: 'social_publish_status',
+    title: 'Publish status',
+    description:
+      'Publish a WhatsApp status (text or image) to an explicit list of contacts: every ' +
+      'recipient sees it for 24 h and it cannot be unsent from those who saw it, so confirm ' +
+      'must be true. Off unless the connector runs with WA_STATUS_PUBLISH_ENABLED ' +
+      '(status_publish_disabled) and sending is enabled.',
+    effect: 'destructive',
+    authScope: 'social.write',
+    capability: 'statuses.publish',
+    handler: 'publishStatus',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        idempotencyKey: writeProperties.idempotencyKey,
+        type: { type: 'string', enum: ['text', 'image'] },
+        text: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4096,
+          description: 'Text of a text status (required), caption of an image (≤ 1024).',
+        },
+        url: {
+          ...fetchedFileUrl('Image of an image status (JPEG or PNG, ≤ 10 MB)'),
+        },
+        recipients: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 256,
+          items: { type: 'string', minLength: 1, maxLength: 200 },
+          description:
+            'Who sees it: phone numbers (E.164) or WhatsApp user jids. Always explicit; the ' +
+            "account's own number is dropped.",
+        },
+        backgroundColor: {
+          type: 'string',
+          pattern: '^#?(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
+          description: 'Text status only: background colour, #RRGGBB or #AARRGGBB.',
+        },
+        font: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 5,
+          description: 'Text status only: WhatsApp font 1..5.',
+        },
+        confirm: {
+          const: true,
+          description: 'Must be true: every recipient sees the status at once.',
+        },
+      },
+      ['channel', 'accountId', 'type', 'recipients', 'confirm'],
+      {
+        allOf: [
+          {
+            if: { properties: { type: { const: 'text' } } },
+            then: { required: ['text'], not: { required: ['url'] } },
+          },
+          {
+            if: { properties: { type: { const: 'image' } } },
+            then: {
+              required: ['url'],
+              not: { anyOf: [{ required: ['backgroundColor'] }, { required: ['font'] }] },
+              properties: { text: { maxLength: 1024 } },
+            },
+          },
+        ],
+      }
+    ),
+    idempotent: false,
+  }),
+  tool({
     name: 'social_set_chat_state',
     title: 'Set chat state',
     description:

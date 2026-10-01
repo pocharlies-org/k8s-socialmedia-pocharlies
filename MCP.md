@@ -200,9 +200,14 @@ invite_link_unavailable`; nobody invited → `invite_not_sent`.
 - `social_list_channel_posts` (read): posts of the channels the account
   follows (all, or `target` = `<digits>@newsletter`), from `messages`; names
   and following: `social_list_channels`.
+- `social_publish_status` (destructive, `confirm: true`): text or image
+  status to an explicit `recipients` list (phones or user jids, ≤ 256). Off
+  unless the connector runs with `WA_STATUS_PUBLISH_ENABLED=true`
+  (`status_publish_disabled`), then the usual send gate.
 
 Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `invite_to_group`,
-WhatsApp `send_sticker`, `send_gif`, `pin_message`, `start_chat` with a message)
+WhatsApp `send_sticker`, `send_gif`, `pin_message`, `publish_status`, `start_chat` with a
+message)
 forward the caller's `idempotencyKey`, scoped per
 tool, as the connector's `Idempotency-Key`. Connector refusals keep their `failureClass` as
 the error `code` (`disabled_sending`, `disconnected`, `not_group_admin`,

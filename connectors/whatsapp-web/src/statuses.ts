@@ -1,6 +1,6 @@
 /**
  * WhatsApp statuses ("Estados") and channel posts (fase 3 follow-up, the
- * store / read half of the NAS fork's "novedades", adapted to prod).
+ * store / read / publish half of the NAS fork's "novedades", adapted to prod).
  *
  * Where things live (measured on prod, 01-10):
  *  - a status is a message of `status@broadcast`: it already lands in
@@ -19,7 +19,10 @@
  *  - the table is created by the migration, never here. While it is missing
  *    every call fails soft: 42P01 is logged once, writes answer false and the
  *    status list answers empty with persisted: false. Re-probed every few
- *    minutes, so no restart is needed once the migration lands.
+ *    minutes, so no restart is needed once the migration lands;
+ *  - publishing a status is behind WA_STATUS_PUBLISH_ENABLED (default off,
+ *    set in no overlay) on top of the send gate, with confirm: true and an
+ *    explicit list of recipients: a status goes to every listed contact.
  *
  * The caller (BaileysClient) only calls in here when `ingest` is on: the
  * per-sub pairing pool never touches these tables.
@@ -46,6 +49,15 @@ export const STATUS_MESSAGE_TYPES: ReadonlySet<string> = new Set([
 export const LIST_DEFAULT_LIMIT = 50;
 export const LIST_MAX_LIMIT = 200;
 
+/** Publishing (the same limits as the NAS fork's publishStatus). */
+export const STATUS_RECIPIENTS_MAX = 256;
+export const STATUS_TEXT_MAX_CHARS = 4096;
+export const STATUS_CAPTION_MAX_CHARS = 1024;
+export const STATUS_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+export const STATUS_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png']);
+export const STATUS_FONT_MIN = 1;
+export const STATUS_FONT_MAX = 5;
+
 export type StatusSource = 'live' | 'history' | 'connector' | 'backfill';
 
 export function isStatusJid(jid: string | null | undefined): boolean {
@@ -54,6 +66,11 @@ export function isStatusJid(jid: string | null | undefined): boolean {
 
 export function isChannelJid(jid: string | null | undefined): boolean {
   return /^\d+@newsletter$/.test(stripAccountKey(String(jid || '')));
+}
+
+/** WA_STATUS_PUBLISH_ENABLED=true; anything else (unset included) keeps publishing off. */
+export function statusPublishEnabled(): boolean {
+  return process.env.WA_STATUS_PUBLISH_ENABLED === 'true';
 }
 
 // ---------------------------------------------------------------------------
@@ -168,14 +185,28 @@ export function parseChannelPostsQuery(body: Record<string, unknown>): ChannelPo
   };
 }
 
+export interface StatusPublishRequest {
+  type: 'text' | 'image';
+  /** Text of a text status, caption of an image one. */
+  text?: string;
+  /** Image status: an http(s) URL the connector fetches. */
+  url?: string;
+  /** Normalised user jids, deduplicated, in the order given. */
+  recipients: string[];
+  /** Text status only: #RRGGBB or #AARRGGBB. */
+  backgroundColor?: string;
+  /** Text status only: WhatsApp's font 1..5. */
+  font?: number;
+}
+
 /**
- * One person: an E.164 phone (with or without '+') or a user jid
+ * One recipient: an E.164 phone (with or without '+') or a user jid
  * (`@s.whatsapp.net`, `@c.us`, `@lid`). Groups, broadcasts and channels are
  * not people. Returns the normalised jid (device suffix dropped).
  */
 export function statusRecipientJid(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) {
-    throw invalid('expected phone numbers or WhatsApp user jids');
+    throw invalid('recipients must be phone numbers or WhatsApp user jids');
   }
   const raw = stripAccountKey(value.trim());
   if (/^\+?\d[\d\s-]{6,24}$/.test(raw)) {
@@ -184,9 +215,83 @@ export function statusRecipientJid(value: unknown): string {
     return `${digits}@s.whatsapp.net`;
   }
   const match = /^(\d{1,20})(?::\d{1,3})?@(s\.whatsapp\.net|c\.us|lid)$/.exec(raw);
-  if (!match) throw invalid(`expected a person (phone or user jid), got ${value}`);
+  if (!match) throw invalid(`recipients must be people (phone or user jid), got ${value}`);
   const server = match[2] === 'c.us' ? 's.whatsapp.net' : match[2];
   return jidNormalizedUser(`${match[1]}@${server}`) || `${match[1]}@${server}`;
+}
+
+/**
+ * {type, text?, url?, recipients[], backgroundColor?, font?, confirm: true}
+ * of POST /statuses/publish; 400 otherwise. confirm must be literally true:
+ * a status goes to every recipient at once.
+ */
+export function parseStatusPublishRequest(body: Record<string, unknown>): StatusPublishRequest {
+  if (body.confirm !== true) {
+    throw invalid('confirm must be true: a status goes to every recipient');
+  }
+  const type = body.type;
+  if (type !== 'text' && type !== 'image') throw invalid("type must be 'text' or 'image'");
+  if (!Array.isArray(body.recipients) || body.recipients.length === 0) {
+    throw invalid('recipients must be a non-empty array (the audience is always explicit)');
+  }
+  if (body.recipients.length > STATUS_RECIPIENTS_MAX) {
+    throw invalid(`recipients must not exceed ${STATUS_RECIPIENTS_MAX} entries`);
+  }
+  const recipients = [...new Set(body.recipients.map(statusRecipientJid))];
+  if (body.text !== undefined && body.text !== null && typeof body.text !== 'string') {
+    throw invalid('text must be a string');
+  }
+  const text = typeof body.text === 'string' && body.text.trim() ? body.text : undefined;
+  if (type === 'text') {
+    if (!text) throw invalid('text is required for a text status');
+    if (text.length > STATUS_TEXT_MAX_CHARS) {
+      throw invalid(`text must not exceed ${STATUS_TEXT_MAX_CHARS} characters`);
+    }
+    if (body.url !== undefined && body.url !== null)
+      throw invalid('url is only for an image status');
+    let backgroundColor: string | undefined;
+    if (body.backgroundColor !== undefined && body.backgroundColor !== null) {
+      if (
+        typeof body.backgroundColor !== 'string' ||
+        !/^#?(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(body.backgroundColor.trim())
+      ) {
+        throw invalid('backgroundColor must be a 6 or 8 digit hex colour');
+      }
+      const hex = body.backgroundColor.trim();
+      backgroundColor = hex.startsWith('#') ? hex : `#${hex}`;
+    }
+    let font: number | undefined;
+    if (body.font !== undefined && body.font !== null) {
+      if (
+        typeof body.font !== 'number' ||
+        !Number.isInteger(body.font) ||
+        body.font < STATUS_FONT_MIN ||
+        body.font > STATUS_FONT_MAX
+      ) {
+        throw invalid(`font must be an integer from ${STATUS_FONT_MIN} to ${STATUS_FONT_MAX}`);
+      }
+      font = body.font;
+    }
+    return {
+      type,
+      text,
+      recipients,
+      ...(backgroundColor ? { backgroundColor } : {}),
+      ...(font ? { font } : {}),
+    };
+  }
+  if (typeof body.url !== 'string' || !/^https?:\/\/\S+$/i.test(body.url.trim())) {
+    throw invalid('url must be an http(s) URL of the image');
+  }
+  if (text && text.length > STATUS_CAPTION_MAX_CHARS) {
+    throw invalid(`text (caption) must not exceed ${STATUS_CAPTION_MAX_CHARS} characters`);
+  }
+  for (const field of ['backgroundColor', 'font']) {
+    if (body[field] !== undefined && body[field] !== null) {
+      throw invalid(`${field} is only for a text status`);
+    }
+  }
+  return { type, url: body.url.trim(), recipients, ...(text ? { text } : {}) };
 }
 
 // ---------------------------------------------------------------------------

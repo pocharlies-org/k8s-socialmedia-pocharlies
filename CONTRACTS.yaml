@@ -2012,6 +2012,35 @@ contracts:
       nextCursor, channels (how many channel conversations were read)}; []
       with ingest off. Ids bare. Path, body and 200 shape are contract:
       changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.statuses-publish.v1
+    kind: http-route
+    value: /statuses/publish
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/statuses/publish of the house WhatsApp connectors: publish
+      a text or image status to an explicit list of contacts (sendMessage to
+      status@broadcast with statusJidList), consumed by the MCP tool
+      social_publish_status (mcp-server/src/mcp/server.ts
+      canonicalPublishStatus). HMAC-signed body {type: text | image, text?,
+      url?, recipients[1..256], backgroundColor?, font?, confirm: true,
+      actor?}: confirm literally true; recipients phones or user jids
+      (deduplicated, the account's own dropped); text required for a text
+      status (≤ 4096), caption ≤ 1024 for an image; url an http(s) JPEG / PNG
+      ≤ 10 MB fetched server-side (422 media_unavailable when the fetch
+      fails); backgroundColor (#RRGGBB / #AARRGGBB) and font (1–5) only for
+      text. 400 invalid_request first, then 403 status_publish_disabled unless
+      the connector runs with WA_STATUS_PUBLISH_ENABLED=true (default off, in
+      no overlay), then the sending gate (403 disabled_sending), 503
+      disconnected and the opt-in Idempotency-Key (send-idempotency.v1). One
+      socket call, no retry; no id back = 502 send_outcome_uncertain. 200
+      {published, messageId, conversationId ('status@broadcast'), type,
+      audienceSize, postedAt, expiresAt, persisted, sentAt?}; indexed in
+      whatsapp_statuses with source connector, audience size and actor. Path,
+      body and 200 shape are contract: changing any is breaking — a new `.v2`
+      entry beside this one.
   - id: http.brain.push-ingest.conversation-window.v1
     kind: http-route
     value: /instances/{instance}/push-ingest

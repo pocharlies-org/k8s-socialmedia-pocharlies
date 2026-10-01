@@ -117,10 +117,16 @@ import {
   listChannelPosts,
   listStatuses,
   recordStatus,
+  STATUS_IMAGE_MAX_BYTES,
+  STATUS_IMAGE_MIME_TYPES,
+  STATUS_JID,
   STATUS_MESSAGE_TYPES,
   StatusList,
   StatusListQuery,
+  statusPublishEnabled,
+  StatusPublishRequest,
   statusRecipientJid,
+  STATUS_TTL_MS,
 } from './statuses';
 import {
   buildPollContent,
@@ -4208,6 +4214,134 @@ export class BaileysClient extends EventEmitter {
   async listChannelPosts(query: ChannelPostsQuery): Promise<ChannelPostList> {
     if (!this.ingest) return { posts: [], nextCursor: null, channels: 0 };
     return listChannelPosts(query);
+  }
+
+  /**
+   * Publish a text or image status to an explicit list of contacts
+   * (`statusJidList`: WhatsApp relays it to exactly those people, whatever the
+   * phone's status privacy says). Off unless WA_STATUS_PUBLISH_ENABLED=true;
+   * the route adds the send gate and confirm: true. One socket call, no
+   * retry: a status cannot be taken back from those who saw it.
+   */
+  async publishStatus(
+    request: StatusPublishRequest,
+    options: { messageId?: string; beforeSend?: () => Promise<void>; actor?: string } = {}
+  ): Promise<{
+    published: true;
+    messageId: string;
+    conversationId: typeof STATUS_JID;
+    type: StatusPublishRequest['type'];
+    audienceSize: number;
+    postedAt: string;
+    expiresAt: string;
+    persisted: boolean;
+  }> {
+    if (!statusPublishEnabled()) {
+      throw new MessageMutationError(
+        'Publishing statuses is disabled on this connector (WA_STATUS_PUBLISH_ENABLED)',
+        403,
+        'status_publish_disabled'
+      );
+    }
+    const sock = this.connectedSocket();
+    const own = new Set(await this.ownIds().catch(() => [] as string[]));
+    if (this.meJid) own.add(jidNormalizedUser(this.meJid));
+    const recipients = request.recipients.filter(jid => !own.has(jid));
+    if (!recipients.length) {
+      throw new MessageMutationError(
+        'recipients must name someone other than this account',
+        400,
+        'invalid_request'
+      );
+    }
+    let payload: AnyMessageContent;
+    if (request.type === 'text') {
+      payload = { text: request.text || '' };
+    } else {
+      payload = await this.statusImage(request.url || '', request.text);
+    }
+    const sendOptions = {
+      statusJidList: recipients,
+      broadcast: true,
+      ...(options.messageId ? { messageId: options.messageId } : {}),
+      ...(request.backgroundColor ? { backgroundColor: request.backgroundColor } : {}),
+      ...(request.font ? { font: request.font } : {}),
+    };
+    await options.beforeSend?.();
+    const sent = await sock.sendMessage(STATUS_JID, payload, sendOptions as any);
+    const messageId = sent?.key?.id;
+    if (!sent?.key || !messageId) {
+      throw new MessageMutationError(
+        'WhatsApp did not answer the status with an id: it may or may not have gone out',
+        502,
+        'send_outcome_uncertain'
+      );
+    }
+    this.rememberKey(messageId, sent.key, STATUS_JID);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, STATUS_JID, 'sent');
+    const seconds = Number(sent.messageTimestamp || 0);
+    const postedAt = seconds > 0 ? new Date(seconds * 1000) : new Date();
+    const self = this.meJid || sock.user?.id || '';
+    const persisted =
+      this.ingest && self
+        ? await recordStatus({
+            messageId,
+            authorId: this.normalizeJid(jidNormalizedUser(self) || self),
+            fromMe: true,
+            messageType: request.type === 'text' ? 'TEXT' : 'IMAGE',
+            postedAt,
+            source: 'connector',
+            audienceSize: recipients.length,
+            actor: options.actor,
+          })
+        : false;
+    this.logger.info(
+      `Status ${messageId} (${request.type}) published to ${recipients.length} contacts${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      published: true,
+      messageId,
+      conversationId: STATUS_JID,
+      type: request.type,
+      audienceSize: recipients.length,
+      postedAt: postedAt.toISOString(),
+      expiresAt: new Date(postedAt.getTime() + STATUS_TTL_MS).toISOString(),
+      persisted,
+    };
+  }
+
+  /** The image of a status: fetched server-side, JPEG / PNG up to 10 MB. */
+  private async statusImage(url: string, caption?: string): Promise<AnyMessageContent> {
+    let buffer: Buffer;
+    let mimeType: string;
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      mimeType = (res.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+      buffer = Buffer.from(await res.arrayBuffer());
+    } catch (e: any) {
+      throw new MessageMutationError(
+        `Failed to fetch the status image from ${url}: ${e?.message || e}`,
+        422,
+        'media_unavailable'
+      );
+    }
+    if (!STATUS_IMAGE_MIME_TYPES.has(mimeType)) {
+      throw new MessageMutationError(
+        `The status image must be ${[...STATUS_IMAGE_MIME_TYPES].join(' or ')}, got ${mimeType || 'no content-type'}`,
+        400,
+        'invalid_request'
+      );
+    }
+    if (!buffer.length || buffer.length > STATUS_IMAGE_MAX_BYTES) {
+      throw new MessageMutationError(
+        `The status image must be 1 byte to ${STATUS_IMAGE_MAX_BYTES} bytes`,
+        400,
+        'invalid_request'
+      );
+    }
+    return { image: buffer, mimetype: mimeType, ...(caption ? { caption } : {}) };
   }
 
   /**

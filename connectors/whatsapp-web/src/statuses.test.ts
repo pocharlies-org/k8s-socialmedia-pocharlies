@@ -2,7 +2,9 @@
  * Statuses and channel posts: request parsing, the status index on ingest
  * (live / history; protocol noise and timeless rows skipped; chats untouched),
  * the lists (author PN ↔ LID, active window, keyset cursor, table missing),
- * channel posts from messages and the HTTP routes (ungated, 400s).
+ * channel posts from messages, publishing (flag off by default, explicit
+ * audience, own jid dropped, image fetched, indexed with audience + actor)
+ * and the HTTP routes (flag, gate, 400s, lists ungated).
  *
  * No socket and no DB: a fake sock records what would go to WhatsApp and
  * pg.Pool#query is stubbed per test (same harness as message-stars-pins.test.ts).
@@ -12,7 +14,7 @@
 import './test-env';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Server } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import pg from 'pg';
@@ -26,7 +28,9 @@ import {
   isStatusJid,
   parseChannelPostsQuery,
   parseStatusListQuery,
+  parseStatusPublishRequest,
   resetStatusStoreStateForTests,
+  statusPublishEnabled,
   statusRecipientJid,
 } from './statuses';
 import { createRouter } from './api/controller';
@@ -149,16 +153,20 @@ function statusMessage(overrides: Record<string, any> = {}): WAMessage {
 // Parsing
 // ---------------------------------------------------------------------------
 
-test('jid kinds; a person is a phone or a user jid', () => {
+test('jid kinds and the publish flag (off unless exactly "true")', () => {
   assert.ok(isStatusJid('status@broadcast'));
   assert.ok(!isStatusJid('123@broadcast'));
   assert.ok(isChannelJid('120363400253693272@newsletter'));
   assert.ok(!isChannelJid('120363@g.us'));
-  assert.equal(statusRecipientJid('+34 600 111 222'), '34600111222@s.whatsapp.net');
-  assert.equal(statusRecipientJid('34600111222@c.us'), '34600111222@s.whatsapp.net');
-  assert.equal(statusRecipientJid('2222:4@lid'), '2222@lid');
-  for (const bad of ['120363@g.us', 'status@broadcast', '1203@newsletter', '', 'abc', 7]) {
-    assert.throws(() => statusRecipientJid(bad), MessageMutationError);
+  const undo = withEnv({ WA_STATUS_PUBLISH_ENABLED: undefined });
+  try {
+    assert.equal(statusPublishEnabled(), false);
+    process.env.WA_STATUS_PUBLISH_ENABLED = '1';
+    assert.equal(statusPublishEnabled(), false);
+    process.env.WA_STATUS_PUBLISH_ENABLED = 'true';
+    assert.equal(statusPublishEnabled(), true);
+  } finally {
+    undo();
   }
 });
 
@@ -207,6 +215,72 @@ test('list queries: defaults, flags, limits, cursors; channel ids only @newslett
   });
   for (const body of [{ channelId: '120363@g.us' }, { channelId: 'status@broadcast' }]) {
     assert.throws(() => parseChannelPostsQuery(body), MessageMutationError);
+  }
+});
+
+test('publish request: confirm, explicit audience normalised + deduplicated, per-type fields', () => {
+  assert.equal(statusRecipientJid('+34 600 111 222'), '34600111222@s.whatsapp.net');
+  assert.equal(statusRecipientJid('34600111222@c.us'), '34600111222@s.whatsapp.net');
+  assert.equal(statusRecipientJid('2222:4@lid'), '2222@lid');
+  for (const bad of ['120363@g.us', 'status@broadcast', '1203@newsletter', '', 'abc', 7]) {
+    assert.throws(() => statusRecipientJid(bad), MessageMutationError);
+  }
+  assert.deepEqual(
+    parseStatusPublishRequest({
+      confirm: true,
+      type: 'text',
+      text: 'Abrimos el sábado',
+      recipients: ['+34600111222', '34600111222@s.whatsapp.net', '2222@lid'],
+      backgroundColor: 'ff0000',
+      font: 2,
+    }),
+    {
+      type: 'text',
+      text: 'Abrimos el sábado',
+      recipients: ['34600111222@s.whatsapp.net', '2222@lid'],
+      backgroundColor: '#ff0000',
+      font: 2,
+    }
+  );
+  assert.deepEqual(
+    parseStatusPublishRequest({
+      confirm: true,
+      type: 'image',
+      url: 'https://cdn.example/x.png',
+      recipients: ['2222@lid'],
+    }),
+    { type: 'image', url: 'https://cdn.example/x.png', recipients: ['2222@lid'] }
+  );
+  const base = { confirm: true, type: 'text', text: 'hola', recipients: ['2222@lid'] };
+  for (const body of [
+    { ...base, confirm: undefined },
+    { ...base, confirm: 'true' },
+    { ...base, type: 'video' },
+    { ...base, recipients: [] },
+    { ...base, recipients: undefined },
+    { ...base, recipients: Array.from({ length: 257 }, (_, i) => `${1000 + i}@lid`) },
+    { ...base, recipients: ['120363@g.us'] },
+    { ...base, text: '   ' },
+    { ...base, text: 'x'.repeat(4097) },
+    { ...base, url: 'https://cdn.example/x.png' },
+    { ...base, font: 9 },
+    { ...base, backgroundColor: 'red' },
+    { confirm: true, type: 'image', recipients: ['2222@lid'] },
+    { confirm: true, type: 'image', url: 'file:///etc/passwd', recipients: ['2222@lid'] },
+    { confirm: true, type: 'image', url: 'https://x/y.png', recipients: ['2222@lid'], font: 1 },
+    {
+      confirm: true,
+      type: 'image',
+      url: 'https://x/y.png',
+      recipients: ['2222@lid'],
+      text: 'x'.repeat(1025),
+    },
+  ]) {
+    assert.throws(
+      () => parseStatusPublishRequest(body as Record<string, unknown>),
+      (e: unknown) => e instanceof MessageMutationError && e.status === 400,
+      JSON.stringify(body).slice(0, 120)
+    );
   }
 });
 
@@ -549,6 +623,160 @@ test('channel posts: channels from conversations, posts from messages, names onl
 });
 
 // ---------------------------------------------------------------------------
+// Publish
+// ---------------------------------------------------------------------------
+
+async function withImageServer(
+  body: Buffer,
+  contentType: string,
+  run: (url: string) => Promise<void>
+): Promise<void> {
+  const server: Server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': contentType });
+    res.end(body);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  try {
+    await run(`http://127.0.0.1:${port}/x.png`);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+test('publish is refused while WA_STATUS_PUBLISH_ENABLED is off, before the socket', async () => {
+  useAccount('personal');
+  const undo = withEnv({ WA_STATUS_PUBLISH_ENABLED: undefined });
+  const { calls, restore } = stubPool();
+  try {
+    const { client, sent } = makeClient();
+    await assert.rejects(
+      client.publishStatus({ type: 'text', text: 'hola', recipients: ['2222@lid'] }),
+      (e: unknown) =>
+        e instanceof MessageMutationError &&
+        e.status === 403 &&
+        e.failureClass === 'status_publish_disabled'
+    );
+    assert.equal(sent.length, 0);
+    assert.equal(calls.length, 0);
+  } finally {
+    restore();
+    undo();
+  }
+});
+
+test('publish a text status: statusJidList without our own ids, style, indexed with audience + actor', async () => {
+  useAccount('professional');
+  const undo = withEnv({ WA_STATUS_PUBLISH_ENABLED: 'true' });
+  const { calls, restore } = stubPool();
+  try {
+    const { client, sent } = makeClient();
+    let claimed = false;
+    const result = await client.publishStatus(
+      {
+        type: 'text',
+        text: 'Abrimos el sábado',
+        recipients: ['34600@s.whatsapp.net', '34999@s.whatsapp.net', '9999@lid'],
+        backgroundColor: '#ff0000',
+        font: 2,
+      },
+      {
+        messageId: 'IDEM1',
+        actor: 'mcp:agent',
+        beforeSend: async () => {
+          claimed = true;
+        },
+      }
+    );
+    assert.ok(claimed);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].jid, 'status@broadcast');
+    assert.deepEqual(sent[0].content, { text: 'Abrimos el sábado' });
+    assert.deepEqual(sent[0].options, {
+      statusJidList: ['34600@s.whatsapp.net'],
+      broadcast: true,
+      messageId: 'IDEM1',
+      backgroundColor: '#ff0000',
+      font: 2,
+    });
+    assert.deepEqual(result, {
+      published: true,
+      messageId: 'IDEM1',
+      conversationId: 'status@broadcast',
+      type: 'text',
+      audienceSize: 1,
+      postedAt: new Date(NOW_MS).toISOString(),
+      expiresAt: new Date(NOW_MS + DAY_MS).toISOString(),
+      persisted: true,
+    });
+    const [index] = calls.filter(c => isStatusInsert(c.sql));
+    assert.deepEqual(index.params, [
+      'professional',
+      'professional:IDEM1',
+      'professional:34999@c.us',
+      true,
+      'TEXT',
+      new Date(NOW_MS),
+      new Date(NOW_MS + DAY_MS),
+      1,
+      'connector',
+      'mcp:agent',
+    ]);
+
+    await assert.rejects(
+      client.publishStatus({ type: 'text', text: 'solo yo', recipients: ['9999@lid'] }),
+      (e: unknown) => e instanceof MessageMutationError && e.status === 400
+    );
+    assert.equal(sent.length, 1, 'only ourselves: nothing sent');
+  } finally {
+    restore();
+    undo();
+  }
+});
+
+test('publish an image status: fetched, JPEG / PNG only, a failed fetch is 422', async () => {
+  useAccount('personal');
+  const undo = withEnv({ WA_STATUS_PUBLISH_ENABLED: 'true' });
+  const { restore } = stubPool();
+  try {
+    const { client, sent } = makeClient();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    await withImageServer(png, 'image/png', async url => {
+      const result = await client.publishStatus({
+        type: 'image',
+        url,
+        text: 'nuevo',
+        recipients: ['2222@lid'],
+      });
+      assert.equal(result.type, 'image');
+      assert.deepEqual(sent[0].content, { image: png, mimetype: 'image/png', caption: 'nuevo' });
+      assert.deepEqual(sent[0].options, { statusJidList: ['2222@lid'], broadcast: true });
+    });
+    await withImageServer(Buffer.from('GIF89a'), 'image/gif', async url => {
+      await assert.rejects(
+        client.publishStatus({ type: 'image', url, recipients: ['2222@lid'] }),
+        (e: unknown) => e instanceof MessageMutationError && e.status === 400
+      );
+    });
+    await assert.rejects(
+      client.publishStatus({
+        type: 'image',
+        url: 'http://127.0.0.1:1/none.png',
+        recipients: ['2222@lid'],
+      }),
+      (e: unknown) =>
+        e instanceof MessageMutationError &&
+        e.status === 422 &&
+        e.failureClass === 'media_unavailable'
+    );
+    assert.equal(sent.length, 1);
+  } finally {
+    restore();
+    undo();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 
@@ -603,39 +831,108 @@ function recordingClient(connected = true): { client: Partial<BaileysClient>; se
       seen.push(['posts', query]);
       return { posts: [], nextCursor: null, channels: 0 };
     },
+    publishStatus: async (request: any, options: any) => {
+      seen.push(['publish', request, options?.actor]);
+      return {
+        published: true,
+        messageId: 'ST9',
+        conversationId: 'status@broadcast',
+        type: request.type,
+        audienceSize: request.recipients.length,
+        postedAt: 'T',
+        expiresAt: 'T+24h',
+        persisted: true,
+      };
+    },
   };
   return { client: client as unknown as Partial<BaileysClient>, seen };
 }
 
-test('HTTP: the lists are not gated, validate their bodies and answer while disconnected', async () => {
+const PUBLISH = {
+  type: 'text',
+  text: 'hola',
+  recipients: ['+34600111222'],
+  confirm: true,
+  actor: 'dani',
+};
+
+test('HTTP: publish needs the flag (403 status_publish_disabled), then the send gate; lists ungated', async () => {
   const { client, seen } = recordingClient();
-  await withRouter(client, { ENABLE_SENDING: undefined }, async call => {
+  await withRouter(
+    client,
+    { WA_STATUS_PUBLISH_ENABLED: undefined, ENABLE_SENDING: 'true' },
+    async call => {
+      const off = await call('POST', '/statuses/publish', PUBLISH);
+      assert.equal(off.status, 403);
+      assert.equal((await off.json()).failureClass, 'status_publish_disabled');
+      const invalid = await call('POST', '/statuses/publish', { ...PUBLISH, confirm: false });
+      assert.equal(invalid.status, 400, 'validated before the flag');
+      assert.equal((await call('POST', '/statuses', {})).status, 200);
+      assert.equal((await call('POST', '/channels/posts', {})).status, 200);
+    }
+  );
+  await withRouter(
+    client,
+    { WA_STATUS_PUBLISH_ENABLED: 'true', ENABLE_SENDING: undefined },
+    async call => {
+      const gated = await call('POST', '/statuses/publish', PUBLISH);
+      assert.equal(gated.status, 403);
+      assert.equal((await gated.json()).failureClass, 'disabled_sending');
+    }
+  );
+  await withRouter(
+    client,
+    {
+      WA_STATUS_PUBLISH_ENABLED: 'true',
+      ENABLE_SENDING: 'true',
+      EMERGENCY_DISABLE_SENDING: 'true',
+    },
+    async call => {
+      assert.equal((await call('POST', '/statuses/publish', PUBLISH)).status, 403);
+    }
+  );
+  assert.deepEqual(seen, [
+    ['statuses', { includeExpired: false, includeOwn: true, limit: 50 }],
+    ['posts', { limit: 50 }],
+  ]);
+});
+
+test('HTTP: 200 shapes, 400s, 503 disconnected for publish only', async () => {
+  const { client, seen } = recordingClient();
+  const ON = {
+    WA_STATUS_PUBLISH_ENABLED: 'true',
+    ENABLE_SENDING: 'true',
+    EMERGENCY_DISABLE_SENDING: undefined,
+  };
+  await withRouter(client, ON, async call => {
+    const published = await call('POST', '/statuses/publish', PUBLISH);
+    assert.equal(published.status, 200);
+    assert.equal((await published.json()).messageId, 'ST9');
     const list = await call('POST', '/statuses', { contact: '34600@c.us', limit: 5 });
     assert.equal(list.status, 200);
-    assert.deepEqual(await list.json(), { statuses: [], nextCursor: null, persisted: true });
-    assert.equal((await call('POST', '/channels/posts', {})).status, 200);
-    assert.equal(
-      (await call('POST', '/channels/posts', { channelId: '111@newsletter' })).status,
-      200
-    );
+    const posts = await call('POST', '/channels/posts', { channelId: '111@newsletter' });
+    assert.equal(posts.status, 200);
     for (const [path, body] of [
       ['/statuses', { limit: 500 }],
       ['/statuses', { cursor: 'x' }],
-      ['/statuses', { includeOwn: 'no' }],
       ['/channels/posts', { channelId: '111@g.us' }],
+      ['/statuses/publish', { ...PUBLISH, recipients: [] }],
+      ['/statuses/publish', { ...PUBLISH, type: 'video' }],
     ] as const) {
       const res = await call('POST', path, body);
       assert.equal(res.status, 400, `${path} ${JSON.stringify(body)}`);
       assert.equal((await res.json()).failureClass, 'invalid_request');
     }
   });
-  await withRouter(recordingClient(false).client, {}, async call => {
-    assert.equal((await call('POST', '/statuses', {})).status, 200);
-    assert.equal((await call('POST', '/channels/posts', {})).status, 200);
-  });
   assert.deepEqual(seen, [
+    ['publish', { type: 'text', text: 'hola', recipients: ['34600111222@s.whatsapp.net'] }, 'dani'],
     ['statuses', { contact: '34600@c.us', includeExpired: false, includeOwn: true, limit: 5 }],
-    ['posts', { limit: 50 }],
     ['posts', { channelId: '111@newsletter', limit: 50 }],
   ]);
+  await withRouter(recordingClient(false).client, ON, async call => {
+    const res = await call('POST', '/statuses/publish', PUBLISH);
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).failureClass, 'disconnected');
+    assert.equal((await call('POST', '/statuses', {})).status, 200);
+  });
 });

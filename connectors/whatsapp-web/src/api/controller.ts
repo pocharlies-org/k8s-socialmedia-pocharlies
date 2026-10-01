@@ -31,7 +31,13 @@ import {
 import { MessageUnavailableError } from '../durable-message-store';
 import { MessageMutationError } from '../message-mutations';
 import { parsePinRequest, parseStarredQuery, parseStarRequest } from '../message-stars-pins';
-import { parseChannelPostsQuery, parseStatusListQuery } from '../statuses';
+import {
+  parseChannelPostsQuery,
+  parseStatusListQuery,
+  parseStatusPublishRequest,
+  STATUS_JID,
+  statusPublishEnabled,
+} from '../statuses';
 import { PollEventInputError, validatePollInput } from '../poll-votes';
 import { validateEventInput, validateEventResponse } from '../event-responses';
 import { availablePresenceAllowed, parsePresenceRequest } from '../presence';
@@ -2369,7 +2375,10 @@ export function createRouter(
   });
 
   // Statuses and channel posts (fase 3 follow-up). The lists read the DB: no
-  // gate, and they answer while disconnected.
+  // gate, and they answer while disconnected. Publishing a status goes to
+  // every listed contact: off unless WA_STATUS_PUBLISH_ENABLED=true (403
+  // status_publish_disabled), then the send gate (403) and the connection
+  // (503); confirm: true and an explicit audience are validated first (400).
 
   // CONTRACT: http.whatsapp-connector.statuses-list.v1 — body {contact?, includeExpired?, includeOwn?, limit?, cursor?}, 200 {statuses: [{messageId, conversationId, authorId, authorName, fromMe, messageType, text, hasMedia, mimeType, postedAt, expiresAt, active, audienceSize, source}], nextCursor, persisted, contact?}
   router.post('/statuses', auth, (req: AuthenticatedRequest, res: Response): void => {
@@ -2389,6 +2398,39 @@ export function createRouter(
         res.json(await client.listChannelPosts(parseChannelPostsQuery(optionalObject(req.body))));
       } catch (e) {
         mutationErrorResponse(res, e, 'list channel posts');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.statuses-publish.v1 — body {type: text|image, text?, url?, recipients[1..256], backgroundColor?, font?, confirm: true, actor?} + optional Idempotency-Key, 200 {published, messageId, conversationId, type, audienceSize, postedAt, expiresAt, persisted, sentAt?}, 403 status_publish_disabled
+  router.post('/statuses/publish', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const request = parseStatusPublishRequest(body);
+        if (!statusPublishEnabled()) {
+          res.status(403).json({
+            error: 'Publishing statuses is disabled on this connector (WA_STATUS_PUBLISH_ENABLED)',
+            failureClass: 'status_publish_disabled',
+          });
+          return;
+        }
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('status', STATUS_JID, request)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.publishStatus(
+          request,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'publish status');
       }
     })();
   });

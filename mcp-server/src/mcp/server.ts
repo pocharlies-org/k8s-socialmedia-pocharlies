@@ -757,6 +757,8 @@ export class MCPServer {
         return this.canonicalListStatuses(args);
       case 'listChannelPosts':
         return this.canonicalListChannelPosts(args);
+      case 'publishStatus':
+        return this.canonicalPublishStatus(args);
       case 'setChatState':
         return this.canonicalSetChatState(args);
       case 'getGroup':
@@ -2483,6 +2485,45 @@ export class MCPServer {
         ...(channelId ? { channelId } : {}),
         ...this.pageArgs(args),
       })
+    );
+  }
+
+  /**
+   * POST /statuses/publish: confirm: true and an explicit audience are forced
+   * by the schema and passed through (the connector refuses without them, and
+   * answers 403 status_publish_disabled unless WA_STATUS_PUBLISH_ENABLED).
+   * Recipients are bare; one namespaced to another account is refused.
+   */
+  private async canonicalPublishStatus(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    if (!Array.isArray(args.recipients) || args.recipients.length === 0) {
+      throw this.canonicalError('invalid_request', 'recipients must be a non-empty array');
+    }
+    const type = this.string(args, 'type');
+    const optional = (field: string) => (args[field] !== undefined ? { [field]: args[field] } : {});
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/statuses/publish',
+        {
+          type,
+          ...optional('text'),
+          ...optional('url'),
+          ...optional('backgroundColor'),
+          ...optional('font'),
+          recipients: args.recipients.map((recipient: unknown) =>
+            this.whatsAppParticipant(recipient, account)
+          ),
+          confirm: true,
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'status', 'social_publish_status')
+      )
     );
   }
 
