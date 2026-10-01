@@ -89,6 +89,39 @@ const attachment = {
   required: ['url'],
 } as const;
 
+/** A file the CONNECTOR fetches server-side, like social_send_message attachment urls. */
+function fetchedFileUrl(what: string) {
+  return {
+    type: 'string',
+    format: 'uri',
+    pattern: '^https?://',
+    description:
+      `${what}. An http(s) URL the connector fetches server-side before uploading, as ` +
+      'social_send_message attachment urls: public https, cluster-internal http or presigned ' +
+      'S3/MinIO http URLs; never file:// or s3://.',
+  } as const;
+}
+
+/** WhatsApp's only disappearing timers, in seconds: off, 24 h, 7 d, 90 d (connector disappearing.ts). */
+const WHATSAPP_DISAPPEARING_SECONDS = [0, 86400, 604800, 7776000];
+
+/**
+ * WhatsApp privacy settings and the exact values the connector accepts
+ * (connectors/whatsapp-web/src/privacy-settings.ts, Baileys' names; case
+ * matters). defaultDisappearing is the timer of NEW chats.
+ */
+const WHATSAPP_PRIVACY_VALUES: Record<string, Array<string | number>> = {
+  lastSeen: ['all', 'contacts', 'contact_blacklist', 'none'],
+  online: ['all', 'match_last_seen'],
+  profilePicture: ['all', 'contacts', 'contact_blacklist', 'none'],
+  status: ['all', 'contacts', 'contact_blacklist', 'none'],
+  readReceipts: ['all', 'none'],
+  groupsAdd: ['all', 'contacts', 'contact_blacklist'],
+  call: ['all', 'known'],
+  messages: ['all', 'contacts'],
+  defaultDisappearing: WHATSAPP_DISAPPEARING_SECONDS,
+};
+
 const sourceSchema = {
   type: 'object',
   additionalProperties: false,
@@ -665,7 +698,9 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
   tool({
     name: 'social_delete_message',
     title: 'Delete message',
-    description: 'Delete a provider message where supported.',
+    description:
+      'Delete a provider message where supported: for everyone by default, or with forMe ' +
+      'only for this account (WhatsApp).',
     effect: 'destructive',
     authScope: 'social.write',
     capability: 'messages.delete',
@@ -674,6 +709,13 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
       {
         ...writeProperties,
         messageId: { type: 'string', minLength: 1 },
+        forMe: {
+          type: 'boolean',
+          default: false,
+          description:
+            'WhatsApp only: remove it from this account and its linked devices; the other ' +
+            'side keeps it and sees no change.',
+        },
       },
       ['channel', 'accountId', 'target', 'messageId']
     ),
@@ -1624,6 +1666,137 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     handler: 'getPrivacy',
     inputSchema: objectSchema({ channel, accountId, target, readSource }, ['channel', 'accountId']),
     idempotent: true,
+  }),
+  tool({
+    name: 'social_set_privacy',
+    title: 'Set privacy setting',
+    description:
+      'Change one privacy setting of the WhatsApp account (who sees last seen, online, ' +
+      'photo, status, read receipts, who may add us to groups, call or message us) or the ' +
+      'default disappearing timer of new chats. It applies to every contact and every ' +
+      'linked device, so confirm must be true. An equal value answers changed: false. ' +
+      'Current values and what each setting accepts: social_get_privacy.',
+    effect: 'destructive',
+    authScope: 'social.write',
+    capability: 'privacy.update',
+    handler: 'setPrivacy',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        idempotencyKey: writeProperties.idempotencyKey,
+        setting: { type: 'string', enum: Object.keys(WHATSAPP_PRIVACY_VALUES) },
+        value: {
+          type: ['string', 'integer'],
+          description:
+            "Exact WhatsApp value for the setting, e.g. lastSeen 'contacts'; " +
+            'defaultDisappearing in seconds (0 = off, 86400, 604800 or 7776000).',
+        },
+        confirm: {
+          const: true,
+          description: 'Must be true: the change applies to every contact and every device.',
+        },
+      },
+      ['channel', 'accountId', 'setting', 'value', 'confirm'],
+      {
+        allOf: Object.entries(WHATSAPP_PRIVACY_VALUES).map(([setting, values]) => ({
+          if: { properties: { setting: { const: setting } } },
+          then: { properties: { value: { enum: values } } },
+        })),
+      }
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_set_disappearing',
+    title: 'Set disappearing messages',
+    description:
+      "Set a chat's disappearing-messages timer (WhatsApp): 0 off, 86400 (24 h), 604800 " +
+      '(7 d) or 7776000 (90 d). Everyone in the chat sees the change and new messages vanish ' +
+      'after the timer; a group that restricts its settings needs admin. An equal known ' +
+      'timer answers changed: false.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'chats.disappearing',
+    handler: 'setDisappearing',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        expiration: {
+          type: 'integer',
+          enum: WHATSAPP_DISAPPEARING_SECONDS,
+          description: 'Seconds; 0 turns it off.',
+        },
+      },
+      ['channel', 'accountId', 'target', 'expiration']
+    ),
+    idempotent: true,
+    destructive: true,
+  }),
+  tool({
+    name: 'social_send_typing',
+    title: 'Send typing indicator',
+    description:
+      "Show 'typing…' (composing) or 'recording audio…' (recording) in one chat, or stop it " +
+      '(paused) (WhatsApp). Never makes the account online or offline. The same state to ' +
+      'the same chat within 3 s is not re-sent (throttled: true).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'chats.presence',
+    handler: 'sendTyping',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        state: { type: 'string', enum: ['composing', 'recording', 'paused'] },
+      },
+      ['channel', 'accountId', 'target', 'state']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_send_sticker',
+    title: 'Send sticker',
+    description:
+      'Send a sticker to a chat (WhatsApp, Telegram): a WebP image, static or animated ' +
+      '(WhatsApp: at most 1 MiB, checked by its bytes). Nothing is converted: a PNG, JPEG ' +
+      'or GIF is refused (sticker_not_webp).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'messages.sticker',
+    handler: 'sendSticker',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        fileUrl: fetchedFileUrl('The WebP sticker'),
+        replyTo: { type: ['string', 'integer'], description: 'Message to quote.' },
+        threadId: {
+          type: ['string', 'integer', 'null'],
+          description: 'Telegram only: forum topic.',
+        },
+      },
+      ['channel', 'accountId', 'target', 'fileUrl']
+    ),
+  }),
+  tool({
+    name: 'social_send_gif',
+    title: 'Send GIF',
+    description:
+      'Send a GIF to a chat (WhatsApp): an MP4 video of at most 16 MiB that plays looped ' +
+      'and muted, with an optional caption. A .gif file is refused (gif_not_mp4): transcode ' +
+      'it to MP4 first; nothing is converted.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'messages.gif',
+    handler: 'sendGif',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        fileUrl: fetchedFileUrl('The MP4 video'),
+        caption: { type: 'string', maxLength: 1024 },
+        replyTo: { type: 'string', minLength: 1, description: 'Message to quote.' },
+      },
+      ['channel', 'accountId', 'target', 'fileUrl']
+    ),
   }),
 ].sort((left, right) => left.name.localeCompare(right.name));
 

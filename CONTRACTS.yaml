@@ -214,6 +214,7 @@ contracts:
       body fields, the scope values, the 200 shape and the failureClass values
       are contract: changing any is breaking — a new `.v2` entry beside this
       one.
+      The MCP social_delete_message also sends forMe: true when the caller asks for delete for me (handleDeleteMessage; added later, surface unchanged).
   - id: http.whatsapp-connector.send-idempotency.v1
     kind: http-route
     value: Idempotency-Key
@@ -936,6 +937,7 @@ contracts:
       gate (the route predates the registry). The path, the body fields and
       the 200 shape are contract: changing any is breaking — a new `.v2` entry
       beside this one.
+      Also consumed by the MCP tool social_send_sticker (mcp-server/src/mcp/server.ts canonicalSendSticker, sticker: true; added later, surface unchanged).
   - id: http.telegram-connector.messages-media-group.v1
     kind: http-route
     value: /messages/media/group
@@ -1298,6 +1300,7 @@ contracts:
       failure classes as /messages/send. Nothing stored, no NATS event. The
       path, the body fields, the 200 shape and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_send_typing (mcp-server/src/mcp/server.ts canonicalSendTyping: composing | recording | paused in one chat only, never unavailable / available; added later, surface unchanged).
   - id: http.whatsapp-connector.chats-presence-read.v1
     kind: http-route
     value: /chats/presence/read
@@ -1370,6 +1373,7 @@ contracts:
       (code = WhatsApp's). Nothing stored, no NATS event. The path, the body
       fields, the 200 shape and the failureClass values are contract:
       changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_set_privacy (mcp-server/src/mcp/server.ts canonicalSetPrivacy: one setting per call, confirm: true forced by the tool schema; added later, surface unchanged).
   - id: http.whatsapp-connector.chats-disappearing-read.v1
     kind: http-route
     value: /chats/disappearing/read
@@ -1425,6 +1429,7 @@ contracts:
       NATS event. The path, the body fields, the 200 shape and the
       failureClass values are contract: changing any is breaking — a new
       `.v2` entry beside this one.
+      Also consumed by the MCP tool social_set_disappearing (mcp-server/src/mcp/server.ts canonicalSetDisappearing, expiration in seconds only; added later, surface unchanged).
   - id: http.whatsapp-connector.chats-start.v1
     kind: http-route
     value: /chats/start
@@ -1480,6 +1485,7 @@ contracts:
       The row is written by the echo (messages.upsert) as STICKER. The path,
       the body fields and the 200 shape are contract: changing any is
       breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_send_sticker (mcp-server/src/mcp/server.ts whatsAppStickerOrGif, http(s) fileUrl, Idempotency-Key scoped to the tool; added later, surface unchanged).
   - id: http.whatsapp-connector.messages-gif.v1
     kind: http-route
     value: /messages/gif
@@ -1500,6 +1506,7 @@ contracts:
       received GIF). The path, the body fields and the 200
       shape are contract: changing any is breaking — a new `.v2` entry beside
       this one.
+      Also consumed by the MCP tool social_send_gif (mcp-server/src/mcp/server.ts whatsAppStickerOrGif, http(s) fileUrl, Idempotency-Key scoped to the tool; added later, surface unchanged).
   - id: http.whatsapp-connector.contacts-list.v1
     kind: http-route
     value: /contacts

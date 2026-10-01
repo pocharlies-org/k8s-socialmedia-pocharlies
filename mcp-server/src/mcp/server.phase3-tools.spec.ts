@@ -1081,3 +1081,608 @@ async function runWithRedisDouble(
       ),
   });
 }
+
+describe('social_set_privacy', () => {
+  const privacy = { ...wa, setting: 'lastSeen', value: 'contacts', confirm: true };
+
+  it('changes one setting through POST /privacy with confirm and the caller', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({
+      updated: true,
+      setting: 'lastSeen',
+      value: 'contacts',
+      previous: 'all',
+      changed: true,
+    });
+    const out = await runWithRequestActor({ sub: 'sub-1', name: 'dani' }, () =>
+      run('social_set_privacy', privacy)
+    );
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/privacy',
+      {
+        setting: 'lastSeen',
+        value: 'contacts',
+        confirm: true,
+        actor: 'dani',
+      }
+    );
+    expect(out.structuredContent).toMatchObject({
+      ok: true,
+      status: 'accepted',
+      data: { changed: true, previous: 'all' },
+    });
+  });
+
+  it('sets the default disappearing timer of new chats in seconds', async () => {
+    const { run, connectorCall } = serverWith();
+    await run('social_set_privacy', {
+      ...wa,
+      setting: 'defaultDisappearing',
+      value: 604800,
+      confirm: true,
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/privacy',
+      {
+        setting: 'defaultDisappearing',
+        value: 604800,
+        confirm: true,
+      }
+    );
+  });
+
+  it('refuses without confirm: true and values the connector does not accept (schema)', async () => {
+    const { run, connectorCall } = serverWith();
+    for (const args of [
+      { ...privacy, confirm: undefined },
+      { ...privacy, confirm: false },
+      { ...privacy, setting: 'about' },
+      { ...privacy, setting: 'online', value: 'none' },
+      { ...privacy, setting: 'readReceipts', value: 'contacts' },
+      { ...privacy, value: 'Contacts' },
+      { ...privacy, setting: 'defaultDisappearing', value: 3600 },
+      { ...privacy, setting: 'defaultDisappearing', value: '7d' },
+      { ...privacy, channel: undefined },
+      { ...privacy, accountId: undefined },
+    ]) {
+      await expect(run('social_set_privacy', args)).rejects.toMatchObject({
+        canonicalCode: 'invalid_request',
+      });
+    }
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('maps 403 disabled_sending, 400 confirm_required and 422 rejected_by_whatsapp', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending disabled', failureClass: 'disabled_sending' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(400, {
+          error: 'pass confirm: true',
+          failureClass: 'invalid_request',
+          code: 'confirm_required',
+        })
+      )
+      .mockRejectedValueOnce(
+        connectorError(422, { error: 'refused', failureClass: 'rejected_by_whatsapp', code: '400' })
+      );
+    const gated = await run('social_set_privacy', privacy);
+    expect(gated.structuredContent.error).toMatchObject({
+      code: 'disabled_sending',
+      details: { status: 403 },
+    });
+    const confirm = await run('social_set_privacy', privacy);
+    expect(confirm.structuredContent.error).toMatchObject({
+      code: 'invalid_request',
+      details: { status: 400, code: 'confirm_required' },
+    });
+    const rejected = await run('social_set_privacy', privacy);
+    expect(rejected.structuredContent.error).toMatchObject({
+      code: 'rejected_by_whatsapp',
+      details: { status: 422 },
+    });
+  });
+
+  it('is WhatsApp-only and a destructive write with confirm const true', async () => {
+    const { run, connectorCall } = serverWith();
+    for (const channel of [
+      { channel: 'telegram', accountId: 'personal' },
+      { channel: 'instagram', accountId: 'skirmshop' },
+    ]) {
+      const out = await run('social_set_privacy', { ...privacy, ...channel });
+      expect(out.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    }
+    expect(connectorCall).not.toHaveBeenCalled();
+    const tool = SOCIAL_TOOL_REGISTRY.find(candidate => candidate.name === 'social_set_privacy')!;
+    expect(tool.effect).toBe('destructive');
+    expect(tool.annotations).toMatchObject({ destructiveHint: true, readOnlyHint: false });
+    expect((tool.inputSchema.properties as Record<string, unknown>).confirm).toEqual({
+      const: true,
+      description: expect.any(String),
+    });
+    expect(tool.inputSchema.required).toEqual(
+      expect.arrayContaining(['channel', 'accountId', 'setting', 'value', 'confirm'])
+    );
+  });
+});
+
+describe('social_set_disappearing', () => {
+  it('sets a chat timer through POST /chats/disappearing with the bare chat', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({
+      updated: true,
+      expiration: 86400,
+      label: '24h',
+      previous: 0,
+      changed: true,
+    });
+    const out = await run('social_set_disappearing', {
+      ...wa,
+      target: 'professional:1203@g.us',
+      expiration: 86400,
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/chats/disappearing',
+      { conversationId: '1203@g.us', expiration: 86400 }
+    );
+    expect(out.structuredContent).toMatchObject({ ok: true, data: { label: '24h' } });
+    await run('social_set_disappearing', { ...wa, target: '34600@s.whatsapp.net', expiration: 0 });
+    expect(connectorCall).toHaveBeenLastCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/chats/disappearing',
+      { conversationId: '34600@s.whatsapp.net', expiration: 0 }
+    );
+  });
+
+  it('refuses other timers, another account target and other channels', async () => {
+    const { run, connectorCall } = serverWith();
+    for (const expiration of [3600, 2592000, '24h', -1]) {
+      await expect(
+        run('social_set_disappearing', { ...wa, target: '1203@g.us', expiration })
+      ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    }
+    const foreign = await run('social_set_disappearing', {
+      channel: 'whatsapp',
+      accountId: 'personal',
+      target: 'professional:1203@g.us',
+      expiration: 604800,
+    });
+    expect(foreign.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    expect(foreign.structuredContent.error.message).toMatch(/professional WhatsApp namespace/);
+    const tg = await run('social_set_disappearing', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      expiration: 604800,
+    });
+    expect(tg.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('maps 403 disabled_sending / not_group_admin and 404 conversation_unavailable', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending disabled', failureClass: 'disabled_sending' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'admins only', failureClass: 'not_group_admin' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(404, { error: 'unknown chat', failureClass: 'conversation_unavailable' })
+      );
+    const args = { ...wa, target: '1203@g.us', expiration: 604800 };
+    expect((await run('social_set_disappearing', args)).structuredContent.error).toMatchObject({
+      code: 'disabled_sending',
+      details: { status: 403 },
+    });
+    expect((await run('social_set_disappearing', args)).structuredContent.error).toMatchObject({
+      code: 'not_group_admin',
+    });
+    expect((await run('social_set_disappearing', args)).structuredContent.error).toMatchObject({
+      code: 'conversation_unavailable',
+      details: { status: 404 },
+    });
+  });
+});
+
+describe('social_send_typing', () => {
+  it('sends a chat-state to one chat through POST /chats/presence', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({
+      ok: true,
+      state: 'composing',
+      scope: 'chat',
+      sent: true,
+      throttled: false,
+    });
+    const out = await run('social_send_typing', {
+      ...wa,
+      target: 'professional:34600@s.whatsapp.net',
+      state: 'composing',
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/chats/presence',
+      { conversationId: '34600@s.whatsapp.net', state: 'composing' }
+    );
+    expect(out.structuredContent).toMatchObject({ ok: true, data: { scope: 'chat', sent: true } });
+  });
+
+  it('never sends account-wide presence and needs the chat', async () => {
+    const { run, connectorCall } = serverWith();
+    for (const state of ['available', 'unavailable', 'typing']) {
+      await expect(
+        run('social_send_typing', { ...wa, target: '34600@s.whatsapp.net', state })
+      ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    }
+    await expect(run('social_send_typing', { ...wa, state: 'paused' })).rejects.toMatchObject({
+      canonicalCode: 'invalid_request',
+    });
+    const foreign = await run('social_send_typing', {
+      channel: 'whatsapp',
+      accountId: 'personal',
+      target: 'professional:34600@s.whatsapp.net',
+      state: 'paused',
+    });
+    expect(foreign.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    const tg = await run('social_send_typing', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      state: 'composing',
+    });
+    expect(tg.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('maps the gate and 422 presence_unsupported', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending disabled', failureClass: 'disabled_sending' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(422, { error: 'no push name', failureClass: 'presence_unsupported' })
+      );
+    const args = { ...wa, target: '34600@s.whatsapp.net', state: 'recording' };
+    expect((await run('social_send_typing', args)).structuredContent.error).toMatchObject({
+      code: 'disabled_sending',
+    });
+    expect((await run('social_send_typing', args)).structuredContent.error).toMatchObject({
+      code: 'presence_unsupported',
+      details: { status: 422 },
+    });
+  });
+});
+
+describe('social_send_sticker / social_send_gif', () => {
+  const sticker = {
+    ...wa,
+    target: 'professional:34600@s.whatsapp.net',
+    fileUrl: 'https://cdn.example.com/hola.webp',
+  };
+
+  it('sends a WhatsApp sticker with a bare reply id and a tool-scoped Idempotency-Key', async () => {
+    await runWithRedisDouble(async server => {
+      server.connectorCall.mockResolvedValueOnce({
+        sent: true,
+        messageId: '3EB0STK',
+        kind: 'sticker',
+        animated: false,
+      });
+      const out = (await server.run('social_send_sticker', {
+        ...sticker,
+        replyTo: 'professional:3EB0QUOTE',
+        idempotencyKey: 'stk-1',
+      })) as { structuredContent: Record<string, any> };
+      const [url, method, path, body, timeout, headers] = server.connectorCall.mock.calls[0];
+      expect([url, method, path, timeout]).toEqual([
+        'http://wa-professional',
+        'POST',
+        '/api/v1/messages/sticker',
+        undefined,
+      ]);
+      expect(body).toEqual({
+        conversationId: '34600@s.whatsapp.net',
+        fileUrl: 'https://cdn.example.com/hola.webp',
+        replyTo: '3EB0QUOTE',
+      });
+      expect((headers as Record<string, string>)['Idempotency-Key']).toMatch(/^mcp-[0-9a-f]{64}$/);
+      expect(out.structuredContent).toMatchObject({ ok: true, data: { kind: 'sticker' } });
+    });
+  });
+
+  it('sends a WhatsApp GIF with its caption, keyed apart from a sticker', async () => {
+    await runWithRedisDouble(async server => {
+      await server.run('social_send_gif', {
+        ...wa,
+        target: '1203@g.us',
+        fileUrl: 'http://minio.storage:9000/drive/baile.mp4?X-Amz-Signature=abc',
+        caption: '¡Viernes!',
+        idempotencyKey: 'same-key',
+      });
+      await server.run('social_send_sticker', {
+        ...wa,
+        target: '1203@g.us',
+        fileUrl: 'https://cdn.example.com/hola.webp',
+        idempotencyKey: 'same-key',
+      });
+      const [gif, stk] = server.connectorCall.mock.calls;
+      expect(gif.slice(0, 4)).toEqual([
+        'http://wa-professional',
+        'POST',
+        '/api/v1/messages/gif',
+        {
+          conversationId: '1203@g.us',
+          fileUrl: 'http://minio.storage:9000/drive/baile.mp4?X-Amz-Signature=abc',
+          caption: '¡Viernes!',
+        },
+      ]);
+      expect(stk[2]).toBe('/api/v1/messages/sticker');
+      expect(gif[5]['Idempotency-Key']).not.toBe(stk[5]['Idempotency-Key']);
+    });
+  });
+
+  it('sends a Telegram sticker through its media send with sticker: true', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({ sent: true });
+    const out = await run('social_send_sticker', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: 'tg_-100123',
+      fileUrl: 'https://cdn.example.com/hola.webp',
+      replyTo: 'tg_-100123_77',
+      threadId: 5,
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://tg-personal',
+      'POST',
+      '/api/v1/messages/media/send',
+      {
+        chatId: '-100123',
+        filePath: 'https://cdn.example.com/hola.webp',
+        sticker: true,
+        replyTo: 77,
+        threadId: 5,
+      }
+    );
+    expect(out.structuredContent).toMatchObject({ ok: true, status: 'accepted' });
+  });
+
+  it('maps 400 sticker_not_webp / gif_not_mp4 and the 403 gate', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall
+      .mockRejectedValueOnce(
+        connectorError(400, {
+          error: 'A sticker must be a WebP image',
+          failureClass: 'invalid_request',
+          code: 'sticker_not_webp',
+        })
+      )
+      .mockRejectedValueOnce(
+        connectorError(400, {
+          error: 'transcode to MP4',
+          failureClass: 'invalid_request',
+          code: 'gif_not_mp4',
+        })
+      )
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending disabled', failureClass: 'disabled_sending' })
+      )
+      .mockRejectedValueOnce(
+        connectorError(403, { error: 'Sending disabled', failureClass: 'disabled_sending' })
+      );
+    const webp = await run('social_send_sticker', sticker);
+    expect(webp.structuredContent.error).toMatchObject({
+      code: 'invalid_request',
+      details: { status: 400, code: 'sticker_not_webp' },
+    });
+    const gif = await run('social_send_gif', {
+      ...sticker,
+      fileUrl: 'https://cdn.example.com/baile.gif',
+    });
+    expect(gif.structuredContent.error).toMatchObject({
+      code: 'invalid_request',
+      details: { code: 'gif_not_mp4' },
+    });
+    const gated = await run('social_send_sticker', sticker);
+    expect(gated.structuredContent.error).toMatchObject({
+      code: 'disabled_sending',
+      details: { status: 403 },
+    });
+    const tgGated = await run('social_send_sticker', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      fileUrl: 'https://cdn.example.com/hola.webp',
+    });
+    expect(tgGated.structuredContent.error).toMatchObject({ code: 'disabled_sending' });
+  });
+
+  it('refuses non-http urls, a sticker caption, foreign ids, threadId on WhatsApp and other channels', async () => {
+    const { run, connectorCall } = serverWith();
+    for (const fileUrl of [
+      'file:///tmp/a.webp',
+      's3://drive/a.webp',
+      'data:image/webp;base64,UklG',
+    ]) {
+      await expect(run('social_send_sticker', { ...sticker, fileUrl })).rejects.toMatchObject({
+        canonicalCode: 'invalid_request',
+      });
+    }
+    await expect(run('social_send_sticker', { ...sticker, caption: 'no' })).rejects.toMatchObject({
+      canonicalCode: 'invalid_request',
+    });
+    await expect(
+      run('social_send_gif', { ...sticker, caption: 'x'.repeat(1025) })
+    ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    const foreignTarget = await run('social_send_gif', {
+      ...sticker,
+      accountId: 'personal',
+    });
+    expect(foreignTarget.structuredContent.error.message).toMatch(
+      /professional WhatsApp namespace/
+    );
+    const foreignReply = await run('social_send_sticker', {
+      ...sticker,
+      accountId: 'personal',
+      target: '34600@s.whatsapp.net',
+      replyTo: 'professional:3EB0X',
+    });
+    expect(foreignReply.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    expect(foreignReply.structuredContent.error.message).toMatch(
+      /messageId belongs to the professional/
+    );
+    const foreignTg = await run('social_send_sticker', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: 'professional:tg_12345',
+      fileUrl: 'https://cdn.example.com/hola.webp',
+    });
+    expect(foreignTg.structuredContent.error.message).toMatch(/professional Telegram namespace/);
+    const thread = await run('social_send_sticker', { ...sticker, threadId: 5 });
+    expect(thread.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    const tgGif = await run('social_send_gif', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '12345',
+      fileUrl: 'https://cdn.example.com/baile.mp4',
+    });
+    expect(tgGif.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    const ig = await run('social_send_sticker', {
+      channel: 'instagram',
+      accountId: 'skirmshop',
+      target: '1',
+      fileUrl: 'https://cdn.example.com/hola.webp',
+    });
+    expect(ig.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+});
+
+describe('social_delete_message forMe', () => {
+  it('deletes only for this account on WhatsApp with forMe: true', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({ deleted: true, scope: 'me', messageId: '3EB0AAA' });
+    const out = await run('social_delete_message', {
+      ...wa,
+      target: 'professional:34600@s.whatsapp.net',
+      messageId: 'professional:3EB0AAA',
+      forMe: true,
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/messages/delete',
+      { chatId: '34600@s.whatsapp.net', messageId: '3EB0AAA', forMe: true }
+    );
+    expect(out.structuredContent).toMatchObject({ ok: true, data: { scope: 'me' } });
+  });
+
+  it('keeps forMe: false identical to the delete for everyone', async () => {
+    const { run, connectorCall } = serverWith();
+    await run('social_delete_message', {
+      ...wa,
+      target: '34600@s.whatsapp.net',
+      messageId: '3EB0AAA',
+      forMe: false,
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/messages/delete',
+      { chatId: '34600@s.whatsapp.net', messageId: '3EB0AAA' }
+    );
+  });
+
+  it('maps 404 message_unavailable and answers unsupported_capability off WhatsApp', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockRejectedValueOnce(
+      connectorError(404, { error: 'no timestamp', failureClass: 'message_unavailable' })
+    );
+    const gone = await run('social_delete_message', {
+      ...wa,
+      target: '34600@s.whatsapp.net',
+      messageId: '3EB0OLD',
+      forMe: true,
+    });
+    expect(gone.structuredContent.error).toMatchObject({ code: 'message_unavailable' });
+    for (const channel of [
+      { channel: 'telegram', accountId: 'personal', target: '12345', messageId: '77' },
+      { channel: 'instagram', accountId: 'skirmshop', target: '1', messageId: '2' },
+    ]) {
+      const out = await run('social_delete_message', { ...channel, forMe: true });
+      expect(out.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+      expect(out.structuredContent.error.message).toMatch(/forMe/);
+    }
+    await expect(
+      run('social_delete_message', {
+        ...wa,
+        target: '34600@s.whatsapp.net',
+        messageId: '3',
+        forMe: 'yes',
+      })
+    ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    expect(connectorCall).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('new WhatsApp writes and the identity binding', () => {
+  const saved: Record<string, string | undefined> = {};
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'social-gate-'));
+    writeFileSync(
+      join(dir, 'bindings.yaml'),
+      'bindings:\n  - sub: leila-sub\n    label: leila\n    accounts: [leila]\n'
+    );
+    for (const key of ['SOCIAL_IDENTITY_BINDING', 'SOCIAL_IDENTITY_BINDINGS_FILE']) {
+      saved[key] = process.env[key];
+    }
+    process.env.SOCIAL_IDENTITY_BINDING = 'on';
+    process.env.SOCIAL_IDENTITY_BINDINGS_FILE = join(dir, 'bindings.yaml');
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuse an account the caller is not bound to before reaching the connector', async () => {
+    const { run, connectorCall } = serverWith();
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ['social_set_privacy', { ...wa, setting: 'readReceipts', value: 'none', confirm: true }],
+      ['social_set_disappearing', { ...wa, target: '34600@s.whatsapp.net', expiration: 0 }],
+      ['social_send_typing', { ...wa, target: '34600@s.whatsapp.net', state: 'composing' }],
+      [
+        'social_send_sticker',
+        { ...wa, target: '34600@s.whatsapp.net', fileUrl: 'https://cdn.example.com/a.webp' },
+      ],
+      [
+        'social_send_gif',
+        { ...wa, target: '34600@s.whatsapp.net', fileUrl: 'https://cdn.example.com/a.mp4' },
+      ],
+    ];
+    for (const [name, args] of calls) {
+      await expect(
+        runWithRequestActor({ sub: 'leila-sub' }, () => run(name, args))
+      ).rejects.toMatchObject({ canonicalCode: 'forbidden' });
+    }
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+});

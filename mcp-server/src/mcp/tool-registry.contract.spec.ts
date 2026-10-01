@@ -54,9 +54,14 @@ const EXPECTED_TOOL_NAMES = [
   'social_search_messages',
   'social_send_draft',
   'social_send_event',
+  'social_send_gif',
   'social_send_message',
   'social_send_poll',
+  'social_send_sticker',
+  'social_send_typing',
   'social_set_chat_state',
+  'social_set_disappearing',
+  'social_set_privacy',
   'social_share_contact',
   'social_start_chat',
   'social_start_digest',
@@ -110,9 +115,14 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_search_messages: 'read',
   social_send_draft: 'externalWrite',
   social_send_event: 'externalWrite',
+  social_send_gif: 'externalWrite',
   social_send_message: 'externalWrite',
   social_send_poll: 'externalWrite',
+  social_send_sticker: 'externalWrite',
+  social_send_typing: 'externalWrite',
   social_set_chat_state: 'externalWrite',
+  social_set_disappearing: 'externalWrite',
+  social_set_privacy: 'destructive',
   social_share_contact: 'externalWrite',
   social_start_chat: 'externalWrite',
   social_start_digest: 'internalWrite',
@@ -401,6 +411,12 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: false,
     openWorldHint: true,
   },
+  social_send_gif: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
   social_send_message: {
     readOnlyHint: false,
     destructiveHint: false,
@@ -413,9 +429,33 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: false,
     openWorldHint: true,
   },
+  social_send_sticker: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  social_send_typing: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_set_chat_state: {
     readOnlyHint: false,
     destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_set_disappearing: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_set_privacy: {
+    readOnlyHint: false,
+    destructiveHint: true,
     idempotentHint: true,
     openWorldHint: true,
   },
@@ -542,11 +582,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 53 canonical tools in deterministic order', () => {
+  it('contains exactly the 58 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(53);
+    expect(new Set(names).size).toBe(58);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -572,7 +612,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(27);
+    expect(writes).toHaveLength(32);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same

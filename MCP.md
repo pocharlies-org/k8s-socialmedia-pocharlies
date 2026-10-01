@@ -128,15 +128,36 @@ invite_link_unavailable`; nobody invited → `invite_not_sent`.
   conversation), `social_share_contact` (1–5 cards), `social_list_contacts`
   (local index).
 - `social_get_presence` and `social_get_privacy` are read-only (the latter,
-  with `target`, adds that chat's disappearing timer). The MCP exposes no
-  presence, privacy or disappearing-timer writes.
+  with `target`, adds that chat's disappearing timer).
+- `social_send_typing`: our typing indicator in one chat, `state`
+  `composing`, `recording` or `paused`. It never sends `available` or
+  `unavailable` (account-wide; `available` silences the phone's notifications).
+- `social_set_privacy` (destructive, `confirm: true` required by the schema):
+  one account-wide setting per call with WhatsApp's exact values — `lastSeen`,
+  `profilePicture`, `status`: `all | contacts | contact_blacklist | none`;
+  `online`: `all | match_last_seen`; `readReceipts`: `all | none`; `groupsAdd`:
+  `all | contacts | contact_blacklist`; `call`: `all | known`; `messages`:
+  `all | contacts`; `defaultDisappearing` (new chats): `0`, `86400`, `604800`
+  or `7776000` seconds. An equal value answers `changed: false`.
+- `social_set_disappearing`: a chat's timer, `expiration` `0`, `86400`,
+  `604800` or `7776000` seconds; everyone in the chat sees the change.
+- `social_send_sticker` (WhatsApp and Telegram; WebP, WhatsApp ≤ 1 MiB) and
+  `social_send_gif` (WhatsApp; MP4 ≤ 16 MiB played looped, optional `caption`):
+  `fileUrl` is an http(s) URL the connector fetches, as attachment `url`s.
+  Nothing is converted (`sticker_not_webp`, `gif_not_mp4`). Separate tools
+  rather than `social_send_message` attachments: that path picks the message
+  type from the Content-Type (a WebP would go as a photo) and its schema stays
+  unchanged.
+- `social_delete_message` with `forMe: true` (WhatsApp only) removes the
+  message from this account and its devices; the other side keeps it.
 - `social_block_contact` (`action: block|unblock`, exactly one of `target` —
   the 1:1 conversation — or `phone`, `confirm: true` required by the schema;
   groups are refused) and `social_list_blocked` (read; `fresh: true` re-reads
   WhatsApp's list). `changed: false` means it already was so.
 
 Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `invite_to_group`,
-`start_chat` with a message) forward the caller's `idempotencyKey`, scoped per
+WhatsApp `send_sticker`, `send_gif`, `start_chat` with a message) forward the
+caller's `idempotencyKey`, scoped per
 tool, as the connector's `Idempotency-Key`. Connector refusals keep their `failureClass` as
 the error `code` (`disabled_sending`, `disconnected`, `not_group_admin`,
 `not_on_whatsapp`, `account_restricted`, …) with the connector payload in

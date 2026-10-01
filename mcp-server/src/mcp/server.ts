@@ -767,6 +767,16 @@ export class MCPServer {
         return this.canonicalGetPresence(args);
       case 'getPrivacy':
         return this.canonicalGetPrivacy(args);
+      case 'setPrivacy':
+        return this.canonicalSetPrivacy(args);
+      case 'setDisappearing':
+        return this.canonicalSetDisappearing(args);
+      case 'sendTyping':
+        return this.canonicalSendTyping(args);
+      case 'sendSticker':
+        return this.canonicalSendSticker(args);
+      case 'sendGif':
+        return this.whatsAppStickerOrGif('gif', args);
       case 'blockContact':
         return this.canonicalBlockContact(args);
       case 'listBlocked':
@@ -1974,12 +1984,21 @@ export class MCPServer {
 
   private async canonicalDeleteMessage(args: Record<string, any>): Promise<any> {
     const channelName = this.channel(args);
+    const forMe = args.forMe === true;
     if (channelName === 'whatsapp') {
       return this.handleDeleteMessage({
         chatId: this.whatsAppProviderTarget(args),
         messageId: this.string(args, 'messageId'),
         account: this.account(args),
+        forMe,
       });
+    }
+    if (forMe) {
+      // The Telegram connector always revokes for everyone.
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Deleting a message only for this account (forMe) is only supported on WhatsApp'
+      );
     }
     if (channelName === 'telegram') {
       return this.handleTelegramDeleteMessage({
@@ -2397,6 +2416,140 @@ export class MCPServer {
         account,
         'GET',
         `/api/v1/contacts/blocklist${args.fresh === true ? '?fresh=1' : ''}`
+      )
+    );
+  }
+
+  /**
+   * POST /privacy: one account-wide setting per call (every contact, every
+   * device). confirm: true is forced by the schema and passed through (the
+   * connector refuses without it); the connector reads the current value
+   * first and does not re-send an equal one (changed: false).
+   */
+  private async canonicalSetPrivacy(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/privacy', {
+        setting: this.string(args, 'setting'),
+        value: args.value,
+        confirm: true,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  private async canonicalSetDisappearing(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/chats/disappearing', {
+        conversationId: chatId,
+        expiration: args.expiration,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /**
+   * Our typing indicator in ONE chat (POST /chats/presence with a chat-state).
+   * Never unavailable / available: those are account-wide, and available
+   * silences the phone's notifications.
+   */
+  private async canonicalSendTyping(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    const state = this.string(args, 'state');
+    if (!['composing', 'recording', 'paused'].includes(state)) {
+      throw this.canonicalError('invalid_request', 'state must be composing, recording or paused');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/chats/presence', {
+        conversationId: chatId,
+        state,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /** WhatsApp: POST /messages/sticker. Telegram: its media send with sticker: true. */
+  private async canonicalSendSticker(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') return this.whatsAppStickerOrGif('sticker', args);
+    if (channelName !== 'telegram') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Stickers are not supported by the deployed ${channelName} connector`
+      );
+    }
+    const account = normalizeAccount(this.account(args));
+    const target = stripAccount(this.target(args));
+    if (target.account !== 'personal' && target.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `target belongs to the ${target.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const { chatId, topicId } = this.telegramTopicTarget(
+      this.target(args),
+      args.threadId ?? undefined
+    );
+    const replyTo =
+      args.replyTo === undefined || args.replyTo === null
+        ? undefined
+        : this.telegramMessageNumber(String(args.replyTo), chatId, account);
+    return this.jsonResponse(
+      await this.classifiedConnectorCall(
+        this.tgUrl(args.accountId),
+        'POST',
+        '/api/v1/messages/media/send',
+        {
+          chatId,
+          filePath: this.string(args, 'fileUrl'),
+          sticker: true,
+          ...(replyTo ? { replyTo } : {}),
+          ...(topicId ? { threadId: topicId } : {}),
+        }
+      )
+    );
+  }
+
+  /**
+   * POST /messages/sticker | /messages/gif: the connector fetches fileUrl,
+   * checks its bytes (WebP ≤ 1 MiB / MP4 ≤ 16 MiB, nothing converted) and
+   * takes the caller's idempotencyKey, scoped to the tool, as Idempotency-Key.
+   */
+  private async whatsAppStickerOrGif(
+    kind: 'sticker' | 'gif',
+    args: Record<string, any>
+  ): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    if (args.threadId !== undefined && args.threadId !== null) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'WhatsApp does not support Telegram threadId'
+      );
+    }
+    const replyTo =
+      args.replyTo === undefined || args.replyTo === null
+        ? undefined
+        : this.bareWhatsAppMessageId(String(args.replyTo), account);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        `/api/v1/messages/${kind}`,
+        {
+          conversationId: chatId,
+          fileUrl: this.string(args, 'fileUrl'),
+          ...(typeof args.caption === 'string' && args.caption.trim()
+            ? { caption: args.caption }
+            : {}),
+          ...(replyTo ? { replyTo } : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, kind, `social_send_${kind}`)
       )
     );
   }
@@ -4750,13 +4903,19 @@ export class MCPServer {
   }
 
   /**
-   * Delete for everyone (revoke) through the connector's POST /messages/delete
-   * (fase 3 / PR-3): ids travel inside the HMAC-signed body, the connector
+   * Delete for everyone (revoke) or, with forMe, only for this account through
+   * the connector's POST /messages/delete (fase 3 / PR-3): ids travel inside
+   * the HMAC-signed body, the connector
    * rebuilds the real key from its durable copies, applies ENABLE_SENDING and
    * flags the row (content kept). messageId may be bare or namespaced to this
    * account; another account's id is refused like a foreign target.
    */
-  private async handleDeleteMessage(args: { chatId: string; messageId: string; account?: string }) {
+  private async handleDeleteMessage(args: {
+    chatId: string;
+    messageId: string;
+    account?: string;
+    forMe?: boolean;
+  }) {
     const data = await this.classifiedConnectorCall(
       this.waUrl(args.account),
       'POST',
@@ -4764,6 +4923,8 @@ export class MCPServer {
       {
         chatId: bareWhatsAppJid(args.chatId),
         messageId: this.bareWhatsAppMessageId(args.messageId, args.account),
+        // forMe: only this account (WhatsApp app-state deleteForMe); absent = for everyone.
+        ...(args.forMe ? { forMe: true } : {}),
         ...this.connectorActor(),
       }
     );
