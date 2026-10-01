@@ -2188,7 +2188,11 @@ contracts:
       (chat|group|channel|bot) listado entre las claves; el ledger brain_windows
       y el corte de sesiones del lado consumidor se corrigen sin cambiar la forma. Los textos se envian bien formados en UTF-16
       (sustitutos sueltos -> U+FFFD) para no abrir el circuit breaker del embedder. Desde el 01-10 las ventanas con conv_kind bot o channel se
-      suben sin hijos conversation_chunk (solo el padre).
+      suben sin hijos conversation_chunk (solo el padre). Desde el 02-10 la
+      `extraction` del padre se normaliza antes de validarla: un tipo de
+      entidad fuera del enum se mapea a su sinónimo o esa entidad se omite,
+      y las listas y el summary van recortados a sus topes. La forma y las
+      claves no cambian.
       Desde el 01-10 el incremental (brain-windows.ts) ya no llama aqui
       por defecto: publica amqp.synapse.brain-window-*.v1 y Synapse hace el
       push-ingest con los MISMOS documentos; este camino queda para el
