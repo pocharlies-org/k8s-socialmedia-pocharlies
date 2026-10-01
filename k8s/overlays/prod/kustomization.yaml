@@ -77,9 +77,11 @@ images:
   # antes del brain y del LLM (#168); incluye lo de v1.3.81 (#166).
   # v1.3.83 (run 36906114195, deploy/prod@84c9b76) añade la tool social_invite_to_group (#171);
   # mismo código que v1.3.82 en lo demás.
+  # v1.3.85 (run 36920007935, deploy/prod@69d1fe8): #173 (privacidad, temporizador, escribiendo,
+  # stickers/GIFs, borrar para mí) y #175 (destacados/fijados, migración 018). 62 tools.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.83
-    digest: sha256:8cd69ba00e5a040494caa3eafa0ee5917a494a0effad4cdbebeb1014e4a496ad
+    newTag: v1.3.85
+    digest: sha256:dd5a31557d934831bc540e56e07f6f46048c3043f3e61c9fa95ecf7e6c0fcb3b
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
