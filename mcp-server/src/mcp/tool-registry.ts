@@ -85,6 +85,21 @@ const attachment = {
     name: { type: 'string' },
     mimeType: { type: 'string' },
     caption: { type: 'string' },
+    viewOnce: {
+      type: 'boolean',
+      default: false,
+      description:
+        'WhatsApp only: the recipient can open it once. Only for JPEG/PNG photos and MP4 ' +
+        'videos (by the fetched Content-Type); anything else is refused, never sent permanent.',
+    },
+    hd: {
+      type: 'boolean',
+      default: false,
+      description:
+        'WhatsApp only, still images: re-encode to HD (long edge ≤ 2560 px, JPEG 85; PNG ' +
+        'with transparency stays PNG; never enlarged). Without it the fetched bytes go out ' +
+        'untouched.',
+    },
   },
   required: ['url'],
 } as const;
@@ -2106,6 +2121,64 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
           if: { properties: { setting: { const: setting } } },
           then: { properties: { value: { enum: values } } },
         })),
+      }
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_get_my_profile',
+    title: 'Get my profile',
+    description:
+      "Read this WhatsApp account's own profile: display name, about text (and when it was " +
+      'set), whether it has a photo, and which changes the connected session can make ' +
+      '(capabilities). aboutKnown / photoKnown false mean WhatsApp did not answer, not ' +
+      'empty. Read-only.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'profiles.me.get',
+    handler: 'getMyProfile',
+    inputSchema: objectSchema({ channel, accountId, readSource }, ['channel', 'accountId']),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_update_my_profile',
+    title: 'Update my profile',
+    description:
+      "Change this WhatsApp account's own profile: display name (≤ 25 characters), about " +
+      "text (≤ 139; '' clears it), photo (photoUrl, JPEG/PNG/WebP ≤ 8 MB, WhatsApp crops " +
+      'it square) or removePhoto. Every contact sees it, so confirm must be true. Each ' +
+      'field answers accepted (WhatsApp took it) and confirmed (a readback proved it); a ' +
+      'name is often accepted but not yet confirmed by this linked session. Current ' +
+      'values: social_get_my_profile.',
+    effect: 'destructive',
+    authScope: 'social.write',
+    capability: 'profiles.me.update',
+    handler: 'updateMyProfile',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        name: { type: 'string', minLength: 1, maxLength: 25 },
+        about: { type: 'string', maxLength: 139 },
+        photoUrl: fetchedFileUrl('The new profile photo (JPEG, PNG or WebP, ≤ 8 MB)'),
+        removePhoto: {
+          const: true,
+          description: 'Remove the profile photo. Not together with photoUrl.',
+        },
+        confirm: {
+          const: true,
+          description: 'Must be true: every contact sees the change.',
+        },
+      },
+      ['channel', 'accountId', 'confirm'],
+      {
+        anyOf: [
+          { required: ['name'] },
+          { required: ['about'] },
+          { required: ['photoUrl'] },
+          { required: ['removePhoto'] },
+        ],
+        not: { required: ['photoUrl', 'removePhoto'] },
       }
     ),
     idempotent: true,

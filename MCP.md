@@ -204,6 +204,21 @@ invite_link_unavailable`; nobody invited → `invite_not_sent`.
   status to an explicit `recipients` list (phones or user jids, ≤ 256). Off
   unless the connector runs with `WA_STATUS_PUBLISH_ENABLED=true`
   (`status_publish_disabled`), then the usual send gate.
+- `social_get_my_profile` (read): this WhatsApp account's own name, about
+  (`aboutSetAt`), whether it has a photo and `capabilities` (what the session
+  can change). `aboutKnown` / `photoKnown: false` = WhatsApp did not answer.
+- `social_update_my_profile` (destructive, `confirm: true` required by the
+  schema): `name` (≤ 25), `about` (≤ 139, `''` clears it), `photoUrl` (http(s),
+  JPEG/PNG/WebP ≤ 8 MB, fetched by the connector, WhatsApp crops it square) or
+  `removePhoto: true` — at least one, photoUrl and removePhoto not together.
+  Every contact sees it. Each field answers `accepted` (WhatsApp took it) and
+  `confirmed` (a readback proved it); a name is usually accepted but not yet
+  confirmed by the linked session. A photo step failing after name/about were
+  applied is `outcome_unknown`.
+- `social_send_message` attachments (WhatsApp only, additive): `viewOnce: true`
+  sends a JPEG/PNG photo or MP4 video that opens once (anything else is
+  refused, never sent permanent); `hd: true` re-encodes a still image to HD
+  (long edge ≤ 2560 px). Without them the bytes go out untouched, as before.
 
 Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `invite_to_group`,
 WhatsApp `send_sticker`, `send_gif`, `pin_message`, `publish_status`, `start_chat` with a

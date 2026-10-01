@@ -253,6 +253,25 @@ import {
   PresenceSendThrottle,
   PresenceView,
 } from './presence';
+import { createHash } from 'crypto';
+import {
+  checkMediaOptions,
+  MediaQuality,
+  parseMediaQuality,
+  parseViewOnce,
+  prepareImageQuality,
+} from './media-quality';
+import {
+  applyProfileUpdates,
+  OwnProfilePhotoProvider,
+  ProfileIo,
+  ProfileUpdateInput,
+  ProfileUpdateResult,
+  readOwnProfile,
+  readOwnProfilePhotoBytes,
+  removeOwnProfilePhoto,
+  setOwnProfilePhoto,
+} from './profile-service';
 import {
   buildPrivacyUpdate,
   currentPrivacyValue,
@@ -2833,9 +2852,15 @@ export class BaileysClient extends EventEmitter {
       /** Same contract as sendMessage's messageId / beforeSend. */
       messageId?: string;
       beforeSend?: () => Promise<void>;
+      /** Play-once photo/video (media-quality.ts); refused for other kinds. */
+      viewOnce?: boolean;
+      /** Re-encode a still image (media-quality.ts); default source = untouched. */
+      quality?: MediaQuality;
     }
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
+    const viewOnce = parseViewOnce(options?.viewOnce);
+    const quality = parseMediaQuality(options?.quality);
     const raw = this.toRawJid(chatId);
     await this.guardDirectSend(raw);
     // A media reply whose quoted message is unknown is rejected (before the
@@ -2859,14 +2884,23 @@ export class BaileysClient extends EventEmitter {
       throw new Error(`Failed to fetch file from ${fileUrl}: ${e?.message || e}`);
     }
     const fileName = fileUrl.split('/').pop() || 'attachment';
+    const asSticker = !!options?.asSticker || contentType === 'image/webp';
+    // Refused before anything goes out: play-once only for photos/videos,
+    // a quality only for still images.
+    checkMediaOptions(contentType, { viewOnce, quality, asSticker });
+    const once = viewOnce ? { viewOnce: true } : {};
 
     let payload: AnyMessageContent;
     // Stickers: WhatsApp expects webp; baileys handles conversion when the
     // payload is `{ sticker: buf }` and the bytes are a static webp/animated.
-    if (options?.asSticker || contentType === 'image/webp') {
+    if (asSticker) {
       payload = { sticker: buf };
-    } else if (contentType.startsWith('image/')) payload = { image: buf, caption };
-    else if (contentType.startsWith('video/')) payload = { video: buf, caption };
+    } else if (contentType.startsWith('image/')) {
+      if (quality !== 'source') {
+        const prepared = await prepareImageQuality(buf, contentType, quality);
+        payload = { image: prepared.bytes, mimetype: prepared.mimeType, caption, ...once };
+      } else payload = { image: buf, caption, ...once };
+    } else if (contentType.startsWith('video/')) payload = { video: buf, caption, ...once };
     else if (contentType.startsWith('audio/'))
       payload = { audio: buf, mimetype: contentType, ptt: false };
     else
@@ -6624,6 +6658,105 @@ export class BaileysClient extends EventEmitter {
       }
       throw new ProfilePictureDownloadError('WhatsApp profile picture download failed');
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Own profile: name, about, photo (ported from the NAS fork; the rules live
+  // in profile-service.ts, provider-agnostic)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Provider surface for `profile-service`, rebuilt from the live socket on
+   * every call. A writer is advertised only when the installed Baileys really
+   * exposes it, so a provider upgrade degrades to `capability: false` and a
+   * 501 instead of a TypeError on a signature assumed from the `.d.ts` files.
+   */
+  ownProfileProvider(): OwnProfilePhotoProvider {
+    const socket = this.sock as unknown as
+      | (Record<string, unknown> & {
+          user?: { id?: string; name?: string; lid?: string };
+          authState?: { creds?: { me?: { id?: string; name?: string } } };
+        })
+      | null;
+    const method = <A extends unknown[], R>(name: string) => {
+      const candidate = socket?.[name];
+      if (typeof candidate !== 'function') return undefined;
+      return (...args: A): Promise<R> => (candidate as (...a: A) => Promise<R>).apply(socket, args);
+    };
+    const ownRawJid = (): string | null => {
+      // `creds.me.id` carries the paired device suffix; the profile IQs and the
+      // USync lookup both need the bare user JID.
+      const candidate = socket?.user?.id || socket?.authState?.creds?.me?.id;
+      if (!candidate) return null;
+      try {
+        return jidNormalizedUser(candidate);
+      } catch {
+        return null;
+      }
+    };
+    return {
+      isConnected: () => this.isConnected(),
+      ownJid: ownRawJid,
+      accountName: () => {
+        const name = socket?.user?.name || socket?.authState?.creds?.me?.name;
+        return typeof name === 'string' && name.trim() ? name.trim() : null;
+      },
+      updateProfileName: method<[string], unknown>('updateProfileName'),
+      updateProfileStatus: method<[string], unknown>('updateProfileStatus'),
+      updateProfilePicture: method<[string, Buffer], unknown>('updateProfilePicture'),
+      removeProfilePicture: method<[string], unknown>('removeProfilePicture'),
+      fetchStatus: method<[string], unknown>('fetchStatus'),
+      // The CDN path identifies the stored picture; the query string is a
+      // rotating access token, so it must not look like a new picture. Hashed
+      // to keep the provider URL out of the API. Unlike contact avatars, a 403
+      // for our own account is a refused lookup, not a proven absence: only a
+      // 404 says "no picture", so a removal is never "confirmed" by an error.
+      profilePictureIdentity: async (jid: string) => {
+        const sock = this.sock;
+        if (!sock) throw new Error('Client not connected');
+        const raw = this.toRawJid(jid);
+        let url: string | undefined;
+        try {
+          url = await boundedProfilePictureUrl(timeoutMs =>
+            sock.profilePictureUrl(raw, 'preview', timeoutMs)
+          );
+        } catch (error) {
+          if (error instanceof Boom && error.output.statusCode === 404) return null;
+          throw error;
+        }
+        if (!url) throw new ProfilePictureDownloadError('WhatsApp returned no profile picture URL');
+        return createHash('sha256').update(url.split('?')[0]).digest('hex');
+      },
+      downloadProfilePhoto: async (jid: string) => this.getProfilePictureBytes(this.toRawJid(jid)),
+    };
+  }
+
+  /** Own profile with the `@c.us` JID shape the rest of this API returns. */
+  async getOwnProfile(io: ProfileIo = {}) {
+    const profile = await readOwnProfile(this.ownProfileProvider(), io);
+    return { ...profile, jid: this.normalizeJid(profile.jid) };
+  }
+
+  async updateOwnProfile(
+    input: ProfileUpdateInput,
+    io: ProfileIo = {}
+  ): Promise<ProfileUpdateResult> {
+    return applyProfileUpdates(this.ownProfileProvider(), input, io);
+  }
+
+  async setOwnProfilePhoto(
+    input: { imageBase64?: unknown; mimeType?: unknown },
+    io: ProfileIo = {}
+  ) {
+    return setOwnProfilePhoto(this.ownProfileProvider(), input, io);
+  }
+
+  async removeOwnProfilePhoto(io: ProfileIo = {}) {
+    return removeOwnProfilePhoto(this.ownProfileProvider(), io);
+  }
+
+  async getOwnProfilePhotoBytes(io: ProfileIo = {}): Promise<Buffer | null> {
+    return readOwnProfilePhotoBytes(this.ownProfileProvider(), io);
   }
 
   private isAllowedWhatsAppMediaHost(hostname: string): boolean {

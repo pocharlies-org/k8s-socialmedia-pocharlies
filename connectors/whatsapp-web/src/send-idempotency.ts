@@ -178,7 +178,15 @@ export function mediaRequestHash(input: {
   caption?: string;
   asSticker: boolean;
   replyToMessageId?: string;
+  viewOnce?: boolean;
+  quality?: string;
 }): string {
+  // viewOnce / quality only enter the hash when set, so a key recorded before
+  // they existed still replays the same plain send.
+  const options =
+    input.viewOnce || (input.quality && input.quality !== 'source')
+      ? [{ viewOnce: !!input.viewOnce, quality: input.quality || 'source' }]
+      : [];
   return createHash('sha256')
     .update(
       JSON.stringify([
@@ -187,6 +195,7 @@ export function mediaRequestHash(input: {
         input.caption || null,
         input.asSticker,
         input.replyToMessageId || null,
+        ...options,
       ])
     )
     .update('\0')

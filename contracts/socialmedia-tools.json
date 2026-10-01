@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:a0b7b4bf11d3bb377d89094d6bdcdd36efe9f1a5668de84ecfa9f51aaabfced7",
+  "digest": "sha256:6f8ce4a07473fb1e353af8032f9b331c983de5f2ef8d02119feeac264a3deab3",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -2931,6 +2931,170 @@
           "accountId",
           "target",
           "messageId"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_get_my_profile",
+      "title": "Get my profile",
+      "description": "Read this WhatsApp account's own profile: display name, about text (and when it was set), whether it has a photo, and which changes the connected session can make (capabilities). aboutKnown / photoKnown false mean WhatsApp did not answer, not empty. Read-only.",
+      "effect": "read",
+      "authScope": "social.read",
+      "capability": "profiles.me.get",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+          },
+          "readSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "provider",
+              "index"
+            ],
+            "default": "auto"
+          }
+        },
+        "required": [
+          "channel",
+          "accountId"
         ]
       },
       "outputSchema": {
@@ -10912,6 +11076,16 @@
                 },
                 "caption": {
                   "type": "string"
+                },
+                "viewOnce": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "WhatsApp only: the recipient can open it once. Only for JPEG/PNG photos and MP4 videos (by the fetched Content-Type); anything else is refused, never sent permanent."
+                },
+                "hd": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "WhatsApp only, still images: re-encode to HD (long edge ≤ 2560 px, JPEG 85; PNG with transparency stays PNG; never enlarged). Without it the fetched bytes go out untouched."
                 }
               },
               "required": [
@@ -13455,6 +13629,213 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
+      }
+    },
+    {
+      "name": "social_update_my_profile",
+      "title": "Update my profile",
+      "description": "Change this WhatsApp account's own profile: display name (≤ 25 characters), about text (≤ 139; '' clears it), photo (photoUrl, JPEG/PNG/WebP ≤ 8 MB, WhatsApp crops it square) or removePhoto. Every contact sees it, so confirm must be true. Each field answers accepted (WhatsApp took it) and confirmed (a readback proved it); a name is often accepted but not yet confirmed by this linked session. Current values: social_get_my_profile.",
+      "effect": "destructive",
+      "authScope": "social.write",
+      "capability": "profiles.me.update",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 25
+          },
+          "about": {
+            "type": "string",
+            "maxLength": 139
+          },
+          "photoUrl": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https?://",
+            "description": "The new profile photo (JPEG, PNG or WebP, ≤ 8 MB). An http(s) URL the connector fetches server-side before uploading, as social_send_message attachment urls: public https, cluster-internal http or presigned S3/MinIO http URLs; never file:// or s3://."
+          },
+          "removePhoto": {
+            "const": true,
+            "description": "Remove the profile photo. Not together with photoUrl."
+          },
+          "confirm": {
+            "const": true,
+            "description": "Must be true: every contact sees the change."
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "confirm"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "about"
+            ]
+          },
+          {
+            "required": [
+              "photoUrl"
+            ]
+          },
+          {
+            "required": [
+              "removePhoto"
+            ]
+          }
+        ],
+        "not": {
+          "required": [
+            "photoUrl",
+            "removePhoto"
+          ]
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
       }
     },
     {

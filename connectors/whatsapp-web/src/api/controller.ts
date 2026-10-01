@@ -42,6 +42,15 @@ import { PollEventInputError, validatePollInput } from '../poll-votes';
 import { validateEventInput, validateEventResponse } from '../event-responses';
 import { availablePresenceAllowed, parsePresenceRequest } from '../presence';
 import { parsePrivacyRequest } from '../privacy-settings';
+import {
+  fetchProfilePhoto,
+  parseProfilePhotoRemoveRequest,
+  parseProfilePhotoRequest,
+  parseProfileUpdateRequest,
+  ProfileError,
+  profileFailureClass,
+} from '../profile-service';
+import { parseMediaQuality, parseViewOnce } from '../media-quality';
 import { parseDisappearingExpiration } from '../disappearing';
 import {
   parseCreateContactRequest,
@@ -224,6 +233,21 @@ function muteFromBody(body: Record<string, unknown>): MuteState | string {
     return 'A timed mute is at most 366 days (omit durationMs / muteUntil to mute always)';
   }
   return { until: until === undefined ? null : new Date(until) };
+}
+
+/** ProfileError → its status + failureClass (and code / details); anything else as a mutation error. */
+function profileErrorResponse(res: Response, error: unknown, what: string): void {
+  if (error instanceof ProfileError) {
+    const { code, ...details } = error.details || {};
+    res.status(error.status).json({
+      error: error.message,
+      failureClass: profileFailureClass(error),
+      code: typeof code === 'string' ? code : error.code,
+      ...(Object.keys(details).length ? { details } : {}),
+    });
+    return;
+  }
+  mutationErrorResponse(res, error, what);
 }
 
 function rejectWhenDisconnected(client: BaileysClient, res: Response): boolean {
@@ -1732,6 +1756,82 @@ export function createRouter(
     })();
   });
 
+  // Own profile (ported from the NAS fork's controller-profile): name, about,
+  // photo. Reads are ungated; every change is visible to every contact, so it
+  // takes confirm: true and the same two kill switches as a send.
+  // CONTRACT: http.whatsapp-connector.profile-me-read.v1 — GET, 200 {profile: {jid, phone, name, about, aboutSetAt, photo: {available}, capabilities: {name, about, photo, photoRemove}, aboutKnown, photoKnown}}, 503 disconnected
+  router.get('/profile/me', auth, (_req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ profile: await client.getOwnProfile() });
+      } catch (e) {
+        profileErrorResponse(res, e, 'read the profile');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.profile-me-update.v1 — body {name?, about?, confirm: true, actor?}, 200 {updated, name?: {requested, current, accepted, confirmed, reason}, about?: {…}, applied, failed, partial}
+  router.post('/profile/me', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const input = parseProfileUpdateRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const actor = actorFromBody(body.actor);
+        console.log(
+          `[profile] update ${Object.keys(input).join('+')}${actor ? ` by ${actor}` : ''}`
+        );
+        res.json({ updated: true, ...(await client.updateOwnProfile(input)) });
+      } catch (e) {
+        profileErrorResponse(res, e, 'update the profile');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.profile-me-photo.v1 — body {fileUrl | imageBase64 + mimeType (jpeg|png|webp, ≤ 8 MB), confirm: true, actor?}, 200 {updated, photo: {available, accepted, confirmed, reason}, mimeType, bytes}
+  router.post('/profile/me/photo', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseProfilePhotoRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const input =
+          request.kind === 'url'
+            ? await fetchProfilePhoto(request.fileUrl)
+            : { imageBase64: request.imageBase64, mimeType: request.mimeType };
+        const actor = actorFromBody(body.actor);
+        console.log(`[profile] photo set${actor ? ` by ${actor}` : ''}`);
+        res.json({ updated: true, ...(await client.setOwnProfilePhoto(input)) });
+      } catch (e) {
+        profileErrorResponse(res, e, 'set the profile photo');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.profile-me-photo-remove.v1 — body {confirm: true, actor?}, 200 {updated, photo: {available, accepted, confirmed, reason}}
+  router.post(
+    '/profile/me/photo/remove',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          const body = optionalObject(req.body);
+          parseProfilePhotoRemoveRequest(body);
+          if (rejectWhenSendingDisabled(res)) return;
+          if (rejectWhenDisconnected(client, res)) return;
+          const actor = actorFromBody(body.actor);
+          console.log(`[profile] photo removed${actor ? ` by ${actor}` : ''}`);
+          res.json({ updated: true, ...(await client.removeOwnProfilePhoto()) });
+        } catch (e) {
+          profileErrorResponse(res, e, 'remove the profile photo');
+        }
+      })();
+    }
+  );
+
   // CONTRACT: http.whatsapp-connector.privacy-read.v1 — GET, 200 {privacy: {settings: {lastSeen, online, profilePicture, status, readReceipts, groupsAdd, call, messages}, defaultDisappearing, other, allowed}}
   router.get('/privacy', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
@@ -2104,6 +2204,7 @@ export function createRouter(
   );
 
   // Send file/media
+  // CONTRACT: http.whatsapp-connector.messages-media-send.v1 — body {conversationId, fileUrl, caption?, asSticker?, kind?, replyTo?, viewOnce?, quality? (source|standard|hd)}, 200 {sent, sentAt, messageId?}, 400 view_once_unsupported / quality_unsupported
   router.post('/messages/media/send', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       let idempotent: IdempotentSend | null = null;
@@ -2126,6 +2227,14 @@ export function createRouter(
         }
         const sticker = !!asSticker || kind === 'sticker';
         const replyToMessageId = optionalString(replyTo);
+        // Additive (fase 3): play-once photo/video and image re-encoding; both
+        // absent = the same send as before (and the same idempotency hash).
+        const viewOnce = parseViewOnce(req.body?.viewOnce);
+        const quality = parseMediaQuality(req.body?.quality);
+        const mediaOptions = {
+          ...(viewOnce ? { viewOnce } : {}),
+          ...(quality !== 'source' ? { quality } : {}),
+        };
         const begun = await beginIdempotentSend(
           client,
           req,
@@ -2137,6 +2246,7 @@ export function createRouter(
               caption,
               asSticker: sticker,
               replyToMessageId,
+              ...mediaOptions,
             }),
           reservation => ({
             sent: true,
@@ -2151,6 +2261,7 @@ export function createRouter(
           await client.sendFile(conversationId, fileUrl, caption, {
             asSticker: sticker,
             replyToMessageId,
+            ...mediaOptions,
           });
           res.json({ sent: true, sentAt: new Date().toISOString() });
           return;
@@ -2159,6 +2270,7 @@ export function createRouter(
         const messageId = await client.sendFile(conversationId, fileUrl, caption, {
           asSticker: sticker,
           replyToMessageId,
+          ...mediaOptions,
           messageId: idempotent.messageId,
           beforeSend: idempotent.beforeSend,
         });
@@ -2171,6 +2283,13 @@ export function createRouter(
         if (await failIdempotentSend(idempotent, e, res)) return;
         if (e instanceof MessageUnavailableError) {
           res.status(e.status).json({ error: e.message, failureClass: e.failureClass });
+          return;
+        }
+        // viewOnce / quality refused for this content (400), before WhatsApp.
+        if (e instanceof MessageMutationError) {
+          res
+            .status(e.status)
+            .json({ error: e.message, failureClass: e.failureClass, code: e.code });
           return;
         }
         if (directSendRefused(res, e)) return;

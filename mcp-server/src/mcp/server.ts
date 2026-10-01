@@ -805,6 +805,10 @@ export class MCPServer {
         return this.canonicalSetPrivacy(args);
       case 'setDisappearing':
         return this.canonicalSetDisappearing(args);
+      case 'getMyProfile':
+        return this.canonicalGetMyProfile(args);
+      case 'updateMyProfile':
+        return this.canonicalUpdateMyProfile(args);
       case 'sendTyping':
         return this.canonicalSendTyping(args);
       case 'sendSticker':
@@ -1890,6 +1894,18 @@ export class MCPServer {
         'WhatsApp does not support Telegram threadId'
       );
     }
+    if (
+      channelName !== 'whatsapp' &&
+      attachments.some(item => {
+        const value = asObject(item);
+        return value.viewOnce === true || value.hd === true;
+      })
+    ) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'viewOnce and hd attachments are only supported for WhatsApp'
+      );
+    }
 
     const operations: unknown[] = [];
     try {
@@ -1948,6 +1964,9 @@ export class MCPServer {
                   conversationId: destination,
                   fileUrl: location,
                   caption: pickString(attachmentValue, ['caption']) || undefined,
+                  // Additive: absent unless asked, so a plain attachment sends as before.
+                  ...(attachmentValue.viewOnce === true ? { viewOnce: true } : {}),
+                  ...(attachmentValue.hd === true ? { quality: 'hd' as const } : {}),
                   account: accountIdValue,
                   replyTo:
                     args.replyTo === null || args.replyTo === undefined
@@ -2752,6 +2771,77 @@ export class MCPServer {
         ...this.connectorActor(),
       })
     );
+  }
+
+  /** GET /profile/me: the account's own name, about, photo and what can change. */
+  private async canonicalGetMyProfile(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The own profile');
+    this.requireChannel(args, 'whatsapp');
+    return this.jsonResponse(
+      await this.whatsAppCall(this.account(args), 'GET', '/api/v1/profile/me')
+    );
+  }
+
+  /**
+   * POST /profile/me (name / about), then POST /profile/me/photo (photoUrl,
+   * fetched by the connector) or /profile/me/photo/remove. confirm: true is
+   * forced by the schema and passed through (the connector refuses without
+   * it). Name and about go in one call; when a later photo step fails after
+   * them, the answer is outcome_unknown naming what was already applied.
+   */
+  private async canonicalUpdateMyProfile(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    const fields: Record<string, string> = {};
+    if (typeof args.name === 'string') fields.name = args.name;
+    if (typeof args.about === 'string') fields.about = args.about;
+    const photoUrl = typeof args.photoUrl === 'string' ? args.photoUrl.trim() : '';
+    const removePhoto = args.removePhoto === true;
+    if (photoUrl && removePhoto) {
+      throw this.canonicalError('invalid_request', 'Provide photoUrl or removePhoto, not both');
+    }
+    if (!Object.keys(fields).length && !photoUrl && !removePhoto) {
+      throw this.canonicalError(
+        'invalid_request',
+        'Provide at least one of name, about, photoUrl or removePhoto'
+      );
+    }
+    const result: Record<string, unknown> = {};
+    if (Object.keys(fields).length) {
+      result.profile = await this.whatsAppCall(account, 'POST', '/api/v1/profile/me', {
+        ...fields,
+        confirm: true,
+        ...this.connectorActor(),
+      });
+    }
+    if (photoUrl || removePhoto) {
+      try {
+        result.photo = photoUrl
+          ? await this.whatsAppCall(account, 'POST', '/api/v1/profile/me/photo', {
+              fileUrl: photoUrl,
+              confirm: true,
+              ...this.connectorActor(),
+            })
+          : await this.whatsAppCall(account, 'POST', '/api/v1/profile/me/photo/remove', {
+              confirm: true,
+              ...this.connectorActor(),
+            });
+      } catch (error) {
+        if (result.profile) {
+          throw this.canonicalError(
+            'outcome_unknown',
+            `WhatsApp accepted ${Object.keys(fields).join(' and ')} but the photo change failed: ${safeError(
+              error
+            )}`
+          );
+        }
+        throw error;
+      }
+    }
+    return this.jsonResponse({ updated: true, ...result });
   }
 
   private async canonicalSetDisappearing(args: Record<string, any>): Promise<any> {
@@ -5177,6 +5267,8 @@ export class MCPServer {
       caption?: string;
       replyTo?: string;
       account?: string;
+      viewOnce?: boolean;
+      quality?: 'hd';
     },
     // Set only by canonicalSendMessage, never from tool arguments.
     options?: { idempotencyKey?: string }

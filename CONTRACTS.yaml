@@ -2041,6 +2041,113 @@ contracts:
       whatsapp_statuses with source connector, audience size and actor. Path,
       body and 200 shape are contract: changing any is breaking — a new `.v2`
       entry beside this one.
+  - id: http.whatsapp-connector.profile-me-read.v1
+    kind: http-route
+    value: /profile/me
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/profile/me of the house WhatsApp connectors (HMAC signs
+      "{}"): this account's own profile, consumed by the MCP tool
+      social_get_my_profile (mcp-server/src/mcp/server.ts
+      canonicalGetMyProfile). A read: not gated; 503 disconnected. 200
+      {profile: {jid (@c.us / @lid), phone (null for a LID), name (the
+      session's push name), about, aboutSetAt, photo: {available},
+      capabilities: {name, about, photo, photoRemove} (what the installed
+      Baileys exposes), aboutKnown, photoKnown}}; aboutKnown / photoKnown
+      false = WhatsApp did not answer (never read as empty). The path and the
+      200 shape are contract: changing either is breaking — a new `.v2` entry
+      beside this one.
+  - id: http.whatsapp-connector.profile-me-update.v1
+    kind: http-route
+    value: /profile/me
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/profile/me of the house WhatsApp connectors: change the
+      account's display name and/or about text, consumed by the MCP tool
+      social_update_my_profile (canonicalUpdateMyProfile). HMAC-signed body
+      {name? (1–25 chars), about? (≤ 139; '' clears it), confirm: true,
+      actor?}; control characters flattened. 400 invalid_request first (code
+      confirm_required without confirm: true), then the sending gate (403
+      disabled_sending: ENABLE_SENDING / EMERGENCY_DISABLE_SENDING), then 503
+      disconnected. Baileys updateProfileName (app-state patch) /
+      updateProfileStatus (IQ); each field applied independently. 200
+      {updated, name?, about?: {requested, current, accepted, confirmed,
+      reason}, applied[], failed[], partial}: accepted = WhatsApp took it,
+      confirmed = a readback proved it (a name is usually accepted but not
+      confirmed by the linked session). All fields failing → the first error:
+      409 app_state_unavailable, 502 rejected_by_whatsapp, 504 timeout, 501
+      unsupported, each with `code` (ProfileError code). The path, the body
+      fields, the 200 shape and the failureClass values are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.profile-me-photo.v1
+    kind: http-route
+    value: /profile/me/photo
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/profile/me/photo of the house WhatsApp connectors: set the
+      account's profile photo, consumed by the MCP tool
+      social_update_my_profile (photoUrl). HMAC-signed body {fileUrl (http(s),
+      fetched by the connector like media sends, 15 s, ≤ 8 MB) | imageBase64 +
+      mimeType, confirm: true, actor?}; the bytes must really be JPEG, PNG or
+      WebP (sniffed) and match the declared type. 400 invalid_request (413
+      when over 8 MB) first, then the sending gate (403 disabled_sending),
+      then 503 disconnected. Baileys updateProfilePicture re-encodes through
+      sharp (640×640 JPEG); without an image library → 501 unsupported. 200
+      {updated, photo: {available, accepted, confirmed, reason}, mimeType,
+      bytes}: confirmed only when the picture identity (CDN path, token
+      stripped) changed. The path, the body fields, the 200 shape and the
+      failureClass values are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.whatsapp-connector.profile-me-photo-remove.v1
+    kind: http-route
+    value: /profile/me/photo/remove
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/profile/me/photo/remove of the house WhatsApp connectors:
+      remove the account's profile photo, consumed by the MCP tool
+      social_update_my_profile (removePhoto). HMAC-signed body {confirm: true,
+      actor?}; 400 confirm_required, then the sending gate (403
+      disabled_sending), then 503 disconnected. Baileys removeProfilePicture.
+      200 {updated, photo: {available, accepted, confirmed, reason}}:
+      confirmed only by a 404 readback (a 403 stays unconfirmed). The path,
+      the body fields and the 200 shape are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-media-send.v1
+    kind: http-route
+    value: /messages/media/send
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/media/send of the house WhatsApp connectors (the
+      route predates the registry; registered when view-once / quality were
+      added), consumed by the MCP tool social_send_message (attachments,
+      mcp-server/src/mcp/server.ts handleSendFile) and dgx-messages.
+      HMAC-signed body {conversationId, fileUrl, caption?, asSticker?, kind?,
+      replyTo?, viewOnce?, quality?}: the connector fetches fileUrl and the
+      Content-Type picks the message type (image/webp → sticker). viewOnce
+      (boolean): play-once, only image/jpeg, image/png, video/mp4, else 400
+      view_once_unsupported. quality source (default: bytes untouched) |
+      standard (long edge ≤ 1600, JPEG 80) | hd (≤ 2560, JPEG 85); alpha stays
+      PNG; never enlarged; still images only, else 400 quality_unsupported /
+      image_unprocessable. Both absent = the send and the Idempotency-Key
+      hash of before. 403 when ENABLE_SENDING is not "true", opt-in
+      Idempotency-Key (send-idempotency.v1). 200 {sent, sentAt, messageId?}.
+      The path, the body fields and the 200 shape are contract: changing any
+      is breaking — a new `.v2` entry beside this one.
   - id: http.brain.push-ingest.conversation-window.v1
     kind: http-route
     value: /instances/{instance}/push-ingest

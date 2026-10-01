@@ -27,6 +27,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_get_group',
   'social_get_insights',
   'social_get_media',
+  'social_get_my_profile',
   'social_get_poll_results',
   'social_get_presence',
   'social_get_privacy',
@@ -79,6 +80,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_start_chat',
   'social_start_digest',
   'social_summarize',
+  'social_update_my_profile',
   'social_validate_account',
   'social_vote_poll',
 ] as const;
@@ -101,6 +103,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_get_group: 'read',
   social_get_insights: 'read',
   social_get_media: 'read',
+  social_get_my_profile: 'read',
   social_get_poll_results: 'read',
   social_get_presence: 'read',
   social_get_privacy: 'read',
@@ -153,6 +156,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_start_chat: 'externalWrite',
   social_start_digest: 'internalWrite',
   social_summarize: 'compute',
+  social_update_my_profile: 'destructive',
   social_validate_account: 'read',
   social_vote_poll: 'externalWrite',
 };
@@ -270,6 +274,12 @@ const EXPECTED_ANNOTATIONS: Record<
     openWorldHint: true,
   },
   social_get_media: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_get_my_profile: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
@@ -587,6 +597,12 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: true,
     openWorldHint: false,
   },
+  social_update_my_profile: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_validate_account: {
     readOnlyHint: true,
     destructiveHint: false,
@@ -686,11 +702,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 71 canonical tools in deterministic order', () => {
+  it('contains exactly the 73 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(71);
+    expect(new Set(names).size).toBe(73);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -716,7 +732,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(37);
+    expect(writes).toHaveLength(38);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same
