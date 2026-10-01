@@ -573,6 +573,19 @@ export const CHUNK_TARGET_CHARS = 800; // ≈ 200 tokens
 export const CHUNK_MAX_CHARS = 1600; // ≈ 400 tokens
 
 /**
+ * Children to push for a window part (Dani, 01-10-2026): only real
+ * conversations (chat/group) that are not trivial get 200–400-token children.
+ * Bots, monitoring chats and broadcast channels are indexed as the parent
+ * window alone — they were half of all text (Synapse monitor ~57M chars) and
+ * chunking alert streams only multiplied embedder work.
+ */
+export function childChunks(w: BuiltWindow, config: WindowsConfig): BuiltChunk[] {
+  if (w.trivial) return [];
+  if (w.chat.conv_kind !== 'chat' && w.chat.conv_kind !== 'group') return [];
+  return chunkWindow(w, config);
+}
+
+/**
  * Children of a non-trivial window part: 3–8 consecutive messages, ~800–1600
  * chars, ONE message of overlap between consecutive children; a message over
  * 1600 chars is itself split by sentences (ADR §3). Content = header + lines.

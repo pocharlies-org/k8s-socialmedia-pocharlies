@@ -9,6 +9,7 @@ import {
   WindowsConfig,
   DEFAULT_WINDOWS_CONFIG,
   buildWindows,
+  childChunks,
   upsertWindow,
   wellFormed,
   wellFormedDeep,
@@ -650,5 +651,22 @@ describe('wellFormed (lone UTF-16 surrogates)', () => {
     expect(out.metadata.transcript[0]).toBe('\uFFFD');
     expect(out.metadata.n).toBe(3);
     expect(out.metadata.when).toBe(d);
+  });
+});
+
+describe('childChunks (bots and channels: parent only)', () => {
+  const long = (i: number) =>
+    msg({ id: String(i + 1), wa_message_id: `w${i + 1}`, content: 'texto de alerta con bastante contenido '.repeat(20), wa_timestamp: new Date(Date.parse('2026-03-14T09:00:00Z') + i * 60_000) });
+  const msgs = Array.from({ length: 12 }, (_, i) => long(i));
+  it('chunks a real chat', () => {
+    const w = buildWindows(chat(), msgs, CFG)[0];
+    expect(w.trivial).toBe(false);
+    expect(childChunks(w, CFG).length).toBeGreaterThan(0);
+  });
+  it('pushes bots and channels as the parent window alone', () => {
+    for (const kind of ['bot', 'channel'] as const) {
+      const w = buildWindows({ ...chat(), conv_kind: kind }, msgs, CFG)[0];
+      expect(childChunks(w, CFG)).toEqual([]);
+    }
   });
 });

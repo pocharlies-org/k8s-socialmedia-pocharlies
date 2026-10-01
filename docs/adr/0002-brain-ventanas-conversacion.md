@@ -92,6 +92,10 @@ instancia según el registro de cuentas (`personal`, `leila` → `personal`; `pr
 - `metadata`: `type: conversation_chunk`, `window_source_id`, `chunk_index`, `platform`, `account`,
   `conversation_id`, `conversation_name`, `conv_kind`, `observed_at`, `message_ids[]`.
 
+**Bots, monitorización y canales de difusión** (`conv_kind` `bot` o `channel`; decisión de Dani, 01-10-2026): se
+sube solo el padre, sin hijos. Eran la mitad de todo el texto («Synapse monitor», ~57M caracteres) y trocear flujos de
+alertas solo multiplicaba el trabajo del embedder; se encuentran por la cabecera y el inicio de cada ventana.
+
 **Ventana trivial**: menos de 4 mensajes o menos de 160 caracteres de texto útil (sin contar emojis,
 reacciones, «ok», «vale»…). Se sube solo el padre, sin hijos, con `llm_status: skipped`. Así el recuento de
 mensajes en ventanas cuadra con Postgres.

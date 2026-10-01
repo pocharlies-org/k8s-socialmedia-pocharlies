@@ -31,7 +31,7 @@ import {
   WindowMessage,
   buildWindows,
   childDocs,
-  chunkWindow,
+  childChunks,
   classifyConvKind,
   deleteWindowFromBrain,
   deleteWindowRow,
@@ -200,7 +200,7 @@ export async function recomputeChat(
       logger.warn({ chat: chat.conversation_id, cap: opts.pushDocsCap }, 'push doc cap reached');
       break;
     }
-    const chunks = w.trivial ? [] : chunkWindow(w, config);
+    const chunks = childChunks(w, config);
     const status = initialLlmStatus(w);
     const all = [parentDoc(w, { llm_status: status }), ...childDocs(w, chunks)];
     docs += all.length;

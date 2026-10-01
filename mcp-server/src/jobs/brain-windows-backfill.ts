@@ -25,7 +25,7 @@ import {
   ChatRef,
   classifyConvKind,
   buildWindows,
-  chunkWindow,
+  childChunks,
   childDocs,
   parentDoc,
   initialLlmStatus,
@@ -154,7 +154,7 @@ export async function backfillChat(
     totals.deleted++;
   }
   for (const w of diff.toPush) {
-    const chunks = w.trivial ? [] : chunkWindow(w, config);
+    const chunks = childChunks(w, config);
     totals.windows++;
     totals.parents++;
     totals.children += chunks.length;
