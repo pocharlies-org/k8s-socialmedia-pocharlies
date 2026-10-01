@@ -9,6 +9,7 @@ import {
   WindowsConfig,
   DEFAULT_WINDOWS_CONFIG,
   buildWindows,
+  upsertWindow,
   childDocs,
   chunkWindow,
   classifyConvKind,
@@ -228,6 +229,23 @@ describe('splitSessionByCap (ADR 0002 §1)', () => {
     expect(parts[0].length).toBeGreaterThanOrEqual(8);
     expect(parts[0].length).toBeLessThanOrEqual(15);
     expect(parts.flatMap(p => p).length).toBe(20);
+  });
+
+  it('splits a huge bot session into thousands of parts without a runaway guard', () => {
+    // Synapse monitor: one 24-day session, ~57M chars -> ~3.5k parts. 20k x 1000 chars here.
+    const base = Date.parse('2026-03-14T09:00:00Z');
+    const msgs = Array.from({ length: 20000 }, (_, i) =>
+      msg({
+        id: String(i + 1),
+        wa_message_id: `w${i + 1}`,
+        content: big(1000),
+        wa_timestamp: new Date(base + i * 60_000),
+      })
+    );
+    const parts = splitSessionByCap(msgs, chat(), CFG);
+    expect(parts.length).toBeGreaterThan(1000);
+    expect(parts.flatMap(p => p).length).toBe(20000);
+    for (const p of parts) expect(p.length).toBeGreaterThan(0);
   });
 
   it('truncates a single message over the cap by sentences', () => {
@@ -580,5 +598,34 @@ describe('session boundary helpers', () => {
     const r = await sessionEndBound(pool, chat(), new Date('2026-03-14T10:00:00Z'), 3600);
     expect(r.bound.toISOString()).toBe(new Date('2026-03-14T11:00:00Z').toISOString());
     expect(r.truncated).toBe(false);
+  });
+});
+
+describe('upsertWindow SQL', () => {
+  it('has as many VALUES expressions as target columns', async () => {
+    const calls: string[] = [];
+    const pool = { query: async (sql: string) => { calls.push(sql); return { rows: [] }; } };
+    const base = Date.parse('2026-03-14T09:00:00Z');
+    const ms = [msg({ id: '1', wa_message_id: 'w1', content: 'hola', wa_timestamp: new Date(base) })];
+    const w = buildWindows(chat(), ms, CFG)[0];
+    await upsertWindow(pool as any, { w, pushed_hash: 'h', chunk_count: 0, llm_status: 'skipped' });
+    const sql = calls[0];
+    const splitTop = (s: string) => {
+      const out: string[] = [];
+      let depth = 0, cur = '';
+      for (const ch of s) {
+        if (ch === '(') depth++;
+        if (ch === ')') depth--;
+        if (ch === ',' && depth === 0) { out.push(cur); cur = ''; } else cur += ch;
+      }
+      out.push(cur);
+      return out.map(x => x.trim()).filter(Boolean);
+    };
+    const m = /INSERT INTO brain_windows \(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*)\)\s*ON CONFLICT/.exec(sql);
+    expect(m).not.toBeNull();
+    const cols = splitTop(m![1]);
+    const vals = splitTop(m![2]);
+    expect(cols.length).toBe(21);
+    expect(vals.length).toBe(cols.length);
   });
 });

@@ -391,57 +391,52 @@ export function splitSessionByCap(
   chat: ChatRef,
   config: WindowsConfig
 ): WindowMessage[][] {
-  const lineLen = (m: WindowMessage) => renderLine(m, authorOf(m, chat, config)).length + 1;
+  // Line lengths and prefix sums once: a bot session can be tens of thousands
+  // of messages and thousands of parts (Synapse monitor: one 24-day session).
+  const lens = msgs.map(m => renderLine(m, authorOf(m, chat, config)).length + 1);
+  const prefix: number[] = [0];
+  for (const l of lens) prefix.push(prefix[prefix.length - 1] + l);
+  const n = msgs.length;
   const parts: WindowMessage[][] = [];
-  let rest = msgs;
-  let guard = 0;
-  while (rest.length) {
-    if (++guard > 1000) throw new Error(`splitSessionByCap: runaway on ${chat.conversation_id}`);
-    const total = rest.reduce((a, m) => a + lineLen(m), 0);
-    if (total <= config.transcriptCapChars) {
-      parts.push(rest);
+  let start = 0;
+  // Every pass consumes at least one message, so the loop ends in <= n passes.
+  while (start < n) {
+    if (prefix[n] - prefix[start] <= config.transcriptCapChars) {
+      parts.push(msgs.slice(start));
       break;
     }
-    // Cumulative lengths; candidate cut after index i-1 (part = rest[0..i)).
-    let cum = 0;
-    const cumAt: number[] = [];
-    for (const m of rest) {
-      cum += lineLen(m);
-      cumAt.push(cum);
-    }
+    // Candidate part = msgs[start .. start+i); its length only grows with i.
     let best = -1;
     let bestGap = -1;
-    for (let i = 1; i < rest.length; i++) {
-      const len = cumAt[i - 1];
-      if (len < config.splitFloorChars || len > config.transcriptCapChars) continue;
-      const gapSec = (rest[i].wa_timestamp.getTime() - rest[i - 1].wa_timestamp.getTime()) / 1000;
+    let nearest = 1;
+    let nearestDiff = Infinity;
+    for (let i = 1; start + i < n; i++) {
+      const len = prefix[start + i] - prefix[start];
+      const diff = Math.abs(len - config.transcriptCapChars);
+      if (diff < nearestDiff) {
+        nearestDiff = diff;
+        nearest = i;
+      }
+      if (len > config.transcriptCapChars) break; // nothing further fits
+      if (len < config.splitFloorChars) continue;
+      const gapSec =
+        (msgs[start + i].wa_timestamp.getTime() - msgs[start + i - 1].wa_timestamp.getTime()) / 1000;
       if (gapSec > bestGap) {
         bestGap = gapSec;
         best = i;
       }
     }
-    if (best < 0) {
-      // No boundary lands inside [floor, cap]: cut at the message boundary
-      // closest to the cap (ADR §1 "en el límite de mensaje").
-      let nearest = 1;
-      let nearestDiff = Infinity;
-      for (let i = 1; i < rest.length; i++) {
-        const diff = Math.abs(cumAt[i - 1] - config.transcriptCapChars);
-        if (diff < nearestDiff) {
-          nearestDiff = diff;
-          nearest = i;
-        }
-      }
-      best = nearest;
-    }
-    if (best === 1 && lineLen(rest[0]) > config.transcriptCapChars) {
+    // No boundary inside [floor, cap]: cut at the message boundary closest to
+    // the cap (ADR §1 "en el límite de mensaje").
+    if (best < 0) best = nearest;
+    if (best === 1 && lens[start] > config.transcriptCapChars) {
       // A single message over the cap: truncate it by sentences (ADR §1).
-      parts.push([truncatedMessage(rest[0], config.transcriptCapChars)]);
-      rest = rest.slice(1);
+      parts.push([truncatedMessage(msgs[start], config.transcriptCapChars)]);
+      start += 1;
       continue;
     }
-    parts.push(rest.slice(0, best));
-    rest = rest.slice(best);
+    parts.push(msgs.slice(start, start + best));
+    start += best;
   }
   return parts;
 }
@@ -1113,7 +1108,7 @@ export async function upsertWindow(pool: Pool, input: UpsertWindowInput): Promis
        conv_kind, content_hash, pushed_hash, pushed_at, chunk_count,
        llm_status, llm_input_hash, llm_done_at, llm_error, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-             CASE WHEN $14::text IS NULL THEN NULL ELSE now() END,$15,$16,NULL,NULL,now())
+             CASE WHEN $14::text IS NULL THEN NULL ELSE now() END,$15,$16,NULL,NULL,NULL,now())
      ON CONFLICT (source_id) DO UPDATE SET
        account = EXCLUDED.account,
        platform = EXCLUDED.platform,
