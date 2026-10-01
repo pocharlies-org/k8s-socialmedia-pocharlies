@@ -144,6 +144,13 @@ contracts:
       fields, the 200 shape and the 404 failureClass are contract: changing any
       is breaking — a new `.v2` entry beside this one. Fase 3 / PR-3 (additive):
       EMERGENCY_DISABLE_SENDING=true also answers the 403, like every send.
+      Behavior note (regresion 01-10, additive): forwarding to a 1:1 chat goes
+      through the same first-contact guard as every new direct send — a person
+      who never interacted with the account (no INBOUND message on the
+      canonical conversation, no tctoken record) and to whom no privacy token
+      can be attached is 403 {error, failureClass: "account_restricted"}
+      instead of the 500; /messages/media/send answers the same 403 for it.
+      A known contact is never held back for a missing or expired tctoken.
   - id: http.whatsapp-connector.messages-edit.v1
     kind: http-route
     value: /messages/edit
