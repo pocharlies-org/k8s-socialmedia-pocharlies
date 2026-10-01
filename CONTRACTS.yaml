@@ -1824,3 +1824,48 @@ contracts:
       y el corte de sesiones del lado consumidor se corrigen sin cambiar la forma. Los textos se envian bien formados en UTF-16
       (sustitutos sueltos -> U+FFFD) para no abrir el circuit breaker del embedder. Desde el 01-10 las ventanas con conv_kind bot o channel se
       suben sin hijos conversation_chunk (solo el padre).
+      Desde el 01-10 el incremental (brain-windows.ts) ya no llama aqui
+      por defecto: publica amqp.synapse.brain-window-*.v1 y Synapse hace el
+      push-ingest con los MISMOS documentos; este camino queda para el
+      backfill y como vuelta atras (BRAIN_WINDOWS_SINK=http).
+  - id: amqp.synapse.brain-window-upserted.v1
+    kind: routing-key
+    value: brain_window.{tenant}.upserted
+    role: provider
+    files:
+      - mcp-server/src/jobs/brain-windows-synapse.ts
+      - mcp-server/src/jobs/brain-windows.ts
+    status: active
+    note: >-
+      INFRA-364. Evento en el exchange topic `events` del vhost /synapse
+      (RabbitMQ compartido; usuario whatsapp_mcp_brain_windows, solo
+      escritura en `events`). tenant = family para la cuenta personal
+      (instancia personal del brain) y skirmshop para el resto (instancia
+      skirmshop). Cuerpo JSON {data: {adapter (whatsapp|telegram), source_id
+      (el del primer documento), payload_hash (sha256 hex del array
+      documents), documents: [{source_id, content, metadata}]}}, con los
+      MISMOS documentos que describe http.brain.push-ingest.conversation-window.v1
+      y como mucho 25 por evento. Propiedades AMQP: persistent,
+      content_type application/json, message_id = UUID derivado de
+      payload_hash (el engine deduplica un re-publish identico), cabeceras
+      tenant_id y event_id. Consumidor: el workflow
+      <tenant>.brain.conversation-window-upserted de pocharlies-org/synapse,
+      que llama a brain.ingest con `documents | native` y reintenta
+      60s/10m/60m. Renombrar la clave, los campos de data o el mapeo
+      cuenta→tenant es breaking: nueva entrada .v2.
+  - id: amqp.synapse.brain-window-deleted.v1
+    kind: routing-key
+    value: brain_window.{tenant}.deleted
+    role: provider
+    files:
+      - mcp-server/src/jobs/brain-windows-synapse.ts
+      - mcp-server/src/jobs/brain-windows.ts
+    status: active
+    note: >-
+      INFRA-364. Mismo exchange, usuario y mapeo de tenant que
+      amqp.synapse.brain-window-upserted.v1. Un evento por documento
+      retirado (el padre y cada hijo '#cN'): {data: {adapter, source_id}},
+      message_id UUID aleatorio (el borrado es idempotente en el brain).
+      Consumidor: el workflow <tenant>.brain.conversation-window-deleted de
+      pocharlies-org/synapse → brain.delete_document. Renombrar la clave o
+      los campos es breaking: nueva entrada .v2.

@@ -42,6 +42,7 @@ import {
   loadStoredWindows,
   loadWindowsConfig,
   pushWindowDocs,
+  httpSink,
   setBackfillCursor,
   upsertWindow,
 } from './brain-windows-lib';
@@ -242,6 +243,7 @@ export async function runLlmPhase(
   opts: BackfillOptions
 ): Promise<{ done: number; failed: number; skipped: number; scanned: number }> {
   const llm = llmConfigFromEnv(process.env);
+  const llmSink = httpSink(brain, msg => logger.debug(msg));
   const budget = new PassBudget(Date.now(), opts.maxRuntimeMs);
   const stats = { done: 0, failed: 0, skipped: 0, scanned: 0 };
   const cur = await getBackfillCursor(pool, opts.runId, 'llm');
@@ -269,7 +271,7 @@ export async function runLlmPhase(
         return stats;
       }
       stats.scanned++;
-      const r = await limit(() => processLlmWindow(pool, brain, llm, row, false));
+      const r = await limit(() => processLlmWindow(pool, llmSink, llm, row, false));
       if (r === 'done') stats.done++;
       else if (r === 'failed') stats.failed++;
       else stats.skipped++;

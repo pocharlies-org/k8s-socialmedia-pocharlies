@@ -11,6 +11,7 @@ import {
   WindowMessage,
   buildWindows,
   DEFAULT_WINDOWS_CONFIG,
+  httpSink,
 } from './brain-windows-lib';
 import { recomputeChat, processLlmWindow, groupAffectedChats } from './brain-windows';
 import { LlmConfig } from './brain-window-llm';
@@ -19,6 +20,7 @@ useTestAccounts({ whatsapp: { personal: 'http://wa' } });
 
 const CFG = DEFAULT_WINDOWS_CONFIG;
 const BRAIN: BrainPushConfig = { brainUrl: 'http://brain', apiKey: 'k' };
+const SINK = httpSink(BRAIN);
 const LLM: LlmConfig = {
   baseUrl: 'http://litellm:4000/v1',
   apiKey: 'sk',
@@ -103,7 +105,7 @@ describe('recomputeChat', () => {
     const pushes = mockBrainFetch();
     const r = await recomputeChat(
       pool as never,
-      BRAIN,
+      SINK,
       CFG,
       { pushDocsCap: 400 },
       'personal',
@@ -136,7 +138,7 @@ describe('recomputeChat', () => {
     ]);
     const pushes = mockBrainFetch();
     await recomputeChat(
-      pool as never, BRAIN, CFG, { pushDocsCap: 400 }, 'personal',
+      pool as never, SINK, CFG, { pushDocsCap: 400 }, 'personal',
       { platform: 'whatsapp', conversation_id: 'reforma@g.us', minTs: msgs[0].wa_timestamp, maxTs: msgs[2].wa_timestamp },
       false
     );
@@ -160,7 +162,7 @@ describe('recomputeChat', () => {
     ]);
     const pushes = mockBrainFetch();
     const r = await recomputeChat(
-      pool as never, BRAIN, CFG, { pushDocsCap: 400 }, 'personal',
+      pool as never, SINK, CFG, { pushDocsCap: 400 }, 'personal',
       { platform: 'whatsapp', conversation_id: 'reforma@g.us', minTs: msgs[0].wa_timestamp, maxTs: msgs[3].wa_timestamp },
       false
     );
@@ -180,7 +182,7 @@ describe('recomputeChat', () => {
     ]);
     const calls = mockBrainFetch();
     const r = await recomputeChat(
-      pool as never, BRAIN, CFG, { pushDocsCap: 400 }, 'personal',
+      pool as never, SINK, CFG, { pushDocsCap: 400 }, 'personal',
       {
         platform: 'whatsapp', conversation_id: 'reforma@g.us',
         minTs: new Date('2026-03-14T09:00:00Z'), maxTs: new Date('2026-03-14T09:05:00Z'),
@@ -202,7 +204,7 @@ describe('recomputeChat', () => {
     ]);
     const pushes = mockBrainFetch();
     const r = await recomputeChat(
-      pool as never, BRAIN, CFG, { pushDocsCap: 400 }, 'personal',
+      pool as never, SINK, CFG, { pushDocsCap: 400 }, 'personal',
       { platform: 'whatsapp', conversation_id: 'reforma@g.us', minTs: msgs[0].wa_timestamp, maxTs: msgs[3].wa_timestamp },
       true
     );
@@ -220,7 +222,7 @@ describe('recomputeChat', () => {
     ]);
     global.fetch = jest.fn(async () => new Response('nope', { status: 400 })) as unknown as typeof fetch;
     const r = await recomputeChat(
-      pool as never, BRAIN, CFG, { pushDocsCap: 400 }, 'personal',
+      pool as never, SINK, CFG, { pushDocsCap: 400 }, 'personal',
       { platform: 'whatsapp', conversation_id: 'reforma@g.us', minTs: msgs[0].wa_timestamp, maxTs: msgs[3].wa_timestamp },
       false
     );
@@ -287,7 +289,7 @@ describe('processLlmWindow', () => {
   it('extracts, records done + summary and re-pushes the parent with header + summary', async () => {
     const pool = llmPool(null);
     const calls = mockLlmAndBrain();
-    const r = await processLlmWindow(pool as never, BRAIN, LLM, row, false);
+    const r = await processLlmWindow(pool as never, SINK, LLM, row, false);
     expect(r).toBe('done');
     const llmCall = calls.find(c => c.url.includes('chat/completions'));
     expect((llmCall?.body.messages as { content: string }[])[0].content).toContain(built.header);
@@ -305,7 +307,7 @@ describe('processLlmWindow', () => {
   it('feeds the previous window summary as context', async () => {
     const pool = llmPool('resumen de la ventana anterior');
     const calls = mockLlmAndBrain();
-    await processLlmWindow(pool as never, BRAIN, LLM, row, false);
+    await processLlmWindow(pool as never, SINK, LLM, row, false);
     const prompt = (calls.find(c => c.url.includes('chat/completions'))?.body.messages as { content: string }[])[0].content;
     expect(prompt).toContain('resumen de la ventana anterior');
   });
@@ -316,7 +318,7 @@ describe('processLlmWindow', () => {
     const pool = llmPool('previo');
     const calls = mockLlmAndBrain();
     const r = await processLlmWindow(
-      pool as never, BRAIN, LLM, { ...row, llm_input_hash: hash }, false
+      pool as never, SINK, LLM, { ...row, llm_input_hash: hash }, false
     );
     expect(r).toBe('skipped');
     expect(calls.some(c => c.url.includes('chat/completions'))).toBe(false);
@@ -328,7 +330,7 @@ describe('processLlmWindow', () => {
   it('LLM failure records llm_status=failed with the error', async () => {
     const pool = llmPool(null);
     global.fetch = jest.fn(async () => new Response('down', { status: 500 })) as unknown as typeof fetch;
-    const r = await processLlmWindow(pool as never, BRAIN, LLM, row, false);
+    const r = await processLlmWindow(pool as never, SINK, LLM, row, false);
     expect(r).toBe('failed');
     const status = pool.sqlLike('SET llm_status')[0];
     expect(status[1]).toBe('failed');
@@ -339,7 +341,7 @@ describe('processLlmWindow', () => {
     const pool = llmPool(null);
     const calls = mockLlmAndBrain();
     const r = await processLlmWindow(
-      pool as never, BRAIN, LLM, { ...row, conv_kind: 'bot' }, false
+      pool as never, SINK, LLM, { ...row, conv_kind: 'bot' }, false
     );
     expect(r).toBe('skipped');
     expect(pool.sqlLike('SET llm_status')[0][1]).toBe('skipped');
@@ -350,7 +352,7 @@ describe('processLlmWindow', () => {
     const pool = llmPool(null);
     const calls = mockLlmAndBrain();
     const r = await processLlmWindow(
-      pool as never, BRAIN, LLM, { ...row, content_hash: 'stale' }, false
+      pool as never, SINK, LLM, { ...row, content_hash: 'stale' }, false
     );
     expect(r).toBe('skipped');
     expect(pool.sqlLike('SET llm_status').length).toBe(0);

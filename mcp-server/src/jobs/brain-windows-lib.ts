@@ -788,6 +788,29 @@ export function wellFormedDeep<T>(v: T): T {
   return v;
 }
 
+/**
+ * Where window documents go. The incremental cron publishes Synapse events
+ * (brain-windows-synapse.ts); the backfill keeps calling push-ingest (httpSink).
+ */
+export interface WindowSink {
+  push(account: string, docs: BrainDoc[]): Promise<void>;
+  remove(account: string, platform: string, sourceId: string, chunkCount: number): Promise<void>;
+}
+
+export function httpSink(
+  config: BrainPushConfig,
+  log: (msg: string, err?: unknown) => void = () => undefined
+): WindowSink {
+  return {
+    async push(account, docs) {
+      await pushWindowDocs(config, account, docs);
+    },
+    async remove(account, platform, sourceId, chunkCount) {
+      await deleteWindowFromBrain(config, account, platform, sourceId, chunkCount, log);
+    },
+  };
+}
+
 /** Push parents + children in batches of `batch` docs through pushToBrain. */
 export async function pushWindowDocs(
   config: BrainPushConfig,

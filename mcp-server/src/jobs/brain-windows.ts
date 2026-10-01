@@ -1,8 +1,9 @@
 /**
  * brain-windows — incremental conversation-window pass (INFRA-364, ADR 0002 §7).
- * Pushes the parent `conversation_window` documents and their
- * `conversation_chunk` children through push-ingest (contract
- * http.brain.push-ingest.conversation-window.v1). CronJob every 30 min. Per
+ * Publishes the parent `conversation_window` documents and their
+ * `conversation_chunk` children as Synapse events (brain_window.<tenant>.*,
+ * brain-windows-synapse.ts), which Synapse ingests with retries; the
+ * backfill still uses push-ingest directly. CronJob every 30 min. Per
  * account (DB namespace):
  *
  *   1. read messages changed after `brain_windows_cursor` (keyset on
@@ -22,7 +23,7 @@
  */
 import { Pool } from 'pg';
 import pino from 'pino';
-import { ingestNamespaces, BrainPushConfig } from './brain-ingest-lib';
+import { ingestNamespaces } from './brain-ingest-lib';
 import {
   BuiltWindow,
   ChatRef,
@@ -33,7 +34,6 @@ import {
   childDocs,
   childChunks,
   classifyConvKind,
-  deleteWindowFromBrain,
   deleteWindowRow,
   diffWindows,
   ensureBrainWindowsIndexes,
@@ -50,7 +50,6 @@ import {
   loadWindowsConfig,
   parentDoc,
   previousSummary,
-  pushWindowDocs,
   setWindowLlmResult,
   setWindowSummary,
   setWindowsCursor,
@@ -58,7 +57,10 @@ import {
   sessionStartBound,
   upsertWindow,
   windowContentHash,
+  WindowSink,
+  httpSink,
 } from './brain-windows-lib';
+import { connectPublisher, synapseSink } from './brain-windows-synapse';
 import {
   LLM_CONCURRENCY,
   LlmConfig,
@@ -141,7 +143,7 @@ export class PassBudget {
 /** Recompute, diff, delete and push the windows of one chat. */
 export async function recomputeChat(
   pool: Pool,
-  brain: BrainPushConfig,
+  sink: WindowSink,
   config: WindowsConfig,
   opts: Pick<WindowsJobOptions, 'pushDocsCap'>,
   account: string,
@@ -174,14 +176,7 @@ export async function recomputeChat(
   for (const gone of diff.toDelete) {
     try {
       if (!dryRun) {
-        await deleteWindowFromBrain(
-          brain,
-          account,
-          chat.platform,
-          gone.source_id,
-          gone.chunk_count,
-          msg => logger.debug(msg)
-        );
+        await sink.remove(account, chat.platform, gone.source_id, gone.chunk_count);
         await deleteWindowRow(pool, gone.source_id);
       }
       deleted++;
@@ -209,7 +204,7 @@ export async function recomputeChat(
       continue;
     }
     try {
-      await pushWindowDocs(brain, account, all);
+      await sink.push(account, all);
     } catch (e) {
       // No ledger write: the next pass re-diffs and re-pushes (ADR §7.3).
       logger.error(
@@ -232,7 +227,7 @@ export async function recomputeChat(
 /** LLM pass over closed pending windows (ADR §7.5), exactly 2 in parallel. */
 export async function runLlmPass(
   pool: Pool,
-  brain: BrainPushConfig,
+  sink: WindowSink,
   llm: LlmConfig,
   account: string,
   opts: { maxLlm: number; closedBefore: Date; budget: PassBudget; dryRun: boolean }
@@ -254,7 +249,7 @@ export async function runLlmPass(
           return;
         }
         try {
-          const r = await processLlmWindow(pool, brain, llm, row, opts.dryRun);
+          const r = await processLlmWindow(pool, sink, llm, row, opts.dryRun);
           if (r === 'done') done++;
           else if (r === 'failed') failed++;
           else skipped++;
@@ -270,7 +265,7 @@ export async function runLlmPass(
 
 export async function processLlmWindow(
   pool: Pool,
-  brain: BrainPushConfig,
+  sink: WindowSink,
   llm: LlmConfig,
   row: PendingLlmWindow,
   dryRun: boolean
@@ -317,10 +312,7 @@ export async function processLlmWindow(
     const summary = s.rows.length ? (s.rows[0].llm_summary as string | null) : null;
     if (summary) {
       await setWindowLlmResult(pool, row.source_id, 'done', null, null);
-      if (!dryRun)
-        await pushWindowDocs(brain, w.chat.account, [
-          parentDoc(w, { llm_status: 'done', summary }),
-        ]);
+      if (!dryRun) await sink.push(w.chat.account, [parentDoc(w, { llm_status: 'done', summary })]);
     }
     return 'skipped';
   }
@@ -331,7 +323,7 @@ export async function processLlmWindow(
     await setWindowLlmResult(pool, row.source_id, 'done', inputHash, null);
     await setWindowSummary(pool, row.source_id, extraction.summary);
     // Re-push the parent with content = header + summary (ADR §5).
-    await pushWindowDocs(brain, w.chat.account, [
+    await sink.push(w.chat.account, [
       parentDoc(w, {
         llm_status: 'done',
         summary: extraction.summary,
@@ -355,7 +347,7 @@ export async function processLlmWindow(
 
 async function accountPass(
   pool: Pool,
-  brain: BrainPushConfig,
+  sink: WindowSink,
   llm: LlmConfig,
   config: WindowsConfig,
   opts: WindowsJobOptions,
@@ -389,7 +381,7 @@ async function accountPass(
     for (const affected of chats.slice(0, opts.maxChats)) {
       if (budget.out()) break;
       try {
-        const r = await recomputeChat(pool, brain, config, opts, account, affected, dryRun);
+        const r = await recomputeChat(pool, sink, config, opts, account, affected, dryRun);
         stats.chats += r.chats;
         stats.pushed += r.pushed;
         stats.deleted += r.deleted;
@@ -422,7 +414,7 @@ async function accountPass(
     if (budget.out()) break;
   }
 
-  const llmStats = await runLlmPass(pool, brain, llm, account, {
+  const llmStats = await runLlmPass(pool, sink, llm, account, {
     maxLlm: opts.maxLlm,
     closedBefore: new Date(Date.now() - config.gapSeconds * 1000),
     budget,
@@ -444,12 +436,33 @@ async function main(): Promise<void> {
   if (!configFile)
     throw new Error('BRAIN_WINDOWS_CONFIG_FILE is unset (k8s/base/brain-windows-config.yaml)');
   const config = loadWindowsConfig(configFile);
-  const brain: BrainPushConfig = {
-    brainUrl:
-      process.env.BRAIN_URL ||
-      'http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local',
-    apiKey: process.env.BRAIN_API_KEY || '',
-  };
+  // INFRA-364: the incremental pass publishes to Synapse (retries and
+  // visibility in the engine); BRAIN_WINDOWS_SINK=http keeps the old direct
+  // push-ingest path for a rollback without a code change.
+  const sinkKind = process.env.BRAIN_WINDOWS_SINK || 'synapse';
+  let publisher: Awaited<ReturnType<typeof connectPublisher>> | null = null;
+  let sink: WindowSink;
+  if (sinkKind === 'http') {
+    sink = httpSink(
+      {
+        brainUrl:
+          process.env.BRAIN_URL ||
+          'http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local',
+        apiKey: process.env.BRAIN_API_KEY || '',
+      },
+      msg => logger.debug(msg)
+    );
+  } else if (sinkKind === 'synapse') {
+    const url = process.env.SYNAPSE_RABBITMQ_URL;
+    if (!url)
+      throw new Error(
+        'SYNAPSE_RABBITMQ_URL is unset (secret whatsapp-mcp-synapse-rabbitmq); set BRAIN_WINDOWS_SINK=http to push directly'
+      );
+    publisher = await connectPublisher(url);
+    sink = synapseSink(publisher);
+  } else {
+    throw new Error(`BRAIN_WINDOWS_SINK=${sinkKind}: expected synapse or http`);
+  }
   const llm = llmConfigFromEnv(process.env);
   const opts = optionsFromEnv(process.env);
   const dryRun = process.env.BRAIN_WINDOWS_DRY_RUN === 'true';
@@ -467,7 +480,7 @@ async function main(): Promise<void> {
     }
     for (const account of ingestNamespaces()) {
       try {
-        const s = await accountPass(pool, brain, llm, config, opts, account, dryRun);
+        const s = await accountPass(pool, sink, llm, config, opts, account, dryRun);
         for (const [k, v] of Object.entries(s)) totals[k] = (totals[k] ?? 0) + v;
         logger.info({ account, ...s, dryRun }, 'account pass done');
       } catch (e) {
@@ -476,8 +489,9 @@ async function main(): Promise<void> {
     }
   } finally {
     await pool.end();
+    await publisher?.close();
   }
-  logger.info({ ...totals, dryRun }, 'brain-windows pass finished');
+  logger.info({ ...totals, sink: sinkKind, dryRun }, 'brain-windows pass finished');
 }
 
 if (require.main === module) {

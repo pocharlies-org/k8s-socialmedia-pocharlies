@@ -39,6 +39,27 @@ spec:
       remoteRef: { key: brain-litellm/api_key }
 
 ---
+# INFRA-364: URL AMQP del usuario RabbitMQ whatsapp_mcp_brain_windows (vhost
+# /synapse; configure ^$, write ^events$, read ^$). El CronJob brain-windows
+# publica con el los eventos brain_window.* en Synapse. Item propio: un campo
+# nuevo en el item whatsapp-mcp tardaria hasta 96 h en salir de la cache de ESO.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: whatsapp-mcp-synapse-rabbitmq
+  namespace: whatsapp-mcp
+spec:
+  refreshInterval: 24h
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: whatsapp-mcp-synapse-rabbitmq
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: url
+      remoteRef: { key: whatsapp-mcp-synapse-rabbitmq/url }
+
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -290,6 +311,13 @@ spec:
                 - { name: BRAIN_WINDOWS_COLDSTART_LOOKBACK_HOURS, value: "168" }
                 - { name: BRAIN_WINDOWS_MAX_RUNTIME_MS, value: "1440000" }
                 - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
+                # INFRA-364: el incremental publica en Synapse
+                # (brain_window.<tenant>.upserted|deleted) y Synapse lo ingiere con
+                # reintentos (workflows */brain/conversation-window-*.v1.yaml).
+                # BRAIN_WINDOWS_SINK=http vuelve al push-ingest directo sin tocar codigo.
+                - { name: BRAIN_WINDOWS_SINK, value: "synapse" }
+                - name: SYNAPSE_RABBITMQ_URL
+                  valueFrom: { secretKeyRef: { name: whatsapp-mcp-synapse-rabbitmq, key: url } }
                 # Chats de bot/monitorizacion y canales (se indexan, no pasan
                 # por el LLM): ConfigMap brain-windows.
                 - { name: BRAIN_WINDOWS_CONFIG_FILE, value: "/brain-config/brain-windows-config.yaml" }

@@ -159,6 +159,32 @@ mensajes en ventanas cuadra con Postgres.
 
 Sustituye al CronJob `brain-ingest` (pausado desde el 30-09, #144), que se retira.
 
+### 7.1 Transporte por Synapse (decisión de Dani, 01-10-2026)
+
+El incremental no llama al brain: publica eventos en Synapse, que es quien ya
+mete en el brain el correo, los pedidos y los productos.
+
+- `brain_window.<tenant>.upserted`: los documentos de una ventana (padre e
+  hijos, como mucho 25 por evento). El workflow
+  `<tenant>.brain.conversation-window-upserted` llama a `brain.ingest` con
+  reintentos 60 s / 10 min / 60 min.
+- `brain_window.<tenant>.deleted`: un evento por documento retirado; el workflow
+  llama a `brain.delete_document`.
+- tenant `family` = cuenta personal (instancia `personal`); `skirmshop` = el
+  resto (instancia `skirmshop`).
+- El cron conserva su papel de detector: que una ventana se ha cerrado (1 h de
+  silencio) lo dice el reloj, no un mensaje, y el corte se calcula con Postgres,
+  que es de este repo.
+- El ledger se escribe cuando el broker confirma el evento; los reintentos del
+  ingest son de Synapse. Un fallo definitivo queda como instancia fallida en el
+  engine, no en un log del cron.
+- Publica con un usuario propio (`whatsapp_mcp_brain_windows`, solo escritura en
+  `events`), secret `whatsapp-mcp-synapse-rabbitmq`.
+- `BRAIN_WINDOWS_SINK=http` vuelve al push-ingest directo sin cambiar código.
+  El reindexado inicial (§9) sigue por HTTP.
+- La extracción con el LLM (§5) sigue en el cron: el ledger ya reintenta los
+  fallos y fija la concurrencia en 2; solo su re-push del padre va por Synapse.
+
 ## 8. Neuronas y aprendizaje hebbiano (brain)
 
 - Cada ventana con `extraction` produce un **knowledge packet** (`packet_id` = `source_id` + `content_hash`):
