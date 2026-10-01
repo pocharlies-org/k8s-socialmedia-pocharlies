@@ -813,6 +813,10 @@ contracts:
       metadata.edited_at — the WhatsApp representation. The path, the body
       fields, the 200 shape and the failureClass values are contract:
       changing any is breaking — a new `.v2` entry beside this one.
+      mcp-server/src/mcp/server.ts (which carries this entry's marker) also
+      hosts the local-index search of social_search_messages (Instagram rows
+      and the mediaType filter, Postgres only — no connector route; added
+      later, surface unchanged).
   - id: nats.telegram-connector.message-edited.v1
     kind: routing-key
     value: telegram.MessageEdited
