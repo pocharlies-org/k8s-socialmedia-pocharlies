@@ -10,6 +10,8 @@ import {
   DEFAULT_WINDOWS_CONFIG,
   buildWindows,
   upsertWindow,
+  wellFormed,
+  wellFormedDeep,
   childDocs,
   chunkWindow,
   classifyConvKind,
@@ -627,5 +629,26 @@ describe('upsertWindow SQL', () => {
     const vals = splitTop(m![2]);
     expect(cols.length).toBe(21);
     expect(vals.length).toBe(cols.length);
+  });
+});
+
+describe('wellFormed (lone UTF-16 surrogates)', () => {
+  const emoji = '\u{1F600}'; // two UTF-16 units
+  it('replaces a half emoji left by slice() and keeps whole emojis', () => {
+    const cut = ('hola ' + emoji).slice(0, 6); // 'hola ' + high surrogate only
+    expect(cut).not.toBe(wellFormed(cut));
+    expect(wellFormed(cut)).toBe('hola \uFFFD');
+    expect(wellFormed('hola ' + emoji)).toBe('hola ' + emoji);
+    expect(() => new TextEncoder().encode(wellFormed(cut))).not.toThrow();
+    expect(JSON.stringify(wellFormed(cut))).not.toMatch(/\\ud83d/i);
+  });
+  it('cleans every string inside a document, leaving numbers and dates alone', () => {
+    const d = new Date(0);
+    const doc = { content: 'a' + emoji.slice(1), metadata: { transcript: [emoji.slice(0, 1)], n: 3, when: d } };
+    const out = wellFormedDeep(doc);
+    expect(out.content).toBe('a\uFFFD');
+    expect(out.metadata.transcript[0]).toBe('\uFFFD');
+    expect(out.metadata.n).toBe(3);
+    expect(out.metadata.when).toBe(d);
   });
 });

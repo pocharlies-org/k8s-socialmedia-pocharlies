@@ -753,6 +753,28 @@ export function instanceForNamespace(account: string): string {
   return instanceForAccount(account);
 }
 
+// A JS slice() counts UTF-16 units and can cut an emoji in half, leaving a lone
+// surrogate. The brain's embedder client cannot UTF-8-encode it, counts it as an
+// endpoint failure and opens the TEI circuit breaker for EVERY caller (01-10-2026).
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** Replace lone UTF-16 surrogates with U+FFFD (String.prototype.toWellFormed). */
+export function wellFormed(s: string): string {
+  return s.replace(LONE_SURROGATE, '\uFFFD');
+}
+
+/** wellFormed applied to every string inside a JSON-like value. */
+export function wellFormedDeep<T>(v: T): T {
+  if (typeof v === 'string') return wellFormed(v) as unknown as T;
+  if (Array.isArray(v)) return v.map(x => wellFormedDeep(x)) as unknown as T;
+  if (v && typeof v === 'object' && !(v instanceof Date)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = wellFormedDeep(x);
+    return out as T;
+  }
+  return v;
+}
+
 /** Push parents + children in batches of `batch` docs through pushToBrain. */
 export async function pushWindowDocs(
   config: BrainPushConfig,
@@ -764,7 +786,12 @@ export async function pushWindowDocs(
   const adapter = adapterForPlatform(docsAdapterKey(docs));
   const instance = instanceForNamespace(account);
   for (let i = 0; i < docs.length; i += batch) {
-    chunks += await pushToBrain(config, instance, adapter, docs.slice(i, i + batch));
+    chunks += await pushToBrain(
+      config,
+      instance,
+      adapter,
+      wellFormedDeep(docs.slice(i, i + batch))
+    );
   }
   return chunks;
 }

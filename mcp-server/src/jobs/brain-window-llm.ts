@@ -10,7 +10,7 @@
  * that does not fit the schema is a FAILED extraction, not a corrupt brain.
  */
 import { z } from 'zod';
-import { BuiltWindow, llmInputHash } from './brain-windows-lib';
+import { BuiltWindow, llmInputHash, wellFormed } from './brain-windows-lib';
 
 export const EXTRACTION_SCHEMA = z.object({
   summary: z.string().max(1200),
@@ -155,7 +155,7 @@ export async function extractWindow(
   const url = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const body = {
     model: config.model,
-    messages: [{ role: 'user', content: buildExtractionPrompt(w, prevSummary) }],
+    messages: [{ role: 'user', content: wellFormed(buildExtractionPrompt(w, prevSummary)) }],
     temperature: 0,
     max_tokens: config.maxTokens,
     response_format: { type: 'json_object' },
