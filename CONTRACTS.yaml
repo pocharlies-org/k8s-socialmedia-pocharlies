@@ -1694,4 +1694,8 @@ contracts:
       an in-place edit. The per-message surface this replaces
       (metadata.type `message`, source ids wa:/tg:/ig:) is retired by the ADR
       0002 §9 purge; brain-ingest.ts / brain-replay.ts keep pushing it for
-      recovery only.
+      recovery only. Behavior note (INFRA-364): the transcript is rendered
+      from `messages.content`; a voice-note echo row that still stores the
+      raw STT response body (`🎙️ "{"text":"…"}"`) is unwrapped to prose in
+      renderLine before pushing — the document schema is untouched, only the
+      transcript text is normalized.
