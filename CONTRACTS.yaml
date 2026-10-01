@@ -1679,7 +1679,7 @@ contracts:
       account instance (personal|skirmshop from the account registry) and
       adapter (whatsapp|telegram), parent documents of metadata.type
       `conversation_window` (content = header + summary or header + first
-      ~1500 chars; metadata carries window_key, part, start_ts, end_ts,
+      ~1500 chars; metadata carries conv_kind, window_key, part, start_ts, end_ts,
       observed_at, message_count, participants[], message_ids[], transcript,
       content_hash, llm_status, summary, extraction) plus child documents of
       metadata.type `conversation_chunk` (source_id = parent + '#cN';
@@ -1698,4 +1698,6 @@ contracts:
       from `messages.content`; a voice-note echo row that still stores the
       raw STT response body (`🎙️ "{"text":"…"}"`) is unwrapped to prose in
       renderLine before pushing — the document schema is untouched, only the
-      transcript text is normalized.
+      transcript text is normalized. 2026-10-01 (INFRA-364): conv_kind
+      (chat|group|channel|bot) listado entre las claves; el ledger brain_windows
+      y el corte de sesiones del lado consumidor se corrigen sin cambiar la forma.
