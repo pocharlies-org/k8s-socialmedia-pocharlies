@@ -420,7 +420,8 @@ export function splitSessionByCap(
       if (len > config.transcriptCapChars) break; // nothing further fits
       if (len < config.splitFloorChars) continue;
       const gapSec =
-        (msgs[start + i].wa_timestamp.getTime() - msgs[start + i - 1].wa_timestamp.getTime()) / 1000;
+        (msgs[start + i].wa_timestamp.getTime() - msgs[start + i - 1].wa_timestamp.getTime()) /
+        1000;
       if (gapSec > bestGap) {
         bestGap = gapSec;
         best = i;
