@@ -79,9 +79,12 @@ images:
   # mismo código que v1.3.82 en lo demás.
   # v1.3.85 (run 36920007935, deploy/prod@69d1fe8): #173 (privacidad, temporizador, escribiendo,
   # stickers/GIFs, borrar para mí) y #175 (destacados/fijados, migración 018). 62 tools.
+  # v1.3.87 (run 36940363123, deploy/prod@b1fdd25): #178 (búsqueda en Instagram + mediaType), #177
+  # (comunidades y canales), #182 (estados y publicaciones de canales, migración 019; publicar
+  # estado tras WA_STATUS_PUBLISH_ENABLED) y #180 (perfil propio, una sola vez/HD). 73 tools.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.85
-    digest: sha256:dd5a31557d934831bc540e56e07f6f46048c3043f3e61c9fa95ecf7e6c0fcb3b
+    newTag: v1.3.87
+    digest: sha256:52f5056dc386996323bd31ac09ce50698f3f1965cd92b02c07b795e736c59870
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

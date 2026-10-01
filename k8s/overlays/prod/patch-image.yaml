@@ -24,7 +24,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.85@sha256:eed355a2e946d103114e7fa7c523aa2dc875bfe6a195c30031b7d89b9f16e66a
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.87@sha256:279b980463cb0e0dea21fd29e1cbb72c06149f6dc2d01a528c99898b7011ece9
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.85@sha256:eed355a2e946d103114e7fa7c523aa2dc875bfe6a195c30031b7d89b9f16e66a
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.87@sha256:279b980463cb0e0dea21fd29e1cbb72c06149f6dc2d01a528c99898b7011ece9
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 apiVersion: apps/v1
@@ -49,7 +49,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-leila
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.85@sha256:eed355a2e946d103114e7fa7c523aa2dc875bfe6a195c30031b7d89b9f16e66a
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.87@sha256:279b980463cb0e0dea21fd29e1cbb72c06149f6dc2d01a528c99898b7011ece9
 ---
 apiVersion: apps/v1
 kind: Deployment
