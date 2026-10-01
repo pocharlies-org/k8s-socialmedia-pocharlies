@@ -307,7 +307,7 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     name: 'social_search_messages',
     title: 'Search messages',
     description:
-      'Search indexed or provider messages without inferring a channel from target shape.',
+      'Search indexed messages (WhatsApp, Telegram and Instagram) without inferring a channel from target shape. mediaType narrows to image (albums/carousels included), video, audio, document or sticker messages.',
     effect: 'read',
     authScope: 'social.read',
     capability: 'messages.search',
@@ -319,6 +319,12 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
         from: { type: 'string', format: 'date-time' },
         to: { type: 'string', format: 'date-time' },
         sender: { type: 'string' },
+        mediaType: {
+          type: 'string',
+          enum: ['image', 'video', 'audio', 'document', 'sticker', 'any'],
+          default: 'any',
+          description: 'Only messages of this media kind; matches captions/text of the media.',
+        },
         limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
         readSource,
       },

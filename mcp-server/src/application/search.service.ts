@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import pino from 'pino';
 import { accountKey, type Account } from '../domain/account';
 import { accountNamespaces } from '../domain/account-registry';
+import { mediaTypePredicate, messageTypesFor, type MediaType } from './media-type-filter';
 
 export interface SearchResult {
   messageId: string;
@@ -14,6 +15,7 @@ export interface SearchResult {
   rank?: number;
   platform: string;
   account: string;
+  messageType?: string;
 }
 
 export interface SearchOptions {
@@ -24,7 +26,14 @@ export interface SearchOptions {
   limit?: number;
   /** Account scope (personal|professional|leila). Defaults to personal. */
   account?: Account;
-  platform?: 'whatsapp' | 'telegram';
+  platform?: 'whatsapp' | 'telegram' | 'instagram';
+  /** image|video|audio|document|sticker|any (see media-type-filter). */
+  mediaType?: MediaType;
+  /**
+   * chatId/sender are stored ids, matched as given. Instagram ids
+   * (`ig_<account>_…`) carry their account and are never namespace-prefixed.
+   */
+  rawIds?: boolean;
 }
 
 export class SearchService {
@@ -62,6 +71,7 @@ export class SearchService {
         m.wa_timestamp,
         m.platform,
         m.account,
+        m.message_type,
         ts_rank(to_tsvector('english', m.content), plainto_tsquery('english', $1)) as rank
       FROM messages m
       WHERE to_tsvector('english', m.content) @@ plainto_tsquery('english', $1)
@@ -72,7 +82,10 @@ export class SearchService {
     let paramIndex = 2;
 
     if (chatId) {
-      if (options.account) {
+      if (options.rawIds) {
+        sql += ` AND m.conversation_id = $${paramIndex}`;
+        params.push(chatId);
+      } else if (options.account) {
         sql += ` AND m.conversation_id = $${paramIndex}`;
         params.push(accountKey(options.account, chatId));
       } else {
@@ -95,7 +108,10 @@ export class SearchService {
     }
 
     if (sender) {
-      if (options.account) {
+      if (options.rawIds) {
+        sql += ` AND m.sender_wa_id = $${paramIndex}`;
+        params.push(sender);
+      } else if (options.account) {
         sql += ` AND m.sender_wa_id = $${paramIndex}`;
         params.push(accountKey(options.account, sender));
       } else {
@@ -115,6 +131,12 @@ export class SearchService {
       params.push(options.platform);
       paramIndex++;
     }
+    const messageTypes = messageTypesFor(options.mediaType);
+    if (messageTypes) {
+      sql += mediaTypePredicate('m', paramIndex);
+      params.push(messageTypes);
+      paramIndex++;
+    }
 
     sql += ` ORDER BY rank DESC, m.wa_timestamp DESC LIMIT $${paramIndex}`;
     params.push(limit);
@@ -130,6 +152,7 @@ export class SearchService {
       rank: parseFloat(row.rank),
       platform: row.platform,
       account: row.account,
+      messageType: row.message_type,
     }));
   }
 
@@ -157,6 +180,7 @@ export class SearchService {
         m.wa_timestamp,
         m.platform,
         m.account,
+        m.message_type,
         1 - (me.embedding <=> $1::vector) as similarity
       FROM messages m
       JOIN message_embeddings me ON m.id = me.message_id
@@ -168,7 +192,10 @@ export class SearchService {
     let paramIndex = 2;
 
     if (chatId) {
-      if (options.account) {
+      if (options.rawIds) {
+        sql += ` AND m.conversation_id = $${paramIndex}`;
+        params.push(chatId);
+      } else if (options.account) {
         sql += ` AND m.conversation_id = $${paramIndex}`;
         params.push(accountKey(options.account, chatId));
       } else {
@@ -191,7 +218,10 @@ export class SearchService {
     }
 
     if (sender) {
-      if (options.account) {
+      if (options.rawIds) {
+        sql += ` AND m.sender_wa_id = $${paramIndex}`;
+        params.push(sender);
+      } else if (options.account) {
         sql += ` AND m.sender_wa_id = $${paramIndex}`;
         params.push(accountKey(options.account, sender));
       } else {
@@ -211,6 +241,12 @@ export class SearchService {
       params.push(options.platform);
       paramIndex++;
     }
+    const messageTypes = messageTypesFor(options.mediaType);
+    if (messageTypes) {
+      sql += mediaTypePredicate('m', paramIndex);
+      params.push(messageTypes);
+      paramIndex++;
+    }
 
     sql += ` ORDER BY similarity DESC, m.wa_timestamp DESC LIMIT $${paramIndex}`;
     params.push(limit);
@@ -226,6 +262,7 @@ export class SearchService {
       similarity: parseFloat(row.similarity),
       platform: row.platform,
       account: row.account,
+      messageType: row.message_type,
     }));
   }
 

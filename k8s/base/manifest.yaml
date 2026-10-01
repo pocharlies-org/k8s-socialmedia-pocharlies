@@ -366,7 +366,7 @@ spec:
     metadata:
       labels: { app: mcp-server }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:4127d487d0cc29da98b69c03080563d78457a5c01329d6822b03245631cbfd32"
+        contracts.e-dani.com/socialmedia-digest: "sha256:378b07709f738a502b5ffa0e283885e9aba8217de4cd26d37134214a24facbed"
     spec:
       enableServiceLinks: false
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
@@ -440,7 +440,7 @@ spec:
     metadata:
       labels: { app: mcp-sse }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:4127d487d0cc29da98b69c03080563d78457a5c01329d6822b03245631cbfd32"
+        contracts.e-dani.com/socialmedia-digest: "sha256:378b07709f738a502b5ffa0e283885e9aba8217de4cd26d37134214a24facbed"
     spec:
       enableServiceLinks: false
       nodeSelector:

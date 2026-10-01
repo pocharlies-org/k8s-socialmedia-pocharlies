@@ -11,6 +11,13 @@ import addFormats from 'ajv-formats';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { SearchService } from '../application/search.service';
+import {
+  isMediaType,
+  MEDIA_TYPES,
+  mediaTypePredicate,
+  messageTypesFor,
+  type MediaType,
+} from '../application/media-type-filter';
 import { SummarizationService } from '../application/summarization.service';
 import {
   UnreadDigestService,
@@ -32,6 +39,7 @@ import { identityBindingEnabled, resolveBoundAccount } from '../domain/identity-
 import {
   findAccount,
   getAccounts,
+  requireAccount,
   socialAccountId,
   type AccountChannel,
   type SocialAccount,
@@ -1413,12 +1421,13 @@ export class MCPServer {
         'Provider-side message search is not supported; use readSource=index'
       );
     }
-    if (args.channel === 'instagram') {
+    if (args.mediaType !== undefined && !isMediaType(args.mediaType)) {
       throw this.canonicalError(
-        'unsupported_capability',
-        'Instagram messages are not ingested into the searchable local index'
+        'invalid_request',
+        `mediaType must be one of ${MEDIA_TYPES.join(', ')}`
       );
     }
+    const mediaType: MediaType | undefined = args.mediaType;
     if (args.channel === 'telegram') {
       return this.handleTelegramSearch({
         query: this.string(args, 'query'),
@@ -1426,6 +1435,23 @@ export class MCPServer {
         topicId: args.threadId,
         account: this.account(args),
         limit: args.limit,
+        mediaType,
+      });
+    }
+    if (args.channel === 'instagram') {
+      // The ingester files Instagram rows under the account's DB namespace
+      // with ids that already carry the Instagram account (ig_<account>_…).
+      return this.handleSearchMessages({
+        query: this.string(args, 'query'),
+        chatId: args.target,
+        account: requireAccount('instagram', this.account(args)).namespace,
+        platform: 'instagram',
+        rawIds: true,
+        from: args.from,
+        to: args.to,
+        sender: args.sender,
+        limit: args.limit,
+        mediaType,
       });
     }
     const account =
@@ -1446,6 +1472,7 @@ export class MCPServer {
       to: args.to,
       sender: args.sender,
       limit: args.limit,
+      mediaType,
     });
   }
 
@@ -3019,7 +3046,9 @@ export class MCPServer {
     sender?: string;
     limit?: number;
     account?: Account;
-    platform?: 'whatsapp' | 'telegram';
+    platform?: 'whatsapp' | 'telegram' | 'instagram';
+    rawIds?: boolean;
+    mediaType?: MediaType;
   }) {
     const results = await this.searchService.search(args.query, {
       chatId: args.chatId,
@@ -3029,6 +3058,8 @@ export class MCPServer {
       limit: args.limit || 20,
       account: args.account,
       platform: args.platform,
+      rawIds: args.rawIds,
+      mediaType: args.mediaType,
     });
 
     return {
@@ -3045,6 +3076,7 @@ export class MCPServer {
                 timestamp: r.waTimestamp.toISOString(),
                 channel: r.platform,
                 accountId: r.account,
+                messageType: r.messageType ?? null,
                 similarity: r.similarity,
                 rank: r.rank,
               })),
@@ -5364,11 +5396,17 @@ export class MCPServer {
     topicId?: number | string;
     limit?: number;
     account?: string;
+    mediaType?: MediaType;
   }) {
     const account = normalizeAccount(args.account);
     const limit = Math.min(args.limit ?? 20, 200);
     const params: any[] = [`%${args.query}%`, limit, account];
     let where = `platform = 'telegram' AND account = $3 AND content ILIKE $1`;
+    const messageTypes = messageTypesFor(args.mediaType);
+    if (messageTypes) {
+      params.push(messageTypes);
+      where += mediaTypePredicate('', params.length);
+    }
     let topicId: number | undefined;
     if (args.chatId) {
       const target = this.telegramTopicTarget(args.chatId, args.topicId);
@@ -5380,13 +5418,14 @@ export class MCPServer {
           `Could not resolve Telegram chatId '${args.chatId}'`
         );
       params.push(id);
-      where += ` AND conversation_id = $4`;
-      where = this.appendTelegramTopicWhere(where, params, 4, topicId);
+      const conversationParam = params.length;
+      where += ` AND conversation_id = $${conversationParam}`;
+      where = this.appendTelegramTopicWhere(where, params, conversationParam, topicId);
     } else if (args.topicId !== undefined) {
       throw new McpError(ErrorCode.InvalidParams, 'topicId requires chatId');
     }
     const result = await this.dbClient.query(
-      `SELECT id, conversation_id, sender_wa_id, direction, content, wa_timestamp,
+      `SELECT id, conversation_id, sender_wa_id, direction, content, message_type, wa_timestamp,
               reply_to_message_id, metadata
          FROM messages WHERE ${where}
         ORDER BY wa_timestamp DESC LIMIT $2`,
@@ -5403,6 +5442,7 @@ export class MCPServer {
         senderId: m.sender_wa_id,
         direction: m.direction,
         content: m.content,
+        messageType: m.message_type ?? null,
         timestamp: m.wa_timestamp,
         replyTo: m.reply_to_message_id,
         topicId:

@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:4127d487d0cc29da98b69c03080563d78457a5c01329d6822b03245631cbfd32",
+  "digest": "sha256:378b07709f738a502b5ffa0e283885e9aba8217de4cd26d37134214a24facbed",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -8322,7 +8322,7 @@
     {
       "name": "social_search_messages",
       "title": "Search messages",
-      "description": "Search indexed or provider messages without inferring a channel from target shape.",
+      "description": "Search indexed messages (WhatsApp, Telegram and Instagram) without inferring a channel from target shape. mediaType narrows to image (albums/carousels included), video, audio, document or sticker messages.",
       "effect": "read",
       "authScope": "social.read",
       "capability": "messages.search",
@@ -8363,6 +8363,19 @@
           },
           "sender": {
             "type": "string"
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "audio",
+              "document",
+              "sticker",
+              "any"
+            ],
+            "default": "any",
+            "description": "Only messages of this media kind; matches captions/text of the media."
           },
           "limit": {
             "type": "integer",
