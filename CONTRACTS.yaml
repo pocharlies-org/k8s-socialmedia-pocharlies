@@ -1834,7 +1834,6 @@ contracts:
     role: provider
     files:
       - mcp-server/src/jobs/brain-windows-synapse.ts
-      - mcp-server/src/jobs/brain-windows.ts
     status: active
     note: >-
       INFRA-364. Evento en el exchange topic `events` del vhost /synapse
@@ -1859,7 +1858,6 @@ contracts:
     role: provider
     files:
       - mcp-server/src/jobs/brain-windows-synapse.ts
-      - mcp-server/src/jobs/brain-windows.ts
     status: active
     note: >-
       INFRA-364. Mismo exchange, usuario y mapeo de tenant que

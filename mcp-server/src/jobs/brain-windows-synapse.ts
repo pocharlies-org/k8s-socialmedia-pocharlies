@@ -43,7 +43,7 @@ export interface SynapseEvent {
 }
 
 // CONTRACT: amqp.synapse.brain-window-upserted.v1 — routing key
-// brain_window.<tenant>.upserted, body {data: {adapter, source_id,
+// brain_window.{tenant}.upserted, body {data: {adapter, source_id,
 // payload_hash, documents[]}} (consumer: synapse workflow
 // <tenant>.brain.conversation-window-upserted).
 export function upsertEvents(account: string, docs: BrainDoc[]): SynapseEvent[] {
@@ -69,7 +69,7 @@ export function upsertEvents(account: string, docs: BrainDoc[]): SynapseEvent[] 
 }
 
 // CONTRACT: amqp.synapse.brain-window-deleted.v1 — routing key
-// brain_window.<tenant>.deleted, body {data: {adapter, source_id}}, one event
+// brain_window.{tenant}.deleted, body {data: {adapter, source_id}}, one event
 // per document: the parent and each `#c<n>` child.
 export function deleteEvents(
   account: string,
