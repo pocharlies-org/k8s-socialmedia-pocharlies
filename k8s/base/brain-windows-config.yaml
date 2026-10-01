@@ -42,9 +42,9 @@ bots:
     ids:
       - tg_-1003984393379
       - tg_-5055944631
-  - name: Skirmshop Spain Hermes
+  - name: github pocharlies-org
     ids:
-      - tg_-1003745557294
+      - tg_-1003975290449
   - name: Pocharlies Operations
     ids:
       - tg_-1004409526898
@@ -59,3 +59,12 @@ channels:
   - name: Anonymous Catalonia
     ids:
       - tg_-1001275874234
+  - name: COPA NACIONAL DE ESPAÑA 2026
+    ids:
+      - tg_-1001059179151
+  - name: Airsoft4Tiesos
+    ids:
+      - tg_-1001648452238
+  - name: Airsoft Ibérico
+    ids:
+      - tg_-1001980503230
