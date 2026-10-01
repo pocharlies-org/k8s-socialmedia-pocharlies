@@ -81,6 +81,7 @@ const ALL_FILES = [
   '016_brain_windows.sql',
   '017_notify_message_edit_delete.sql',
   '018_whatsapp_message_stars_pins.sql',
+  '019_whatsapp_statuses.sql',
 ];
 
 describe('migrate.ts _migrations ledger', () => {
@@ -92,12 +93,21 @@ describe('migrate.ts _migrations ledger', () => {
     expect(db.ledger.every(l => !l.baseline)).toBe(true);
     expect(db.executed).toHaveLength(ALL_FILES.length);
     expect(db.executed[0]).toMatch(/CREATE TABLE conversations/); // 001, the non-idempotent one
-    expect(db.executed[db.executed.length - 6]).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/); // 013
-    expect(db.executed[db.executed.length - 5]).toMatch(/ADD COLUMN IF NOT EXISTS ephemeral_expiration/); // 014
-    expect(db.executed[db.executed.length - 4]).toMatch(/FUNCTION public\.merge_inbound_reaction/); // 015
-    expect(db.executed[db.executed.length - 3]).toMatch(/CREATE TABLE IF NOT EXISTS brain_windows/); // 016
-    expect(db.executed[db.executed.length - 2]).toMatch(/FUNCTION notify_message_edit_delete/); // 017
-    expect(db.executed[db.executed.length - 1]).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_message_stars/); // 018, the last one
+    expect(db.executed[db.executed.length - 7]).toMatch(
+      /CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/
+    ); // 013
+    expect(db.executed[db.executed.length - 6]).toMatch(
+      /ADD COLUMN IF NOT EXISTS ephemeral_expiration/
+    ); // 014
+    expect(db.executed[db.executed.length - 5]).toMatch(/FUNCTION public\.merge_inbound_reaction/); // 015
+    expect(db.executed[db.executed.length - 4]).toMatch(/CREATE TABLE IF NOT EXISTS brain_windows/); // 016
+    expect(db.executed[db.executed.length - 3]).toMatch(/FUNCTION notify_message_edit_delete/); // 017
+    expect(db.executed[db.executed.length - 2]).toMatch(
+      /CREATE TABLE IF NOT EXISTS whatsapp_message_stars/
+    ); // 018
+    expect(db.executed[db.executed.length - 1]).toMatch(
+      /CREATE TABLE IF NOT EXISTS whatsapp_statuses/
+    ); // 019, the last one
     expect(db.commits).toBe(ALL_FILES.length);
     expect(db.openTx).toBe(false);
   });
@@ -135,7 +145,9 @@ describe('migrate.ts _migrations ledger', () => {
     expect(db.executed.some(sql => /user_channel_credentials/.test(sql))).toBe(true);
     expect(db.ledgerFiles()).toEqual(ALL_FILES);
     expect(db.ledger.find(l => l.file === '001_initial_schema.sql')?.baseline).toBe(true);
-    expect(db.ledger.find(l => l.file === '007_user_channel_credentials.sql')?.baseline).toBe(false);
+    expect(db.ledger.find(l => l.file === '007_user_channel_credentials.sql')?.baseline).toBe(
+      false
+    );
   });
 
   test('a failing file is rolled back and NOT recorded; earlier files stay recorded', async () => {

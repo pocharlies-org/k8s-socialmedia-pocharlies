@@ -1964,6 +1964,54 @@ contracts:
       channelId, changed, confirmed: true, channel}. The path, the body
       fields, the 200 shape and those failureClass values are contract:
       changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.statuses-list.v1
+    kind: http-route
+    value: /statuses
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/statuses of the house WhatsApp connectors: the statuses
+      (Estados) of the account's contacts and its own, consumed by the MCP tool
+      social_list_statuses (mcp-server/src/mcp/server.ts canonicalListStatuses).
+      A read: not gated, answers while disconnected. HMAC-signed body
+      {contact?, includeExpired?, includeOwn?, limit?, cursor?}: contact a
+      phone or user jid (its PN and LID ids through social_contact_aliases;
+      a group / channel is 400); includeExpired (default false = only the ones
+      posted in the last 24 h); includeOwn (default true); limit 1–200 (default
+      50); cursor the opaque nextCursor of the previous page; else 400
+      invalid_request. From whatsapp_statuses (migration 019) joined to
+      messages: newest first, revoked ones left out. 200 {statuses
+      [{messageId, conversationId ('status@broadcast', for GET
+      /messages/media/:chatId/:msgId), authorId, authorName, fromMe,
+      messageType, text, hasMedia, mimeType, postedAt, expiresAt, active,
+      audienceSize, source (live | history | connector | backfill)}],
+      nextCursor, persisted, contact?}; persisted false + [] while ingest is
+      off or migration 019 is missing. Ids bare. The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2`
+      entry beside this one.
+  - id: http.whatsapp-connector.channels-posts.v1
+    kind: http-route
+    value: /channels/posts
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/channels/posts of the house WhatsApp connectors: posts of
+      the channels (newsletters) the account receives, consumed by the MCP
+      tool social_list_channel_posts (mcp-server/src/mcp/server.ts
+      canonicalListChannelPosts). A read: not gated, answers while
+      disconnected. HMAC-signed body {channelId?, limit?, cursor?}: channelId
+      <digits>@newsletter (else 400); limit 1–200 (default 50); cursor the
+      opaque nextCursor. From messages (the channel's conversation, no copy):
+      newest first, deleted posts left out. 200 {posts [{messageId, channelId,
+      channelName (null while the conversation is named by its jid),
+      messageType, text, hasMedia, mimeType, postedAt, structured?}],
+      nextCursor, channels (how many channel conversations were read)}; []
+      with ingest off. Ids bare. Path, body and 200 shape are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
   - id: http.brain.push-ingest.conversation-window.v1
     kind: http-route
     value: /instances/{instance}/push-ingest

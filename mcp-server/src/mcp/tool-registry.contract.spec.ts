@@ -33,6 +33,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_get_profile',
   'social_invite_to_group',
   'social_list_accounts',
+  'social_list_channel_posts',
   'social_list_blocked',
   'social_list_channels',
   'social_list_comments',
@@ -45,6 +46,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_list_messages',
   'social_list_participants',
   'social_list_pinned',
+  'social_list_statuses',
   'social_list_starred',
   'social_lookup_channel',
   'social_manage_channel_subscription',
@@ -104,6 +106,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_get_profile: 'read',
   social_invite_to_group: 'externalWrite',
   social_list_accounts: 'read',
+  social_list_channel_posts: 'read',
   social_list_blocked: 'read',
   social_list_channels: 'read',
   social_list_comments: 'read',
@@ -116,6 +119,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_list_messages: 'read',
   social_list_participants: 'read',
   social_list_pinned: 'read',
+  social_list_statuses: 'read',
   social_list_starred: 'read',
   social_lookup_channel: 'read',
   social_manage_channel_subscription: 'externalWrite',
@@ -310,6 +314,12 @@ const EXPECTED_ANNOTATIONS: Record<
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
+  social_list_channel_posts: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   },
   social_list_channels: {
     readOnlyHint: true,
@@ -382,6 +392,12 @@ const EXPECTED_ANNOTATIONS: Record<
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
+  social_list_statuses: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   },
   social_lookup_channel: {
     readOnlyHint: true,
@@ -662,11 +678,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 68 canonical tools in deterministic order', () => {
+  it('contains exactly the 70 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(68);
+    expect(new Set(names).size).toBe(70);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 

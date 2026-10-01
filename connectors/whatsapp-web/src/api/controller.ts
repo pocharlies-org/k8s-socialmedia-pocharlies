@@ -31,6 +31,7 @@ import {
 import { MessageUnavailableError } from '../durable-message-store';
 import { MessageMutationError } from '../message-mutations';
 import { parsePinRequest, parseStarredQuery, parseStarRequest } from '../message-stars-pins';
+import { parseChannelPostsQuery, parseStatusListQuery } from '../statuses';
 import { PollEventInputError, validatePollInput } from '../poll-votes';
 import { validateEventInput, validateEventResponse } from '../event-responses';
 import { availablePresenceAllowed, parsePresenceRequest } from '../presence';
@@ -2363,6 +2364,31 @@ export function createRouter(
         res.json(await client.listPinnedMessages(chatId));
       } catch (e) {
         mutationErrorResponse(res, e, 'list pinned messages');
+      }
+    })();
+  });
+
+  // Statuses and channel posts (fase 3 follow-up). The lists read the DB: no
+  // gate, and they answer while disconnected.
+
+  // CONTRACT: http.whatsapp-connector.statuses-list.v1 — body {contact?, includeExpired?, includeOwn?, limit?, cursor?}, 200 {statuses: [{messageId, conversationId, authorId, authorName, fromMe, messageType, text, hasMedia, mimeType, postedAt, expiresAt, active, audienceSize, source}], nextCursor, persisted, contact?}
+  router.post('/statuses', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        res.json(await client.listStatuses(parseStatusListQuery(optionalObject(req.body))));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list statuses');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.channels-posts.v1 — body {channelId?, limit?, cursor?}, 200 {posts: [{messageId, channelId, channelName, messageType, text, hasMedia, mimeType, postedAt, structured?}], nextCursor, channels}
+  router.post('/channels/posts', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        res.json(await client.listChannelPosts(parseChannelPostsQuery(optionalObject(req.body))));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list channel posts');
       }
     })();
   });

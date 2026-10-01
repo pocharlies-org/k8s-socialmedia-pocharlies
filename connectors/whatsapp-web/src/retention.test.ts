@@ -15,6 +15,7 @@ import { BaileysClient } from './baileys-client';
 import {
   maybeRunRetention,
   payloadRetentionDays,
+  statusRetentionDays,
   purgeSql,
   purgeTable,
   RETENTION_BATCH_SIZE,
@@ -66,6 +67,11 @@ test('purge SQL: batched by ctid, scoped to the account, parameterised age', () 
     /^DELETE FROM whatsapp_message_payloads WHERE ctid IN \( SELECT ctid FROM whatsapp_message_payloads WHERE account = \$1 AND created_at < NOW\(\) - make_interval\(days => \$2\) LIMIT 5000\)$/
   );
   assert.match(purgeSql('whatsapp_send_attempts'), /DELETE FROM whatsapp_send_attempts/);
+  // Statuses age by when they were posted, not when they were indexed (backfill).
+  assert.match(
+    purgeSql('whatsapp_statuses').replace(/\s+/g, ' '),
+    /WHERE account = \$1 AND posted_at < NOW\(\) - make_interval\(days => \$2\)/
+  );
   assert.equal(RETENTION_BATCH_SIZE, 5000);
 });
 
@@ -73,8 +79,12 @@ test('retention windows: 7 days for send attempts, 90 for payloads, env-overrida
   const undo = [
     setEnv('WA_SEND_ATTEMPT_RETENTION_DAYS', undefined),
     setEnv('DURABLE_PAYLOAD_RETENTION_DAYS', undefined),
+    setEnv('WA_STATUS_RETENTION_DAYS', undefined),
   ];
   try {
+    assert.equal(statusRetentionDays(), 30);
+    process.env.WA_STATUS_RETENTION_DAYS = '3';
+    assert.equal(statusRetentionDays(), 3);
     assert.equal(sendAttemptRetentionDays(), 7);
     assert.equal(payloadRetentionDays(), 90);
     process.env.DURABLE_PAYLOAD_RETENTION_DAYS = '30';
@@ -114,11 +124,12 @@ test('purgeTable is capped per run and 0 days disables it', async () => {
   }
 });
 
-test('runRetention purges both tables and tolerates a missing one (42P01)', async () => {
+test('runRetention purges the three tables and tolerates a missing one (42P01)', async () => {
   const undo = [
     setEnv('CONNECTOR_ACCOUNT', 'personal'),
     setEnv('WA_SEND_ATTEMPT_RETENTION_DAYS', undefined),
     setEnv('DURABLE_PAYLOAD_RETENTION_DAYS', undefined),
+    setEnv('WA_STATUS_RETENTION_DAYS', undefined),
   ];
   const { calls, restore } = stubPool(async sql => {
     if (/whatsapp_send_attempts/.test(sql)) {
@@ -128,11 +139,13 @@ test('runRetention purges both tables and tolerates a missing one (42P01)', asyn
   });
   try {
     await runRetention();
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.match(calls[0].sql, /whatsapp_send_attempts/);
     assert.deepEqual(calls[0].params, ['personal', 7]);
     assert.match(calls[1].sql, /whatsapp_message_payloads/);
     assert.deepEqual(calls[1].params, ['personal', 90]);
+    assert.match(calls[2].sql, /DELETE FROM whatsapp_statuses/);
+    assert.deepEqual(calls[2].params, ['personal', 30]);
   } finally {
     restore();
     undo.reverse().forEach(fn => fn());
@@ -154,12 +167,12 @@ test('maybeRunRetention runs at most hourly and never overlaps', async () => {
     assert.equal(maybeRunRetention(t0 + RETENTION_INTERVAL_MS + 1), null, 'still running');
     release();
     await running;
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.equal(maybeRunRetention(t0 + 60_000), null, 'not due within the hour');
     const next = maybeRunRetention(t0 + RETENTION_INTERVAL_MS);
     assert.ok(next);
     await next;
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 6);
   } finally {
     restore();
   }

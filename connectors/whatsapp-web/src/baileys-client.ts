@@ -110,6 +110,19 @@ import {
   starPatch,
 } from './message-stars-pins';
 import {
+  contactAuthorIds,
+  ChannelPostList,
+  ChannelPostsQuery,
+  isStatusJid,
+  listChannelPosts,
+  listStatuses,
+  recordStatus,
+  STATUS_MESSAGE_TYPES,
+  StatusList,
+  StatusListQuery,
+  statusRecipientJid,
+} from './statuses';
+import {
   buildPollContent,
   buildPollVoteContent,
   cryptoUserJid,
@@ -2175,6 +2188,25 @@ export class BaileysClient extends EventEmitter {
       });
     }
 
+    // A status (a message of status@broadcast) stays in messages like before
+    // and is also indexed in whatsapp_statuses (author, posted / expires at).
+    // Also for an already-stored row: a history replay fills the index. A
+    // status without its WhatsApp time is not indexed (it would never expire).
+    if (
+      isStatusJid(rawChatJid) &&
+      STATUS_MESSAGE_TYPES.has(waMessage.messageType) &&
+      waMessage.waTimestamp.getTime() > 0
+    ) {
+      await recordStatus({
+        messageId: waMessage.waMessageId,
+        authorId: waMessage.senderWaId,
+        fromMe: !!msg.key.fromMe,
+        messageType: waMessage.messageType,
+        postedAt: waMessage.waTimestamp,
+        source: options.source === 'baileys_history_sync' ? 'history' : 'live',
+      });
+    }
+
     if (!msgId) return { inserted: false, waMessage };
 
     this.logger.info(`Stored message ${waMessage.waMessageId} from ${waMessage.senderWaId}`);
@@ -4138,6 +4170,44 @@ export class BaileysClient extends EventEmitter {
       cursor: query.cursor,
     });
     return chat ? { conversationId: chat.conversationId, ...found } : found;
+  }
+
+  /**
+   * Statuses of the account's contacts (and our own), newest first: the
+   * whatsapp_statuses index + their messages rows. `contact` (phone or user
+   * jid) narrows to one person, its PN and LID ids together. Reads the DB:
+   * answers while disconnected; a pairing-only client has none.
+   */
+  async listStatuses(query: StatusListQuery): Promise<StatusList & { contact?: string }> {
+    if (!this.ingest) return { statuses: [], nextCursor: null, persisted: false };
+    let contact: string | undefined;
+    let authorIds: string[] | undefined;
+    if (query.contact) {
+      try {
+        contact = this.normalizeJid(statusRecipientJid(query.contact));
+      } catch {
+        throw new MessageMutationError(
+          'contact must be a phone number or a WhatsApp user jid',
+          400,
+          'invalid_request'
+        );
+      }
+      authorIds = await contactAuthorIds(contact);
+    }
+    const found = await listStatuses({
+      authorIds,
+      includeExpired: query.includeExpired,
+      includeOwn: query.includeOwn,
+      limit: query.limit,
+      cursor: query.cursor,
+    });
+    return contact ? { contact, ...found } : found;
+  }
+
+  /** Posts of the channels this account receives (or of one), from messages. */
+  async listChannelPosts(query: ChannelPostsQuery): Promise<ChannelPostList> {
+    if (!this.ingest) return { posts: [], nextCursor: null, channels: 0 };
+    return listChannelPosts(query);
   }
 
   /**

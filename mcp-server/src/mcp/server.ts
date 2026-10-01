@@ -753,6 +753,10 @@ export class MCPServer {
         return this.canonicalListPinned(args);
       case 'listStarred':
         return this.canonicalListStarred(args);
+      case 'listStatuses':
+        return this.canonicalListStatuses(args);
+      case 'listChannelPosts':
+        return this.canonicalListChannelPosts(args);
       case 'setChatState':
         return this.canonicalSetChatState(args);
       case 'getGroup':
@@ -2427,6 +2431,57 @@ export class MCPServer {
         ...(typeof args.cursor === 'string' && args.cursor.trim()
           ? { cursor: args.cursor.trim() }
           : {}),
+      })
+    );
+  }
+
+  /** Optional `cursor` / `limit` of a paged connector list. */
+  private pageArgs(args: Record<string, any>): Record<string, unknown> {
+    return {
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      ...(typeof args.cursor === 'string' && args.cursor.trim()
+        ? { cursor: args.cursor.trim() }
+        : {}),
+    };
+  }
+
+  /** POST /statuses: the account's statuses, optionally of one contact (bare, never another account's). */
+  private async canonicalListStatuses(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Statuses');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const contact =
+      args.contact === undefined ? undefined : this.whatsAppParticipant(args.contact, account);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/statuses', {
+        ...(contact ? { contact } : {}),
+        ...(typeof args.includeExpired === 'boolean'
+          ? { includeExpired: args.includeExpired }
+          : {}),
+        ...(typeof args.includeOwn === 'boolean' ? { includeOwn: args.includeOwn } : {}),
+        ...this.pageArgs(args),
+      })
+    );
+  }
+
+  private async canonicalListChannelPosts(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Channel posts');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    let channelId: string | undefined;
+    if (args.target !== undefined) {
+      channelId = this.whatsAppProviderTarget(args);
+      if (!/^\d+@newsletter$/.test(channelId)) {
+        throw this.canonicalError(
+          'invalid_request',
+          'target must be a WhatsApp channel (…@newsletter)'
+        );
+      }
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/channels/posts', {
+        ...(channelId ? { channelId } : {}),
+        ...this.pageArgs(args),
       })
     );
   }

@@ -1279,6 +1279,83 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     idempotent: true,
   }),
   tool({
+    name: 'social_list_statuses',
+    title: 'List statuses',
+    description:
+      "Read WhatsApp statuses (Estados) of the account's contacts and its own, newest first: " +
+      'by default the ones still visible (posted in the last 24 h); with contact, only that ' +
+      "person's (phone or user jid, its PN and LID together). Each entry has the text, type, " +
+      'author and whether it has media: fetch the media with social_get_media (target ' +
+      "'status@broadcast', the messageId). Known from when the connector indexed them " +
+      '(migration 019 backfills what it already stored); expired ones are kept 30 days.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'statuses.list',
+    handler: 'listStatuses',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        contact: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description: 'Only this contact: phone number (E.164) or WhatsApp user jid.',
+        },
+        includeExpired: {
+          type: 'boolean',
+          default: false,
+          description: 'Also statuses past their 24 h that the connector still keeps.',
+        },
+        includeOwn: { type: 'boolean', default: true, description: "Include the account's own." },
+        limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+        cursor: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+          description: 'nextCursor of the previous page.',
+        },
+        readSource,
+      },
+      ['channel', 'accountId']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_list_channel_posts',
+    title: 'List channel posts',
+    description:
+      'Read posts of the WhatsApp channels (newsletters) the account follows, newest first: all ' +
+      'of them, or with target one channel (…@newsletter). Media: social_get_media with the ' +
+      'channel as target. Channel names and following: social_list_channels. Posts are the ones ' +
+      'the connector received.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'channels.posts',
+    handler: 'listChannelPosts',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        target: {
+          ...target,
+          pattern: '^(?:[^:]+:)?\\d+@newsletter$',
+          description: 'Only this channel: its jid, <digits>@newsletter.',
+        },
+        limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+        cursor: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+          description: 'nextCursor of the previous page.',
+        },
+        readSource,
+      },
+      ['channel', 'accountId']
+    ),
+    idempotent: true,
+  }),
+  tool({
     name: 'social_set_chat_state',
     title: 'Set chat state',
     description:
