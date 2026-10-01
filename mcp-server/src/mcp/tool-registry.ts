@@ -1176,6 +1176,103 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     idempotent: true,
   }),
   tool({
+    name: 'social_star_message',
+    title: 'Star message',
+    description:
+      "Star or unstar a message (WhatsApp). Only this account sees it, in the phone's " +
+      'Starred messages; social_list_starred lists them.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'messages.star',
+    handler: 'starMessage',
+    inputSchema: objectSchema(
+      {
+        ...commonProperties,
+        target: { ...target, description: 'Chat of the message (optional: the message names it).' },
+        messageId: { type: 'string', minLength: 1 },
+        star: { type: 'boolean', description: 'true stars, false unstars.' },
+      },
+      ['channel', 'accountId', 'messageId', 'star']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_pin_message',
+    title: 'Pin message',
+    description:
+      'Pin or unpin a message in its chat (WhatsApp) for 24 h, 7 days (default) or 30 days. ' +
+      'Everyone in the chat sees it; WhatsApp shows the newest 3. In a group whose info only ' +
+      'admins may edit, only admins pin (not_group_admin).',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'messages.pin',
+    handler: 'pinMessage',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        target: { ...target, description: 'Chat of the message (optional: the message names it).' },
+        messageId: { type: 'string', minLength: 1 },
+        pin: { type: 'boolean', description: 'true pins, false unpins.' },
+        durationSeconds: {
+          type: 'integer',
+          enum: [86400, 604800, 2592000],
+          description:
+            'How long the pin lasts: 86400 (24 h), 604800 (7 days, the default) or 2592000 ' +
+            '(30 days). Only for a pin.',
+        },
+      },
+      ['channel', 'accountId', 'messageId', 'pin']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_list_pinned',
+    title: 'List pinned messages',
+    description:
+      "Read a chat's pinned messages (WhatsApp): the active ones, newest first, at most the 3 " +
+      'WhatsApp shows, each with until when. Pins are known from when the connector started ' +
+      'recording them.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'messages.pins',
+    handler: 'listPinned',
+    inputSchema: objectSchema({ ...commonProperties, readSource }, [
+      'channel',
+      'accountId',
+      'target',
+    ]),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_list_starred',
+    title: 'List starred messages',
+    description:
+      "List the account's starred messages (WhatsApp), newest star first; with target, only " +
+      "that chat's. Page with nextCursor. Stars are known from when the connector started " +
+      'recording them (and from history sync).',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'messages.starred',
+    handler: 'listStarred',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        target: { ...target, description: 'Only the starred messages of this chat.' },
+        limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+        cursor: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+          description: 'nextCursor of the previous page.',
+        },
+        readSource,
+      },
+      ['channel', 'accountId']
+    ),
+    idempotent: true,
+  }),
+  tool({
     name: 'social_set_chat_state',
     title: 'Set chat state',
     description:

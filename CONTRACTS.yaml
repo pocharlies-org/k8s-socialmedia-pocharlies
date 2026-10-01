@@ -1677,6 +1677,112 @@ contracts:
       body fields, the 200 shape, the reasons and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
       Also consumed by the MCP tool social_invite_to_group (mcp-server/src/mcp/server.ts canonicalInviteToGroup; added later, surface unchanged).
+  - id: http.whatsapp-connector.messages-star.v1
+    kind: http-route
+    value: /messages/star
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/star of the house WhatsApp connectors: star /
+      unstar a message as the phone does, consumed by the MCP tool
+      social_star_message (mcp-server/src/mcp/server.ts canonicalStarMessage).
+      HMAC-signed body {conversationId?, messageId, star, actor?}: messageId
+      bare or account-prefixed; conversationId optional (the message's key
+      names its chat); star a boolean. 400 invalid_request first, then the
+      sending gate (403 disabled_sending), then 503 disconnected. The key comes
+      from memory, the durable payload, whatsapp_message_keys or the messages
+      row (survives restarts); unknown message, or someone else's group message
+      without its author → 404 message_unavailable. WhatsApp app-state patch in
+      regular_high, index [star, chat, id, fromMe, author-of-a-group-message-
+      not-ours | 0] (Baileys' chatModify star is not used); a WhatsApp 4xx →
+      422 rejected_by_whatsapp (with `code`). Only this account sees it. Once
+      accepted, recorded in whatsapp_message_stars (migration 018, ingest
+      only). 200 {starred, messageId, conversationId, starredAt, persisted}
+      (persisted false = not recorded: ingest off or 018 missing). Inbound: a
+      star / unstar from our phone (messages.update starred) and the starred
+      flag of a history-sync message (only for a message never seen) are
+      recorded too. The path, the body fields, the 200 shape and the
+      failureClass values are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-starred.v1
+    kind: http-route
+    value: /messages/starred
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/starred of the house WhatsApp connectors: the
+      account's starred messages, consumed by the MCP tool social_list_starred
+      (mcp-server/src/mcp/server.ts canonicalListStarred). A read: not gated,
+      answers while disconnected. HMAC-signed body {conversationId?, limit?,
+      cursor?}: conversationId filters one chat (resolved to its canonical
+      conversation, tombstones and contact aliases followed); limit 1–200
+      (default 50); cursor the opaque nextCursor of the previous page; else
+      400 invalid_request. From whatsapp_message_stars joined to messages:
+      newest star first, messages deleted for me left out. 200 {starred
+      [{messageId, conversationId, chatName, senderId, direction, messageType,
+      content, sentAt, isDeleted, starredAt, source (connector | whatsapp |
+      history)}], nextCursor (null on the last page), persisted,
+      conversationId? (with the filter)}; persisted false + [] while ingest is
+      off or migration 018 is missing. Ids bare. The path, the body fields and
+      the 200 shape are contract: changing any is breaking — a new `.v2`
+      entry beside this one.
+  - id: http.whatsapp-connector.messages-pin.v1
+    kind: http-route
+    value: /messages/pin
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/pin of the house WhatsApp connectors: pin / unpin
+      a message for everyone in its chat, consumed by the MCP tool
+      social_pin_message (mcp-server/src/mcp/server.ts canonicalPinMessage).
+      HMAC-signed body {conversationId?, messageId, pin, durationSeconds?,
+      actor?}: pin a boolean; durationSeconds 86400 | 604800 | 2592000 (default
+      604800) only for a pin. 400 invalid_request first, then the sending gate
+      (403 disabled_sending), 503 disconnected and the opt-in Idempotency-Key
+      (send-idempotency.v1: replay {messageId, sentAt, deduplicated}, 409
+      idempotency_key_reused / send_outcome_uncertain). Key from the durable
+      copies as messages-star.v1 (404 message_unavailable). In a group: fresh
+      metadata, 403 not_group_member, and 403 not_group_admin when the group's
+      info is admin-only (restrict) and we are not admin. Sends
+      pinInChatMessage PIN_FOR_ALL / UNPIN_FOR_ALL (Baileys sendMessage {pin,
+      type, time}); recorded in whatsapp_message_pins (migration 018, ingest
+      only) at the time the pin message carries, so its echo changes nothing.
+      200 {pinned, messageId (the pin / unpin message), pinnedMessageId,
+      conversationId, pinnedAt?, expiresAt?, durationSeconds? (a pin),
+      persisted, sentAt? (with a key)}. Inbound pins / unpins from anyone in
+      the chat (and our phone) are recorded the same way (newer action wins,
+      an unpin at the same time wins) and no longer write an empty
+      MESSAGECONTEXTINFO / PININCHATMESSAGE messages row. The path, the body
+      fields, the 200 shape and the failureClass values are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.messages-pins.v1
+    kind: http-route
+    value: /messages/pins
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/messages/pins of the house WhatsApp connectors: the active
+      pinned messages of one chat, consumed by the MCP tool social_list_pinned
+      (mcp-server/src/mcp/server.ts canonicalListPinned). A read: not gated,
+      answers while disconnected. HMAC-signed body {conversationId} (bare or
+      account-prefixed; resolved to its canonical conversation); missing →
+      400 invalid_request. From whatsapp_message_pins joined to messages: not
+      expired, message not revoked, newest pin first, at most 3 (what WhatsApp
+      shows). 200 {conversationId (canonical, bare), pinned [{messageId,
+      conversationId, chatName, senderId, direction, messageType, content,
+      sentAt, isDeleted, pinnedAt, expiresAt, durationSeconds, pinnedBy,
+      source}], limit: 3, persisted}; persisted false + [] while ingest is off
+      or migration 018 is missing. Only pins seen since 018 (no backfill). The
+      path, the body fields and the 200 shape are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
   - id: http.brain.push-ingest.conversation-window.v1
     kind: http-route
     value: /instances/{instance}/push-ingest

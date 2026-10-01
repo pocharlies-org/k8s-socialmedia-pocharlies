@@ -154,10 +154,22 @@ invite_link_unavailable`; nobody invited → `invite_not_sent`.
   the 1:1 conversation — or `phone`, `confirm: true` required by the schema;
   groups are refused) and `social_list_blocked` (read; `fresh: true` re-reads
   WhatsApp's list). `changed: false` means it already was so.
+- `social_star_message` (`messageId`, `star: true|false`; `target` optional):
+  only this account sees it, in the phone's Starred messages.
+  `social_list_starred` (read): the account's starred messages, newest star
+  first, optionally of one `target`; `limit` ≤ 200, page with `cursor` =
+  `nextCursor`.
+- `social_pin_message` (`messageId`, `pin: true|false`, `durationSeconds`
+  `86400 | 604800 | 2592000`, default 7 days, only for a pin): everyone in the
+  chat sees it; in a group whose info only admins may edit, only admins pin
+  (`not_group_admin`). `social_list_pinned` (read, `target` required): the
+  active pins of the chat, newest first, at most the 3 WhatsApp shows, each
+  with `expiresAt`. Both lists hold what the connector recorded since
+  migration 018 (plus history-sync stars); `persisted: false` = not recorded.
 
 Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `invite_to_group`,
-WhatsApp `send_sticker`, `send_gif`, `start_chat` with a message) forward the
-caller's `idempotencyKey`, scoped per
+WhatsApp `send_sticker`, `send_gif`, `pin_message`, `start_chat` with a message)
+forward the caller's `idempotencyKey`, scoped per
 tool, as the connector's `Idempotency-Key`. Connector refusals keep their `failureClass` as
 the error `code` (`disabled_sending`, `disconnected`, `not_group_admin`,
 `not_on_whatsapp`, `account_restricted`, …) with the connector payload in

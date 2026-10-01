@@ -737,6 +737,14 @@ export class MCPServer {
         return this.canonicalManageComment(args);
       case 'reactMessage':
         return this.canonicalReactMessage(args);
+      case 'starMessage':
+        return this.canonicalStarMessage(args);
+      case 'pinMessage':
+        return this.canonicalPinMessage(args);
+      case 'listPinned':
+        return this.canonicalListPinned(args);
+      case 'listStarred':
+        return this.canonicalListStarred(args);
       case 'setChatState':
         return this.canonicalSetChatState(args);
       case 'getGroup':
@@ -2212,6 +2220,78 @@ export class MCPServer {
         },
         ...this.connectorIdempotency(args, 'poll-vote', 'social_vote_poll')
       )
+    );
+  }
+
+  /** Optional chat of a message action: bare, never another account's (undefined when absent). */
+  private optionalWhatsAppTarget(args: Record<string, any>): { conversationId?: string } {
+    return args.target === undefined ? {} : { conversationId: this.whatsAppProviderTarget(args) };
+  }
+
+  private async canonicalStarMessage(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (typeof args.star !== 'boolean') {
+      throw this.canonicalError('invalid_request', 'star is required and must be a boolean');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/star', {
+        ...this.optionalWhatsAppTarget(args),
+        messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+        star: args.star,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  private async canonicalPinMessage(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (typeof args.pin !== 'boolean') {
+      throw this.canonicalError('invalid_request', 'pin is required and must be a boolean');
+    }
+    if (!args.pin && args.durationSeconds !== undefined) {
+      throw this.canonicalError('invalid_request', 'durationSeconds is only for a pin');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/messages/pin',
+        {
+          ...this.optionalWhatsAppTarget(args),
+          messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+          pin: args.pin,
+          ...(args.pin && args.durationSeconds !== undefined
+            ? { durationSeconds: args.durationSeconds }
+            : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'pin', 'social_pin_message')
+      )
+    );
+  }
+
+  private async canonicalListPinned(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Pinned messages');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/pins', { conversationId: chatId })
+    );
+  }
+
+  private async canonicalListStarred(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Starred messages');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/starred', {
+        ...this.optionalWhatsAppTarget(args),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+        ...(typeof args.cursor === 'string' && args.cursor.trim()
+          ? { cursor: args.cursor.trim() }
+          : {}),
+      })
     );
   }
 

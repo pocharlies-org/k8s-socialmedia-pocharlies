@@ -29,6 +29,7 @@ import {
   CacheStore,
   MiscMessageGenerationOptions,
   ChatModification,
+  WAPatchCreate,
   GroupMetadata,
   GroupParticipant,
   Browsers,
@@ -94,6 +95,21 @@ import {
 } from './message-mutations';
 import { reactionTime, storeMessageReaction } from './message-reactions';
 import {
+  isPinAction,
+  listPinnedMessages,
+  listStarredMessages,
+  MAX_PINS_PER_CHAT,
+  pinActionOf,
+  pinContent,
+  PinnedMessage,
+  PinRequest,
+  recordMessagePin,
+  recordMessageStar,
+  StarredList,
+  StarredQuery,
+  starPatch,
+} from './message-stars-pins';
+import {
   buildPollContent,
   buildPollVoteContent,
   cryptoUserJid,
@@ -133,6 +149,7 @@ import {
   CanonicalConversation,
   ChatState,
   ChatStatePatch,
+  externalIdCandidates,
   latestMessageId,
   muteEndTimestamp,
   muteFromBaileys,
@@ -154,6 +171,7 @@ import {
   groupStateView,
   GroupStateView,
   GroupUpdate,
+  isAdminRole,
   isCommunityGroup,
   normalizeGroupParticipantAction,
   ownParticipant,
@@ -535,6 +553,39 @@ const OWN_MUTATION_ECHO_MS = 30_000;
 export interface MessageMutationRequest {
   /** Who asked (dgx-messages user, MCP caller); recorded in metadata. */
   actor?: string;
+}
+
+/** POST /messages/star. */
+export interface StarResult {
+  starred: boolean;
+  messageId: string;
+  conversationId: string;
+  starredAt: string;
+  /** Recorded in whatsapp_message_stars (ingest on, migration 018 applied). */
+  persisted: boolean;
+}
+
+/** POST /messages/pin. */
+export interface PinResult {
+  pinned: boolean;
+  /** Id of the pin / unpin message (what an Idempotency-Key replays). */
+  messageId: string;
+  pinnedMessageId: string;
+  conversationId: string;
+  /** A pin: when, until when and for how long. */
+  pinnedAt?: string;
+  expiresAt?: string;
+  durationSeconds?: number;
+  persisted: boolean;
+}
+
+/** POST /messages/pins. */
+export interface PinnedList {
+  conversationId: string;
+  pinned: PinnedMessage[];
+  /** WhatsApp shows at most this many per chat, the newest. */
+  limit: number;
+  persisted: boolean;
 }
 
 /** POST /groups/create (fase 3 / PR-6). */
@@ -1671,6 +1722,8 @@ export class BaileysClient extends EventEmitter {
         const ackErrorCode = Array.isArray(stubParams) ? String(stubParams[0] || '') : undefined;
         // Revokes and edits (fase 3 / PR-3).
         void this.handleInboundMutation(u);
+        // A star / unstar from our phone (app-state sync).
+        void this.handleInboundStar(u);
         // Track delivery state from WhatsApp servers (the green ticks).
         const st: number | undefined = (u.update as any)?.status;
         if (typeof st === 'number') {
@@ -1870,6 +1923,14 @@ export class BaileysClient extends EventEmitter {
       this.rememberMessageForRetry(msg.key, msg.message);
     }
 
+    // A pin / unpin is state of the pinned message, not a chat message (it
+    // used to land as an empty MESSAGECONTEXTINFO / PININCHATMESSAGE row):
+    // recorded in whatsapp_message_pins, no messages row.
+    if (isPinAction(msg)) {
+      await this.ingestPinAction(msg, options);
+      return { inserted: false };
+    }
+
     // Fase 3 / PR-7: a poll vote or an event response is state of the poll /
     // event, not a chat message (WhatsApp does not list it either): it is
     // decrypted into whatsapp_poll_votes / whatsapp_event_responses and no
@@ -2021,6 +2082,17 @@ export class BaileysClient extends EventEmitter {
     // History sync carries each message's current reactions on the message
     // itself (no REACTION message of their own): same table, same rules.
     await this.persistCarriedReactions(msg, waMessage);
+    // A history-sync message says whether it is starred: only fills a message
+    // whose star we never saw (the app-state sync is newer).
+    if (msg.starred === true) {
+      await recordMessageStar({
+        messageId: waMessage.waMessageId,
+        chatId: waMessage.conversationId,
+        fromMe: !!msg.key.fromMe,
+        starred: true,
+        source: 'history',
+      });
+    }
 
     if (!msgId) return { inserted: false, waMessage };
 
@@ -3828,6 +3900,236 @@ export class BaileysClient extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
+  // Starred and pinned messages. Persistence: message-stars-pins.ts.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Star / unstar a message as the phone does: an app-state patch keyed by the
+   * message key (memory, durable payload, whatsapp_message_keys or the messages
+   * row, so it survives restarts). Only this account sees it. Recorded once
+   * WhatsApp accepted it (ingest only); the echo Baileys replays is skipped.
+   */
+  async starMessage(
+    chatId: string | undefined,
+    messageId: string,
+    star: boolean,
+    request: MessageMutationRequest = {}
+  ): Promise<StarResult> {
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(chatId || '', messageId, 'starMessage');
+    if (isJidGroup(target.chatJid) && !target.key.fromMe && !target.key.participant) {
+      throw new MessageUnavailableError(
+        `starMessage: the author of ${target.id} is unknown (WhatsApp needs it in a group)`,
+        404,
+        'message_unavailable'
+      );
+    }
+    const starredAt = new Date();
+    await this.withOwnMutation('star', target.id, () =>
+      this.applyAppPatch(
+        sock,
+        starPatch(
+          {
+            remoteJid: target.chatJid,
+            id: target.id,
+            fromMe: !!target.key.fromMe,
+            participant: target.key.participant,
+          },
+          star
+        ),
+        star ? 'star' : 'unstar',
+        target.id
+      )
+    );
+    const conversationId = this.normalizeJid(target.chatJid);
+    const persisted = this.ingest
+      ? await recordMessageStar({
+          messageId: target.id,
+          chatId: conversationId,
+          fromMe: !!target.key.fromMe,
+          starred: star,
+          at: starredAt,
+          source: 'connector',
+          actor: request.actor,
+        })
+      : false;
+    this.logger.info(`${star ? 'Starred' : 'Unstarred'} ${target.id} in ${target.chatJid}`);
+    return {
+      starred: star,
+      messageId: target.id,
+      conversationId,
+      starredAt: starredAt.toISOString(),
+      persisted,
+    };
+  }
+
+  /**
+   * Pin / unpin a message for everyone in its chat (24 h, 7 d or 30 d). In a
+   * group whose info only admins may edit, only admins pin (fresh metadata).
+   * The key comes from the durable copies like any mutation; the action is
+   * recorded once WhatsApp has it (ingest only), at the time the pin message
+   * carries, so its echo changes nothing.
+   */
+  async pinMessage(request: PinRequest, options: StructuredSendOptions = {}): Promise<PinResult> {
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(
+      request.chatId || '',
+      request.messageId,
+      'pinMessage'
+    );
+    if (isJidGroup(target.chatJid)) {
+      if (!target.key.fromMe && !target.key.participant) {
+        throw new MessageUnavailableError(
+          `pinMessage: the author of ${target.id} is unknown (WhatsApp needs it in a group)`,
+          404,
+          'message_unavailable'
+        );
+      }
+      await this.checkGroupPinAllowed(target.chatJid);
+    }
+    const content = pinContent(target.key, request.pin, request.durationSeconds);
+    // Our own id, so the echo Baileys emits during the send is recognised.
+    const actionId = options.messageId || generateMessageIDV2(sock.user?.id);
+    const sent = await this.withOwnMutation('pin', actionId, async () => {
+      await options.beforeSend?.();
+      return sock.sendMessage(target.chatJid, content as AnyMessageContent, {
+        messageId: actionId,
+      });
+    });
+    const conversationId = this.normalizeJid(target.chatJid);
+    if (sent?.key?.id && sent.message) {
+      this.rememberMessageForRetry(sent.key, sent.message);
+      await this.persistDurablePayload(sent, conversationId, 'sent');
+    }
+    const at = (sent && pinActionOf(sent)?.at) || new Date();
+    const duration = request.pin ? request.durationSeconds : undefined;
+    const persisted =
+      this.ingest && !!this.meJid
+        ? await recordMessagePin({
+            messageId: target.id,
+            chatId: conversationId,
+            pinned: request.pin,
+            at,
+            durationSeconds: duration,
+            byJid: this.normalizeJid(this.meJid),
+            actionId,
+            source: 'connector',
+            actor: options.actor,
+          })
+        : false;
+    this.logger.info(
+      `${request.pin ? 'Pinned' : 'Unpinned'} ${target.id} in ${target.chatJid}${
+        duration ? ` for ${duration}s` : ''
+      }${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      pinned: request.pin,
+      messageId: actionId,
+      pinnedMessageId: target.id,
+      conversationId,
+      ...(duration
+        ? {
+            pinnedAt: at.toISOString(),
+            expiresAt: new Date(at.getTime() + duration * 1000).toISOString(),
+            durationSeconds: duration,
+          }
+        : {}),
+      persisted,
+    };
+  }
+
+  /** Active pins of a chat (what WhatsApp shows: the newest 3), from the DB. */
+  async listPinnedMessages(chatId: string): Promise<PinnedList> {
+    const { conversationId, ids } = await this.markChat(chatId, 'listPinnedMessages');
+    const found = this.ingest ? await listPinnedMessages(ids) : { pinned: [], persisted: false };
+    return { conversationId, ...found, limit: MAX_PINS_PER_CHAT };
+  }
+
+  /** Starred messages of this account (or of one chat), newest star first, from the DB. */
+  async listStarredMessages(
+    query: StarredQuery
+  ): Promise<StarredList & { conversationId?: string }> {
+    if (!this.ingest) return { starred: [], nextCursor: null, persisted: false };
+    const chat = query.chatId ? await this.markChat(query.chatId, 'listStarredMessages') : null;
+    const found = await listStarredMessages({
+      chatIds: chat?.ids,
+      limit: query.limit,
+      cursor: query.cursor,
+    });
+    return chat ? { conversationId: chat.conversationId, ...found } : found;
+  }
+
+  /**
+   * The ids a chat's stars / pins may be filed under (namespaced): its
+   * canonical conversation (tombstones and contact aliases followed) and the
+   * chat's own external ids, for a message never ingested.
+   */
+  private async markChat(
+    chatId: string,
+    action: string
+  ): Promise<{ conversationId: string; ids: string[] }> {
+    const requested = stripAccountKey(String(chatId || '').trim());
+    if (!requested) {
+      throw new MessageMutationError(
+        `${action}: conversationId is required`,
+        400,
+        'invalid_request'
+      );
+    }
+    const normalized = this.normalizeJid(this.toRawJid(requested));
+    const canonical = this.ingest ? await resolveCanonicalConversation(normalized) : undefined;
+    const ids = new Set<string>(canonical ? [canonical.id] : []);
+    for (const candidate of externalIdCandidates(normalized)) ids.add(accountKey(candidate));
+    return {
+      conversationId: canonical ? stripAccountKey(canonical.id) : normalized,
+      ids: [...ids],
+    };
+  }
+
+  /**
+   * Who may pin in a group: every member, or only admins when the group's
+   * info is admin-only (`restrict`, what WhatsApp calls "Edit group settings").
+   */
+  private async checkGroupPinAllowed(raw: string): Promise<void> {
+    const meta = await this.groupMetadataForAction(raw);
+    const self = ownParticipant(meta, await this.ownIds());
+    if (!self) {
+      throw new GroupActionError(
+        `This account is not a participant of ${raw}`,
+        403,
+        'not_group_member'
+      );
+    }
+    if (meta.restrict === true && !isAdminRole(self.admin)) {
+      throw new GroupActionError(`Only admins can pin messages in ${raw}`, 403, 'not_group_admin');
+    }
+  }
+
+  /** appPatch, with WhatsApp's own refusals as 422 rejected_by_whatsapp. */
+  private async applyAppPatch(
+    sock: WASocket,
+    patch: WAPatchCreate,
+    what: string,
+    id: string
+  ): Promise<void> {
+    try {
+      await sock.appPatch(patch);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      const connectionStatus = [401, 408, 428, 440].includes(status);
+      if (e?.isBoom && status >= 400 && status < 500 && !connectionStatus) {
+        throw new MessageMutationError(
+          `WhatsApp rejected the ${what} of ${id}: ${e?.message || e}`,
+          422,
+          'rejected_by_whatsapp',
+          String(status)
+        );
+      }
+      throw e;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Chat state (fase 3 / PR-5). Persistence: chat-state.ts.
   // ---------------------------------------------------------------------------
 
@@ -4036,7 +4338,7 @@ export class BaileysClient extends EventEmitter {
    * is in flight and for OWN_MUTATION_ECHO_MS after (Baileys may flush it late).
    */
   private async withOwnMutation<T>(
-    kind: 'edit' | 'revoke' | 'forme',
+    kind: 'edit' | 'revoke' | 'forme' | 'star' | 'pin',
     id: string,
     run: () => Promise<T>
   ): Promise<T> {
@@ -4053,7 +4355,7 @@ export class BaileysClient extends EventEmitter {
     }
   }
 
-  private isOwnMutation(kind: 'edit' | 'revoke' | 'forme', id: string): boolean {
+  private isOwnMutation(kind: 'edit' | 'revoke' | 'forme' | 'star' | 'pin', id: string): boolean {
     return this.ownMutations.has(`${kind}:${id}`);
   }
 
@@ -4105,6 +4407,58 @@ export class BaileysClient extends EventEmitter {
     if (editedPayload && !this.isOwnMutation('edit', waMessageId)) {
       await this.recordInboundEdit(u.key, editedPayload);
     }
+  }
+
+  /**
+   * messages.update with `starred`: a star / unstar from our phone or another
+   * linked device (Baileys turns the app-state star action into this). The
+   * echo of our own star is left to starMessage.
+   */
+  private async handleInboundStar(u: WAMessageUpdate): Promise<void> {
+    const starred = (u.update as { starred?: unknown } | undefined)?.starred;
+    const id = u.key?.id;
+    if (!this.ingest || !id || !u.key.remoteJid || typeof starred !== 'boolean') return;
+    if (this.isOwnMutation('star', id)) return;
+    await recordMessageStar({
+      messageId: id,
+      chatId: this.normalizeJid(u.key.remoteJid),
+      fromMe: typeof u.key.fromMe === 'boolean' ? u.key.fromMe : null,
+      starred,
+      source: 'whatsapp',
+    });
+  }
+
+  /**
+   * A pin / unpin seen on the socket (anyone in the chat, our phone, the echo
+   * of ours) → whatsapp_message_pins; the raw action is kept as a payload. One
+   * we cannot apply (unknown type or duration) is logged and dropped.
+   */
+  private async ingestPinAction(msg: WAMessage, options: IngestOptions): Promise<void> {
+    if (!this.ingest || !msg.key?.remoteJid) return;
+    // The echo of our own pin: pinMessage records it.
+    if (msg.key.fromMe && msg.key.id && this.isOwnMutation('pin', msg.key.id)) return;
+    const history = options.source === 'baileys_history_sync';
+    await this.persistDurablePayload(
+      msg,
+      this.normalizeJid(msg.key.remoteJid),
+      history ? 'history' : 'live'
+    );
+    const action = pinActionOf(msg);
+    if (!action) {
+      this.logger.warn(`Pin action ${msg.key.id || '?'} not applied: unknown type or duration`);
+      return;
+    }
+    const by = msg.key.fromMe ? this.meJid : msg.key.participant || msg.key.remoteJid;
+    await recordMessagePin({
+      messageId: action.targetId,
+      chatId: this.normalizeJid(action.chatJid),
+      pinned: action.pinned,
+      at: action.at,
+      durationSeconds: action.durationSeconds,
+      byJid: by ? this.normalizeJid(jidNormalizedUser(by)) : undefined,
+      actionId: action.actionId,
+      source: history ? 'history' : 'whatsapp',
+    });
   }
 
   /** messages.delete with keys = "delete for me" synced from our phone. */

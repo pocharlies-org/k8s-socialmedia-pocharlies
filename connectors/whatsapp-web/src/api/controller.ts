@@ -30,6 +30,7 @@ import {
 } from '../contact-sync';
 import { MessageUnavailableError } from '../durable-message-store';
 import { MessageMutationError } from '../message-mutations';
+import { parsePinRequest, parseStarredQuery, parseStarRequest } from '../message-stars-pins';
 import { PollEventInputError, validatePollInput } from '../poll-votes';
 import { validateEventInput, validateEventResponse } from '../event-responses';
 import { availablePresenceAllowed, parsePresenceRequest } from '../presence';
@@ -2124,6 +2125,91 @@ export function createRouter(
       })();
     }
   );
+
+  // Starred and pinned messages. Ids inside the signed body; the body is
+  // validated first (400). Star and pin go out to WhatsApp: the send gate
+  // (403) and the connection (503); a pin is a message everyone in the chat
+  // sees, so it also takes the opt-in Idempotency-Key. The lists read the DB:
+  // no gate, and they answer while disconnected.
+
+  // CONTRACT: http.whatsapp-connector.messages-star.v1 — body {conversationId?, messageId, star, actor?}, 200 {starred, messageId, conversationId, starredAt, persisted}
+  router.post('/messages/star', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseStarRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json(
+          await client.starMessage(request.chatId, request.messageId, request.star, {
+            actor: actorFromBody(body.actor),
+          })
+        );
+      } catch (e) {
+        mutationErrorResponse(res, e, 'star message');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-starred.v1 — body {conversationId?, limit?, cursor?}, 200 {starred: [...], nextCursor, persisted, conversationId?}
+  router.post('/messages/starred', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        res.json(await client.listStarredMessages(parseStarredQuery(optionalObject(req.body))));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list starred messages');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-pin.v1 — body {conversationId?, messageId, pin, durationSeconds?, actor?}, 200 {pinned, messageId, pinnedMessageId, conversationId, pinnedAt?, expiresAt?, durationSeconds?, persisted, sentAt?}
+  router.post('/messages/pin', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const request = parsePinRequest(body);
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('pin', request.chatId || '', {
+            messageId: request.messageId,
+            pin: request.pin,
+            durationSeconds: request.durationSeconds ?? null,
+          })
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.pinMessage(
+          request,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'pin message');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-pins.v1 — body {conversationId}, 200 {conversationId, pinned: [...], limit, persisted}
+  router.post('/messages/pins', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (!chatId) {
+          res
+            .status(400)
+            .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+          return;
+        }
+        res.json(await client.listPinnedMessages(chatId));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list pinned messages');
+      }
+    })();
+  });
 
   // Mark chat as read
   router.post('/messages/read/:chatId', auth, (req: AuthenticatedRequest, res: Response): void => {

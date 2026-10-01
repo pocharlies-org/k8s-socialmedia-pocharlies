@@ -41,12 +41,15 @@ const EXPECTED_TOOL_NAMES = [
   'social_list_mentions',
   'social_list_messages',
   'social_list_participants',
+  'social_list_pinned',
+  'social_list_starred',
   'social_manage_chat',
   'social_manage_comment',
   'social_manage_forum',
   'social_manage_group',
   'social_manage_session',
   'social_mark_read',
+  'social_pin_message',
   'social_publish_content',
   'social_react_message',
   'social_resolve_target',
@@ -63,6 +66,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_set_disappearing',
   'social_set_privacy',
   'social_share_contact',
+  'social_star_message',
   'social_start_chat',
   'social_start_digest',
   'social_summarize',
@@ -102,12 +106,15 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_list_mentions: 'read',
   social_list_messages: 'read',
   social_list_participants: 'read',
+  social_list_pinned: 'read',
+  social_list_starred: 'read',
   social_manage_chat: 'externalWrite',
   social_manage_comment: 'destructive',
   social_manage_forum: 'destructive',
   social_manage_group: 'destructive',
   social_manage_session: 'externalWrite',
   social_mark_read: 'externalWrite',
+  social_pin_message: 'externalWrite',
   social_publish_content: 'externalWrite',
   social_react_message: 'externalWrite',
   social_resolve_target: 'read',
@@ -124,6 +131,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_set_disappearing: 'externalWrite',
   social_set_privacy: 'destructive',
   social_share_contact: 'externalWrite',
+  social_star_message: 'externalWrite',
   social_start_chat: 'externalWrite',
   social_start_digest: 'internalWrite',
   social_summarize: 'compute',
@@ -333,6 +341,18 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: true,
     openWorldHint: true,
   },
+  social_list_pinned: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_list_starred: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_manage_chat: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -366,6 +386,12 @@ const EXPECTED_ANNOTATIONS: Record<
   social_mark_read: {
     readOnlyHint: false,
     destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_pin_message: {
+    readOnlyHint: false,
+    destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
   },
@@ -463,6 +489,12 @@ const EXPECTED_ANNOTATIONS: Record<
     readOnlyHint: false,
     destructiveHint: false,
     idempotentHint: false,
+    openWorldHint: true,
+  },
+  social_star_message: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
     openWorldHint: true,
   },
   social_start_chat: {
@@ -582,11 +614,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 58 canonical tools in deterministic order', () => {
+  it('contains exactly the 62 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(58);
+    expect(new Set(names).size).toBe(62);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -612,7 +644,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(32);
+    expect(writes).toHaveLength(34);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same

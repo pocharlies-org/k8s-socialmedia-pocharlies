@@ -216,7 +216,8 @@ export function structuredRequestHash(
     | 'sticker'
     | 'gif'
     | 'contact-share'
-    | 'start-chat',
+    | 'start-chat'
+    | 'pin',
   conversationId: string,
   request: unknown
 ): string {
