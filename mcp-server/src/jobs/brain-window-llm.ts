@@ -47,6 +47,141 @@ export const EXTRACTION_SCHEMA = z.object({
 
 export type Extraction = z.infer<typeof EXTRACTION_SCHEMA>;
 
+const ENTITY_TYPES = [
+  'persona',
+  'lugar',
+  'organizacion',
+  'proyecto',
+  'producto',
+  'servicio',
+  'evento',
+  'importe',
+  'fecha',
+] as const;
+type EntityType = (typeof ENTITY_TYPES)[number];
+
+// What the local model writes instead of the enum, seen in production or
+// obvious English/Spanish variants. Anything else drops just that entity.
+const ENTITY_SYNONYMS: Record<string, EntityType> = {
+  person: 'persona',
+  usuario: 'persona',
+  contacto: 'persona',
+  place: 'lugar',
+  location: 'lugar',
+  ciudad: 'lugar',
+  pais: 'lugar',
+  direccion: 'lugar',
+  ubicacion: 'lugar',
+  organization: 'organizacion',
+  organisation: 'organizacion',
+  empresa: 'organizacion',
+  compania: 'organizacion',
+  tienda: 'organizacion',
+  marca: 'organizacion',
+  grupo: 'organizacion',
+  equipo: 'organizacion',
+  project: 'proyecto',
+  product: 'producto',
+  articulo: 'producto',
+  item: 'producto',
+  service: 'servicio',
+  app: 'servicio',
+  aplicacion: 'servicio',
+  plataforma: 'servicio',
+  web: 'servicio',
+  event: 'evento',
+  amount: 'importe',
+  cantidad: 'importe',
+  dinero: 'importe',
+  precio: 'importe',
+  moneda: 'importe',
+  date: 'fecha',
+  dia: 'fecha',
+  hora: 'fecha',
+};
+
+const SENTIMENTS: Record<string, Extraction['sentiment']> = {
+  positivo: 'positivo',
+  positive: 'positivo',
+  neutro: 'neutro',
+  neutral: 'neutro',
+  negativo: 'negativo',
+  negative: 'negativo',
+  mixto: 'mixto',
+  mixed: 'mixto',
+};
+
+const fold = (s: string): string =>
+  s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const strings = (v: unknown, max: number): string[] =>
+  (Array.isArray(v) ? v : [])
+    .map(x => (typeof x === 'number' ? String(x) : x))
+    .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+    .slice(0, max);
+
+/**
+ * Bring a near-miss LLM answer inside EXTRACTION_SCHEMA instead of throwing
+ * the whole window away: unknown entity types map to a synonym or drop only
+ * that entity, lists are cut to their caps, an over-long summary is cut, an
+ * unknown sentiment becomes `neutro`. A missing summary still fails (that is
+ * a real miss, worth the retry). Each retry costs ~45 s of the local model.
+ */
+export function normalizeExtraction(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const r = raw as Record<string, unknown>;
+  const entities = (Array.isArray(r.entities) ? r.entities : [])
+    .map(e => {
+      if (!e || typeof e !== 'object') return null;
+      const o = e as Record<string, unknown>;
+      if (typeof o.name !== 'string' || !o.name.trim()) return null;
+      const t = typeof o.type === 'string' ? fold(o.type) : '';
+      const type = (ENTITY_TYPES as readonly string[]).includes(t)
+        ? (t as EntityType)
+        : ENTITY_SYNONYMS[t];
+      if (!type) return null;
+      return { name: o.name, type, aliases: strings(o.aliases, 24) };
+    })
+    .filter(e => e !== null)
+    .slice(0, 24);
+  const actionItems = (Array.isArray(r.action_items) ? r.action_items : [])
+    .map(a => {
+      if (typeof a === 'string') return a.trim() ? { owner: '', task: a, due: '' } : null;
+      if (!a || typeof a !== 'object') return null;
+      const o = a as Record<string, unknown>;
+      if (typeof o.task !== 'string' || !o.task.trim()) return null;
+      return {
+        owner: typeof o.owner === 'string' ? o.owner : '',
+        task: o.task,
+        due: typeof o.due === 'string' ? o.due : '',
+      };
+    })
+    .filter(a => a !== null)
+    .slice(0, 24);
+  const sentiment = typeof r.sentiment === 'string' ? SENTIMENTS[fold(r.sentiment)] : undefined;
+  const trivial =
+    typeof r.trivial === 'boolean'
+      ? r.trivial
+      : typeof r.trivial === 'string'
+        ? fold(r.trivial) === 'true'
+        : false;
+  return {
+    ...r,
+    summary: typeof r.summary === 'string' ? wellFormed(r.summary.slice(0, 1200)) : r.summary,
+    topics: strings(r.topics, 6),
+    entities,
+    facts: strings(r.facts, 24),
+    decisions: strings(r.decisions, 24),
+    action_items: actionItems,
+    sentiment: sentiment ?? 'neutro',
+    trivial,
+  };
+}
+
 export interface LlmConfig {
   baseUrl: string; // e.g. http://litellm.litellm.svc.cluster.local:4000/v1
   apiKey: string; // low-priority virtual key (ADR §5 "tipo hermes-batch")
@@ -56,7 +191,17 @@ export interface LlmConfig {
   maxTokens: number; // 1200 (ADR §5)
 }
 
-export const LLM_CONCURRENCY = 2; // ADR §5: "2 peticiones en paralelo", exactly
+export const LLM_CONCURRENCY = 2; // ADR §5: "2 peticiones en paralelo" — the default
+
+/**
+ * Parallel LLM calls. Default 2 (ADR §5); BRAIN_WINDOWS_LLM_CONCURRENCY raises
+ * it for a one-off load (Dani, 02-10-2026: 4 for the initial reindex). The key
+ * is the lowest-priority one, so extra calls yield to everyone else.
+ */
+export function llmConcurrencyFromEnv(env: NodeJS.ProcessEnv): number {
+  const n = Number(env.BRAIN_WINDOWS_LLM_CONCURRENCY);
+  return Number.isInteger(n) && n >= 1 && n <= 8 ? n : LLM_CONCURRENCY;
+}
 
 export function llmConfigFromEnv(env: NodeJS.ProcessEnv): LlmConfig {
   return {
@@ -191,7 +336,7 @@ export async function extractWindow(
         lastError = `LLM returned non-JSON content: ${raw.slice(0, 200)}`;
         continue;
       }
-      const checked = EXTRACTION_SCHEMA.safeParse(parsed);
+      const checked = EXTRACTION_SCHEMA.safeParse(normalizeExtraction(parsed));
       if (!checked.success) {
         lastError = `LLM output failed schema: ${checked.error.issues
           .map(i => `${i.path.join('.')}: ${i.message}`)

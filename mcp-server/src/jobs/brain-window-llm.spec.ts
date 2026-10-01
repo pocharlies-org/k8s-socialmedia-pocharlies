@@ -5,7 +5,9 @@ import {
   buildExtractionPrompt,
   createLimiter,
   extractWindow,
+  llmConcurrencyFromEnv,
   llmConfigFromEnv,
+  normalizeExtraction,
 } from './brain-window-llm';
 
 const CFG: LlmConfig = {
@@ -94,7 +96,8 @@ describe('extractWindow', () => {
     global.fetch = jest.fn(async () => {
       n++;
       if (n === 1) return new Response('upstream down', { status: 502 });
-      return llmResponse({ summary: 'sin topics ni resto' });
+      // No summary: the one miss normalizeExtraction does not paper over.
+      return llmResponse({ topics: ['sin resumen'] });
     }) as unknown as typeof fetch;
     await expect(
       extractWindow(CFG, WINDOW, null, { sleep: async () => {} })
@@ -171,5 +174,86 @@ describe('llmConfigFromEnv', () => {
     expect(c.timeoutMs).toBe(240000);
     expect(c.retries).toBe(2);
     expect(c.maxTokens).toBe(1200);
+  });
+});
+
+describe('normalizeExtraction (near-miss answers are kept, 02-10-2026)', () => {
+  const ok = (v: unknown) => EXTRACTION_SCHEMA.safeParse(normalizeExtraction(v));
+
+  it('maps entity-type synonyms and drops only the unknown entity', () => {
+    const r = ok({
+      ...GOOD,
+      entities: [
+        { name: 'Skirmshop', type: 'empresa' },
+        { name: 'Madrid', type: 'Ciudad' },
+        { name: 'x', type: 'alien' },
+        { name: 'Ana', type: 'Persona' },
+      ],
+    });
+    expect(r.success).toBe(true);
+    if (r.success)
+      expect(r.data.entities.map(e => [e.name, e.type])).toEqual([
+        ['Skirmshop', 'organizacion'],
+        ['Madrid', 'lugar'],
+        ['Ana', 'persona'],
+      ]);
+  });
+
+  it('cuts lists and the summary to their caps instead of failing', () => {
+    const r = ok({
+      ...GOOD,
+      summary: 'x'.repeat(2000),
+      topics: Array.from({ length: 10 }, (_, i) => `t${i}`),
+      facts: Array.from({ length: 30 }, (_, i) => `f${i}`),
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.summary).toHaveLength(1200);
+      expect(r.data.topics).toHaveLength(6);
+      expect(r.data.facts).toHaveLength(24);
+    }
+  });
+
+  it('maps an unknown or English sentiment and a string boolean', () => {
+    const a = ok({ ...GOOD, sentiment: 'Negative', trivial: 'true' });
+    expect(a.success && a.data.sentiment).toBe('negativo');
+    expect(a.success && a.data.trivial).toBe(true);
+    expect(ok({ ...GOOD, sentiment: 'meh' }).success && true).toBe(true);
+  });
+
+  it('accepts plain-string action items', () => {
+    const r = ok({ ...GOOD, action_items: ['llamar a Ana', { task: 'pagar', owner: 'Dani' }] });
+    expect(r.success && r.data.action_items).toEqual([
+      { owner: '', task: 'llamar a Ana', due: '' },
+      { owner: 'Dani', task: 'pagar', due: '' },
+    ]);
+  });
+
+  it('still fails without a summary (a real miss, worth the retry)', () => {
+    const { summary: _s, ...rest } = GOOD;
+    expect(ok(rest).success).toBe(false);
+  });
+
+  it('extractWindow keeps a near-miss answer on the first attempt', async () => {
+    let n = 0;
+    const realFetch = global.fetch;
+    global.fetch = jest.fn(async () => {
+      n++;
+      return llmResponse({ ...GOOD, entities: [{ name: 'Skirmshop', type: 'empresa' }] });
+    }) as unknown as typeof fetch;
+    const r = await extractWindow(CFG, WINDOW, null, { sleep: async () => {} });
+    global.fetch = realFetch;
+    expect(n).toBe(1);
+    expect(r.extraction.entities[0].type).toBe('organizacion');
+  });
+});
+
+describe('llmConcurrencyFromEnv', () => {
+  it('defaults to 2 and takes 1..8 from BRAIN_WINDOWS_LLM_CONCURRENCY', () => {
+    expect(llmConcurrencyFromEnv({})).toBe(2);
+    expect(llmConcurrencyFromEnv({ BRAIN_WINDOWS_LLM_CONCURRENCY: '4' })).toBe(4);
+    expect(llmConcurrencyFromEnv({ BRAIN_WINDOWS_LLM_CONCURRENCY: '0' })).toBe(2);
+    expect(llmConcurrencyFromEnv({ BRAIN_WINDOWS_LLM_CONCURRENCY: '50' })).toBe(2);
+    expect(llmConcurrencyFromEnv({ BRAIN_WINDOWS_LLM_CONCURRENCY: 'x' })).toBe(2);
   });
 });

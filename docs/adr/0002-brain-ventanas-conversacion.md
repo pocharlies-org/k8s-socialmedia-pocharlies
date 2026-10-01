@@ -237,7 +237,11 @@ mete en el brain el correo, los pedidos y los productos.
     WhatsApp/Telegram en `skirmshop_v2`. El job diario `personal-graph-enrichment` se adapta para no volver a
     crearlos por mensaje.
 - **Fase 2**: carga de todas las ventanas (padres e hijos) sin LLM. La búsqueda funciona desde aquí.
-- **Fase 3**: el LLM va detrás, de lo más reciente a lo más antiguo, 2 en paralelo, y crea las neuronas.
+- **Fase 3**: el LLM va detrás, de lo más reciente a lo más antiguo, y crea las neuronas. Por defecto van 2 en
+  paralelo (`BRAIN_WINDOWS_LLM_CONCURRENCY`); para la primera carga, 4 (Dani, 02-10-2026: a 2 eran 3-4 días con
+  ~45 s por ventana). Una respuesta del LLM que casi cumple el esquema se normaliza (`normalizeExtraction`): sinónimos
+  del tipo de entidad, listas y resumen recortados, sentimiento desconocido → `neutro`. Solo se reintenta si falta el
+  resumen.
 
 Todo corre en el x86 (embedder GPU `bge-m3-embedding`); en los Sparks solo el LLM residente, a 2 peticiones.
 

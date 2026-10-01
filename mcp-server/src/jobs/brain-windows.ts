@@ -62,7 +62,7 @@ import {
 } from './brain-windows-lib';
 import { connectPublisher, synapseSink } from './brain-windows-synapse';
 import {
-  LLM_CONCURRENCY,
+  llmConcurrencyFromEnv,
   LlmConfig,
   createLimiter,
   extractWindow,
@@ -224,7 +224,7 @@ export async function recomputeChat(
   return { pushed, deleted, docs, chats: 1 };
 }
 
-/** LLM pass over closed pending windows (ADR §7.5), exactly 2 in parallel. */
+/** LLM pass over closed pending windows (ADR §7.5), 2 in parallel by default (BRAIN_WINDOWS_LLM_CONCURRENCY). */
 export async function runLlmPass(
   pool: Pool,
   sink: WindowSink,
@@ -237,7 +237,7 @@ export async function runLlmPass(
     closedBefore: opts.closedBefore,
     limit: opts.maxLlm,
   });
-  const limit = createLimiter(LLM_CONCURRENCY);
+  const limit = createLimiter(llmConcurrencyFromEnv(process.env));
   let done = 0;
   let failed = 0;
   let skipped = 0;

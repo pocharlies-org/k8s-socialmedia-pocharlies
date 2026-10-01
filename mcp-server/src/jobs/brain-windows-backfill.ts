@@ -46,7 +46,7 @@ import {
   setBackfillCursor,
   upsertWindow,
 } from './brain-windows-lib';
-import { LLM_CONCURRENCY, createLimiter, llmConfigFromEnv } from './brain-window-llm';
+import { createLimiter, llmConcurrencyFromEnv, llmConfigFromEnv } from './brain-window-llm';
 import { PassBudget, processLlmWindow } from './brain-windows';
 
 const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
@@ -251,7 +251,7 @@ export async function runLlmPhase(
     cur && cur.last_end_ts && cur.last_source_id
       ? { end_ts: cur.last_end_ts, source_id: cur.last_source_id }
       : null;
-  const limit = createLimiter(LLM_CONCURRENCY);
+  const limit = createLimiter(llmConcurrencyFromEnv(process.env));
   for (;;) {
     const rows = await fetchPendingLlmWindows(pool, {
       accounts: opts.accounts,
