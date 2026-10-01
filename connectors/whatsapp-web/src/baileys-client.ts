@@ -4034,6 +4034,17 @@ export class BaileysClient extends EventEmitter {
     star: boolean,
     request: MessageMutationRequest = {}
   ): Promise<StarResult> {
+    // 01-10-2026: un star/unstar real (Skirmshop) acabó en stream:error 401
+    // conflict device_removed 3 s después — WhatsApp desvinculó el dispositivo.
+    // El parche de app-state propio queda apagado hasta validarlo; solo se activa
+    // a propósito con WA_STAR_ENABLED=true (no está en ningún overlay).
+    if (process.env.WA_STAR_ENABLED !== 'true') {
+      throw new MessageMutationError(
+        'Starring messages is disabled on this connector (WA_STAR_ENABLED): a real star patch got the linked device removed by WhatsApp',
+        403,
+        'star_disabled'
+      );
+    }
     const sock = this.connectedSocket();
     const target = await this.resolveMutationTarget(chatId || '', messageId, 'starMessage');
     if (isJidGroup(target.chatJid) && !target.key.fromMe && !target.key.participant) {

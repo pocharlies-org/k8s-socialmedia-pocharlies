@@ -12,6 +12,10 @@
 import './test-env';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+
+// The star patch is off by default (WA_STAR_ENABLED, 01-10 device_removed); these
+// tests exercise the patch itself, so they turn it on. The disabled path has its own test.
+process.env.WA_STAR_ENABLED = 'true';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
@@ -996,4 +1000,26 @@ test('HTTP: 200 shapes with ids from the signed body; 400s; 503 disconnected; er
     assert.equal(pin.status, 403);
     assert.equal((await pin.json()).failureClass, 'not_group_admin');
   });
+});
+
+test('star is disabled unless WA_STAR_ENABLED=true: refused before touching WhatsApp', async () => {
+  const previous = process.env.WA_STAR_ENABLED;
+  delete process.env.WA_STAR_ENABLED;
+  try {
+    let socketTouched = false;
+    const fake = {
+      connectedSocket: () => {
+        socketTouched = true;
+        throw new Error('socket must not be used');
+      },
+    };
+    await assert.rejects(
+      () => BaileysClient.prototype.starMessage.call(fake as unknown as BaileysClient, '34600@s.whatsapp.net', 'ABC', true),
+      (e: unknown) => e instanceof MessageMutationError && e.status === 403 && e.failureClass === 'star_disabled'
+    );
+    assert.equal(socketTouched, false);
+  } finally {
+    if (previous === undefined) delete process.env.WA_STAR_ENABLED;
+    else process.env.WA_STAR_ENABLED = previous;
+  }
 });
