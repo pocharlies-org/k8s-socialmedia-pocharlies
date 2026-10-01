@@ -502,12 +502,14 @@ describe('config file (ADR 0002 §5)', () => {
         'Synapse monitor',
         'Alertas Monitoring Skirmshop',
         'Skirmshop ES OP',
-        'Skirmshop Spain Hermes',
+        'github pocharlies-org',
         'Pocharlies Operations',
       ])
     );
+    // Skirmshop Spain Hermes is Dani talking to Hermes: a normal chat, LLM-eligible.
+    expect(cfg.botChats.map(b => b.name)).not.toContain('Skirmshop Spain Hermes');
     expect(cfg.channelChats.map(c => c.name)).toEqual(
-      expect.arrayContaining(['Ofertas Chollos', 'Anonymous Catalonia'])
+      expect.arrayContaining(['Ofertas Chollos', 'Anonymous Catalonia', 'Airsoft4Tiesos'])
     );
     expect(cfg.outboundNames).toEqual({ personal: 'Dani', professional: 'Skirmshop', leila: 'Leila' });
   });
