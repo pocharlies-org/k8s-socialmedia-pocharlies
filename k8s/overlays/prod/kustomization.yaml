@@ -75,9 +75,11 @@ images:
   # brain_windows y el corte de sesiones enormes del backfill de ventanas (#164).
   # v1.3.82 (deploy/prod@ea5b8c4): textos bien formados (sin sustitutos UTF-16 sueltos)
   # antes del brain y del LLM (#168); incluye lo de v1.3.81 (#166).
+  # v1.3.83 (run 36906114195, deploy/prod@84c9b76) añade la tool social_invite_to_group (#171);
+  # mismo código que v1.3.82 en lo demás.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.82
-    digest: sha256:51b4860487328460dcee2a215826416a17b650d3d1947c4aaaeaa817c08ef9ee
+    newTag: v1.3.83
+    digest: sha256:8cd69ba00e5a040494caa3eafa0ee5917a494a0effad4cdbebeb1014e4a496ad
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
