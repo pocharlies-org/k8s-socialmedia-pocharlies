@@ -39,8 +39,8 @@ images:
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.80
-    digest: sha256:aa065f9ce445607d2ad7e00fa5516ad8bcd624ba76f83e3997459714eb672dd2
+    newTag: v1.3.82
+    digest: sha256:3fbf891f0fd28e7f962b4b4f5ab06522bb49f014702619914c397ab59e3618a1
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
@@ -73,9 +73,11 @@ images:
   # Telegram desenvuelto (#159). Mismo bump para telegram-sync (#159).
   # v1.3.80 (run 36846209634, deploy/prod@19d2716): arregla el INSERT del ledger
   # brain_windows y el corte de sesiones enormes del backfill de ventanas (#164).
+  # v1.3.82 (deploy/prod@ea5b8c4): textos bien formados (sin sustitutos UTF-16 sueltos)
+  # antes del brain y del LLM (#168); incluye lo de v1.3.81 (#166).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.80
-    digest: sha256:2d7f013422e8a2a7f11ae28bbd6a83e3cd9e39621dba12b95a2baa1c186f1c32
+    newTag: v1.3.82
+    digest: sha256:51b4860487328460dcee2a215826416a17b650d3d1947c4aaaeaa817c08ef9ee
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
