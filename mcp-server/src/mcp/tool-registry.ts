@@ -1208,7 +1208,9 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     title: 'Manage group',
     description:
       'Create a group, change its subject, description or settings, or add, remove, ' +
-      'promote or demote participants (WhatsApp). Members see every change.',
+      'promote or demote participants (WhatsApp). Members see every change. People an add ' +
+      'cannot reach because of their privacy come back in inviteRequired: invite them ' +
+      'with social_invite_to_group.',
     effect: 'destructive',
     authScope: 'social.write',
     capability: 'groups.manage',
@@ -1282,6 +1284,39 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
           },
         ],
       }
+    ),
+  }),
+  tool({
+    name: 'social_invite_to_group',
+    title: 'Invite to group',
+    description:
+      "Send WhatsApp's private 'join group' invitation card to people (usually the " +
+      'inviteRequired of a social_manage_group add). Each one gets a real message; members ' +
+      'are reported, not messaged. Admins only (WhatsApp). Per-person results: invited, ' +
+      'already_participant, send_failed or invite_link_unavailable; nobody invited answers ' +
+      'invite_not_sent.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'groups.invite',
+    handler: 'inviteToGroup',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        target: { ...target, description: 'The WhatsApp group (…@g.us).' },
+        participants: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+          minItems: 1,
+          maxItems: 20,
+          description: 'Phone numbers or user jids (…@s.whatsapp.net, …@c.us, …@lid).',
+        },
+        text: {
+          type: 'string',
+          maxLength: 1024,
+          description: 'Optional caption of the invitation card.',
+        },
+      },
+      ['channel', 'accountId', 'target', 'participants']
     ),
   }),
   tool({

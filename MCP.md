@@ -114,6 +114,13 @@ Writes pass through the connector's `ENABLE_SENDING` /
   (optional `durationMs` or `muteUntil`), `unmute`, `markRead`, `markUnread`.
 - `social_get_group` / `social_manage_group`: `create`, `update` (subject,
   description, `announce`, `restrict`), `add|remove|promote|demoteParticipants`.
+  An add WhatsApp refuses for someone's privacy lists them in `inviteRequired`
+  (in `data`, or in `error.details` when nobody was added).
+- `social_invite_to_group` (admins only): sends WhatsApp's private "join group"
+  card to 1–20 people (`participants`, optional `text` caption ≤ 1024) — a real
+  message to each; members are reported, not messaged. Per-person `results`
+  with `reason` `invited | already_participant | send_failed |
+invite_link_unavailable`; nobody invited → `invite_not_sent`.
 - `social_send_poll`, `social_vote_poll` (`options: []` retracts),
   `social_get_poll_results`, `social_send_event`, `social_respond_event`,
   `social_get_event_results`.
@@ -128,9 +135,9 @@ Writes pass through the connector's `ENABLE_SENDING` /
   groups are refused) and `social_list_blocked` (read; `fresh: true` re-reads
   WhatsApp's list). `changed: false` means it already was so.
 
-Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `start_chat` with a
-message) forward the caller's `idempotencyKey`, scoped per tool, as the
-connector's `Idempotency-Key`. Connector refusals keep their `failureClass` as
+Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `invite_to_group`,
+`start_chat` with a message) forward the caller's `idempotencyKey`, scoped per
+tool, as the connector's `Idempotency-Key`. Connector refusals keep their `failureClass` as
 the error `code` (`disabled_sending`, `disconnected`, `not_group_admin`,
 `not_on_whatsapp`, `account_restricted`, …) with the connector payload in
 `error.details`; `invalid_request` stays, `idempotency_key_reused` becomes

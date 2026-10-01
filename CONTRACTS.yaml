@@ -1669,6 +1669,7 @@ contracts:
       sent card's payload is kept for retries, ingest only). The path, the
       body fields, the 200 shape, the reasons and the failureClass values are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      Also consumed by the MCP tool social_invite_to_group (mcp-server/src/mcp/server.ts canonicalInviteToGroup; added later, surface unchanged).
   - id: http.brain.push-ingest.conversation-window.v1
     kind: http-route
     value: /instances/{instance}/push-ingest

@@ -30,6 +30,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_get_presence',
   'social_get_privacy',
   'social_get_profile',
+  'social_invite_to_group',
   'social_list_accounts',
   'social_list_blocked',
   'social_list_comments',
@@ -85,6 +86,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_get_presence: 'read',
   social_get_privacy: 'read',
   social_get_profile: 'read',
+  social_invite_to_group: 'externalWrite',
   social_list_accounts: 'read',
   social_list_blocked: 'read',
   social_list_comments: 'read',
@@ -253,6 +255,12 @@ const EXPECTED_ANNOTATIONS: Record<
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_invite_to_group: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
     openWorldHint: true,
   },
   social_list_accounts: {
@@ -534,11 +542,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 52 canonical tools in deterministic order', () => {
+  it('contains exactly the 53 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(52);
+    expect(new Set(names).size).toBe(53);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -564,7 +572,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(26);
+    expect(writes).toHaveLength(27);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same

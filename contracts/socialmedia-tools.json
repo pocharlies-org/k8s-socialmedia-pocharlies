@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:ef8c481e6274921cc85556995a0743e3002a86efec3f6bdeffed24b7b09d0641",
+  "digest": "sha256:ba4d23f39fde34f45b4f33bcf9c4438c78a9c3d7c0e201136b20d73488130b5a",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -3566,6 +3566,189 @@
       }
     },
     {
+      "name": "social_invite_to_group",
+      "title": "Invite to group",
+      "description": "Send WhatsApp's private 'join group' invitation card to people (usually the inviteRequired of a social_manage_group add). Each one gets a real message; members are reported, not messaged. Admins only (WhatsApp). Per-person results: invited, already_participant, send_failed or invite_link_unavailable; nobody invited answers invite_not_sent.",
+      "effect": "externalWrite",
+      "authScope": "social.write",
+      "capability": "groups.invite",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The WhatsApp group (…@g.us)."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "Phone numbers or user jids (…@s.whatsapp.net, …@c.us, …@lid)."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Optional caption of the invitation card."
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "participants"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "social_list_accounts",
       "title": "List social accounts",
       "description": "List configured provider accounts, transports and capabilities actually deployed.",
@@ -6114,7 +6297,7 @@
     {
       "name": "social_manage_group",
       "title": "Manage group",
-      "description": "Create a group, change its subject, description or settings, or add, remove, promote or demote participants (WhatsApp). Members see every change.",
+      "description": "Create a group, change its subject, description or settings, or add, remove, promote or demote participants (WhatsApp). Members see every change. People an add cannot reach because of their privacy come back in inviteRequired: invite them with social_invite_to_group.",
       "effect": "destructive",
       "authScope": "social.write",
       "capability": "groups.manage",

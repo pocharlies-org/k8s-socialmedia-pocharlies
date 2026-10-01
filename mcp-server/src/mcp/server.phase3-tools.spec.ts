@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runWithRequestActor } from '@mcp-socialmedia/shared';
 import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
@@ -299,6 +302,251 @@ describe('social_get_group / social_manage_group', () => {
       participants: ['34600000001'],
     });
     expect(out.structuredContent.error).toMatchObject({ code: 'not_group_admin' });
+  });
+
+  it('surfaces inviteRequired of an add, in data (200) and in error.details (422)', async () => {
+    const { run, connectorCall } = serverWith();
+    const inviteRequired = [
+      {
+        participant: '+34600000002',
+        jid: '34600000002@s.whatsapp.net',
+        privateInvite: true,
+        inviteExpiresAt: '2026-10-04T10:00:00.000Z',
+      },
+    ];
+    const add = {
+      ...wa,
+      target: '1203@g.us',
+      action: 'addParticipants',
+      participants: ['+34600000001', '+34600000002'],
+    };
+    connectorCall.mockResolvedValueOnce({
+      updated: true,
+      action: 'add',
+      succeeded: 1,
+      failed: 1,
+      partial: true,
+      inviteRequired,
+    });
+    const partial = await run('social_manage_group', add);
+    expect(partial.structuredContent).toMatchObject({
+      ok: true,
+      data: { partial: true, inviteRequired },
+    });
+    connectorCall.mockRejectedValueOnce(
+      connectorError(422, {
+        error: 'WhatsApp did not add any',
+        failureClass: 'rejected_by_whatsapp',
+        action: 'add',
+        succeeded: 0,
+        failed: 1,
+        inviteRequired,
+      })
+    );
+    const refused = await run('social_manage_group', {
+      ...add,
+      participants: ['+34600000002'],
+    });
+    expect(refused.structuredContent.error).toMatchObject({
+      code: 'rejected_by_whatsapp',
+      details: { status: 422, inviteRequired },
+    });
+  });
+});
+
+describe('social_invite_to_group', () => {
+  const invite = {
+    ...wa,
+    target: 'professional:1203@g.us',
+    participants: ['+34600000002', 'professional:34600000003@s.whatsapp.net', '1234@lid'],
+  };
+
+  it('invites through POST /groups/invite with bare ids, caption, caller and a scoped Idempotency-Key', async () => {
+    await runWithRedisDouble(async server => {
+      server.connectorCall.mockResolvedValueOnce({
+        invited: true,
+        groupId: '1203@g.us',
+        results: [
+          {
+            participant: '+34600000002',
+            jid: '34600000002@s.whatsapp.net',
+            ok: true,
+            reason: 'invited',
+            invite: 'private',
+            messageId: '3EB0INV',
+          },
+        ],
+        succeeded: 1,
+        failed: 0,
+        partial: false,
+      });
+      const out = (await runWithRequestActor({ sub: 'sub-1', name: 'dani' }, () =>
+        server.run('social_invite_to_group', {
+          ...invite,
+          text: 'Únete al grupo',
+          idempotencyKey: 'inv-1',
+        })
+      )) as { structuredContent: Record<string, any> };
+      const [url, method, path, body, timeout, headers] = server.connectorCall.mock.calls[0];
+      expect([url, method, path, timeout]).toEqual([
+        'http://wa-professional',
+        'POST',
+        '/api/v1/groups/invite',
+        undefined,
+      ]);
+      expect(body).toEqual({
+        groupId: '1203@g.us',
+        participants: ['+34600000002', '34600000003@s.whatsapp.net', '1234@lid'],
+        text: 'Únete al grupo',
+        actor: 'dani',
+      });
+      expect((headers as Record<string, string>)['Idempotency-Key']).toMatch(/^mcp-[0-9a-f]{64}$/);
+      expect(out.structuredContent).toMatchObject({
+        ok: true,
+        status: 'accepted',
+        data: { invited: true, succeeded: 1, results: [{ reason: 'invited', invite: 'private' }] },
+      });
+    });
+  });
+
+  it('sends no caption or key when none is given', async () => {
+    const { run, connectorCall } = serverWith();
+    await run('social_invite_to_group', invite);
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/groups/invite',
+      {
+        groupId: '1203@g.us',
+        participants: ['+34600000002', '34600000003@s.whatsapp.net', '1234@lid'],
+      }
+    );
+  });
+
+  it('refuses a non-group target, another account group or participant, Telegram and Instagram', async () => {
+    const { run, connectorCall } = serverWith();
+    const direct = await run('social_invite_to_group', {
+      ...invite,
+      target: '34600@s.whatsapp.net',
+    });
+    expect(direct.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    const foreignGroup = await run('social_invite_to_group', {
+      ...invite,
+      accountId: 'personal',
+      participants: ['+34600000002'],
+    });
+    expect(foreignGroup.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    expect(foreignGroup.structuredContent.error.message).toMatch(/^target belongs to/);
+    const foreignParticipant = await run('social_invite_to_group', {
+      ...invite,
+      accountId: 'personal',
+      target: '1203@g.us',
+    });
+    expect(foreignParticipant.structuredContent.error.message).toMatch(
+      /professional WhatsApp namespace/
+    );
+    const tg = await run('social_invite_to_group', {
+      channel: 'telegram',
+      accountId: 'personal',
+      target: '-100123',
+      participants: ['@someone'],
+    });
+    expect(tg.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    const ig = await run('social_invite_to_group', {
+      channel: 'instagram',
+      accountId: 'skirmshop',
+      target: '1',
+      participants: ['2'],
+    });
+    expect(ig.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  // Schema refusals throw before the call (the MCP handler turns them into invalid_request).
+  it('rejects no participants, more than 20, a long caption and a missing target', async () => {
+    const { run, connectorCall } = serverWith();
+    const many = Array.from({ length: 21 }, (_, i) => `+3460000${String(i).padStart(4, '0')}`);
+    for (const args of [
+      { ...invite, participants: [] },
+      { ...invite, participants: many },
+      { ...invite, text: 'x'.repeat(1025) },
+      { ...wa, participants: ['+34600000002'] },
+    ]) {
+      await expect(run('social_invite_to_group', args)).rejects.toMatchObject({
+        canonicalCode: 'invalid_request',
+      });
+    }
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
+  it('maps the gate, admin-only and invite_not_sent with the per-person results', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockRejectedValueOnce(
+      connectorError(403, { error: 'Sending disabled', failureClass: 'disabled_sending' })
+    );
+    const gated = await run('social_invite_to_group', invite);
+    expect(gated.structuredContent.error).toMatchObject({
+      code: 'disabled_sending',
+      details: { status: 403 },
+    });
+    connectorCall.mockRejectedValueOnce(
+      connectorError(403, { error: 'Only admins', failureClass: 'not_group_admin' })
+    );
+    const admin = await run('social_invite_to_group', invite);
+    expect(admin.structuredContent.error).toMatchObject({ code: 'not_group_admin' });
+    const results = [
+      {
+        participant: '+34600000002',
+        jid: '34600000002@s.whatsapp.net',
+        ok: false,
+        reason: 'invite_link_unavailable',
+        invite: null,
+        messageId: null,
+      },
+    ];
+    connectorCall.mockRejectedValueOnce(
+      connectorError(422, {
+        error: 'Nobody was invited',
+        failureClass: 'invite_not_sent',
+        results,
+        succeeded: 0,
+        failed: 1,
+      })
+    );
+    const none = await run('social_invite_to_group', invite);
+    expect(none.structuredContent).toMatchObject({
+      ok: false,
+      status: 'failed',
+      error: { code: 'invite_not_sent', details: { status: 422, results, succeeded: 0 } },
+    });
+  });
+
+  it('is gated by the identity binding before reaching the connector', async () => {
+    const saved = {
+      on: process.env.SOCIAL_IDENTITY_BINDING,
+      file: process.env.SOCIAL_IDENTITY_BINDINGS_FILE,
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'invite-binding-'));
+    const file = join(dir, 'bindings.yaml');
+    writeFileSync(file, 'bindings:\n  - sub: sub-leila\n    label: leila\n    accounts: [leila]\n');
+    process.env.SOCIAL_IDENTITY_BINDING = 'on';
+    process.env.SOCIAL_IDENTITY_BINDINGS_FILE = file;
+    try {
+      const { run, connectorCall } = serverWith();
+      await expect(
+        runWithRequestActor({ sub: 'sub-leila' }, () => run('social_invite_to_group', invite))
+      ).rejects.toMatchObject({ canonicalCode: 'forbidden' });
+      expect(connectorCall).not.toHaveBeenCalled();
+    } finally {
+      for (const [key, value] of [
+        ['SOCIAL_IDENTITY_BINDING', saved.on],
+        ['SOCIAL_IDENTITY_BINDINGS_FILE', saved.file],
+      ] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

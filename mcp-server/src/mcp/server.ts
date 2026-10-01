@@ -743,6 +743,8 @@ export class MCPServer {
         return this.canonicalGetGroup(args);
       case 'manageGroup':
         return this.canonicalManageGroup(args);
+      case 'inviteToGroup':
+        return this.canonicalInviteToGroup(args);
       case 'sendPoll':
         return this.canonicalSendPoll(args);
       case 'votePoll':
@@ -2130,6 +2132,30 @@ export class MCPServer {
         participants: participants(),
         ...this.connectorActor(),
       })
+    );
+  }
+
+  /** Private "join group" cards for the people an add could not reach (inviteRequired). */
+  private async canonicalInviteToGroup(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const groupId = this.requireGroupJid(this.whatsAppProviderTarget(args));
+    const participants = (Array.isArray(args.participants) ? args.participants : []).map(
+      (value: unknown) => this.whatsAppParticipant(value, account)
+    );
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/groups/invite',
+        {
+          groupId,
+          participants,
+          ...(typeof args.text === 'string' ? { text: args.text } : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'group-invite', 'social_invite_to_group')
+      )
     );
   }
 
