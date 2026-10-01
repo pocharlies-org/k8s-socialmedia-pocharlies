@@ -39,8 +39,8 @@ images:
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.67
-    digest: sha256:56fa67979f97c9af368d94da1bed4805c85e84025aeebd29e13aae5626e66050
+    newTag: v1.3.78
+    digest: sha256:01235fc3d4f58535f7f1fb8f8e51893351dbe9c1e49d71c348018302f238dffa
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
@@ -65,9 +65,12 @@ images:
   # por actor, omite Instagram sin credencial (no_credential). Sin migraciones nuevas.
   # v1.3.76 (run 36751988471, deploy/prod@2df6408) añade las 15 tools MCP de la fase 3 (#138)
   # y el Baileys parcheado (#139). Sin migraciones nuevas.
+  # v1.3.78 (run 36792706654, deploy/prod@74ab0cb): migraciones 015 (backfills de reacciones
+  # e is_deleted) y 017 (aviso de ediciones/borrados), tools social_block_contact /
+  # social_list_blocked (#153) y los jobs de voz (INFRA-364, #154).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.76
-    digest: sha256:7b3d09a0adb1a7dceb60ecf111ce5d9bd2e57a8a5d2de4bbfd37ccd6dff6173b
+    newTag: v1.3.78
+    digest: sha256:3b5669a60d99be1142eb7e8759f160141b0cddaf929e892617717f9722f2016a
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
