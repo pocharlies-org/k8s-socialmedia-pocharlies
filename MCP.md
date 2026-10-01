@@ -166,6 +166,30 @@ invite_link_unavailable`; nobody invited → `invite_not_sent`.
   active pins of the chat, newest first, at most the 3 WhatsApp shows, each
   with `expiresAt`. Both lists hold what the connector recorded since
   migration 018 (plus history-sync stars); `persisted: false` = not recorded.
+- `social_list_communities` and `social_get_community` (reads; `target` = the
+  community's `…@g.us`): subject, description, size, the announcement group,
+  every linked group (`joined` says whether this account is in it;
+  `linkedGroupsComplete: false` = only the joined ones could be read) and
+  `capabilities`. A group of a community answers `not_a_community` with the
+  community id in `details`.
+- `social_manage_community` (destructive): `create` (`subject`, optional
+  `description`; this account owns it), `link` / `unlink` (`target` + `group`;
+  community admins, linking also needs admin of that ordinary group; never the
+  announcement group), `leave` (`confirm: true`; also leaves the announcement
+  group). Already so → `changed: false`. Every change is read back;
+  `change_not_confirmed` = read it again before retrying. The group tools still
+  answer `community_unsupported` for a community.
+- `social_lookup_channel` (read; `target` = `…@newsletter`, a
+  `whatsapp.com/channel/…` link or the invite code): name, description,
+  subscribers, verification, share link, `role`, `following`, `muted`. No
+  channel search exists.
+- `social_list_channels` (read, `meta.source.completeness: partial`): the
+  followed channels among those the connector has seen (history-sync chats,
+  channels whose posts it received, look-ups and follows); WhatsApp's own
+  followed list is not readable with Baileys rc13 (`data.coverage`).
+- `social_manage_channel_subscription` (`target` = `…@newsletter`, `action`
+  `follow | unfollow | mute | unmute`; muting needs a followed channel): proven
+  by the channel's own metadata, `changed: false` when already so.
 
 Sends (`poll`, `vote`, `event`, `respond`, `share_contact`, `invite_to_group`,
 WhatsApp `send_sticker`, `send_gif`, `pin_message`, `start_chat` with a message)

@@ -173,6 +173,7 @@ import {
   GroupUpdate,
   isAdminRole,
   isCommunityGroup,
+  normalizeGroupJid,
   normalizeGroupParticipantAction,
   ownParticipant,
   parseGroupJid,
@@ -195,6 +196,34 @@ import {
   recordInboundGroup,
   toParticipantJid,
 } from './group-management';
+import {
+  CommunityActionError,
+  communityCapabilities,
+  CommunityGroupAction,
+  communityView,
+  CommunityView,
+  isCommunityParent,
+  isLinkedTo,
+  LinkedGroupEntry,
+  parseCommunityDescription,
+  parseCommunityGroupRequest,
+  parseCommunityJid,
+  parseCommunitySubject,
+} from './communities';
+import {
+  ChannelActionError,
+  CHANNELS_LIST_MAX,
+  channelStateMatches,
+  ChannelSubscriptionAction,
+  channelView,
+  ChannelView,
+  KeyedSerializer,
+  knownChannelConversations,
+  normalizeChannelJid,
+  parseChannelJid,
+  parseChannelQuery,
+  parseChannelSubscriptionAction,
+} from './channels';
 import { maybeRunRetention } from './retention';
 import {
   availablePresenceAllowed,
@@ -634,6 +663,52 @@ export interface GroupInvitesResult {
   succeeded: number;
   failed: number;
   partial: boolean;
+}
+
+/** POST /communities/groups. */
+export interface CommunityGroupResult {
+  action: CommunityGroupAction;
+  communityId: string;
+  groupId: string;
+  /** false = it already was so: nothing went to WhatsApp. */
+  changed: boolean;
+  /** A fresh read shows the asked state. */
+  confirmed: true;
+  community: CommunityView | null;
+}
+
+/** POST /communities/leave. */
+export interface CommunityLeaveResult {
+  communityId: string;
+  changed: true;
+  confirmed: true;
+}
+
+/** GET /channels. */
+export interface ChannelListResult {
+  channels: ChannelView[];
+  coverage: {
+    /** Always false: rc13 cannot ask WhatsApp for the followed list. */
+    complete: false;
+    source: 'known-channels';
+    /** Channels this connector has seen (chats, ingested posts, lookups, follows). */
+    candidates: number;
+    /** Of those, read now (at most CHANNELS_LIST_MAX). */
+    checked: number;
+    /** Read but not answered (left out). */
+    unreadable: number;
+  };
+}
+
+/** POST /channels/subscription. */
+export interface ChannelSubscriptionResult {
+  action: ChannelSubscriptionAction;
+  channelId: string;
+  /** false = it already was so: nothing went to WhatsApp. */
+  changed: boolean;
+  /** The channel's own metadata (viewer role / mute) shows the asked state. */
+  confirmed: true;
+  channel: ChannelView;
 }
 
 /**
@@ -1244,6 +1319,12 @@ export class BaileysClient extends EventEmitter {
    * falls back to the group link.
    */
   private pendingGroupInvites = new Map<string, AddRequest>();
+  // One community / channel write at a time per id (WhatsApp gives these
+  // mutations no idempotency token: a concurrent twin must see the first).
+  private communityWrites = new KeyedSerializer();
+  private channelWrites = new KeyedSerializer();
+  /** Channels this process looked up or followed: candidates of GET /channels. */
+  private seenChannels = new Set<string>();
   private keyCache = new Map<string, { key: WAMessageKey; chatJid: string }>(); // by waMessageId
   // `<kind>:<bare id>` of our own edits/revokes/deletes-for-me whose echo the
   // inbound handlers must leave alone (see OWN_MUTATION_ECHO_MS).
@@ -4655,9 +4736,18 @@ export class BaileysClient extends EventEmitter {
    * A group call to WhatsApp. Its refusals come back as Boom with the IQ
    * error code: 403 → 403 not_group_admin (WhatsApp says we may not), 404 →
    * 404 group_unavailable, other 4xx → 422 rejected_by_whatsapp; connection
-   * statuses (401, 408, 428, 440) and the rest go on as send failures.
+   * statuses (401, 408, 428, 440) and the rest go on as send failures. A
+   * community call names its own 403 / 404 classes.
    */
-  private async groupCall<T>(what: string, raw: string, call: () => Promise<T>): Promise<T> {
+  private async groupCall<T>(
+    what: string,
+    raw: string,
+    call: () => Promise<T>,
+    classes: { forbidden: string; unavailable: string } = {
+      forbidden: 'not_group_admin',
+      unavailable: 'group_unavailable',
+    }
+  ): Promise<T> {
     try {
       return await call();
     } catch (e: any) {
@@ -4666,10 +4756,10 @@ export class BaileysClient extends EventEmitter {
       if (!e?.isBoom || !(status >= 400 && status < 500) || connectionStatus) throw e;
       const reason = `WhatsApp rejected ${what} of ${raw}: ${e?.message || e}`;
       if (status === 403) {
-        throw new GroupActionError(reason, 403, 'not_group_admin', { code: '403' });
+        throw new GroupActionError(reason, 403, classes.forbidden, { code: '403' });
       }
       if (status === 404) {
-        throw new GroupActionError(reason, 404, 'group_unavailable', { code: '404' });
+        throw new GroupActionError(reason, 404, classes.unavailable, { code: '404' });
       }
       throw new GroupActionError(reason, 422, 'rejected_by_whatsapp', { code: String(status) });
     }
@@ -5215,7 +5305,8 @@ export class BaileysClient extends EventEmitter {
   private checkGroupAccess(meta: GroupMetadata, own: string[], raw: string) {
     if (isCommunityGroup(meta)) {
       throw new GroupActionError(
-        `${raw} is a community (or its announcement group): manage it from WhatsApp`,
+        `${raw} is a community (or its announcement group): its groups are linked, unlinked ` +
+          'and left with /communities/groups and /communities/leave; the rest from WhatsApp',
         422,
         'community_unsupported'
       );
@@ -5229,6 +5320,589 @@ export class BaileysClient extends EventEmitter {
       );
     }
     return capabilities;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Communities (the helpers live in communities.ts)
+  // ---------------------------------------------------------------------------
+
+  private static readonly COMMUNITY_CLASSES = {
+    forbidden: 'not_community_admin',
+    unavailable: 'community_unavailable',
+  };
+
+  /**
+   * A write whose answer proves nothing (community link / unlink / leave,
+   * channel follow / mute…). A refusal WhatsApp spells out (already a
+   * MessageMutationError) is thrown as it is; the success and any other
+   * failure (a timeout, a lost answer — the write may have landed) go to
+   * `confirm`, a fresh read. Not shown there → 409 change_not_confirmed:
+   * never retried here, the caller reads before trying again.
+   */
+  private async confirmedWrite(
+    what: string,
+    write: () => Promise<unknown>,
+    confirm: () => Promise<boolean>
+  ): Promise<void> {
+    let failure: unknown;
+    try {
+      await write();
+    } catch (e) {
+      if (e instanceof MessageMutationError) throw e;
+      failure = e;
+    }
+    const confirmed = await confirm().catch((e: any) => {
+      this.logger.warn(`read-back of ${what} failed: ${e?.message || e}`);
+      return false;
+    });
+    if (confirmed) return;
+    throw new MessageMutationError(
+      failure
+        ? `${what} failed (${errorMessage(failure)}) and a fresh read does not show it done; it may still have reached WhatsApp — read it again before retrying`
+        : `WhatsApp accepted ${what} but a fresh read does not show it; read it again before retrying`,
+      409,
+      'change_not_confirmed'
+    );
+  }
+
+  /** Every group this account is in — communities, their announcement and linked groups too. */
+  private async participatingGroups(): Promise<GroupMetadata[]> {
+    const sock = this.connectedSocket();
+    // rc13's communityFetchAllParticipating parses <communities>, which
+    // WhatsApp never sends: the same IQ read through the group parser.
+    const all = await this.groupCall('reading the groups', '@g.us', () =>
+      sock.groupFetchAllParticipating()
+    );
+    if (!all || typeof all !== 'object' || Array.isArray(all)) {
+      throw new CommunityActionError(
+        'WhatsApp returned an unusable group list',
+        502,
+        'provider_invalid_response'
+      );
+    }
+    return Object.values(all).filter(
+      (meta): meta is GroupMetadata => !!meta && typeof meta.id === 'string'
+    );
+  }
+
+  /**
+   * Fresh metadata of a community (its parent group), read through the group
+   * parser (rc13's communityMetadata expects a <community> node WhatsApp does
+   * not send). Not cached: the parent has no chat. 403 = not a member; a
+   * linked or ordinary group → 422 not_a_community.
+   */
+  private async communityMetadataForAction(raw: string): Promise<GroupMetadata> {
+    const sock = this.connectedSocket();
+    let meta: GroupMetadata;
+    try {
+      meta = await this.groupCall(
+        'reading the community',
+        raw,
+        () => sock.groupMetadata(raw),
+        BaileysClient.COMMUNITY_CLASSES
+      );
+    } catch (e) {
+      if (e instanceof GroupActionError && e.failureClass === 'not_community_admin') {
+        throw new CommunityActionError(
+          `This account is not a member of ${raw}`,
+          403,
+          'not_community_member',
+          { code: e.code }
+        );
+      }
+      throw e;
+    }
+    if (!isCommunityParent(meta)) {
+      throw new CommunityActionError(
+        meta?.linkedParent
+          ? `${raw} is a group of the community ${meta.linkedParent}, not a community`
+          : `${raw} is not a community`,
+        422,
+        'not_a_community',
+        meta?.linkedParent ? { details: { communityId: meta.linkedParent } } : {}
+      );
+    }
+    return meta;
+  }
+
+  /** Every group of a community (`<sub_groups>`); null when WhatsApp did not answer it. */
+  private async linkedGroupsOf(raw: string): Promise<LinkedGroupEntry[] | null> {
+    try {
+      const answer = await this.connectedSocket().communityFetchLinkedGroups(raw);
+      if (!answer || answer.communityJid !== raw || !Array.isArray(answer.linkedGroups)) {
+        return null;
+      }
+      return answer.linkedGroups;
+    } catch (e: any) {
+      this.logger.warn(`linked groups of ${raw} unavailable: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  private async describeCommunity(
+    meta: GroupMetadata,
+    participating: GroupMetadata[],
+    own: string[]
+  ): Promise<CommunityView> {
+    const linked = await this.linkedGroupsOf(meta.id);
+    return communityView(meta, participating, linked, group => ownParticipant(group, own));
+  }
+
+  /**
+   * GET /communities: every community this account is in, with its
+   * announcement group and its groups (WhatsApp's full list, also those this
+   * account is not in; `joined` says which). A community only reached
+   * through one of its groups (its parent not among the participating
+   * groups) is read on its own.
+   */
+  async listCommunities(): Promise<{ communities: CommunityView[] }> {
+    const sock = this.connectedSocket();
+    const participating = await this.participatingGroups();
+    const own = await this.ownIds();
+    const parents = new Map<string, GroupMetadata>();
+    for (const meta of participating) {
+      if (isCommunityParent(meta)) parents.set(meta.id, meta);
+    }
+    for (const meta of participating) {
+      const parent = normalizeGroupJid(meta.linkedParent);
+      if (!parent || parents.has(parent)) continue;
+      const read = await sock.groupMetadata(parent).catch((e: any) => {
+        this.logger.warn(`community ${parent} of ${meta.id} unreadable: ${e?.message || e}`);
+        return null;
+      });
+      if (isCommunityParent(read)) parents.set(parent, read as GroupMetadata);
+    }
+    const communities: CommunityView[] = [];
+    for (const meta of parents.values()) {
+      communities.push(await this.describeCommunity(meta, participating, own));
+    }
+    communities.sort((a, b) => a.subject.localeCompare(b.subject));
+    return { communities };
+  }
+
+  /** POST /communities/state: one community, its groups and what this account may do there. */
+  async getCommunityState(communityId: unknown): Promise<CommunityView> {
+    const raw = parseCommunityJid(communityId);
+    const meta = await this.communityMetadataForAction(raw);
+    const participating = await this.participatingGroups().catch((e: any) => {
+      this.logger.warn(`participating groups unavailable: ${e?.message || e}`);
+      return [] as GroupMetadata[];
+    });
+    return this.describeCommunity(meta, participating, await this.ownIds());
+  }
+
+  /**
+   * POST /communities/create: a new community with this account as its owner
+   * (WhatsApp creates its announcement group with it; members ask to join).
+   * rc13 answers null when its own re-read failed: then the community is
+   * looked for among the participating groups (ours, same subject, created
+   * just now) before saying it is unconfirmed — never created twice here.
+   */
+  async createCommunity(
+    subject: unknown,
+    description: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<{ communityId: string; community: CommunityView }> {
+    const cleanSubject = parseCommunitySubject(subject);
+    const cleanDescription = parseCommunityDescription(description);
+    const sock = this.connectedSocket();
+    const own = await this.ownIds();
+    const startedAt = Math.floor(Date.now() / 1000) - 120;
+    let meta: GroupMetadata | null = null;
+    let failure: unknown;
+    try {
+      meta = await this.groupCall(
+        'the community creation',
+        '@g.us',
+        () => sock.communityCreate(cleanSubject, cleanDescription),
+        BaileysClient.COMMUNITY_CLASSES
+      );
+    } catch (e) {
+      if (e instanceof MessageMutationError) throw e;
+      failure = e;
+    }
+    let participating: GroupMetadata[] | null = null;
+    if (!isCommunityParent(meta)) {
+      participating = await this.participatingGroups().catch(() => [] as GroupMetadata[]);
+      meta =
+        participating
+          .filter(
+            group =>
+              isCommunityParent(group) &&
+              group.subject === cleanSubject &&
+              Number(group.creation) >= startedAt &&
+              (!group.owner || own.includes(jidNormalizedUser(group.owner)))
+          )
+          .sort((a, b) => Number(b.creation) - Number(a.creation))[0] || null;
+    }
+    if (!meta) {
+      throw new CommunityActionError(
+        `The creation of the community ${cleanSubject} was not confirmed${failure ? ` (${errorMessage(failure)})` : ''}; list the communities before retrying`,
+        409,
+        'change_not_confirmed'
+      );
+    }
+    participating ??= await this.participatingGroups().catch(() => [] as GroupMetadata[]);
+    const community = await this.describeCommunity(meta, participating, own);
+    this.logger.info(`Community created ${meta.id}${request.actor ? ` by ${request.actor}` : ''}`);
+    return { communityId: meta.id, community };
+  }
+
+  /**
+   * POST /communities/groups: link a group to a community or unlink it.
+   * Fresh metadata first: community admins only; linking also needs admin of
+   * the group, which must be an ordinary group not linked elsewhere; the
+   * announcement group is never unlinked. Already so → changed: false,
+   * nothing sent. The result is read back (the group's linkedParent, or the
+   * community's list when we are not in the group).
+   */
+  async updateCommunityGroup(
+    communityId: unknown,
+    groupId: unknown,
+    action: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<CommunityGroupResult> {
+    const wanted = parseCommunityGroupRequest({ communityId, groupId, action });
+    const sock = this.connectedSocket();
+    return this.communityWrites.run(wanted.communityId, async () => {
+      const raw = wanted.communityId;
+      const target = wanted.groupId;
+      const meta = await this.communityMetadataForAction(raw);
+      const own = await this.ownIds();
+      const capabilities = communityCapabilities(ownParticipant(meta, own));
+      if (!capabilities.isMember) {
+        throw new CommunityActionError(
+          `This account is not a member of ${raw}`,
+          403,
+          'not_community_member'
+        );
+      }
+      if (!capabilities.isAdmin) {
+        throw new CommunityActionError(
+          `Only community admins can ${wanted.action} groups of ${raw}`,
+          403,
+          'not_community_admin'
+        );
+      }
+      const done = async (changed: boolean): Promise<CommunityGroupResult> => {
+        this.groupMetaCache.delete(target);
+        const participating = await this.participatingGroups().catch(() => [] as GroupMetadata[]);
+        const community = await this.describeCommunity(meta, participating, own).catch(() => null);
+        this.logger.info(
+          `Community ${raw} ${wanted.action} ${target}${changed ? '' : ' (already)'}${request.actor ? ` by ${request.actor}` : ''}`
+        );
+        return {
+          action: wanted.action,
+          communityId: raw,
+          groupId: target,
+          changed,
+          confirmed: true,
+          community,
+        };
+      };
+
+      if (wanted.action === 'link') {
+        const group = await this.groupMetadataForAction(target);
+        if (isCommunityGroup(group)) {
+          throw new CommunityActionError(
+            `${target} is a community or an announcement group: only ordinary groups are linked`,
+            422,
+            'not_linkable_group'
+          );
+        }
+        if (group.linkedParent === raw) return done(false);
+        if (group.linkedParent) {
+          throw new CommunityActionError(
+            `${target} already belongs to the community ${group.linkedParent}: unlink it there first`,
+            409,
+            'linked_elsewhere',
+            { details: { linkedTo: group.linkedParent } }
+          );
+        }
+        if (!isAdminRole(ownParticipant(group, own)?.admin)) {
+          throw new CommunityActionError(
+            `Only admins of ${target} can link it to a community`,
+            403,
+            'not_group_admin'
+          );
+        }
+        await this.confirmedWrite(
+          `the link of ${target} to ${raw}`,
+          () =>
+            this.groupCall(
+              'the group link',
+              raw,
+              () => sock.communityLinkGroup(target, raw),
+              BaileysClient.COMMUNITY_CLASSES
+            ),
+          async () => (await this.fetchGroupMetadata(target, true)).linkedParent === raw
+        );
+        return done(true);
+      }
+
+      // Unlink: we need not be in the group; its metadata when we are, else
+      // the community's own list of groups.
+      const group = await this.fetchGroupMetadata(target, true).catch(() => null);
+      if (group?.isCommunityAnnounce && group.linkedParent === raw) {
+        throw new CommunityActionError(
+          `${target} is the announcement group of ${raw}: it cannot be unlinked`,
+          422,
+          'announcement_group'
+        );
+      }
+      const linked = group ? null : await this.linkedGroupsOf(raw);
+      const before = isLinkedTo(raw, target, { group, linked });
+      if (before === false) return done(false);
+      if (before === null) {
+        throw new CommunityActionError(
+          `Could not read whether ${target} belongs to ${raw}; nothing was sent`,
+          502,
+          'provider_invalid_response'
+        );
+      }
+      await this.confirmedWrite(
+        `the unlink of ${target} from ${raw}`,
+        () =>
+          this.groupCall(
+            'the group unlink',
+            raw,
+            () => sock.communityUnlinkGroup(target, raw),
+            BaileysClient.COMMUNITY_CLASSES
+          ),
+        async () => {
+          const after = group ? await this.fetchGroupMetadata(target, true) : null;
+          const list = group ? null : await this.linkedGroupsOf(raw);
+          return isLinkedTo(raw, target, { group: after, linked: list }) === false;
+        }
+      );
+      return done(true);
+    });
+  }
+
+  /**
+   * POST /communities/leave: this account leaves a community (and, as
+   * WhatsApp does, its announcement group). Members only; proven by the
+   * participating groups no longer listing us in it.
+   */
+  async leaveCommunity(
+    communityId: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<CommunityLeaveResult> {
+    const raw = parseCommunityJid(communityId);
+    const sock = this.connectedSocket();
+    return this.communityWrites.run(raw, async () => {
+      const meta = await this.communityMetadataForAction(raw);
+      const own = await this.ownIds();
+      if (!communityCapabilities(ownParticipant(meta, own)).isMember) {
+        throw new CommunityActionError(
+          `This account is not a member of ${raw}`,
+          403,
+          'not_community_member'
+        );
+      }
+      await this.confirmedWrite(
+        `leaving ${raw}`,
+        () =>
+          this.groupCall(
+            'leaving the community',
+            raw,
+            () => sock.communityLeave(raw),
+            BaileysClient.COMMUNITY_CLASSES
+          ),
+        async () => {
+          const participating = await this.participatingGroups();
+          const still = participating.find(group => group.id === raw);
+          return !still || !ownParticipant(still, own);
+        }
+      );
+      this.groupMetaCache.delete(raw);
+      this.logger.info(`Left community ${raw}${request.actor ? ` by ${request.actor}` : ''}`);
+      return { communityId: raw, changed: true, confirmed: true };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Channels / newsletters (the helpers live in channels.ts)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * A newsletter WMex call. A GraphQL refusal (Boom "GraphQL server error",
+   * with the error's code): 404 → 404 channel_unavailable, 401 / 403 → 403
+   * not_allowed, any other → 422 rejected_by_whatsapp. Anything else (no
+   * answer, a connection status) goes on as it is.
+   */
+  private async channelCall<T>(what: string, key: string, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (e: any) {
+      const message = String(e?.message || e);
+      if (!e?.isBoom || !message.startsWith('GraphQL server error')) throw e;
+      const status = Number(e?.output?.statusCode ?? e?.data?.extensions?.error_code);
+      const code = Number.isFinite(status) ? String(status) : undefined;
+      const reason = `WhatsApp rejected ${what} of ${key}: ${message}`;
+      if (status === 404) throw new ChannelActionError(reason, 404, 'channel_unavailable', code);
+      if (status === 401 || status === 403) {
+        throw new ChannelActionError(reason, 403, 'not_allowed', code);
+      }
+      throw new ChannelActionError(reason, 422, 'rejected_by_whatsapp', code);
+    }
+  }
+
+  /** One channel's metadata by jid, proven to be about that channel (404 when there is none). */
+  private async readChannel(jid: string): Promise<ChannelView> {
+    const sock = this.connectedSocket();
+    const answer = await this.channelCall('reading the channel', jid, () =>
+      sock.newsletterMetadata('jid', jid)
+    );
+    if (!answer) {
+      throw new ChannelActionError(`WhatsApp has no channel ${jid}`, 404, 'channel_unavailable');
+    }
+    const view = channelView(answer);
+    if (view.channelId !== jid) {
+      throw new ChannelActionError(
+        `WhatsApp answered ${view.channelId} for ${jid}`,
+        502,
+        'provider_invalid_response'
+      );
+    }
+    return view;
+  }
+
+  /**
+   * POST /channels/lookup: one channel by its jid, share link or invite code
+   * (rc13 has no channel search or directory). Its public metadata and this
+   * account's relation to it (role, following, muted).
+   */
+  async lookupChannel(channel: unknown): Promise<ChannelView> {
+    const query = parseChannelQuery(channel);
+    if (query.type === 'jid') {
+      const view = await this.readChannel(query.key);
+      if (view.following) this.seenChannels.add(view.channelId);
+      return view;
+    }
+    const sock = this.connectedSocket();
+    const answer = await this.channelCall('the channel lookup', 'an invite', () =>
+      sock.newsletterMetadata('invite', query.key)
+    );
+    if (!answer) {
+      throw new ChannelActionError(
+        'WhatsApp has no channel for that link or invite code',
+        404,
+        'channel_unavailable'
+      );
+    }
+    const view = channelView(answer);
+    if (view.following) this.seenChannels.add(view.channelId);
+    return view;
+  }
+
+  /**
+   * GET /channels: the channels this account follows among those this
+   * connector has seen — chats of the history sync, conversations with
+   * ingested posts (ingest only), lookups and follows of this process — each
+   * confirmed by its own metadata. rc13 cannot ask WhatsApp for the followed
+   * list, so coverage.complete is always false.
+   */
+  async listChannels(): Promise<ChannelListResult> {
+    this.connectedSocket();
+    const candidates = new Set<string>();
+    for (const chat of this.chatStore.values()) {
+      const jid = normalizeChannelJid(chat.rawJid || chat.id);
+      if (jid) candidates.add(jid);
+    }
+    for (const jid of this.seenChannels) candidates.add(jid);
+    if (this.ingest) {
+      for (const jid of await knownChannelConversations().catch((e: any) => {
+        this.logger.warn(`known channel conversations unavailable: ${e?.message || e}`);
+        return [] as string[];
+      })) {
+        candidates.add(jid);
+      }
+    }
+    const checked = Array.from(candidates).slice(0, CHANNELS_LIST_MAX);
+    const channels: ChannelView[] = [];
+    let unreadable = 0;
+    for (let index = 0; index < checked.length; index += 4) {
+      const batch = await Promise.all(
+        checked.slice(index, index + 4).map(jid =>
+          this.readChannel(jid).catch((e: any) => {
+            this.logger.warn(`channel ${jid} unreadable: ${e?.message || e}`);
+            return null;
+          })
+        )
+      );
+      for (const view of batch) {
+        if (!view) {
+          unreadable += 1;
+        } else if (view.following) {
+          channels.push(view);
+        } else {
+          this.seenChannels.delete(view.channelId);
+        }
+      }
+    }
+    channels.sort((a, b) => a.name.localeCompare(b.name));
+    return {
+      channels,
+      coverage: {
+        complete: false,
+        source: 'known-channels',
+        candidates: candidates.size,
+        checked: checked.length,
+        unreadable,
+      },
+    };
+  }
+
+  /**
+   * POST /channels/subscription: follow / unfollow, mute / unmute a channel.
+   * Read first (already so → changed: false, nothing sent; mute needs a
+   * followed channel), then the mutation, then the channel's own viewer
+   * metadata must show it. One write per channel at a time.
+   */
+  async setChannelSubscription(
+    channelId: unknown,
+    action: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<ChannelSubscriptionResult> {
+    const jid = parseChannelJid(channelId);
+    const verb = parseChannelSubscriptionAction(action);
+    const sock = this.connectedSocket();
+    return this.channelWrites.run(jid, async () => {
+      const before = await this.readChannel(jid);
+      if ((verb === 'mute' || verb === 'unmute') && before.following === false) {
+        throw new ChannelActionError(
+          `This account does not follow ${jid}: follow it before muting or unmuting it`,
+          422,
+          'not_following'
+        );
+      }
+      const result = (changed: boolean, channel: ChannelView): ChannelSubscriptionResult => {
+        if (channel.following) this.seenChannels.add(jid);
+        else if (channel.following === false) this.seenChannels.delete(jid);
+        this.logger.info(
+          `Channel ${jid} ${verb}${changed ? '' : ' (already)'}${request.actor ? ` by ${request.actor}` : ''}`
+        );
+        return { action: verb, channelId: jid, changed, confirmed: true, channel };
+      };
+      if (channelStateMatches(before, verb) === true) return result(false, before);
+      const mutate: Record<ChannelSubscriptionAction, () => Promise<unknown>> = {
+        follow: () => sock.newsletterFollow(jid),
+        unfollow: () => sock.newsletterUnfollow(jid),
+        mute: () => sock.newsletterMute(jid),
+        unmute: () => sock.newsletterUnmute(jid),
+      };
+      let after: ChannelView = before;
+      await this.confirmedWrite(
+        `the ${verb} of ${jid}`,
+        () => this.channelCall(`the ${verb}`, jid, mutate[verb]),
+        async () => {
+          after = await this.readChannel(jid);
+          return channelStateMatches(after, verb) === true;
+        }
+      );
+      return result(true, after);
+    });
   }
 
   // ---------------------------------------------------------------------------

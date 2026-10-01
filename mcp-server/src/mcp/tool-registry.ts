@@ -1465,6 +1465,157 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     ),
   }),
   tool({
+    name: 'social_list_communities',
+    title: 'List communities',
+    description:
+      'List the WhatsApp communities this account is in, each with its announcement group, ' +
+      'its groups (joined says whether this account is in each) and what this account may ' +
+      'do there (link or unlink groups as admin, leave).',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'communities.list',
+    handler: 'listCommunities',
+    inputSchema: objectSchema({ channel, accountId, readSource }, ['channel', 'accountId']),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_get_community',
+    title: 'Get community',
+    description:
+      'Read one WhatsApp community: subject, description, size, announcement group, every ' +
+      'group linked to it (also those this account is not in) and what this account may do. ' +
+      'A group of a community answers not_a_community with the community id in details.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'communities.get',
+    handler: 'getCommunity',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        target: { ...target, description: 'The community: the …@g.us of its parent group.' },
+        readSource,
+      },
+      ['channel', 'accountId', 'target']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_manage_community',
+    title: 'Manage community',
+    description:
+      'Create a WhatsApp community (this account owns it; WhatsApp adds its announcement ' +
+      'group), link a group to it or unlink one (community admins; linking also needs admin ' +
+      'of that ordinary group), or leave it (also leaves its announcement group; confirm ' +
+      'must be true). Members see every change. Each change is read back: already so ' +
+      'answers changed: false; change_not_confirmed means read it again before retrying.',
+    effect: 'destructive',
+    authScope: 'social.write',
+    capability: 'communities.manage',
+    handler: 'manageCommunity',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        action: { type: 'string', enum: ['create', 'link', 'unlink', 'leave'] },
+        target: {
+          ...target,
+          description: 'The community (…@g.us of its parent group); every action but create.',
+        },
+        subject: { type: 'string', minLength: 1, maxLength: 100, description: 'create only.' },
+        description: { type: 'string', maxLength: 2048, description: 'create only.' },
+        group: {
+          type: 'string',
+          minLength: 1,
+          description: 'link / unlink only: the group (…@g.us).',
+        },
+        confirm: {
+          const: true,
+          description: 'leave only: must be true (this account stops seeing the community).',
+        },
+      },
+      ['channel', 'accountId', 'action'],
+      {
+        allOf: [
+          {
+            if: { properties: { action: { const: 'create' } } },
+            then: { required: ['subject'] },
+          },
+          {
+            if: { properties: { action: { enum: ['link', 'unlink'] } } },
+            then: { required: ['target', 'group'] },
+          },
+          {
+            if: { properties: { action: { const: 'leave' } } },
+            then: { required: ['target', 'confirm'] },
+          },
+        ],
+      }
+    ),
+  }),
+  tool({
+    name: 'social_lookup_channel',
+    title: 'Look up channel',
+    description:
+      'Look up one WhatsApp channel by its jid (…@newsletter), share link ' +
+      '(whatsapp.com/channel/…) or invite code: name, description, subscribers, verification, ' +
+      'share link and whether this account follows or muted it. WhatsApp offers no channel ' +
+      'search.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'channels.lookup',
+    handler: 'lookupChannel',
+    inputSchema: objectSchema(
+      {
+        channel,
+        accountId,
+        target: {
+          ...target,
+          description: 'Channel jid (…@newsletter), whatsapp.com/channel/… link or invite code.',
+        },
+        readSource,
+      },
+      ['channel', 'accountId', 'target']
+    ),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_list_channels',
+    title: 'List followed channels',
+    description:
+      'List the WhatsApp channels this account follows among those the connector has seen ' +
+      '(its chats, channel posts it received, look-ups and follows). WhatsApp does not let ' +
+      'the connector read the full followed list, so some may be missing: data.coverage says ' +
+      'how many were checked.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'channels.list',
+    handler: 'listChannels',
+    inputSchema: objectSchema({ channel, accountId, readSource }, ['channel', 'accountId']),
+    idempotent: true,
+  }),
+  tool({
+    name: 'social_manage_channel_subscription',
+    title: 'Follow or mute channel',
+    description:
+      'Follow, unfollow, mute or unmute a WhatsApp channel (social_lookup_channel turns a ' +
+      "link into its jid). Muting needs a followed channel. Proven by the channel's own " +
+      'metadata: already so answers changed: false; change_not_confirmed means read it again ' +
+      'before retrying.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'channels.subscription',
+    handler: 'manageChannelSubscription',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        target: { ...target, description: 'The channel jid (…@newsletter).' },
+        action: { type: 'string', enum: ['follow', 'unfollow', 'mute', 'unmute'] },
+      },
+      ['channel', 'accountId', 'target', 'action']
+    ),
+    idempotent: true,
+  }),
+  tool({
     name: 'social_send_poll',
     title: 'Send poll',
     description: 'Send a poll to a chat (WhatsApp).',

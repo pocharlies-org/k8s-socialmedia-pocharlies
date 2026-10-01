@@ -19,6 +19,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_discover_business',
   'social_edit_message',
   'social_forward_message',
+  'social_get_community',
   'social_get_conversation',
   'social_get_digest',
   'social_get_event_results',
@@ -33,7 +34,9 @@ const EXPECTED_TOOL_NAMES = [
   'social_invite_to_group',
   'social_list_accounts',
   'social_list_blocked',
+  'social_list_channels',
   'social_list_comments',
+  'social_list_communities',
   'social_list_contacts',
   'social_list_content',
   'social_list_conversations',
@@ -43,8 +46,11 @@ const EXPECTED_TOOL_NAMES = [
   'social_list_participants',
   'social_list_pinned',
   'social_list_starred',
+  'social_lookup_channel',
+  'social_manage_channel_subscription',
   'social_manage_chat',
   'social_manage_comment',
+  'social_manage_community',
   'social_manage_forum',
   'social_manage_group',
   'social_manage_session',
@@ -84,6 +90,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_discover_business: 'read',
   social_edit_message: 'externalWrite',
   social_forward_message: 'externalWrite',
+  social_get_community: 'read',
   social_get_conversation: 'read',
   social_get_digest: 'read',
   social_get_event_results: 'read',
@@ -98,7 +105,9 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_invite_to_group: 'externalWrite',
   social_list_accounts: 'read',
   social_list_blocked: 'read',
+  social_list_channels: 'read',
   social_list_comments: 'read',
+  social_list_communities: 'read',
   social_list_contacts: 'read',
   social_list_content: 'read',
   social_list_conversations: 'read',
@@ -108,8 +117,11 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_list_participants: 'read',
   social_list_pinned: 'read',
   social_list_starred: 'read',
+  social_lookup_channel: 'read',
+  social_manage_channel_subscription: 'externalWrite',
   social_manage_chat: 'externalWrite',
   social_manage_comment: 'destructive',
+  social_manage_community: 'destructive',
   social_manage_forum: 'destructive',
   social_manage_group: 'destructive',
   social_manage_session: 'externalWrite',
@@ -209,6 +221,12 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: false,
     openWorldHint: true,
   },
+  social_get_community: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_get_conversation: {
     readOnlyHint: true,
     destructiveHint: false,
@@ -293,7 +311,19 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: true,
     openWorldHint: true,
   },
+  social_list_channels: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_list_comments: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_list_communities: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
@@ -353,6 +383,18 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: true,
     openWorldHint: true,
   },
+  social_lookup_channel: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  social_manage_channel_subscription: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
   social_manage_chat: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -360,6 +402,12 @@ const EXPECTED_ANNOTATIONS: Record<
     openWorldHint: true,
   },
   social_manage_comment: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  social_manage_community: {
     readOnlyHint: false,
     destructiveHint: true,
     idempotentHint: false,
@@ -614,11 +662,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 62 canonical tools in deterministic order', () => {
+  it('contains exactly the 68 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(62);
+    expect(new Set(names).size).toBe(68);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -644,7 +692,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(34);
+    expect(writes).toHaveLength(36);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same

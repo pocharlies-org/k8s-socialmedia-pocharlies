@@ -761,6 +761,18 @@ export class MCPServer {
         return this.canonicalManageGroup(args);
       case 'inviteToGroup':
         return this.canonicalInviteToGroup(args);
+      case 'listCommunities':
+        return this.canonicalListCommunities(args);
+      case 'getCommunity':
+        return this.canonicalGetCommunity(args);
+      case 'manageCommunity':
+        return this.canonicalManageCommunity(args);
+      case 'lookupChannel':
+        return this.canonicalLookupChannel(args);
+      case 'listChannels':
+        return this.canonicalListChannels(args);
+      case 'manageChannelSubscription':
+        return this.canonicalManageChannelSubscription(args);
       case 'sendPoll':
         return this.canonicalSendPoll(args);
       case 'votePoll':
@@ -932,7 +944,8 @@ export class MCPServer {
       source: {
         kind,
         asOf: new Date().toISOString(),
-        completeness: 'complete',
+        // WhatsApp's followed-channel list cannot be read: only the channels seen.
+        completeness: definition.handler === 'listChannels' ? 'partial' : 'complete',
       },
     };
   }
@@ -2210,6 +2223,102 @@ export class MCPServer {
         },
         ...this.connectorIdempotency(args, 'group-invite', 'social_invite_to_group')
       )
+    );
+  }
+
+  /** GET /communities: every community of the account, its groups and capabilities. */
+  private async canonicalListCommunities(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The community list');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(await this.whatsAppCall(account, 'GET', '/api/v1/communities'));
+  }
+
+  private async canonicalGetCommunity(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Community state');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/communities/state', {
+        communityId: this.requireGroupJid(chatId),
+      })
+    );
+  }
+
+  /**
+   * POST /communities/create | /communities/groups | /communities/leave. The
+   * connector checks admin rights on fresh metadata and reads every change
+   * back; leave passes the schema-forced confirm: true through.
+   */
+  private async canonicalManageCommunity(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const action = this.string(args, 'action');
+    if (action === 'create') {
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/communities/create', {
+          subject: this.string(args, 'subject'),
+          ...(typeof args.description === 'string' ? { description: args.description } : {}),
+          ...this.connectorActor(),
+        })
+      );
+    }
+    const communityId = this.requireGroupJid(this.whatsAppProviderTarget(args));
+    if (action === 'link' || action === 'unlink') {
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/communities/groups', {
+          communityId,
+          groupId: this.requireGroupJid(this.whatsAppProviderTarget(args, 'group')),
+          action,
+          ...this.connectorActor(),
+        })
+      );
+    }
+    if (action !== 'leave') {
+      throw this.canonicalError('invalid_request', `Unknown community action '${action}'`);
+    }
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true to leave a community');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/communities/leave', {
+        communityId,
+        confirm: true,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /** POST /channels/lookup: a channel by jid, share link or invite code. */
+  private async canonicalLookupChannel(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Channel look-up');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/channels/lookup', { channel: chatId })
+    );
+  }
+
+  /** GET /channels: the followed ones among the channels the connector has seen. */
+  private async canonicalListChannels(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The followed channels');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(await this.whatsAppCall(account, 'GET', '/api/v1/channels'));
+  }
+
+  private async canonicalManageChannelSubscription(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    if (!chatId.endsWith('@newsletter')) {
+      throw this.canonicalError(
+        'invalid_request',
+        'target must be a WhatsApp channel (…@newsletter); social_lookup_channel resolves a link'
+      );
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/channels/subscription', {
+        channelId: chatId,
+        action: this.string(args, 'action'),
+        ...this.connectorActor(),
+      })
     );
   }
 

@@ -45,6 +45,14 @@ import {
 import { parseStickerGifRequest, stickerGifHashInput } from '../sticker-gif';
 import { parseContactBlockRequest } from '../contact-block';
 import {
+  parseCommunityDescription,
+  parseCommunityGroupRequest,
+  parseCommunityJid,
+  parseCommunitySubject,
+  requireLeaveConfirmation,
+} from '../communities';
+import { parseChannelJid, parseChannelQuery, parseChannelSubscriptionAction } from '../channels';
+import {
   GroupActionError,
   normalizeGroupParticipantAction,
   parseGroupJid,
@@ -1512,6 +1520,154 @@ export function createRouter(
         res.json({ invited: true, ...result });
       } catch (e) {
         mutationErrorResponse(res, e, 'send group invites');
+      }
+    })();
+  });
+
+  // Communities. Ids inside the signed body (communityId / groupId:
+  // …@g.us). Reads are not gated; create / link / unlink / leave reach every
+  // member: validated first (400, leave also needs confirm: true), then the
+  // sending gate (403), then the connection (503). Admin checks against fresh
+  // metadata (403 not_community_admin / not_community_member / not_group_admin);
+  // every write is read back (409 change_not_confirmed when it does not show).
+
+  // CONTRACT: http.whatsapp-connector.communities-list.v1 — GET (signed over "{}"), 200 {communities: [{communityId, subject, description, size, createdAt, owner, capabilities, announcementGroup, linkedGroups, linkedGroupsComplete}], count}
+  router.get('/communities', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        const { communities } = await client.listCommunities();
+        res.json({ communities, count: communities.length });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list communities');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-state.v1 — body {communityId}, 200 {community: {communityId, subject, description, size, createdAt, owner, capabilities, announcementGroup, linkedGroups, linkedGroupsComplete}}, 422 not_a_community
+  router.post('/communities/state', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const communityId = parseCommunityJid(body.communityId ?? body.conversationId);
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ community: await client.getCommunityState(communityId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read community');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-create.v1 — body {subject, description?, actor?}, 200 {created, communityId, community}, 409 change_not_confirmed
+  router.post('/communities/create', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const subject = parseCommunitySubject(body.subject);
+        const description = parseCommunityDescription(body.description);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.createCommunity(subject, description, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ created: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'create community');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-groups.v1 — body {communityId, groupId, action: link|unlink, actor?}, 200 {updated, action, communityId, groupId, changed, confirmed, community}, 409 linked_elsewhere|change_not_confirmed, 422 not_a_community|not_linkable_group|announcement_group
+  router.post('/communities/groups', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseCommunityGroupRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateCommunityGroup(
+          request.communityId,
+          request.groupId,
+          request.action,
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update community groups');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-leave.v1 — body {communityId, confirm: true, actor?}, 200 {left, communityId, changed, confirmed}, 403 not_community_member, 409 change_not_confirmed
+  router.post('/communities/leave', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const communityId = parseCommunityJid(body.communityId ?? body.conversationId);
+        requireLeaveConfirmation(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.leaveCommunity(communityId, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ left: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'leave community');
+      }
+    })();
+  });
+
+  // Channels (newsletters). Look-up and the followed list are reads (not
+  // gated); follow / unfollow / mute / unmute are validated (400), gated
+  // (403), connected (503) and proven by the channel's own metadata.
+
+  // CONTRACT: http.whatsapp-connector.channels-lookup.v1 — body {channel: jid | whatsapp.com/channel link | invite code}, 200 {channel: {channelId, name, description, subscribers, verification, createdAt, inviteLink, role, following, muted}}, 404 channel_unavailable
+  router.post('/channels/lookup', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const query = body.channel ?? body.channelId;
+        parseChannelQuery(query);
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ channel: await client.lookupChannel(query) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'look up channel');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.channels-list.v1 — GET (signed over "{}"), 200 {channels: [channel], count, coverage: {complete: false, source, candidates, checked, unreadable}}
+  router.get('/channels', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.listChannels();
+        res.json({
+          channels: result.channels,
+          count: result.channels.length,
+          coverage: result.coverage,
+        });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list channels');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.channels-subscription.v1 — body {channelId, action: follow|unfollow|mute|unmute, actor?}, 200 {updated, action, channelId, changed, confirmed, channel}, 409 change_not_confirmed, 422 not_following|rejected_by_whatsapp
+  router.post('/channels/subscription', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const channelId = parseChannelJid(body.channelId ?? body.channel);
+        const action = parseChannelSubscriptionAction(body.action);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.setChannelSubscription(channelId, action, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'change the channel subscription');
       }
     })();
   });

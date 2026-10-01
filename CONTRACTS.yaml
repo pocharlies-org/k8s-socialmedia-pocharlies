@@ -1787,6 +1787,183 @@ contracts:
       or migration 018 is missing. Only pins seen since 018 (no backfill). The
       path, the body fields and the 200 shape are contract: changing any is
       breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.communities-list.v1
+    kind: http-route
+    value: /communities
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/communities of the house WhatsApp connectors (signed over
+      "{}"): every community the account is in, consumed by the MCP tool
+      social_list_communities (mcp-server/src/mcp/server.ts
+      canonicalListCommunities). A read: not gated; 503 disconnected. Read
+      through Baileys' group parser (groupFetchAllParticipating; rc13's
+      communityFetchAllParticipating parses a <communities> node WhatsApp
+      never sends) plus each community's <sub_groups>. 200 {communities
+      [{communityId (…@g.us of the parent), subject, description, size,
+      createdAt, owner, capabilities {isMember, isAdmin, isSuperAdmin,
+      linkGroups, unlinkGroups, leave}, announcementGroup {groupId, subject,
+      size, createdAt, joined, isAdmin} | null, linkedGroups [same shape],
+      linkedGroupsComplete}], count}; linkedGroupsComplete false = <sub_groups>
+      unreadable, only the joined groups listed. Nothing stored. The path and
+      the 200 shape are contract: changing either is breaking — a new `.v2`
+      entry beside this one.
+  - id: http.whatsapp-connector.communities-state.v1
+    kind: http-route
+    value: /communities/state
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/communities/state of the house WhatsApp connectors: one
+      community, consumed by the MCP tool social_get_community
+      (canonicalGetCommunity). A read: not gated; 503 disconnected.
+      HMAC-signed body {communityId} (…@g.us, account prefix stripped; else
+      400 invalid_request). Fresh metadata through the group parser: 403
+      not_community_member when WhatsApp says we are not in it, 422
+      not_a_community for an ordinary group or a community's group (then
+      communityId of its community in the answer). 200 {community} with the
+      communities-list.v1 entry shape. The path, the body field, the 200
+      shape and those failureClass values are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.communities-create.v1
+    kind: http-route
+    value: /communities/create
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/communities/create of the house WhatsApp connectors: a new
+      community owned by this account (Baileys communityCreate: members ask to
+      join, WhatsApp adds its announcement group), consumed by the MCP tool
+      social_manage_community action create. HMAC-signed body {subject (1–100
+      characters), description? (≤ 2048), actor?}; validated first (400
+      invalid_request), then the sending gate (403 disabled_sending), then the
+      connection (503). rc13 answers null when its own re-read fails: the
+      community is then looked for among the participating groups (ours, same
+      subject, created now); not found → 409 change_not_confirmed (never
+      created twice here). WhatsApp refusals 422 rejected_by_whatsapp. 200
+      {created: true, communityId, community} (communities-list.v1 shape).
+      Nothing stored. The path, the body fields, the 200 shape and those
+      failureClass values are contract: changing any is breaking — a new
+      `.v2` entry beside this one.
+  - id: http.whatsapp-connector.communities-groups.v1
+    kind: http-route
+    value: /communities/groups
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/communities/groups of the house WhatsApp connectors: link a
+      group to a community or unlink it (Baileys communityLinkGroup /
+      communityUnlinkGroup), consumed by the MCP tool social_manage_community
+      actions link / unlink. HMAC-signed body {communityId, groupId (both
+      …@g.us, never the same), action: link|unlink, actor?}; validated first
+      (400), then the sending gate (403 disabled_sending), then the
+      connection (503). Fresh metadata: 403 not_community_member /
+      not_community_admin (community admins only); link also needs the group
+      readable (403 not_group_member) and our admin there (403
+      not_group_admin), an ordinary group (422 not_linkable_group) not linked
+      elsewhere (409 linked_elsewhere + linkedTo); the announcement group is
+      never unlinked (422 announcement_group); a group we are not in is
+      checked against the community's <sub_groups>, neither readable → 502
+      provider_invalid_response, nothing sent. Already so → changed: false,
+      nothing sent. rc13 answers nothing: the change is read back (the
+      group's linkedParent or <sub_groups>), not shown → 409
+      change_not_confirmed. 200 {updated: true, action, communityId, groupId,
+      changed, confirmed: true, community | null}. The path, the body fields,
+      the 200 shape and those failureClass values are contract: changing any
+      is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.communities-leave.v1
+    kind: http-route
+    value: /communities/leave
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/communities/leave of the house WhatsApp connectors: this
+      account leaves a community and, as WhatsApp does, its announcement
+      group (Baileys communityLeave), consumed by the MCP tool
+      social_manage_community action leave. HMAC-signed body {communityId,
+      confirm: true, actor?}; without confirm: true 400 invalid_request, then
+      the sending gate (403 disabled_sending), then the connection (503).
+      Members only (403 not_community_member, also once left). Read back
+      from the participating groups; not shown → 409 change_not_confirmed.
+      200 {left: true, communityId, changed: true, confirmed: true}. The
+      path, the body fields, the 200 shape and those failureClass values are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.channels-lookup.v1
+    kind: http-route
+    value: /channels/lookup
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/channels/lookup of the house WhatsApp connectors: one
+      channel (newsletter), consumed by the MCP tool social_lookup_channel
+      (canonicalLookupChannel). A read: not gated; 503 disconnected.
+      HMAC-signed body {channel}: a channel jid (…@newsletter, or only its
+      digits), a whatsapp.com/channel/<code> link or the bare invite code;
+      else 400 invalid_request. Baileys newsletterMetadata (rc13 has no
+      search or directory); none → 404 channel_unavailable, a GraphQL
+      refusal 404 / 403 not_allowed / 422 rejected_by_whatsapp, an unusable
+      answer 502 provider_invalid_response. 200 {channel {channelId, name,
+      description, subscribers, verification (verified|unverified|null),
+      createdAt, inviteLink, role (owner|admin|subscriber|guest|null),
+      following, muted}}: only those fields (no picture media handles). The
+      path, the body field, the 200 shape and those failureClass values are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.channels-list.v1
+    kind: http-route
+    value: /channels
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/channels of the house WhatsApp connectors (signed over
+      "{}"): the channels the account follows, consumed by the MCP tool
+      social_list_channels (canonicalListChannels; meta.source.completeness
+      partial). A read: not gated; 503 disconnected. rc13 has no query for
+      the followed list, so candidates are the channels this connector has
+      seen — @newsletter chats of the history sync, conversations with
+      ingested channel posts (ingest only), look-ups and follows of this
+      process — at most 100, each confirmed by its own newsletterMetadata
+      (role owner|admin|subscriber). 200 {channels [channels-lookup.v1
+      channel], count, coverage {complete: false, source: known-channels,
+      candidates, checked, unreadable}}. The path and the 200 shape are
+      contract: changing either is breaking — a new `.v2` entry beside this
+      one.
+  - id: http.whatsapp-connector.channels-subscription.v1
+    kind: http-route
+    value: /channels/subscription
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/channels/subscription of the house WhatsApp connectors:
+      follow / unfollow / mute / unmute a channel (Baileys newsletterFollow /
+      Unfollow / Mute / Unmute), consumed by the MCP tool
+      social_manage_channel_subscription. HMAC-signed body {channelId
+      (…@newsletter), action: follow|unfollow|mute|unmute, actor?};
+      validated first (400), then the sending gate (403 disabled_sending),
+      then the connection (503). Read first: 404 channel_unavailable, mute /
+      unmute of a channel not followed 422 not_following, already so →
+      changed: false, nothing sent. One write per channel at a time; the
+      result is read back from the channel's viewer metadata (role / mute),
+      not shown → 409 change_not_confirmed; a GraphQL refusal 422
+      rejected_by_whatsapp / 403 not_allowed. 200 {updated: true, action,
+      channelId, changed, confirmed: true, channel}. The path, the body
+      fields, the 200 shape and those failureClass values are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
   - id: http.brain.push-ingest.conversation-window.v1
     kind: http-route
     value: /instances/{instance}/push-ingest
