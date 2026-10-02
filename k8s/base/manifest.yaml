@@ -33,10 +33,19 @@ spec:
   dataFrom:
     - extract: { key: whatsapp-mcp }
   # INFRA-364 (01-10-2026): LLM_API_KEY = virtual key `brain` de LiteLLM (prioridad minima,
-  # bot, sin fallback). La lee el LLM de las ventanas del brain; vive en su propio item.
+  # bot, sin fallback). La lee SOLO el LLM de las ventanas del brain (CronJob brain-windows);
+  # vive en su propio item.
+  # OPENAI_API_KEY (02-10-2026, Dani): virtual key `socialmedia` de LiteLLM, la UNICA de todo
+  # socialmedia (mcp-sse / mcp-server: summarize, search, drafts, digest; y la consola
+  # dgx-messages). Antes salia del item whatsapp-mcp (la key `auto-reply-worker`, prestada).
+  # `data` gana a `dataFrom` en la misma clave (medido con un ExternalSecret de prueba).
+  # Item `litellm`, campo SOCIALMEDIA_KEY: la convencion de keys de servicio
+  # (SKIRMSHOP_RAG_KEY, HERMES_BATCH_KEY).
   data:
     - secretKey: LLM_API_KEY
       remoteRef: { key: brain-litellm/api_key }
+    - secretKey: OPENAI_API_KEY
+      remoteRef: { key: litellm/SOCIALMEDIA_KEY }
 
 ---
 # INFRA-364: URL AMQP del usuario RabbitMQ whatsapp_mcp_brain_windows (vhost
@@ -300,8 +309,8 @@ spec:
                 # LLM local (ADR 0002 §5): LiteLLM -> residente de los Sparks,
                 # alias de capacidad `tooling`. La clave debe ser una virtual de
                 # BAJA PRIORIDAD (tipo hermes-batch) via LLM_API_KEY en
-                # whatsapp-mcp-secrets; mientras no exista, el codigo cae a
-                # OPENAI_API_KEY (la que ya usa mcp-sse contra LiteLLM).
+                # whatsapp-mcp-secrets (la `brain`); si faltara, el codigo cae a
+                # OPENAI_API_KEY (la `socialmedia`, la de mcp-sse contra LiteLLM).
                 - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
                 - { name: LLM_CHAT_MODEL, value: "tooling" }
                 # Ventanas y topes por pasada (ADR 0002 §7).
@@ -394,6 +403,8 @@ spec:
     metadata:
       labels: { app: mcp-server }
       annotations:
+        # Sin reloader: cambiar la key de LiteLLM exige rodar el pod (envFrom).
+        litellm.e-dani.com/key-alias: "socialmedia"
         contracts.e-dani.com/socialmedia-digest: "sha256:6f8ce4a07473fb1e353af8032f9b331c983de5f2ef8d02119feeac264a3deab3"
     spec:
       enableServiceLinks: false
@@ -468,6 +479,8 @@ spec:
     metadata:
       labels: { app: mcp-sse }
       annotations:
+        # Sin reloader: cambiar la key de LiteLLM exige rodar el pod (envFrom).
+        litellm.e-dani.com/key-alias: "socialmedia"
         contracts.e-dani.com/socialmedia-digest: "sha256:6f8ce4a07473fb1e353af8032f9b331c983de5f2ef8d02119feeac264a3deab3"
     spec:
       enableServiceLinks: false
