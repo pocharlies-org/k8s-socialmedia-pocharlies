@@ -44,7 +44,7 @@ describe('SummarizationService (LiteLLM tooling)', () => {
     expect(create.mock.calls[0][0]).toMatchObject({
       model: 'tooling',
       max_tokens: 200,
-      enable_thinking: false,
+      reasoning_effort: 'none',
     });
     expect(redisStore.setex).toHaveBeenCalledWith(
       expect.stringContaining('summary:chat-1'),
