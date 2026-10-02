@@ -82,9 +82,12 @@ images:
   # v1.3.87 (run 36940363123, deploy/prod@b1fdd25): #178 (búsqueda en Instagram + mediaType), #177
   # (comunidades y canales), #182 (estados y publicaciones de canales, migración 019; publicar
   # estado tras WA_STATUS_PUBLISH_ENABLED) y #180 (perfil propio, una sola vez/HD). 73 tools.
+  # v1.3.88 (run 36948590108, deploy/prod@7c8d9a6): sobre v1.3.87 solo cambia #184 (INFRA-364):
+  # la fase LLM de brain-windows corre de verdad en paralelo (BRAIN_WINDOWS_LLM_CONCURRENCY) y
+  # normaliza las respuestas casi válidas del LLM. 73 tools, como v1.3.87.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.87
-    digest: sha256:52f5056dc386996323bd31ac09ce50698f3f1965cd92b02c07b795e736c59870
+    newTag: v1.3.88
+    digest: sha256:e64be685f4b5008ad0d97e3b5fa2b018aa97bcf2f7c43a97b397d312b6ef36c0
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

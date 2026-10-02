@@ -226,15 +226,15 @@ spec:
 #      edits, deletions, late history syncs and voice notes transcribed hours
 #      later all move updated_at, migration 015);
 #   2. recomputes the windows of the affected chats and diffs them against
-#      `brain_windows`: gone -> delete-document, new/changed -> push-ingest;
-#   3. runs the LLM (LiteLLM alias `tooling`, exactly 2 in parallel, closed
+#      `brain_windows`: gone -> brain_window.<tenant>.deleted, new/changed ->
+#      brain_window.<tenant>.upserted (Synapse ingests both);
+#   3. runs the LLM (LiteLLM alias `tooling`, 2 in parallel by default, closed
 #      windows only, capped per pass) and re-pushes the parents with summary.
 #
-# SUSPENDED ON PURPOSE (Dani's session): the reindex (ADR 0002 §9 fases 2-3,
-# k8s/base/brain-windows-backfill.yaml) must land first — running this against
-# a brain that still holds the per-message points doubles the noise. Unsuspend
-# after the reindex + purge, together with the image re-pin that carries this
-# job (the prod overlay pins whatsappmcp-mcp-server for every consumer).
+# ON since 02-10-2026 (INFRA-364): the reindex push (ADR 0002 §9 fase 2) and
+# the per-message purge are done; the LLM phase of the reindex runs as a
+# separate job. Pass output goes through Synapse (brain_window.<tenant>.*,
+# ADR §7.1), not straight to push-ingest.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -243,7 +243,7 @@ metadata:
 spec:
   schedule: "*/30 * * * *"
   timeZone: Europe/Madrid
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 2
