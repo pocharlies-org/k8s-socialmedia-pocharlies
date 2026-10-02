@@ -88,9 +88,11 @@ images:
   # v1.3.90 (run 36950205073, deploy/prod@4662be0): sobre v1.3.88 anade #187 (resumenes,
   # borradores y digest con enable_thinking:false: social_summarize devolvia "Failed to generate
   # summary"). Incluye #184 de v1.3.88. Solo mcp-server.
+  # v1.3.91 (run 36959150256, deploy/prod@f43b1c6): #190 corrige #187: el razonamiento se apaga
+  # con reasoning_effort "none" (el enable_thinking suelto no lo honra LiteLLM). Solo mcp-server.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.90
-    digest: sha256:99e718847fda4a8dc1e6881a481a7c9a6b53dbdbc78d7ddf267009a0530d31e2
+    newTag: v1.3.91
+    digest: sha256:eff0c28fe8fb98209c0057d977fff6958da9b2292a80f94d503f0c79cdfd5814
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
