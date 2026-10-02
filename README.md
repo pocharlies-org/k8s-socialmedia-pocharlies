@@ -1,5 +1,19 @@
 # mcp-socialmedia
 
+## Local NAS deployment
+
+The active source checkout is `/home/staticduo/git/socialmedia`. Start with
+[deploy/README.md](deploy/README.md) for the Docker Compose workflow and
+[.env.example](.env.example) for the full configuration template. On this NAS,
+`.env` links to the private `/volume2/docker/social-media/.env`; editing it changes
+the deployment configuration source. Never commit that file.
+
+Public domains, connector URLs, storage, database, queue, cache and model endpoints
+are configurable. Regenerate the account registry/gateway with `--env-file` after
+changing domains, then apply Compose using that same file. Accounts remain defined
+in `deploy/accounts.json`. No Kubernetes deployment is needed. The sections below
+describe upstream components, including optional connectors not deployed here.
+
 Personal-use MCP (Model Context Protocol) server that bridges WhatsApp, Telegram and Instagram to Claude / LLMs. Stores messages in PostgreSQL + pgvector, caches in Redis, files in MinIO, events in NATS. LLM access via LiteLLM proxy.
 
 Repo: `git@github.com:pocharlies/whatsappmcp.git` (the directory is `mcp-socialmedia`; the GitHub name is legacy).

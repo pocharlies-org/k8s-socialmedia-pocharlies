@@ -4,10 +4,22 @@
 import json
 import logging
 import os
+from datetime import datetime, timezone
+from uuid import UUID
 
 import asyncpg
 
 logger = logging.getLogger(__name__)
+
+# Preserve PostgreSQL's native ID type when passing it back to asyncpg.
+MessageId = int | UUID
+
+
+def utc_timestamp(value: datetime) -> datetime:
+    """The unified NAS tables store TIMESTAMP without time zone in UTC."""
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
 
 # This sync instance serves exactly one account ("personal" by default,
 # "professional" for the second instance). Non-personal row ids are namespaced
@@ -131,18 +143,20 @@ async def insert_message_ex(
     reply_to_message_id: int | None = None,
     topic_id: int | None = None,
     needs_transcription: bool = False,
-) -> tuple[int | None, bool]:
+) -> tuple[MessageId | None, bool]:
     """Insert a message into the unified table.
 
     Returns (message_id, is_new): is_new=True when this call actually created the
     row, False when it already existed (ON CONFLICT). Callers gate one-shot side
     effects (avatar/media pulls) on is_new to stay idempotent
     when realtime + history backfill see the same message."""
+    timestamp = utc_timestamp(timestamp)
     raw_conv_id = f"tg_{chat_id}"
     conv_id = account_key(raw_conv_id)
     wa_msg_id = account_key(f"tg_{chat_id}_{telegram_message_id}")
     sender_wa_id = account_key(f"tg_{sender_id}") if sender_id else None
     is_group = chat_type in ("group", "supergroup")
+    conversation_type = "GROUP" if is_group else "INDIVIDUAL"
     reply_ref = account_key(f"tg_{chat_id}_{reply_to_message_id}") if reply_to_message_id else None
 
     metadata = {
@@ -161,7 +175,7 @@ async def insert_message_ex(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute(ENSURE_CONVERSATION_SQL, conv_id, chat_title, is_group, chat_type, timestamp, raw_conv_id, ACCOUNT)
+            await conn.execute(ENSURE_CONVERSATION_SQL, conv_id, chat_title, is_group, conversation_type, timestamp, raw_conv_id, ACCOUNT)
             if sender_id:
                 await conn.execute(ENSURE_PARTICIPANT_SQL, sender_wa_id, sender_name, ACCOUNT)
                 await conn.execute(LINK_PARTICIPANT_SQL, conv_id, sender_wa_id)
@@ -172,10 +186,10 @@ async def insert_message_ex(
                 is_forwarded, reply_ref, json.dumps(metadata), ACCOUNT,
             )
             if new_id is not None:
-                return int(new_id), True
+                return new_id, True
             # ON CONFLICT — fetch existing id so callers (e.g. attachment writer) can still wire up
             existing = await conn.fetchval(GET_MESSAGE_ID_SQL, wa_msg_id)
-            return (int(existing) if existing is not None else None), False
+            return existing, False
 
 
 async def insert_message(
@@ -194,7 +208,7 @@ async def insert_message(
     reply_to_message_id: int | None = None,
     topic_id: int | None = None,
     needs_transcription: bool = False,
-) -> int | None:
+) -> MessageId | None:
     """Back-compat wrapper: returns the message id (new or existing), or None."""
     msg_id, _is_new = await insert_message_ex(
         pool,
@@ -218,7 +232,7 @@ async def insert_message(
 
 async def insert_attachment(
     pool: asyncpg.Pool,
-    message_id: int,
+    message_id: MessageId,
     file_type: str,
     mime_type: str | None,
     file_name: str | None,
@@ -238,7 +252,7 @@ async def insert_attachment(
         )
 
 
-async def attachment_exists_for_message(pool: asyncpg.Pool, message_id: int) -> bool:
+async def attachment_exists_for_message(pool: asyncpg.Pool, message_id: MessageId) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT 1 FROM attachments WHERE message_id = $1 LIMIT 1", message_id)
     return row is not None
@@ -264,7 +278,7 @@ async def get_pending_transcription(pool: asyncpg.Pool) -> dict | None:
     return dict(row) if row else None
 
 
-async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: int):
+async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: MessageId):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE messages SET metadata = jsonb_set(metadata, '{transcription_status}', '\"processing\"') "
@@ -272,7 +286,7 @@ async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: int):
         )
 
 
-async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
+async def complete_transcription(pool: asyncpg.Pool, msg_id: MessageId, text: str):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE messages SET "
@@ -282,7 +296,7 @@ async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
         )
 
 
-async def fail_transcription(pool: asyncpg.Pool, msg_id: int, error: str, increment_attempts: bool = True):
+async def fail_transcription(pool: asyncpg.Pool, msg_id: MessageId, error: str, increment_attempts: bool = True):
     # $2 must be cast explicitly: as a jsonb_build_object value arg its type is
     # "any", which asyncpg cannot infer ("could not determine data type of
     # parameter $2") and the UPDATE throws.

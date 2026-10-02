@@ -9,7 +9,6 @@ import {
   InputMedia,
   Message,
   Peer,
-  User,
   Chat,
 } from '@mtcute/node';
 import type { ITelegramStorageProvider } from '@mtcute/node';
@@ -168,10 +167,8 @@ function mapChatType(peer: Peer | undefined | null): TelegramMessage['chatType']
  * caller can never click a lossy string by accident; `dataB64` always carries
  * the exact bytes.
  */
-function inlineButtonsOf(
-  markup: unknown
-): InlineKeyboardButton[][] | undefined {
-  const rows = (markup as { type?: string; buttons?: unknown[][] } | null);
+function inlineButtonsOf(markup: unknown): InlineKeyboardButton[][] | undefined {
+  const rows = markup as { type?: string; buttons?: unknown[][] } | null;
   if (!rows || rows.type !== 'inline' || !Array.isArray(rows.buttons)) return undefined;
 
   const out: InlineKeyboardButton[][] = [];
@@ -920,11 +917,9 @@ export class TelegramClientWrapper extends EventEmitter {
     forwardCount: number = 0
   ): Promise<any> {
     if (!this.connected) throw new Error('Not connected');
-    const missing = await this.client.addChatMembers(
-      toMtcutePeer(chatId),
-      members,
-      { forwardCount }
-    );
+    const missing = await this.client.addChatMembers(toMtcutePeer(chatId), members, {
+      forwardCount,
+    });
     return { chatId, membersRequested: members.length, missing };
   }
 
@@ -1127,7 +1122,11 @@ export class TelegramClientWrapper extends EventEmitter {
           const userId: number | undefined = peerObj?.id ?? peerObj?.userId;
           if (typeof userId !== 'number') continue;
           const displayName: string | null =
-            peerObj?.displayName || peerObj?.firstName || peerObj?.username || peerObj?.title || null;
+            peerObj?.displayName ||
+            peerObj?.firstName ||
+            peerObj?.username ||
+            peerObj?.title ||
+            null;
           out.push({ emoji, userId, displayName, mine: meId !== null && userId === meId });
         }
         offset = result?.next;
@@ -1278,11 +1277,7 @@ export class TelegramClientWrapper extends EventEmitter {
     const effectiveReplyTo = options?.replyTo ?? options?.threadId;
     const sendParams: CommonSendParams | undefined =
       effectiveReplyTo !== undefined ? { replyTo: effectiveReplyTo } : undefined;
-    const messages = await this.client.sendMediaGroup(
-      toMtcutePeer(chatId),
-      medias,
-      sendParams
-    );
+    const messages = await this.client.sendMediaGroup(toMtcutePeer(chatId), medias, sendParams);
     return messages.map(message => message.id);
   }
 

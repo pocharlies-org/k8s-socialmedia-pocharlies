@@ -7,6 +7,7 @@ import {
   ChatUpdatedEvent,
 } from '@mcp-socialmedia/shared';
 import { accountKey, normalizeAccount } from '../domain/account';
+import { isWhatsAppUpdate } from '../domain/whatsapp-surface';
 import pino from 'pino';
 
 export class MessageIngestionService {
@@ -24,10 +25,11 @@ export class MessageIngestionService {
   }
 
   async handleMessageReceived(event: MessageReceivedEvent): Promise<void> {
+    if (isWhatsAppUpdate(event.conversationId)) return;
     try {
       // Account scoping: ids for non-personal accounts are namespaced so two
       // accounts talking to the same contact don't merge. Personal stays bare.
-      const account = normalizeAccount(event.account);
+      const account = normalizeAccount(event.account, 'whatsapp');
       const convId = accountKey(account, event.conversationId);
       const senderId = accountKey(account, event.senderWaId);
       const wamId = accountKey(account, event.waMessageId);

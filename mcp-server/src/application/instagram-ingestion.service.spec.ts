@@ -60,7 +60,9 @@ describe('InstagramIngestionService account isolation', () => {
 
   it('refuses an undeclared account instead of filing it under personal', async () => {
     const { calls, service } = capture();
-    await service.handleEvent(dm('ghost'));
+    await expect(service.handleEvent(dm('ghost'))).rejects.toThrow(
+      'Unknown or disabled instagram account: ghost'
+    );
     expect(calls).toHaveLength(0);
   });
 });

@@ -1,8 +1,8 @@
 import { Pool } from 'pg';
 import OpenAI from 'openai';
 import pino from 'pino';
-import { accountKey, type Account } from '../domain/account';
-import { accountNamespaces } from '../domain/account-registry';
+import { getAccounts } from '../domain/account-registry';
+import { accountKey, normalizeAccount, stripAccount, type Account } from '../domain/account';
 
 export interface SearchResult {
   messageId: string;
@@ -24,19 +24,21 @@ export interface SearchOptions {
   limit?: number;
   /** Account scope (personal|professional|leila). Defaults to personal. */
   account?: Account;
-  platform?: 'whatsapp' | 'telegram';
+  platform?: 'whatsapp' | 'telegram' | 'instagram';
 }
 
 export class SearchService {
   private openai: OpenAI;
   private dbClient: Pool;
   private logger: pino.Logger;
-  private readonly EMBEDDING_MODEL = 'text-embedding-3-small';
+  private readonly EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
 
   constructor(openaiApiKey: string, dbClient: Pool, _encryptionKey: string, llmBaseUrl?: string) {
     this.openai = new OpenAI({
       apiKey: openaiApiKey || 'sk-placeholder',
-      ...(llmBaseUrl && { baseURL: llmBaseUrl }),
+      ...((process.env.EMBEDDING_BASE_URL || llmBaseUrl) && {
+        baseURL: process.env.EMBEDDING_BASE_URL || llmBaseUrl,
+      }),
     });
     this.dbClient = dbClient;
     this.logger = pino({
@@ -45,6 +47,35 @@ export class SearchService {
         options: { colorize: true },
       },
     });
+  }
+
+  /**
+   * Storage keys for a raw conversation/sender id across the selected accounts.
+   * An id already namespaced to a different account is dropped (fail closed).
+   * WhatsApp/Telegram rows are keyed by their account namespace; Instagram rows
+   * are keyed by the Instagram accountId (ig_<account>_...) while they are
+   * FILTERED by the namespace the registry declares for that account.
+   */
+  private indexKeys(
+    scopes: ReturnType<typeof getAccounts>,
+    id: string,
+    kind: 'thread' | 'sender'
+  ): string[] {
+    return [
+      ...new Set(
+        scopes.flatMap(scope => {
+          if (scope.channel === 'instagram') {
+            const prefix = `ig_${scope.accountId}_`;
+            if (id.startsWith(prefix)) return [id];
+            if (id.startsWith('ig_')) return [];
+            return [`${prefix}${kind === 'thread' ? 'thread_' : ''}${id}`];
+          }
+          const parsed = stripAccount(id);
+          if (parsed.id !== id && parsed.account !== scope.namespace) return [];
+          return [accountKey(scope.namespace, id)];
+        })
+      ),
+    ];
   }
 
   /**
@@ -71,15 +102,19 @@ export class SearchService {
     const params: unknown[] = [query];
     let paramIndex = 2;
 
+    // The argument may be an account id or the namespace it files rows under.
+    const requested = options.account
+      ? normalizeAccount(options.account, options.platform)
+      : undefined;
+    const scopes = getAccounts(options.platform).filter(
+      a => !requested || a.accountId === requested || a.namespace === requested
+    );
+    sql += ` AND (m.platform || ':' || m.account) = ANY($${paramIndex++}::text[])`;
+    params.push(scopes.map(a => `${a.channel}:${a.namespace}`));
+
     if (chatId) {
-      if (options.account) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(accountKey(options.account, chatId));
-      } else {
-        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(chatId));
-      }
-      paramIndex++;
+      sql += ` AND m.conversation_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, chatId, 'thread'));
     }
 
     if (from) {
@@ -95,19 +130,15 @@ export class SearchService {
     }
 
     if (sender) {
-      if (options.account) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(accountKey(options.account, sender));
-      } else {
-        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(sender));
-      }
-      paramIndex++;
+      sql += ` AND m.sender_wa_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, sender, 'sender'));
     }
 
     if (options.account) {
-      sql += ` AND m.account = $${paramIndex}`;
-      params.push(options.account);
+      // The stored dimension is the registry namespace, not the tool argument:
+      // an Instagram account argument resolves to the namespace its rows live in.
+      sql += ` AND m.account = ANY($${paramIndex}::text[])`;
+      params.push([...new Set(scopes.map(a => a.namespace))]);
       paramIndex++;
     }
     if (options.platform) {
@@ -143,6 +174,7 @@ export class SearchService {
     const response = await this.openai.embeddings.create({
       model: this.EMBEDDING_MODEL,
       input: query,
+      encoding_format: 'float',
     });
 
     const queryEmbedding = response.data[0].embedding;
@@ -167,15 +199,19 @@ export class SearchService {
     const params: unknown[] = [embeddingVector];
     let paramIndex = 2;
 
+    // The argument may be an account id or the namespace it files rows under.
+    const requested = options.account
+      ? normalizeAccount(options.account, options.platform)
+      : undefined;
+    const scopes = getAccounts(options.platform).filter(
+      a => !requested || a.accountId === requested || a.namespace === requested
+    );
+    sql += ` AND (m.platform || ':' || m.account) = ANY($${paramIndex++}::text[])`;
+    params.push(scopes.map(a => `${a.channel}:${a.namespace}`));
+
     if (chatId) {
-      if (options.account) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(accountKey(options.account, chatId));
-      } else {
-        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(chatId));
-      }
-      paramIndex++;
+      sql += ` AND m.conversation_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, chatId, 'thread'));
     }
 
     if (from) {
@@ -191,19 +227,15 @@ export class SearchService {
     }
 
     if (sender) {
-      if (options.account) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(accountKey(options.account, sender));
-      } else {
-        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(sender));
-      }
-      paramIndex++;
+      sql += ` AND m.sender_wa_id = ANY($${paramIndex++}::text[])`;
+      params.push(this.indexKeys(scopes, sender, 'sender'));
     }
 
     if (options.account) {
-      sql += ` AND m.account = $${paramIndex}`;
-      params.push(options.account);
+      // The stored dimension is the registry namespace, not the tool argument:
+      // an Instagram account argument resolves to the namespace its rows live in.
+      sql += ` AND m.account = ANY($${paramIndex}::text[])`;
+      params.push([...new Set(scopes.map(a => a.namespace))]);
       paramIndex++;
     }
     if (options.platform) {
@@ -246,9 +278,4 @@ export class SearchService {
     // Fallback to keyword search
     return this.keywordSearch(query, options);
   }
-}
-
-/** Account-less filter: the raw id under every declared namespace (personal = bare). */
-function inEveryNamespace(id: string): string[] {
-  return [...new Set(accountNamespaces().map(a => accountKey(a, id)))];
 }

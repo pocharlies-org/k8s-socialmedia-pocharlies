@@ -44,6 +44,12 @@ const wa = (accountId: string, extra: object = {}) => ({
 describe('account registry', () => {
   afterEach(() => resetAccountRegistryCache());
 
+  it('accepts the NAS deployment account registry', () => {
+    const entries = JSON.parse(fs.readFileSync(path.join(REPO, 'deploy/accounts.json'), 'utf8'));
+    const accounts = parseAccounts(entries);
+    expect(accounts.find(account => account.channel === 'instagram')?.namespace).toBe('personal');
+  });
+
   it('default registry reproduces the seven accounts prod served before the registry', () => {
     const accounts = defaultRegistry({});
     expect(accounts.map(a => `${a.channel}:${a.accountId}`)).toEqual([

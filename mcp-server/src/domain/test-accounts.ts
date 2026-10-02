@@ -15,6 +15,7 @@ export function useTestAccounts(maps: {
   whatsapp?: UrlMap;
   telegram?: UrlMap;
   bridge?: UrlMap;
+  requireInboundBeforeSend?: Record<string, boolean>;
 }): void {
   state = {
     whatsapp: maps.whatsapp ?? state.whatsapp,
@@ -36,6 +37,9 @@ export function useTestAccounts(maps: {
       accountId,
       connectorUrl,
       ...brain(accountId),
+      ...(maps.requireInboundBeforeSend?.[accountId] !== undefined
+        ? { requireInboundBeforeSend: maps.requireInboundBeforeSend[accountId] }
+        : {}),
     });
   }
   for (const [accountId, connectorUrl] of Object.entries(state.telegram)) {

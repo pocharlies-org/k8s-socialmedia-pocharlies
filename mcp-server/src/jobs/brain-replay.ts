@@ -61,7 +61,7 @@ function requireDatabaseUrl(env: NodeJS.ProcessEnv): string {
 export function replayOptionsFromEnv(env: NodeJS.ProcessEnv): ReplayOptions {
   return {
     databaseUrl: requireDatabaseUrl(env),
-    brainUrl: env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local',
+    brainUrl: env.BRAIN_URL || '',
     apiKey: env.BRAIN_API_KEY || '',
     batch: parseInt(env.BATCH || env.BRAIN_INGEST_BATCH || '500', 10),
     limit: parseInt(env.LIMIT || env.BRAIN_INGEST_MAX_ROWS || '0', 10),

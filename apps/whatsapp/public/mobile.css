@@ -1,0 +1,113 @@
+@media (max-width: 760px) {
+  /* Percentage root heights leave a gap in iOS standalone's translucent viewport. */
+  html, body {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell {
+    position: fixed;
+    inset: 0;
+    height: auto;
+    touch-action: pan-x pan-y;
+    overscroll-behavior: none;
+    flex-direction: column;
+  }
+
+  .app-rail {
+    order: 2;
+    flex: 0 0 auto;
+    flex-direction: row;
+    width: 100%;
+    height: calc(60px + env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+    padding: 0 max(10px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(10px, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--line);
+    border-right: 0;
+  }
+
+  .rail-top, .rail-bottom {
+    flex-direction: row;
+    width: auto;
+    gap: 4px;
+  }
+
+  .rail-accounts {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .rail-account {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+  }
+
+  .rail-bottom { flex: 0 0 auto; }
+
+  .chat-sidebar, .conversation {
+    order: 1;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    border-right: 0;
+  }
+
+  .chat-sidebar-header, .conversation-header, .ai-panel-header {
+    flex-basis: calc(64px + env(safe-area-inset-top, 0px));
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  }
+
+  .chat-sidebar-header { padding-left: max(18px, env(safe-area-inset-left, 0px)); }
+
+  .conversation-header { padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+
+  .conversation-contact { flex: 1 1 auto; }
+
+  .conversation-contact-copy { max-width: none; }
+
+  .composer {
+    min-width: 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .composer::before { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+
+  .message-input textarea::placeholder {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .ai-panel, body.chat-open .ai-panel {
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .rail-settings .rail-popover {
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .feature-modal-panel .feature-dialog-header, .novedades-header, .settings-header {
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  }
+
+  .feature-modal:not(.feature-modal-panel):not(.feature-modal-menu) .feature-dialog {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .app-shell :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select),
+  .feature-modal :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select),
+  .novedades-overlay :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select) {
+    font-size: 16px;
+  }
+
+  button, summary { touch-action: manipulation; }
+}

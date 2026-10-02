@@ -1,16 +1,11 @@
 import { join } from 'path';
+import { readdirSync, readFileSync } from 'fs';
 import { MigrationClient, runMigrations } from './migrate';
 
-/**
- * Fake pg client: models tables, the `_migrations` ledger and transactions
- * closely enough to prove the chain is idempotent without a live postgres
- * (same fake-DB pattern as session-store/adapters.spec.ts; the real-server
- * suite stays gated on CREDSTORE_TEST_DATABASE_URL).
- */
+/** Fake pg client for the migration ledger and ordering behavior. */
 class FakeDb implements MigrationClient {
   tables = new Set<string>();
-  ledger: Array<{ file: string; baseline: boolean }> = [];
-  /** migration bodies actually executed, in order (excludes ledger bookkeeping) */
+  ledger: Array<{ file: string; checksum: string; adopted: boolean }> = [];
   executed: string[] = [];
   openTx = false;
   commits = 0;
@@ -33,116 +28,102 @@ class FakeDb implements MigrationClient {
       this.rollbacks += 1;
       return { rows: [] };
     }
-    if (/CREATE TABLE IF NOT EXISTS _migrations/.test(s)) return { rows: [] };
-    if (/SELECT file FROM _migrations/.test(s)) {
-      return { rows: this.ledger.map(l => ({ file: l.file })) };
+    if (/^SELECT pg_advisory_xact_lock/.test(s)) return { rows: [] };
+    if (/CREATE TABLE IF NOT EXISTS schema_migrations/.test(s)) return { rows: [] };
+    if (/SELECT version FROM schema_migrations/.test(s)) {
+      return { rows: this.ledger.map(row => ({ version: row.file })) };
+    }
+    if (/SELECT checksum FROM schema_migrations WHERE version = \$1/.test(s)) {
+      const row = this.ledger.find(entry => entry.file === String(params?.[0]));
+      return { rows: row ? [{ checksum: row.checksum }] : [] };
     }
     if (/SELECT to_regclass\(\$1\)/.test(s)) {
-      const t = String(params?.[0]);
-      return { rows: [{ t: this.tables.has(t) ? t : null }] };
+      const table = String(params?.[0]);
+      return { rows: [{ t: this.tables.has(table) ? table : null }] };
     }
-    if (/INSERT INTO _migrations/.test(s)) {
-      this.ledger.push({ file: String(params?.[0]), baseline: /TRUE/.test(s) });
+    if (/INSERT INTO schema_migrations/.test(s)) {
+      this.ledger.push({
+        file: String(params?.[0]),
+        checksum: String(params?.[1]),
+        adopted: Boolean(params?.[2]),
+      });
       return { rows: [] };
     }
-    // Anything else is a migration body.
     if (this.failOnBody && s.includes(this.failOnBody)) {
       throw new Error(`relation "${this.failOnBody}" already exists`);
     }
     this.executed.push(s);
-    for (const m of s.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-zA-Z_]\w*)/gi)) {
-      this.tables.add(m[1]);
+    for (const match of s.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-zA-Z_]\w*)/gi)) {
+      this.tables.add(match[1]);
     }
     return { rows: [] };
   }
 
   ledgerFiles(): string[] {
-    return this.ledger.map(l => l.file);
+    return this.ledger.map(row => row.file);
   }
 }
 
 const MIGRATIONS_DIR = join(__dirname, 'migrations');
-const ALL_FILES = [
-  '001_initial_schema.sql',
-  '002_account_scope.sql',
-  '003_whatsapp_customer_allowlist.sql',
-  '004_whatsapp_manual_open_requests.sql',
-  '005_whatsapp_manual_open_processing_status.sql',
-  '006_unread_digest_sessions.sql',
-  '007_user_channel_credentials.sql',
-  '008_multiaccount_first_class.sql',
-  '009_whatsapp_message_payloads.sql',
-];
+const ALL_FILES = readdirSync(MIGRATIONS_DIR)
+  .filter(file => /^\d+.*\.sql$/.test(file))
+  .sort();
 
-describe('migrate.ts _migrations ledger', () => {
-  test('fresh DB: applies every file in order, records each, commits per file', async () => {
+describe('migrate.ts schema_migrations ledger', () => {
+  test('fresh DB applies every file in order and rerun is a no-op', async () => {
     const db = new FakeDb();
+    await runMigrations(db, MIGRATIONS_DIR);
+    const firstRun = [...db.executed];
     await runMigrations(db, MIGRATIONS_DIR);
 
     expect(db.ledgerFiles()).toEqual(ALL_FILES);
-    expect(db.ledger.every(l => !l.baseline)).toBe(true);
-    expect(db.executed).toHaveLength(ALL_FILES.length);
-    expect(db.executed[0]).toMatch(/CREATE TABLE conversations/); // 001, the non-idempotent one
-    expect(db.executed[db.executed.length - 1]).toMatch(/social_accounts/);
-    expect(db.commits).toBe(ALL_FILES.length);
+    expect(db.ledger.every(row => !row.adopted)).toBe(true);
+    expect(db.executed).toEqual(firstRun);
+    expect(db.commits).toBe(2);
     expect(db.openTx).toBe(false);
   });
 
-  test('re-run on the same DB is a no-op: nothing re-executes (the SC-1144 blocker)', async () => {
+  test('an existing NAS payload table still executes the expand migration', async () => {
     const db = new FakeDb();
+    db.tables.add('whatsapp_message_payloads');
     await runMigrations(db, MIGRATIONS_DIR);
-    const before = [...db.executed];
 
-    await runMigrations(db, MIGRATIONS_DIR);
-    expect(db.executed).toEqual(before);
-    expect(db.ledgerFiles()).toEqual(ALL_FILES);
+    const payloadMigration = db.executed.find(sql =>
+      sql.includes('ADD COLUMN IF NOT EXISTS wa_timestamp')
+    );
+    expect(payloadMigration).toBeDefined();
+    expect(db.ledger.find(row => row.file === '015_whatsapp_message_payloads.sql')?.adopted).toBe(
+      false
+    );
   });
 
-  test('already-migrated prod DB without a ledger: 001 is baselined, never re-executed; 007 applies', async () => {
-    // Simulate the live whatsappmcp DB: 001-006 applied by hand (schema may
-    // have diverged), no `_migrations` table yet, 007 missing.
+  test('changed applied migration checksum fails closed', async () => {
     const db = new FakeDb();
-    for (const t of [
-      'conversations',
-      'participants',
-      'messages',
-      'whatsapp_customer_allowlist',
-      'whatsapp_manual_open_requests',
-      'unread_digest_sessions',
-    ]) {
-      db.tables.add(t);
-    }
-
     await runMigrations(db, MIGRATIONS_DIR);
-
-    // The blocker: 001's bare CREATE TABLE must never hit an existing schema.
-    expect(db.executed.some(sql => /CREATE TABLE conversations/.test(sql))).toBe(false);
-    // 007 (table absent) really runs.
-    expect(db.executed.some(sql => /user_channel_credentials/.test(sql))).toBe(true);
-    expect(db.ledgerFiles()).toEqual(ALL_FILES);
-    expect(db.ledger.find(l => l.file === '001_initial_schema.sql')?.baseline).toBe(true);
-    expect(db.ledger.find(l => l.file === '007_user_channel_credentials.sql')?.baseline).toBe(false);
-  });
-
-  test('a failing file is rolled back and NOT recorded; earlier files stay recorded', async () => {
-    const db = new FakeDb();
-    db.failOnBody = 'user_channel_credentials';
-
-    await expect(runMigrations(db, MIGRATIONS_DIR)).rejects.toThrow(/007_user_channel_credentials/);
-    expect(db.ledgerFiles()).toEqual(ALL_FILES.slice(0, 6));
+    db.ledger[0].checksum = 'stale';
+    await expect(runMigrations(db, MIGRATIONS_DIR)).rejects.toThrow(/Migration checksum changed/);
     expect(db.openTx).toBe(false);
     expect(db.rollbacks).toBe(1);
   });
 
-  test('a file added to the ledger mid-chain is picked up on the next run only', async () => {
+  test('a failing file rolls back and is not recorded', async () => {
     const db = new FakeDb();
-    // Pre-record 001-003 as applied (e.g. a partial ledger from a prior run)
-    // while their tables exist.
-    for (const f of ALL_FILES.slice(0, 3)) db.ledger.push({ file: f, baseline: true });
-    db.tables.add('conversations');
+    db.failOnBody = 'user_channel_credentials';
+    await expect(runMigrations(db, MIGRATIONS_DIR)).rejects.toThrow(
+      /Migration 013_user_channel_credentials/
+    );
+    expect(db.ledgerFiles()).not.toContain('013_user_channel_credentials.sql');
+    expect(db.openTx).toBe(false);
+    expect(db.rollbacks).toBe(1);
+  });
 
+  test('migration SQL checksums are derived from the exact file bytes', async () => {
+    const db = new FakeDb();
     await runMigrations(db, MIGRATIONS_DIR);
-    expect(db.executed.every(sql => !/CREATE TABLE conversations/.test(sql))).toBe(true);
-    expect(db.ledgerFiles()).toEqual(ALL_FILES);
+    const credentialSql = readFileSync(join(MIGRATIONS_DIR, '013_user_channel_credentials.sql'));
+    const { createHash } = await import('crypto');
+    expect(db.ledger.find(row => row.file === '013_user_channel_credentials.sql')?.checksum).toBe(
+      createHash('sha256').update(credentialSql).digest('hex')
+    );
   });
 });

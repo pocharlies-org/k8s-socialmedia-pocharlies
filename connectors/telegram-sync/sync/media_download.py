@@ -25,7 +25,7 @@ async def download_and_store_media(
     connector: ConnectorClient,
     pool: asyncpg.Pool,
     msg: dict,
-    message_id: int,
+    message_id: db.MessageId,
     message_type: str,
 ) -> bool:
     """Download msg's media via the connector and INSERT an attachments row.

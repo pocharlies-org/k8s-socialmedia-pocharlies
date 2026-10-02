@@ -19,6 +19,8 @@ function pairingServer(fetchImpl: jest.Mock) {
   Object.assign(server as unknown as Record<string, unknown>, {
     instagramUrl: 'http://instagram-connector:3003',
     connectorSecret: 'test-shared-secret',
+    secretForUrl: jest.fn(() => 'test-shared-secret'),
+    authHeaders: jest.fn(() => ({})),
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() },
   });
   global.fetch = fetchImpl as unknown as typeof fetch;

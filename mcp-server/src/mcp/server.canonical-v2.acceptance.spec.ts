@@ -403,6 +403,35 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       );
     });
 
+    test.each(['social_create_draft', 'social_list_drafts'])(
+      '%s rejects a target prefixed for another account before its handler',
+      async toolName => {
+        const server = createServer();
+        server.handleDraftReply = jest.fn(async (args: unknown) => legacy(args));
+        server.handleListDrafts = jest.fn(async (args: unknown) => legacy(args));
+        const wrong = await server.executeCanonicalTool(definition(toolName), {
+          channel: 'whatsapp',
+          accountId: 'professional',
+          target: 'personal:123456789-987654321@g.us',
+        });
+        expectStructuredError(wrong, 'invalid_request');
+        expect(server.handleDraftReply).not.toHaveBeenCalled();
+        expect(server.handleListDrafts).not.toHaveBeenCalled();
+
+        const valid = await server.executeCanonicalTool(definition(toolName), {
+          channel: 'whatsapp',
+          accountId: 'professional',
+          target: 'professional:123456789-987654321@g.us',
+        });
+        expect(valid.structuredContent).toMatchObject({ ok: true });
+        const handler = toolName === 'social_create_draft'
+          ? server.handleDraftReply : server.handleListDrafts;
+        expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+          chatId: 'professional:123456789-987654321@g.us',
+        }));
+      }
+    );
+
     test('does not approve a draft through another account selector', async () => {
       const server = createServer();
       server.draftService = {
@@ -513,6 +542,45 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         account: 'professional',
         replyTo: '71',
       });
+    });
+
+    test('forwards direct GIF attachments unchanged and reports connector rejection as failed', async () => {
+      const previousEnableSending = process.env.ENABLE_SENDING;
+      process.env.ENABLE_SENDING = 'true';
+      try {
+        const server = createServer();
+        const gifUrl = 'https://example.test/animation.gif';
+        server.connectorCall = jest.fn(async () => {
+          throw new Error(
+            'Connector error 400: {"error":"Animated GIFs must be transcoded to MP4 before sending","failureClass":"invalid_request"}'
+          );
+        });
+
+        const result = await server.executeCanonicalTool(
+          definition('social_send_message'),
+          {
+            channel: 'whatsapp',
+            accountId: 'personal',
+            target: '34600000000@s.whatsapp.net',
+            attachments: [{ url: gifUrl, caption: 'animation' }],
+          }
+        );
+
+        expect(server.connectorCall).toHaveBeenCalledWith(
+          'http://wa-personal',
+          'POST',
+          '/api/v1/messages/media/send',
+          expect.objectContaining({
+            conversationId: '34600000000@s.whatsapp.net',
+            fileUrl: gifUrl,
+            caption: 'animation',
+          })
+        );
+        expectStructuredError(result, 'provider_error');
+      } finally {
+        if (previousEnableSending === undefined) delete process.env.ENABLE_SENDING;
+        else process.env.ENABLE_SENDING = previousEnableSending;
+      }
     });
 
     test('routes Telegram replyTo and threadId to both text and attachment operations', async () => {
@@ -1179,6 +1247,11 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
       server.draftService = {
         getDraftById: jest.fn(async () => draft),
         markAsSent: jest.fn(async () => undefined),
+      };
+      server.dbClient = {
+        query: jest.fn(async () => ({
+          rows: [{ id: draft.conversationId, ns: 'professional' }],
+        })),
       };
       const previousFetch = global.fetch;
       const previousEnableSending = process.env.ENABLE_SENDING;

@@ -37,6 +37,9 @@ async function main(): Promise<void> {
          FROM messages m
          LEFT JOIN message_embeddings me ON me.message_id = m.id
          WHERE m.platform = 'whatsapp'
+           AND m.conversation_id NOT LIKE '%@newsletter'
+           AND m.conversation_id <> 'status@broadcast'
+           AND m.conversation_id NOT LIKE '%:status@broadcast'
            AND m.content IS NOT NULL
            AND btrim(m.content) <> ''
            AND me.message_id IS NULL

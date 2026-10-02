@@ -1,0 +1,11 @@
+.chat-selection-bar { display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:10px 12px; background:var(--surface); border-bottom:1px solid var(--line); }
+.chat-selection-bar[hidden] { display:none; }
+.chat-selection-bar button { display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:transparent; color:var(--text); cursor:pointer; }
+.chat-selection-bar button:hover { background:var(--surface-raised); }
+.chat-selection-bar button:disabled { opacity:.45; cursor:default; }
+.chat-selection-count { flex:1; font-size:14px; color:var(--text); }
+.chat-selection-status { flex-basis:100%; margin:0; color:var(--muted-strong); font-size:12px; }
+.chat-selection-status:empty { display:none; }
+.chat-selectable::before { content:''; display:block; flex:0 0 18px; height:18px; border:2px solid var(--muted-strong); border-radius:50%; }
+.chat-is-selected::before { background:var(--accent); border-color:var(--accent); box-shadow:inset 0 0 0 3px var(--surface); }
+.chat-item.chat-is-selected { background:var(--surface-raised); }

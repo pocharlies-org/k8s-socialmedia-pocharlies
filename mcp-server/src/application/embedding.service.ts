@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { Pool } from 'pg';
 import pino from 'pino';
+import { isWhatsAppUpdate } from '../domain/whatsapp-surface';
 
 export interface MessageChunk {
   messageId: string;
@@ -184,7 +185,7 @@ export class EmbeddingService {
   async processMessage(messageId: string): Promise<void> {
     try {
       const result = await this.dbClient.query(
-        `SELECT id, content, conversation_id FROM messages WHERE id = $1`,
+        `SELECT id, content, conversation_id, platform FROM messages WHERE id = $1`,
         [messageId]
       );
 
@@ -194,6 +195,7 @@ export class EmbeddingService {
       }
 
       const row = result.rows[0];
+      if (row.platform === 'whatsapp' && isWhatsAppUpdate(row.conversation_id)) return;
       const content = row.content;
 
       if (!content) {

@@ -212,12 +212,33 @@ const cases: Case[] = [
 
 for (const c of cases) {
   test(`shouldForward: ${c.name}`, () => {
-    const result = shouldForward(c.event, c.ownJid ?? OWN_JID, c.dedup ?? neverSeen);
-    assert.equal(result.forward, c.forward, `forward mismatch for ${c.name}`);
-    assert.equal(result.reason, c.reason, `reason mismatch for ${c.name}`);
-    assert.equal(result.fromMe, c.fromMe, `fromMe mismatch for ${c.name}`);
+    const previous = process.env.TRACKING_OPT_IN_BASE_URL;
+    process.env.TRACKING_OPT_IN_BASE_URL = 'https://track.skirmshop.es/labels/track/';
+    try {
+      const result = shouldForward(c.event, c.ownJid ?? OWN_JID, c.dedup ?? neverSeen);
+      assert.equal(result.forward, c.forward, `forward mismatch for ${c.name}`);
+      assert.equal(result.reason, c.reason, `reason mismatch for ${c.name}`);
+      assert.equal(result.fromMe, c.fromMe, `fromMe mismatch for ${c.name}`);
+    } finally {
+      if (previous === undefined) delete process.env.TRACKING_OPT_IN_BASE_URL; else process.env.TRACKING_OPT_IN_BASE_URL = previous;
+    }
   });
 }
+
+test('tracking control filter activates only for its configured link base', () => {
+  const previous = process.env.TRACKING_OPT_IN_BASE_URL;
+  const event = makeEvent({ content: 'Hola Skirmshop, quiero recibir seguimiento por WhatsApp del pedido ORD12345. https://tracking.example/orders/abc' });
+  try {
+    delete process.env.TRACKING_OPT_IN_BASE_URL;
+    assert.equal(shouldForward(event, OWN_JID, neverSeen).forward, true);
+    process.env.TRACKING_OPT_IN_BASE_URL = 'https://tracking.example/orders';
+    assert.equal(shouldForward(event, OWN_JID, neverSeen).reason, 'tracking-opt-in-control-message');
+    process.env.TRACKING_OPT_IN_BASE_URL = 'https://another.example/orders';
+    assert.equal(shouldForward(event, OWN_JID, neverSeen).forward, true);
+  } finally {
+    if (previous === undefined) delete process.env.TRACKING_OPT_IN_BASE_URL; else process.env.TRACKING_OPT_IN_BASE_URL = previous;
+  }
+});
 
 test('malformed event dropped', () => {
   const result = shouldForward(null as unknown as MessageReceivedEvent, OWN_JID, neverSeen);

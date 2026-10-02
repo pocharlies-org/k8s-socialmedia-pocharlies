@@ -112,15 +112,32 @@ contracts:
     role: provider
     files:
       - connectors/whatsapp-web/src/api/controller.ts
-    status: active
+    status: deprecated
+    replaced_by: http.whatsapp-connector.auth-qr.v2
+    remove_after: "2026-12-29"
     note: >-
       GET /api/v1/auth/qr of the house WhatsApp connectors (personal, professional,
       leila): unauthenticated, 200 {qrCode, expiresAt} (qrCode a PNG data URL,
       expiresAt ISO) or 404 {"error":"No QR code available"}. Registered by SC-1197
-      (design D6) without changing its code so the per-sub pairing work cannot
-      touch it: per-sub QR lives only on http.whatsapp-pairing.internal-sessions.v1.
-      Path, method, the absence of auth and the response shape are contract;
-      changing any of them is breaking — a new `.v2` entry beside this one.
+      (design D6). This historical unauthenticated contract was replaced when
+      connector access protection was added. Per-sub QR lives only on
+      http.whatsapp-pairing.internal-sessions.v1.
+  - id: http.whatsapp-connector.auth-qr.v2
+    kind: http-route
+    value: /auth/qr
+    anchor: auth/qr
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+      - connectors/whatsapp-web/src/api/access.ts
+    status: active
+    note: >-
+      GET /api/v1/auth/qr now requires valid connector HMAC credentials or
+      configured UI Basic authentication. An unauthenticated request receives
+      401 with a Basic challenge. Success remains 200 {qrCode, expiresAt}
+      (PNG data URL and ISO timestamp); no current QR returns 404
+      {"error":"No QR code available"}. The path, access requirement and
+      response shape are contract.
   - id: http.whatsapp-connector.messages-forward.v1
     kind: http-route
     value: /messages/forward
@@ -136,13 +153,29 @@ contracts:
       {chatId, messageId, toChatId}: the source is found by messageId (bare or
       account-namespaced) in process memory or in whatsapp_message_payloads
       (migration 009); chatId only names it in errors. Answers 200
-      {forwarded: true, messageId} (the id of the new message), 403 when
-      ENABLE_SENDING is not true, 400 on a missing field, 404
+      {ok: true, forwarded: true, messageId} (the id of the new message), 403
+      when sending is disabled or emergency-disabled, 400 on a missing field, 404
       {error, failureClass: "message_unavailable"} when the original is not
       known, 500 {error} otherwise. Registered by fase 3 / PR-1, when forwarding
       started to work (before it always answered 500). The path, the body
       fields, the 200 shape and the 404 failureClass are contract: changing any
       is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.poll-vote.v1
+    kind: http-route
+    value: /messages/poll/vote
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      POST /api/v1/messages/poll/vote accepts conversationId, pollMessageId,
+      options (the complete selection; [] withdraws the vote), and sendToken.
+      A successful transport returns 200 {ok:true, sent:true, messageId}, where
+      messageId may be null. Reusing the token for the same completed vote
+      returns deduplicated:true without a second relay; a different payload or
+      an uncertain in-flight attempt returns 409. The app's authenticated
+      /api/messages/poll/vote route forwards the scoped account and token.
   - id: http.social-api.pairing-whatsapp.v1
     kind: http-route
     value: /pairing/whatsapp

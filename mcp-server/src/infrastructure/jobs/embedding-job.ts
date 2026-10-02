@@ -4,9 +4,12 @@ import { EmbeddingService } from '../../application/embedding.service';
 import { EventType } from '@mcp-socialmedia/shared';
 import pino from 'pino';
 import * as fs from 'fs';
+import { accountKey, normalizeAccount } from '../../domain/account';
+import { isWhatsAppUpdate } from '../../domain/whatsapp-surface';
 
 interface MessageReceivedEvent {
   eventType: string;
+  account?: string;
   conversationId: string;
   waMessageId: string;
 }
@@ -63,19 +66,7 @@ export class EmbeddingJob {
           try {
             const event = JSONCodec<MessageReceivedEvent>().decode(msg.data);
 
-            // Get message ID from database using wa_message_id
-            const result = await this.dbClient.query(
-              `SELECT id FROM messages WHERE wa_message_id = $1 LIMIT 1`,
-              [event.waMessageId]
-            );
-
-            if (result.rows.length > 0) {
-              const messageId = result.rows[0].id;
-              // Process in background (don't await to avoid blocking)
-              this.embeddingService.processMessage(messageId).catch(error => {
-                this.logger.error(`Error processing embedding: ${error}`);
-              });
-            }
+            await this.handleMessageReceived(event);
           } catch (error) {
             this.logger.error(`Error handling embedding job event: ${error}`);
           }
@@ -86,6 +77,20 @@ export class EmbeddingJob {
     } catch (error) {
       this.logger.error(`Failed to start embedding job: ${error}`);
       throw error;
+    }
+  }
+
+  async handleMessageReceived(event: MessageReceivedEvent): Promise<void> {
+    if (isWhatsAppUpdate(event.conversationId)) return;
+    const account = normalizeAccount(event.account, 'whatsapp');
+    const result = await this.dbClient.query(
+      `SELECT id FROM messages WHERE account = $1 AND platform = 'whatsapp'
+       AND conversation_id = $2 AND wa_message_id = $3
+       AND (is_deleted IS NULL OR is_deleted = false) LIMIT 1`,
+      [account, accountKey(account, event.conversationId), accountKey(account, event.waMessageId)]
+    );
+    if (result.rows.length > 0) {
+      await this.embeddingService.processMessage(result.rows[0].id);
     }
   }
 

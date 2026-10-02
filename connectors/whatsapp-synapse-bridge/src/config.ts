@@ -54,6 +54,21 @@ function optionalEnv(name: string, fallback: string): string {
   return raw.trim();
 }
 
+function httpUrl(name: string, value: string, httpsOnly = false): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new ConfigError(`${name} must be an absolute URL`); }
+  const protocols = httpsOnly ? ['https:'] : ['http:', 'https:'];
+  if (!protocols.includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new ConfigError(`${name} must use ${httpsOnly ? 'HTTPS' : 'HTTP(S)'} without credentials, query or fragment`);
+  }
+  return url.toString().replace(/\/$/, '');
+}
+
+export function trackingOptInBaseUrl(): string | undefined {
+  const value = optionalEnv('TRACKING_OPT_IN_BASE_URL', '');
+  return value ? `${httpUrl('TRACKING_OPT_IN_BASE_URL', value)}/` : undefined;
+}
+
 function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
@@ -71,15 +86,9 @@ function intEnv(name: string, fallback: number): number {
  */
 export function loadConfig(): BridgeConfig {
   const natsCaCert = optionalEnv('NATS_CA_CERT', '');
-  const gatewayWebhookUrl = optionalEnv(
-    'GATEWAY_WEBHOOK_URL',
-    'https://synapse.e-dani.com/webhooks/whatsapp'
-  );
-  if (!/^https:\/\//.test(gatewayWebhookUrl)) {
-    // Refuse plaintext gateway: the HMAC protects integrity, TLS protects the
-    // payload (phone numbers, message bodies) in transit. Fail closed.
-    throw new ConfigError(`GATEWAY_WEBHOOK_URL must be https://, got: ${gatewayWebhookUrl}`);
-  }
+  const gatewayWebhookUrl = httpUrl('GATEWAY_WEBHOOK_URL', requireEnv('GATEWAY_WEBHOOK_URL'), true);
+  const connectorUrl = httpUrl('CONNECTOR_URL', requireEnv('CONNECTOR_URL'));
+  trackingOptInBaseUrl();
 
   return {
     natsUrl: optionalEnv('NATS_URL', 'nats://localhost:4222'),
@@ -87,10 +96,7 @@ export function loadConfig(): BridgeConfig {
     natsQueueGroup: optionalEnv('NATS_QUEUE_GROUP', 'synapse-bridge'),
     gatewayWebhookUrl,
     whatsappWebhookSecret: requireEnv('WHATSAPP_WEBHOOK_SECRET'),
-    connectorUrl: optionalEnv(
-      'CONNECTOR_URL',
-      'http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001'
-    ),
+    connectorUrl,
     connectorSharedSecret: requireEnv('CONNECTOR_SHARED_SECRET'),
     allowedAccount: optionalEnv('ALLOWED_ACCOUNT', 'professional'),
     dedupTtlMs: intEnv('DEDUP_TTL_MS', 86_400_000),

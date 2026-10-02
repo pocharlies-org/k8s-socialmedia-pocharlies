@@ -1,4 +1,5 @@
 import { MessageReceivedEvent } from '@mcp-socialmedia/shared';
+import { trackingOptInBaseUrl } from './config';
 
 /**
  * FAIL-CLOSED forwarding filter for the WhatsApp -> synapse bridge.
@@ -76,11 +77,13 @@ function hasSuffix(jid: string, suffixes: readonly string[]): boolean {
 
 function isTrackingOptInControlMessage(content: string | null | undefined): boolean {
   if (!content || typeof content !== 'string') return false;
+  const trackingBase = trackingOptInBaseUrl();
+  if (!trackingBase) return false;
   const text = content.trim().toLowerCase();
   return (
     text.startsWith(TRACKING_OPT_IN_PREFIX) &&
     TRACKING_OPT_IN_ORDER_RE.test(text) &&
-    text.includes('https://track.skirmshop.es/labels/track/')
+    text.includes(trackingBase.toLowerCase())
   );
 }
 

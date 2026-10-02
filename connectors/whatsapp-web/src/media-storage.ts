@@ -141,7 +141,7 @@ export interface UploadedMedia {
 }
 
 export async function uploadMedia(
-  messageId: bigint | number,
+  messageId: string,
   data: Buffer,
   mimeType: string | undefined,
   fileName: string | undefined

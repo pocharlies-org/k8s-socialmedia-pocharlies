@@ -49,6 +49,12 @@ export interface SocialAccount {
    */
   brainInstance: string;
   capabilities: Record<string, boolean>;
+  /** Pairing/QR endpoint exposed by the connector (NAS deployments). */
+  qrUrl?: string;
+  /** Name of the env var holding this account's connector secret. */
+  secretEnv?: string;
+  /** Refuse cold sends until an inbound message is seen (per-account policy). */
+  requireInboundBeforeSend?: boolean;
 }
 
 const ID_RE = /^[a-z][a-z0-9_-]*$/;
@@ -155,6 +161,19 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     ) {
       throw new AccountRegistryError(`${key}: capabilities must map names to booleans`);
     }
+    const qrUrl = httpUrl(item.qrUrl, 'qrUrl', key);
+    if (
+      item.requireInboundBeforeSend !== undefined &&
+      typeof item.requireInboundBeforeSend !== 'boolean'
+    ) {
+      throw new AccountRegistryError(`${key}: requireInboundBeforeSend must be a boolean`);
+    }
+    if (
+      item.secretEnv !== undefined &&
+      (typeof item.secretEnv !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(item.secretEnv))
+    ) {
+      throw new AccountRegistryError(`${key}: secretEnv must reference an env var name`);
+    }
     return {
       channel,
       accountId: item.accountId,
@@ -171,6 +190,13 @@ export function parseAccounts(value: unknown): SocialAccount[] {
       profile,
       brainInstance,
       capabilities: { ...DEFAULT_CAPABILITIES[channel], ...(item.capabilities || {}) },
+      // Only present when declared: specs (and the connector payloads) must not
+      // see an undefined key for accounts that never opted in.
+      ...(qrUrl !== undefined ? { qrUrl } : {}),
+      ...(item.secretEnv !== undefined ? { secretEnv: item.secretEnv as string } : {}),
+      ...(item.requireInboundBeforeSend !== undefined
+        ? { requireInboundBeforeSend: item.requireInboundBeforeSend as boolean }
+        : {}),
     } as SocialAccount;
   });
   // An Instagram namespace must be a real WhatsApp/Telegram namespace, or its
@@ -322,4 +348,21 @@ export function socialAccountId(channel: AccountChannel, accountId: string): str
 /** Brain instance for a DB namespace (brain-ingest). Undeclared → undefined. */
 export function brainInstanceForNamespace(namespace: string): string | undefined {
   return getAccounts(undefined, true).find(a => a.namespace === namespace)?.brainInstance;
+}
+
+/**
+ * Connector shared secret for an account (NAS fork): `secretEnv` names the env
+ * var when the account declares one, otherwise the shared
+ * CONNECTOR_SHARED_SECRET. Fail-closed: a missing secret is an error, not an
+ * unsigned request.
+ */
+export function connectorSecretFor(account: SocialAccount): string {
+  const secret = account.secretEnv
+    ? process.env[account.secretEnv]
+    : process.env.CONNECTOR_SHARED_SECRET;
+  if (!secret)
+    throw new AccountRegistryError(
+      `Missing connector secret for ${account.channel}:${account.accountId}`
+    );
+  return secret;
 }
