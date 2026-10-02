@@ -2244,6 +2244,22 @@ contracts:
       chat y pasada. La forma de los documentos no cambia.
       02-10-2026: el presupuesto de la pasada es único para todas las cuentas
       (18 min); sin cambio de forma.
+  - id: metric.brain-windows.refused-deletes.v1
+    kind: schema
+    value: brain_windows_refused_deletes
+    role: provider
+    files:
+      - mcp-server/src/jobs/brain-windows.ts
+    status: active
+    note: >-
+      INFRA-364. Métrica que cada pasada del CronJob brain-windows importa en
+      VictoriaMetrics (POST BRAIN_WINDOWS_METRICS_URL =
+      vmsingle /api/v1/import/prometheus): brain_windows_refused_deletes{account}
+      = ventanas cuyo borrado rechazó el tope BRAIN_WINDOWS_MAX_DELETES_PER_CHAT
+      en esa pasada (0 si ninguna), y brain_windows_pass_finished_timestamp_seconds
+      = fin de la pasada. Consumidor: la alerta BrainWindowsMassDeleteRefused de
+      k8s-observability-pocharlies (manifests/rules.yaml). Renombrar la métrica o
+      la etiqueta account es breaking: nueva entrada .v2.
   - id: amqp.synapse.brain-window-upserted.v1
     kind: routing-key
     value: brain_window.{tenant}.upserted

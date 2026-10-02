@@ -13,7 +13,7 @@ import {
   DEFAULT_WINDOWS_CONFIG,
   httpSink,
 } from './brain-windows-lib';
-import { recomputeChat, processLlmWindow, groupAffectedChats } from './brain-windows';
+import { recomputeChat, processLlmWindow, groupAffectedChats, passMetricsText } from './brain-windows';
 import { LlmConfig } from './brain-window-llm';
 
 useTestAccounts({ whatsapp: { personal: 'http://wa' } });
@@ -250,6 +250,7 @@ describe('recomputeChat', () => {
       false
     );
     expect(r.deleted).toBe(0);
+    expect(r.refused).toBe(60);
     expect(calls.filter(c => c.url.endsWith('/delete-document')).length).toBe(0);
     expect(pool.sqlLike('DELETE FROM brain_windows').length).toBe(0);
   });
@@ -431,5 +432,16 @@ describe('groupAffectedChats', () => {
     const a = chats.find(c => c.platform === 'whatsapp' && c.conversation_id === 'a')!;
     expect(a.minTs.toISOString()).toBe('2026-03-14T10:00:00.000Z');
     expect(a.maxTs.toISOString()).toBe('2026-03-14T11:00:00.000Z');
+  });
+});
+
+describe('passMetricsText', () => {
+  it('emits refused deletes per account and the finish timestamp, in Prometheus text', () => {
+    const txt = passMetricsText({ personal: 0, professional: 60 }, 1790900000123);
+    expect(txt).toBe(
+      'brain_windows_refused_deletes{account="personal"} 0 1790900000123\n' +
+        'brain_windows_refused_deletes{account="professional"} 60 1790900000123\n' +
+        'brain_windows_pass_finished_timestamp_seconds 1790900000 1790900000123\n'
+    );
   });
 });

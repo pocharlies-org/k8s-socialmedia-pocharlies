@@ -151,10 +151,10 @@ export async function recomputeChat(
   account: string,
   affected: AffectedChat,
   dryRun: boolean
-): Promise<{ pushed: number; deleted: number; docs: number; chats: number }> {
+): Promise<{ pushed: number; deleted: number; docs: number; chats: number; refused: number }> {
   const meta = await fetchChatMeta(pool, account, [affected.conversation_id]);
   const m = meta.get(affected.conversation_id);
-  if (!m) return { pushed: 0, deleted: 0, docs: 0, chats: 0 }; // conversation row gone
+  if (!m) return { pushed: 0, deleted: 0, docs: 0, chats: 0, refused: 0 }; // conversation row gone
   const chat: ChatRef = {
     account,
     platform: affected.platform,
@@ -174,6 +174,7 @@ export async function recomputeChat(
   // Only the windows of the rebuilt range can vanish (see loadStoredWindows).
   const existing = await loadStoredWindows(pool, chat, { from: start.bound, to: end.bound });
   const diff = diffWindows(existing, built);
+  let refused = 0;
   if (diff.toDelete.length > opts.maxDeletesPerChat) {
     // A recomputed session range rarely loses more than a handful of windows;
     // hundreds at once is a bug, not a chat. Keep everything and shout.
@@ -181,6 +182,7 @@ export async function recomputeChat(
       { chat: chat.conversation_id, toDelete: diff.toDelete.length, cap: opts.maxDeletesPerChat },
       'refusing mass delete: too many vanished windows for one chat'
     );
+    refused = diff.toDelete.length;
     diff.toDelete = [];
   }
 
@@ -233,7 +235,7 @@ export async function recomputeChat(
     });
     pushed++;
   }
-  return { pushed, deleted, docs, chats: 1 };
+  return { pushed, deleted, docs, chats: 1, refused };
 }
 
 /** LLM pass over closed pending windows (ADR §7.5), 2 in parallel by default (BRAIN_WINDOWS_LLM_CONCURRENCY). */
@@ -373,6 +375,7 @@ async function accountPass(
     chats: 0,
     pushed: 0,
     deleted: 0,
+    refused_deletes: 0,
     docs: 0,
     llm_done: 0,
     llm_failed: 0,
@@ -399,6 +402,7 @@ async function accountPass(
         stats.chats += r.chats;
         stats.pushed += r.pushed;
         stats.deleted += r.deleted;
+        stats.refused_deletes += r.refused;
         stats.docs += r.docs;
       } catch (e) {
         // One broken chat must not stall the account; it self-heals when the
@@ -483,6 +487,7 @@ async function main(): Promise<void> {
 
   const pool = new Pool({ connectionString: databaseUrl, max: 4 });
   const budget = new PassBudget(Date.now(), opts.maxRuntimeMs);
+  const refusedByAccount: Record<string, number> = {};
   const totals: Record<string, number> = {};
   try {
     await ensureBrainWindowsTables(pool);
@@ -501,6 +506,7 @@ async function main(): Promise<void> {
         }
         const s = await accountPass(pool, sink, llm, config, opts, account, dryRun, budget);
         for (const [k, v] of Object.entries(s)) totals[k] = (totals[k] ?? 0) + v;
+        refusedByAccount[account] = s.refused_deletes ?? 0;
         logger.info({ account, ...s, dryRun }, 'account pass done');
       } catch (e) {
         logger.error({ account, err: String(e) }, 'account pass failed; continuing with the next');
@@ -511,6 +517,39 @@ async function main(): Promise<void> {
     await publisher?.close();
   }
   logger.info({ ...totals, sink: sinkKind, dryRun }, 'brain-windows pass finished');
+  if (!dryRun) await pushPassMetrics(process.env.BRAIN_WINDOWS_METRICS_URL, refusedByAccount);
+}
+
+/**
+ * Prometheus text lines for one pass: the mass deletes the per-chat cap
+ * refused (an alert fires on any > 0 — the cap only stops the damage, a
+ * human has to look) and when the pass finished.
+ */
+export function passMetricsText(refusedByAccount: Record<string, number>, nowMs: number): string {
+  const lines = Object.entries(refusedByAccount).map(
+    ([account, n]) => `brain_windows_refused_deletes{account="${account}"} ${n} ${nowMs}`
+  );
+  lines.push(`brain_windows_pass_finished_timestamp_seconds ${Math.floor(nowMs / 1000)} ${nowMs}`);
+  return lines.join('\n') + '\n';
+}
+
+/** Best effort: a metrics outage must never fail the pass. */
+async function pushPassMetrics(
+  url: string | undefined,
+  refusedByAccount: Record<string, number>
+): Promise<void> {
+  if (!url) return;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: passMetricsText(refusedByAccount, Date.now()),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) logger.warn({ status: resp.status }, 'pass metrics push rejected');
+  } catch (e) {
+    logger.warn({ err: String(e) }, 'pass metrics push failed');
+  }
 }
 
 if (require.main === module) {
