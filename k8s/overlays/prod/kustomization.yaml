@@ -93,9 +93,11 @@ images:
   # v1.3.92 (run 36962281564, deploy/prod@4a2065e): sobre v1.3.91 solo cambia #191 — el
   # incremental de brain-windows solo borra ventanas del rango que reconstruye y nunca más de
   # 50 por chat y pasada (incidente INFRA-364 del 02-10: ~26k ventanas borradas).
+  # v1.3.93 (run 37037198214, deploy/prod@2e43392): sobre v1.3.92 solo cambia #196 — un único
+  # presupuesto por pasada del cron brain-windows (6/20 pasadas en DeadlineExceeded el 02-10).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.92
-    digest: sha256:d865664d77ffa5d62cdc06e794efb41394cdb8cb0127dca9bee5060657576450
+    newTag: v1.3.93
+    digest: sha256:34263f896848eca12a2593596e8c78cae80523ab8e670d7a9dd4db1455a57dce
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
