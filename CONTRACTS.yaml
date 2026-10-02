@@ -2201,6 +2201,8 @@ contracts:
       que reconstruye (antes comparaba con todo el chat y borró ~26k
       ventanas) y nunca más de BRAIN_WINDOWS_MAX_DELETES_PER_CHAT (50) por
       chat y pasada. La forma de los documentos no cambia.
+      02-10-2026: el presupuesto de la pasada es único para todas las cuentas
+      (18 min); sin cambio de forma.
   - id: amqp.synapse.brain-window-upserted.v1
     kind: routing-key
     value: brain_window.{tenant}.upserted

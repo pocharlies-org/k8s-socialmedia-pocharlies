@@ -364,9 +364,11 @@ async function accountPass(
   config: WindowsConfig,
   opts: WindowsJobOptions,
   account: string,
-  dryRun: boolean
+  dryRun: boolean,
+  // One budget for the whole pass, shared by every account: a budget per
+  // account let two slow accounts add up past activeDeadlineSeconds.
+  budget: PassBudget
 ): Promise<Record<string, number>> {
-  const budget = new PassBudget(Date.now(), opts.maxRuntimeMs);
   const stats = {
     chats: 0,
     pushed: 0,
@@ -480,6 +482,7 @@ async function main(): Promise<void> {
   const dryRun = process.env.BRAIN_WINDOWS_DRY_RUN === 'true';
 
   const pool = new Pool({ connectionString: databaseUrl, max: 4 });
+  const budget = new PassBudget(Date.now(), opts.maxRuntimeMs);
   const totals: Record<string, number> = {};
   try {
     await ensureBrainWindowsTables(pool);
@@ -492,7 +495,11 @@ async function main(): Promise<void> {
     }
     for (const account of ingestNamespaces()) {
       try {
-        const s = await accountPass(pool, sink, llm, config, opts, account, dryRun);
+        if (budget.out()) {
+          logger.warn({ account }, 'pass budget exhausted; account left for the next pass');
+          continue;
+        }
+        const s = await accountPass(pool, sink, llm, config, opts, account, dryRun, budget);
         for (const [k, v] of Object.entries(s)) totals[k] = (totals[k] ?? 0) + v;
         logger.info({ account, ...s, dryRun }, 'account pass done');
       } catch (e) {

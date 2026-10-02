@@ -251,9 +251,11 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
-      # 30-min schedule; the job stops itself at MAX_RUNTIME_MS (24 min) so it
-      # exits 0 before this deadline. Worst case inside: 100 chats recomputed
-      # + 5 LLM windows x (240 s x 3 attempts) / 2 parallel = ~18 min.
+      # 30-min schedule. The job stops starting work at MAX_RUNTIME_MS (18 min)
+      # and exits 0 before this deadline: an LLM call already in flight can
+      # still take LLM_TIMEOUT_MS x (LLM_RETRIES+1) = 2 x 180 s = 6 min. At 24
+      # min with 240 s x 3 attempts, 6 of ~20 passes overran on 02-10-2026 while
+      # the reindex LLM phase shared the resident model.
       activeDeadlineSeconds: 1500
       ttlSecondsAfterFinished: 3600
       template:
@@ -318,7 +320,12 @@ spec:
                 - { name: BRAIN_WINDOWS_MAX_CHATS, value: "100" }
                 - { name: BRAIN_WINDOWS_MAX_LLM, value: "5" }
                 - { name: BRAIN_WINDOWS_COLDSTART_LOOKBACK_HOURS, value: "168" }
-                - { name: BRAIN_WINDOWS_MAX_RUNTIME_MS, value: "1440000" }
+                - { name: BRAIN_WINDOWS_MAX_RUNTIME_MS, value: "1080000" }
+                # Bound an in-flight LLM window so it always fits before the
+                # deadline (see activeDeadlineSeconds); a failed window is
+                # retried by the next pass.
+                - { name: LLM_TIMEOUT_MS, value: "180000" }
+                - { name: LLM_RETRIES, value: "1" }
                 - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
                 # INFRA-364: el incremental publica en Synapse
                 # (brain_window.<tenant>.upserted|deleted) y Synapse lo ingiere con
