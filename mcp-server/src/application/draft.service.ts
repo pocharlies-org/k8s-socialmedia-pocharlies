@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { Pool } from 'pg';
 import pino from 'pino';
+import { NO_THINKING } from './llm-request';
 
 export interface DraftConstraints {
   maxLength?: number;
@@ -184,6 +185,7 @@ Generate a draft reply. Keep it concise and appropriate for WhatsApp messaging.`
           ],
           temperature: 0.7,
           max_tokens: constraints?.maxLength ? Math.min(constraints.maxLength / 4, 500) : 200,
+          ...NO_THINKING,
         },
         { timeout: 180_000 }
       );

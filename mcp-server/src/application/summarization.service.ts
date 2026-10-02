@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
 import type { Account } from '../domain/account';
+import { NO_THINKING } from './llm-request';
 
 export type SummaryStyle = 'brief' | 'detailed' | 'bullet';
 export type SummaryLanguage = 'en' | 'es';
@@ -148,16 +149,22 @@ export class SummarizationService {
           ],
           temperature: 0.7,
           max_tokens: style === 'brief' ? 200 : 500,
+          ...NO_THINKING,
         },
         { timeout: 180_000 }
       );
 
-      const summary = response.choices[0]?.message?.content || 'Failed to generate summary';
+      const content = response.choices[0]?.message?.content?.trim();
+      if (!content) {
+        // Not cached: an empty answer is a transient model outcome, and caching
+        // it pinned the failure on this conversation for an hour.
+        return 'Failed to generate summary';
+      }
 
       // Cache for 1 hour
-      await this.redis.setex(cacheKey, 3600, summary);
+      await this.redis.setex(cacheKey, 3600, content);
 
-      return summary;
+      return content;
     } catch (error) {
       this.logger.error(`Error generating summary: ${error}`);
       throw error;
