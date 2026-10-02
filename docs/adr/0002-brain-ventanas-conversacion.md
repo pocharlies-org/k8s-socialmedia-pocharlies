@@ -149,7 +149,9 @@ mensajes en ventanas cuadra con Postgres.
 
 ## 7. Pasada incremental (CronJob `brain-windows`, cada 30 min)
 
-1. Lee los mensajes con `updated_at` posterior al cursor y saca los chats y rangos de tiempo afectados.
+1. Lee los mensajes con `updated_at` posterior al cursor y saca los chats y rangos de tiempo afectados. Solo compara
+   contra las ventanas del registro que empiezan dentro del rango reconstruido, y nunca borra más de 50 ventanas de un
+   chat en una pasada (`BRAIN_WINDOWS_MAX_DELETES_PER_CHAT`): el 02-10 comparar contra el chat entero borró ~26k.
 2. Recalcula las ventanas de cada chat en `[min − 1 h, max + 1 h]`, ampliado a ventanas completas.
 3. Compara con `brain_windows`: borra del brain las que desaparecen (padre e hijos, por `delete-document`) y sube
    las nuevas o cambiadas (por `content_hash`).

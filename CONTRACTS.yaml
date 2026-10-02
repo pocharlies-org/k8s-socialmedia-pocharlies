@@ -2197,6 +2197,10 @@ contracts:
       por defecto: publica amqp.synapse.brain-window-*.v1 y Synapse hace el
       push-ingest con los MISMOS documentos; este camino queda para el
       backfill y como vuelta atras (BRAIN_WINDOWS_SINK=http).
+      02-10-2026: el incremental solo borra ventanas del rango de sesiones
+      que reconstruye (antes comparaba con todo el chat y borró ~26k
+      ventanas) y nunca más de BRAIN_WINDOWS_MAX_DELETES_PER_CHAT (50) por
+      chat y pasada. La forma de los documentos no cambia.
   - id: amqp.synapse.brain-window-upserted.v1
     kind: routing-key
     value: brain_window.{tenant}.upserted

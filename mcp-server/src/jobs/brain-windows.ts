@@ -83,6 +83,7 @@ export interface WindowsJobOptions {
   coldstartLookbackHours: number; // first cursor: don't blind the recent past
   maxRuntimeMs: number; // stop cleanly before activeDeadlineSeconds
   pushDocsCap: number; // safety cap of docs pushed for one chat
+  maxDeletesPerChat: number; // above this the pass deletes nothing for the chat
 }
 
 export function optionsFromEnv(env: NodeJS.ProcessEnv): WindowsJobOptions {
@@ -93,6 +94,7 @@ export function optionsFromEnv(env: NodeJS.ProcessEnv): WindowsJobOptions {
     coldstartLookbackHours: envInt(env, 'BRAIN_WINDOWS_COLDSTART_LOOKBACK_HOURS', 168),
     maxRuntimeMs: envInt(env, 'BRAIN_WINDOWS_MAX_RUNTIME_MS', 1_440_000),
     pushDocsCap: envInt(env, 'BRAIN_WINDOWS_PUSH_DOCS_CAP', 400),
+    maxDeletesPerChat: envInt(env, 'BRAIN_WINDOWS_MAX_DELETES_PER_CHAT', 50),
   };
 }
 
@@ -145,7 +147,7 @@ export async function recomputeChat(
   pool: Pool,
   sink: WindowSink,
   config: WindowsConfig,
-  opts: Pick<WindowsJobOptions, 'pushDocsCap'>,
+  opts: Pick<WindowsJobOptions, 'pushDocsCap' | 'maxDeletesPerChat'>,
   account: string,
   affected: AffectedChat,
   dryRun: boolean
@@ -169,8 +171,18 @@ export async function recomputeChat(
 
   const msgs: WindowMessage[] = await fetchChatMessages(pool, chat, start.bound, end.bound);
   const built: BuiltWindow[] = buildWindows(chat, msgs, config);
-  const existing = await loadStoredWindows(pool, chat);
+  // Only the windows of the rebuilt range can vanish (see loadStoredWindows).
+  const existing = await loadStoredWindows(pool, chat, { from: start.bound, to: end.bound });
   const diff = diffWindows(existing, built);
+  if (diff.toDelete.length > opts.maxDeletesPerChat) {
+    // A recomputed session range rarely loses more than a handful of windows;
+    // hundreds at once is a bug, not a chat. Keep everything and shout.
+    logger.error(
+      { chat: chat.conversation_id, toDelete: diff.toDelete.length, cap: opts.maxDeletesPerChat },
+      'refusing mass delete: too many vanished windows for one chat'
+    );
+    diff.toDelete = [];
+  }
 
   let deleted = 0;
   for (const gone of diff.toDelete) {

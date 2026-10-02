@@ -1145,12 +1145,29 @@ export async function sessionEndBound(
   return { bound, truncated };
 }
 
-export async function loadStoredWindows(pool: Pool, chat: ChatRef): Promise<StoredWindow[]> {
+/**
+ * Ledger windows of a chat. With `range`, only those starting inside it: the
+ * incremental rebuilds just the affected sessions, so comparing against the
+ * whole chat made every window outside the range look "vanished" and got it
+ * deleted (02-10-2026: ~26k windows in four passes). The backfill rebuilds the
+ * whole chat and calls this without a range.
+ */
+export async function loadStoredWindows(
+  pool: Pool,
+  chat: ChatRef,
+  range?: { from: Date; to: Date }
+): Promise<StoredWindow[]> {
+  const params: unknown[] = [chat.account, chat.platform, chat.conversation_id];
+  let where = 'account = $1 AND platform = $2 AND conversation_id = $3';
+  if (range) {
+    params.push(range.from, range.to);
+    where += ' AND start_ts >= $4 AND start_ts <= $5';
+  }
   const r = await pool.query(
     `SELECT source_id, content_hash, chunk_count, llm_status
        FROM brain_windows
-      WHERE account = $1 AND platform = $2 AND conversation_id = $3`,
-    [chat.account, chat.platform, chat.conversation_id]
+      WHERE ${where}`,
+    params
   );
   return r.rows as StoredWindow[];
 }
