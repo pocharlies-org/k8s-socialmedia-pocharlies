@@ -2257,7 +2257,8 @@ contracts:
       vmsingle /api/v1/import/prometheus): brain_windows_refused_deletes{account}
       = ventanas cuyo borrado rechazó el tope BRAIN_WINDOWS_MAX_DELETES_PER_CHAT
       en esa pasada (0 si ninguna), y brain_windows_pass_finished_timestamp_seconds
-      = fin de la pasada. Consumidor: la alerta BrainWindowsMassDeleteRefused de
+      = fin de la pasada, con la etiqueta job=brain_windows (extra_label). Consumidores:
+      las alertas BrainWindowsMassDeleteRefused y BrainWindowsPassStale de
       k8s-observability-pocharlies (manifests/rules.yaml). Renombrar la métrica o
       la etiqueta account es breaking: nueva entrada .v2.
   - id: amqp.synapse.brain-window-upserted.v1

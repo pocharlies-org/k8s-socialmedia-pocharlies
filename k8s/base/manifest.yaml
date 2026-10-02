@@ -328,7 +328,7 @@ spec:
                 - { name: LLM_RETRIES, value: "1" }
                 # Métricas de la pasada (borrados rechazados por el tope, fin de
                 # pasada) a VictoriaMetrics; alerta BrainWindowsMassDeleteRefused.
-                - { name: BRAIN_WINDOWS_METRICS_URL, value: "http://vmsingle-vm-victoria-metrics-k8s-stack.monitoring.svc:8428/api/v1/import/prometheus" }
+                - { name: BRAIN_WINDOWS_METRICS_URL, value: "http://vmsingle-vm-victoria-metrics-k8s-stack.monitoring.svc:8428/api/v1/import/prometheus?extra_label=job=brain_windows" }
                 - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
                 # INFRA-364: el incremental publica en Synapse
                 # (brain_window.<tenant>.upserted|deleted) y Synapse lo ingiere con
