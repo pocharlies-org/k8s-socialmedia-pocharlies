@@ -85,9 +85,12 @@ images:
   # v1.3.88 (run 36948590108, deploy/prod@7c8d9a6): sobre v1.3.87 solo cambia #184 (INFRA-364):
   # la fase LLM de brain-windows corre de verdad en paralelo (BRAIN_WINDOWS_LLM_CONCURRENCY) y
   # normaliza las respuestas casi válidas del LLM. 73 tools, como v1.3.87.
+  # v1.3.90 (run 36950205073, deploy/prod@4662be0): sobre v1.3.88 anade #187 (resumenes,
+  # borradores y digest con enable_thinking:false: social_summarize devolvia "Failed to generate
+  # summary"). Incluye #184 de v1.3.88. Solo mcp-server.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.88
-    digest: sha256:e64be685f4b5008ad0d97e3b5fa2b018aa97bcf2f7c43a97b397d312b6ef36c0
+    newTag: v1.3.90
+    digest: sha256:99e718847fda4a8dc1e6881a481a7c9a6b53dbdbc78d7ddf267009a0530d31e2
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
