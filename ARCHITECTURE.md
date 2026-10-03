@@ -9,7 +9,7 @@
 | cliente | repositorio / ruta | versión desplegada | cómo se despliega |
 |---|---|---|---|
 | `whatsapp-connector` (Baileys, :3001), `telegram-connector` (gramjs, :3002), `telegram-sync` (telethon, :3080), `instagram-connector` (:3003), `whatsapp-cloud-connector` (:3004) | `connectors/*` | imágenes por `tag@digest` (p. ej. instagram `sha-985a199ea567@sha256:38c14176…`; pool `v1.3.57`) | ArgoCD app `socialmedia` |
-| `mcp-server` (:3000) y `mcp-sse` (:3010), 49 tools | `mcp-server/src` | digest del `mcp-server`, compartido con los CronJobs de digest | ídem |
+| `mcp-server` (:3000) y `mcp-sse` (:3010), superficie en `contracts/socialmedia-tools.json` | `mcp-server/src` | digest del `mcp-server`, compartido con los CronJobs de digest | ídem |
 | Puente Synapse | `connectors/whatsapp-synapse-bridge` | digest | ídem |
 
 Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGateway `/social`; un cambio de herramienta toca el catálogo
