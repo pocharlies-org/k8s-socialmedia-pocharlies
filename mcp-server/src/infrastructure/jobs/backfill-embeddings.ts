@@ -32,11 +32,14 @@ async function main(): Promise<void> {
       if (MAX_MESSAGES > 0 && remainingLimit === 0) break;
       const limit = Math.min(BATCH_SIZE, remainingLimit);
 
+      // Barriendo por fila acierta todas las cuentas (no depende del id del
+      // evento), pero el filtro estaba fijado a 'whatsapp': el historial de
+      // Telegram no se embebía ni corriendo el backfill a mano.
       const result = await pool.query(
         `SELECT m.id
          FROM messages m
          LEFT JOIN message_embeddings me ON me.message_id = m.id
-         WHERE m.platform = 'whatsapp'
+         WHERE m.platform IN ('whatsapp', 'telegram')
            AND m.content IS NOT NULL
            AND btrim(m.content) <> ''
            AND me.message_id IS NULL
@@ -52,7 +55,7 @@ async function main(): Promise<void> {
         processed++;
       }
 
-      logger.info(`Backfilled embeddings for ${processed} WhatsApp messages so far`);
+      logger.info(`Backfilled embeddings for ${processed} messages so far`);
     }
 
     logger.info(`Embedding backfill complete. processed=${processed}`);
