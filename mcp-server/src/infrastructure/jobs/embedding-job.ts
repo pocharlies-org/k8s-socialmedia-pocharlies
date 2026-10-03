@@ -16,6 +16,32 @@ interface MessageReceivedEvent {
   account?: string;
 }
 
+/**
+ * Telegram: la fila de `messages` la inserta `telegram-sync` al recibir el MISMO
+ * evento de NATS (core, at-most-once: `connectors/telegram-sync/sync/nats_consumer.py`),
+ * así que el SELECT del embedding puede llegar antes que el INSERT y el mensaje se
+ * perdería para siempre. Se reintenta con estas esperas. WhatsApp no lo necesita:
+ * el conector escribe su fila antes de publicar.
+ */
+export const TELEGRAM_LOOKUP_WAITS_MS = [500, 1500, 4000];
+
+/** `id` de la fila, o null tras agotar los reintentos. */
+export async function lookupMessageId(
+  query: Pool['query'],
+  key: string,
+  waitsMs: number[] = [],
+  sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms))
+): Promise<string | null> {
+  const remaining = [...waitsMs];
+  for (;;) {
+    const result = await query(`SELECT id FROM messages WHERE wa_message_id = $1 LIMIT 1`, [key]);
+    if (result.rows.length > 0) return String(result.rows[0].id);
+    const wait = remaining.shift();
+    if (wait === undefined) return null;
+    await sleep(wait);
+  }
+}
+
 export class EmbeddingJob {
   private nc: NatsConnection | null = null;
   private subscriptions: Subscription[] = [];
@@ -95,14 +121,15 @@ export class EmbeddingJob {
       const event = JSONCodec<MessageReceivedEvent>().decode(msg.data);
       const key = EmbeddingJob.messageKeyFor(event);
       if (key) {
-        const result = await this.dbClient.query(
-          `SELECT id FROM messages WHERE wa_message_id = $1 LIMIT 1`,
-          [key]
+        const messageId = await lookupMessageId(
+          this.dbClient.query.bind(this.dbClient),
+          key,
+          event.telegramMessageId ? TELEGRAM_LOOKUP_WAITS_MS : []
         );
 
-        if (result.rows.length > 0) {
+        if (messageId) {
           // Process in background (don't await to avoid blocking)
-          this.embeddingService.processMessage(result.rows[0].id).catch(error => {
+          this.embeddingService.processMessage(messageId).catch(error => {
             this.logger.error(`Error processing embedding: ${error}`);
           });
         } else {

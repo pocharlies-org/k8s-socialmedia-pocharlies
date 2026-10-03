@@ -43,6 +43,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Catálogo de tools | `contracts/socialmedia-tools.json` / `.md` | `contracts/` | gateway, Hermes |
 | Registro de contratos | `CONTRACTS.yaml` | raíz | todos |
 | Doc de la API social | `docs/social-api.md`, ADRs en `docs/adr` | `docs/` | operadores |
+| Clave opaca por cuenta (`personal` sin prefijo, el resto namespaceadas — migración 002) | `mcp-server/src/domain/account.ts` (`accountKey` / `normalizeAccount`) | `mcp-server/src/domain/` | MCP y job de embeddings; `connectors/telegram-sync/sync/db.py` es **espejo en Python** de la misma regla (no puede importar TS): cambiar una sin la otra deja mensajes sin embedding |
 
 ## 5. Cómo se construye aquí
 
