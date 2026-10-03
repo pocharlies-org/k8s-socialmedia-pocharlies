@@ -546,6 +546,9 @@ spec:
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
+            # La busqueda semantica del lector tiene que preguntar por la misma
+            # anchura con la que se escribio message_embeddings (vector(1024)).
+            - { name: EMBEDDING_DIMENSION, value: "1024" }
             - name: MCP_SSE_AUTH_TOKEN
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-sse-secrets, key: MCP_SSE_AUTH_TOKEN } }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]

@@ -49,12 +49,22 @@ export class SearchService {
   private openai: OpenAI;
   private dbClient: Pool;
   private logger: pino.Logger;
-  private readonly EMBEDDING_MODEL = 'text-embedding-3-small';
+  private readonly EMBEDDING_MODEL: string;
+  private readonly EMBEDDING_DIMENSION: number;
 
   constructor(openaiApiKey: string, dbClient: Pool, _encryptionKey: string, llmBaseUrl?: string) {
+    // The query vector must come from the SAME model that wrote message_embeddings.
+    // EmbeddingService (the writer) talks to EMBEDDING_BASE_URL — bge-m3,
+    // vector(1024) in prod; this reader was pointed at the LiteLLM chat route with
+    // a hardcoded text-embedding-3-small (1536 dims), which the `socialmedia` key
+    // cannot use and which would not have fit the column either way: every semantic
+    // search died here and silently fell back to keyword search.
+    const baseURL = process.env.EMBEDDING_BASE_URL || llmBaseUrl || undefined;
+    this.EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'bge-m3';
+    this.EMBEDDING_DIMENSION = parseInt(process.env.EMBEDDING_DIMENSION || '1024', 10);
     this.openai = new OpenAI({
-      apiKey: openaiApiKey || 'sk-placeholder',
-      ...(llmBaseUrl && { baseURL: llmBaseUrl }),
+      apiKey: openaiApiKey || 'not-needed',
+      ...(baseURL && { baseURL }),
     });
     this.dbClient = dbClient;
     this.logger = pino({
@@ -63,6 +73,9 @@ export class SearchService {
         options: { colorize: true },
       },
     });
+    this.logger.info(
+      `SearchService: modelo=${this.EMBEDDING_MODEL} dim=${this.EMBEDDING_DIMENSION} baseURL=${baseURL || 'openai-default'}`
+    );
   }
 
   /**
@@ -180,6 +193,13 @@ export class SearchService {
     });
 
     const queryEmbedding = response.data[0].embedding;
+    // A vector of another width is a wrong-model bug, not a miss: say which,
+    // instead of letting Postgres fail on the <=> operator.
+    if (queryEmbedding.length !== this.EMBEDDING_DIMENSION) {
+      throw new Error(
+        `embedding del query: ${queryEmbedding.length} dims, y message_embeddings es vector(${this.EMBEDDING_DIMENSION}) con ${this.EMBEDDING_MODEL}`
+      );
+    }
     const embeddingVector = `[${queryEmbedding.join(',')}]`;
 
     let sql = `
