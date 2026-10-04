@@ -58,8 +58,9 @@ export interface BrainSearchConfig {
   apiKey: string;
   timeoutMs: number;
   /**
-   * Relevance floor on the brain's score (its reranker's, bge-reranker-v2-m3).
-   * Below it a chunk is noise and the search falls through to keyword search.
+   * Relevance floor on the brain's score: the raw logit of its reranker
+   * (bge-reranker-v2-m3), not a 0..1 similarity. Below it a chunk is noise and
+   * the search falls through to keyword search.
    */
   minScore: number;
 }
@@ -92,12 +93,19 @@ export function brainSearchConfigFromEnv(
   return {
     url,
     apiKey,
-    timeoutMs: envNumber(env.BRAIN_SEARCH_TIMEOUT_MS, 8000),
+    timeoutMs: envNumber(env.BRAIN_SEARCH_TIMEOUT_MS, 10000),
     minScore: envNumber(env.SEMANTIC_MIN_SCORE, DEFAULT_SEMANTIC_MIN_SCORE),
   };
 }
 
-export const DEFAULT_SEMANTIC_MIN_SCORE = 0.2;
+/**
+ * Measured 04-10-2026 against prod (scoped chunk searches, brain-39c0788):
+ * on-topic queries score +0.8..+3.5 at the top; the hard paraphrase «el gestor
+ * de contraseñas no me deja acceder a mis claves» finds its 1Password chunks at
+ * -2.3 (first) and -4.9; nonsense («xqzv plorf bandurria…») tops out at -6.7
+ * (professional) and -7.8 (personal). -5 keeps the paraphrase and drops the noise.
+ */
+export const DEFAULT_SEMANTIC_MIN_SCORE = -5;
 
 interface BrainScope {
   instance: string;
