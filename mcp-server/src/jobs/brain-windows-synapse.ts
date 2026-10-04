@@ -8,7 +8,7 @@
  *   brain_window.<tenant>.deleted  → brain.delete_document (one doc per event)
  *
  * tenant: follows the account's brain instance in the account registry —
- * instance `personal` → family, anything else (`skirmshop`) → skirmshop. Workflows live in pocharlies-org/synapse
+ * instance `skirmshop` → skirmshop, anything else (`personal`, `leila`) → family. Workflows live in pocharlies-org/synapse
  * `workflows/{family,skirmshop}/brain/conversation-window-*.v1.yaml`.
  *
  * Publishing goes straight to the `events` topic exchange of vhost /synapse
@@ -22,9 +22,13 @@ import { WindowSink, instanceForNamespace, wellFormedDeep } from './brain-window
 export const SYNAPSE_EVENTS_EXCHANGE = 'events';
 export const UPSERT_BATCH = 25;
 
-/** Synapse tenant of an account: its brain instance decides (registry), not its name. */
+/**
+ * Synapse tenant of an account: its brain instance decides (registry), not its
+ * name. Only the shop's instance is the shop's tenant; `personal` and `leila`
+ * (INFRA-487: each messaging account in its own instance) are the family's.
+ */
 export function tenantForAccount(account: string): string {
-  return instanceForNamespace(account) === 'personal' ? 'family' : 'skirmshop';
+  return instanceForNamespace(account) === 'skirmshop' ? 'skirmshop' : 'family';
 }
 
 export interface SynapseEvent {

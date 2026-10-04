@@ -339,7 +339,7 @@ export class MCPServer {
     this.dbClient = dbClient;
     this.redisClient = redisClient;
     this.repository = new DatabaseRepository(dbClient);
-    this.searchService = new SearchService(openaiApiKey, dbClient, encryptionKey, llmBaseUrl);
+    this.searchService = new SearchService(dbClient);
     this.summarizationService = new SummarizationService(
       openaiApiKey,
       dbClient,
@@ -3418,7 +3418,7 @@ export class MCPServer {
     rawIds?: boolean;
     mediaType?: MediaType;
   }) {
-    const results = await this.searchService.search(args.query, {
+    const { results, mode, fallbackReason } = await this.searchService.searchDetailed(args.query, {
       chatId: args.chatId,
       from: args.from ? new Date(args.from) : undefined,
       to: args.to ? new Date(args.to) : undefined,
@@ -3448,6 +3448,10 @@ export class MCPServer {
                 similarity: r.similarity,
                 rank: r.rank,
               })),
+              // Which branch answered: `semantic` = the brain (INFRA-486),
+              // `text` = Postgres full-text, with why the brain did not.
+              mode,
+              ...(fallbackReason ? { fallbackReason } : {}),
             },
             null,
             2

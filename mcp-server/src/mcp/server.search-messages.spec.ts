@@ -19,8 +19,8 @@ function serverWith() {
   const searchService = Object.create(SearchService.prototype) as SearchService;
   Object.assign(searchService as unknown as Record<string, unknown>, {
     dbClient: { query },
-    // No embeddings endpoint: search() falls back to the keyword (FTS) query.
-    openai: { embeddings: { create: jest.fn(async () => Promise.reject(new Error('no llm'))) } },
+    // No brain configured: search() falls back to the keyword (FTS) query.
+    brain: null,
     logger: { warn: jest.fn() },
   });
   Object.assign(server as unknown as Record<string, unknown>, {

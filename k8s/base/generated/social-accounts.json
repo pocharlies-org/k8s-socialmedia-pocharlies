@@ -21,7 +21,7 @@
     "label": "WhatsApp leila",
     "profile": "leila",
     "connectorUrl": "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001",
-    "brainInstance": "personal"
+    "brainInstance": "leila"
   },
   {
     "channel": "telegram",

@@ -215,6 +215,8 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       channel: 'whatsapp',
       accountId: 'leila',
       connectorUrl: env.WHATSAPP_LEILA_URL || 'http://whatsapp-connector-leila:3001',
+      // INFRA-487: each messaging account in its own brain instance.
+      brainInstance: 'leila',
     },
     {
       channel: 'telegram',
