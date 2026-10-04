@@ -65,6 +65,24 @@ it('pregunta las embeddings del query al servicio de embeddings, no a LiteLLM', 
   );
 });
 
+/**
+ * openai-node >=4.104 pide `encoding_format: 'base64'` por defecto. El servicio de
+ * embeddings lo ignora y responde la lista de floats, que el SDK decodifica como si
+ * fuera base64: 1024 valores llegaban convertidos en 256 y el guard de anchura tiraba
+ * a FTS toda búsqueda (medido en prod con v1.3.96, 04-10).
+ */
+it('pide los floats explícitamente, como el escritor', async () => {
+  embeddingsCreate.mockResolvedValue({ data: [{ embedding: new Array(1024).fill(0.1) }] });
+  const { pool } = fakePool();
+  const svc = new SearchService('key', pool, 'enc', LITELLM_URL);
+
+  await svc.semanticSearch('pedido de material deportivo');
+
+  expect(embeddingsCreate).toHaveBeenCalledWith(
+    expect.objectContaining({ encoding_format: 'float' })
+  );
+});
+
 it('sin EMBEDDING_BASE_URL sigue usando la base que ya tenía (no rompe otras instalaciones)', async () => {
   delete process.env.EMBEDDING_BASE_URL;
   embeddingsCreate.mockResolvedValue({ data: [{ embedding: new Array(1024).fill(0.1) }] });

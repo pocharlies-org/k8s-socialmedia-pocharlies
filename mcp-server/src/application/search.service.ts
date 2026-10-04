@@ -186,10 +186,17 @@ export class SearchService {
     const { chatId, from, to, sender } = options;
     const limit = searchLimit(options.limit);
 
-    // Generate embedding for query
+    // Generate embedding for query.
+    // `encoding_format: 'float'` no es opcional: desde openai-node 4.104 el SDK
+    // pide `base64` por defecto, el servicio de embeddings (TEI propio) lo ignora
+    // y devuelve la lista de floats de siempre, que el SDK entonces decodifica mal
+    // — 1024 floats llegaban como 256 números. El escritor (EmbeddingService) ya
+    // lo pasaba; sin esto el vector del query no cabe en vector(1024) y toda
+    // búsqueda cae a texto.
     const response = await this.openai.embeddings.create({
       model: this.EMBEDDING_MODEL,
       input: query,
+      encoding_format: 'float',
     });
 
     const queryEmbedding = response.data[0].embedding;
