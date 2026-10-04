@@ -103,8 +103,8 @@ images:
   # brain-windows importa en vmsingle brain_windows_refused_deletes{account} y el fin de pasada
   # (alertas BrainWindowsMassDeleteRefused y BrainWindowsPassStale, k8s-observability#69).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.96
-    digest: sha256:6ddcf5827f57a3dc8a82a2bdde7ba55d8f6de1cf2cea7ec1c5944eb71a346efa
+    newTag: v1.3.98
+    digest: sha256:13f35105f1b896a68dd4d0bf13fb79d38c7a6445eab1f0fb00136ade239b4752
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
