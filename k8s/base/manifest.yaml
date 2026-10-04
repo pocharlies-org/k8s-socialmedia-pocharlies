@@ -544,11 +544,12 @@ spec:
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: LEGACY_MINIO_USE_SSL, value: "false" }
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
-            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
-            - { name: EMBEDDING_MODEL, value: "bge-m3" }
-            # La busqueda semantica del lector tiene que preguntar por la misma
-            # anchura con la que se escribio message_embeddings (vector(1024)).
-            - { name: EMBEDDING_DIMENSION, value: "1024" }
+            # Busqueda semantica: en el brain (INFRA-486/487), el unico indice
+            # vectorial de WhatsApp/Telegram. La API (pods `skirmshop-brain`),
+            # no la de ingesta. La clave con alcance BRAIN_MESSAGING_SEARCH_KEY
+            # llega por envFrom (item 1Password `whatsapp-mcp`); sin ella la
+            # tool busca solo por texto y lo dice en `fallbackReason`.
+            - { name: BRAIN_SEARCH_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
             - name: MCP_SSE_AUTH_TOKEN
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-sse-secrets, key: MCP_SSE_AUTH_TOKEN } }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]

@@ -1,8 +1,7 @@
 import { Pool } from 'pg';
-import OpenAI from 'openai';
 import pino from 'pino';
 import { accountKey, type Account } from '../domain/account';
-import { accountNamespaces } from '../domain/account-registry';
+import { accountNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
 import { mediaTypePredicate, messageTypesFor, type MediaType } from './media-type-filter';
 
 export interface SearchResult {
@@ -45,28 +44,97 @@ export function searchLimit(limit: unknown): number {
   return Math.min(n, MAX_SEARCH_LIMIT);
 }
 
+/**
+ * Semantic search lives in the brain (INFRA-486/487, Dani 04-10-2026): one
+ * vector index for the WhatsApp/Telegram conversations, the Qdrant collections
+ * that `brain-windows` already feeds (ADR 0002). This service no longer embeds
+ * anything: it asks `POST /instances/{instance}/search` for the conversation
+ * chunks that match, scoped to the tool's account/channel/chat/dates, and
+ * resolves their `message_ids` against `messages` here, where the filters the
+ * brain does not have (sender, mediaType, deletions, the exact time window) live.
+ */
+export interface BrainSearchConfig {
+  url: string;
+  apiKey: string;
+  timeoutMs: number;
+  /**
+   * Relevance floor on the brain's score (its reranker's, bge-reranker-v2-m3).
+   * Below it a chunk is noise and the search falls through to keyword search.
+   */
+  minScore: number;
+}
+
+/** A conversation chunk is stamped with its first message (`observed_at`):
+ *  one that starts before `from` can still hold messages after it. The brain
+ *  is asked a day earlier and the exact cut is applied per message here. */
+const CHUNK_WINDOW_SLACK_MS = 24 * 60 * 60 * 1000;
+/** The brain caps a search at 50 hits (`/search` top-k). */
+const BRAIN_MAX_HITS = 50;
+
+function envNumber(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return value !== undefined && value.trim() !== '' && Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * The brain only opens messaging conversations to its scoped messaging key
+ * (`BRAIN_MESSAGING_SEARCH_KEY`, INFRA-487): `/search` only, the messaging
+ * instances only, always with an account. The shared key cannot lift the
+ * `skirmshop` audience filter nor read `leila`, so without the scoped key there
+ * is no semantic search, and the tool says so instead of half-working.
+ */
+export function brainSearchConfigFromEnv(
+  env: NodeJS.ProcessEnv = process.env
+): BrainSearchConfig | null {
+  const url = (env.BRAIN_SEARCH_URL || '').trim().replace(/\/+$/, '');
+  const apiKey = (env.BRAIN_MESSAGING_SEARCH_KEY || '').trim();
+  if (!url || !apiKey) return null;
+  return {
+    url,
+    apiKey,
+    timeoutMs: envNumber(env.BRAIN_SEARCH_TIMEOUT_MS, 8000),
+    minScore: envNumber(env.SEMANTIC_MIN_SCORE, DEFAULT_SEMANTIC_MIN_SCORE),
+  };
+}
+
+export const DEFAULT_SEMANTIC_MIN_SCORE = 0.2;
+
+interface BrainScope {
+  instance: string;
+  account: Account;
+  conversationIds?: string[];
+}
+
+interface BrainChunk {
+  score: number;
+  messageIds: string[];
+}
+
+export type SearchMode = 'semantic' | 'text';
+
+export interface SearchOutcome {
+  results: SearchResult[];
+  mode: SearchMode;
+  /** Why the keyword branch answered: no semantic match, or the brain failed. */
+  fallbackReason?: string;
+}
+
+type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
 export class SearchService {
-  private openai: OpenAI;
   private dbClient: Pool;
   private logger: pino.Logger;
-  private readonly EMBEDDING_MODEL: string;
-  private readonly EMBEDDING_DIMENSION: number;
+  private readonly brain: BrainSearchConfig | null;
+  private readonly fetchImpl: FetchLike;
 
-  constructor(openaiApiKey: string, dbClient: Pool, _encryptionKey: string, llmBaseUrl?: string) {
-    // The query vector must come from the SAME model that wrote message_embeddings.
-    // EmbeddingService (the writer) talks to EMBEDDING_BASE_URL — bge-m3,
-    // vector(1024) in prod; this reader was pointed at the LiteLLM chat route with
-    // a hardcoded text-embedding-3-small (1536 dims), which the `socialmedia` key
-    // cannot use and which would not have fit the column either way: every semantic
-    // search died here and silently fell back to keyword search.
-    const baseURL = process.env.EMBEDDING_BASE_URL || llmBaseUrl || undefined;
-    this.EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'bge-m3';
-    this.EMBEDDING_DIMENSION = parseInt(process.env.EMBEDDING_DIMENSION || '1024', 10);
-    this.openai = new OpenAI({
-      apiKey: openaiApiKey || 'not-needed',
-      ...(baseURL && { baseURL }),
-    });
+  constructor(
+    dbClient: Pool,
+    brain: BrainSearchConfig | null = brainSearchConfigFromEnv(),
+    fetchImpl: FetchLike = (url, init) => fetch(url, init)
+  ) {
     this.dbClient = dbClient;
+    this.brain = brain;
+    this.fetchImpl = fetchImpl;
     this.logger = pino({
       transport: {
         target: 'pino-pretty',
@@ -74,7 +142,9 @@ export class SearchService {
       },
     });
     this.logger.info(
-      `SearchService: modelo=${this.EMBEDDING_MODEL} dim=${this.EMBEDDING_DIMENSION} baseURL=${baseURL || 'openai-default'}`
+      brain
+        ? `SearchService: búsqueda semántica en el brain ${brain.url} (corte ${brain.minScore})`
+        : 'SearchService: BRAIN_SEARCH_URL o BRAIN_MESSAGING_SEARCH_KEY sin configurar, solo búsqueda de texto'
     );
   }
 
@@ -180,146 +250,209 @@ export class SearchService {
   }
 
   /**
-   * Performs semantic search using vector similarity
+   * Semantic search in the brain (INFRA-486): the conversation chunks that
+   * match, scoped to the tool's filters, resolved to the messages they hold.
+   *
+   * Every hit is a chunk of 3-8 consecutive messages (ADR 0002 §2): its messages
+   * come back in chunk order (best first) and, inside a chunk, in time order,
+   * each with the chunk's score as `similarity`. Throws if the brain cannot be
+   * asked, so `searchDetailed` can say why it fell back.
    */
   async semanticSearch(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
-    const { chatId, from, to, sender } = options;
+    if (!this.brain)
+      throw new Error('BRAIN_SEARCH_URL o BRAIN_MESSAGING_SEARCH_KEY sin configurar');
+    // Instagram does not go through brain-windows: there are no chunks to find.
+    if (options.platform === 'instagram') return [];
     const limit = searchLimit(options.limit);
+    const scopes = this.brainScopes(options);
+    if (!scopes.length) return [];
 
-    // Generate embedding for query.
-    // `encoding_format: 'float'` no es opcional: desde openai-node 4.104 el SDK
-    // pide `base64` por defecto, el servicio de embeddings (TEI propio) lo ignora
-    // y devuelve la lista de floats de siempre, que el SDK entonces decodifica mal
-    // — 1024 floats llegaban como 256 números. El escritor (EmbeddingService) ya
-    // lo pasaba; sin esto el vector del query no cabe en vector(1024) y toda
-    // búsqueda cae a texto.
-    const response = await this.openai.embeddings.create({
-      model: this.EMBEDDING_MODEL,
-      input: query,
-      encoding_format: 'float',
+    const perScope = await Promise.all(
+      scopes.map(scope => this.askBrain(query, scope, options, limit))
+    );
+    const chunks = perScope
+      .flat()
+      .filter(c => c.score >= (this.brain as BrainSearchConfig).minScore)
+      .sort((a, b) => b.score - a.score);
+    if (!chunks.length) return [];
+
+    const best = new Map<string, { score: number; order: number }>();
+    chunks.forEach((chunk, order) => {
+      for (const id of chunk.messageIds) {
+        if (!best.has(id)) best.set(id, { score: chunk.score, order });
+      }
     });
+    const rows = await this.messagesById([...best.keys()], options);
+    return rows
+      .map(row => ({ row, rank: best.get(row.wa_message_id) as { score: number; order: number } }))
+      .sort(
+        (a, b) =>
+          a.rank.order - b.rank.order ||
+          new Date(a.row.wa_timestamp).getTime() - new Date(b.row.wa_timestamp).getTime()
+      )
+      .slice(0, limit)
+      .map(({ row, rank }) => ({
+        messageId: row.message_id,
+        conversationId: row.conversation_id,
+        content: row.content || '',
+        senderWaId: row.sender_wa_id,
+        waTimestamp: row.wa_timestamp,
+        similarity: rank.score,
+        platform: row.platform,
+        account: row.account,
+        messageType: row.message_type,
+      }));
+  }
 
-    const queryEmbedding = response.data[0].embedding;
-    // A vector of another width is a wrong-model bug, not a miss: say which,
-    // instead of letting Postgres fail on the <=> operator.
-    if (queryEmbedding.length !== this.EMBEDDING_DIMENSION) {
-      throw new Error(
-        `embedding del query: ${queryEmbedding.length} dims, y message_embeddings es vector(${this.EMBEDDING_DIMENSION}) con ${this.EMBEDDING_MODEL}`
-      );
+  /**
+   * One brain query per account in scope: each account's conversations live
+   * in its own brain instance (`brainInstance` in the account registry), and
+   * the account goes in the filter too, so a search never returns another
+   * account's chunks even if two ever shared an instance.
+   */
+  private brainScopes(options: SearchOptions): BrainScope[] {
+    const namespaces = options.account ? [options.account] : accountNamespaces();
+    const scopes: BrainScope[] = [];
+    for (const account of namespaces) {
+      const instance = brainInstanceForNamespace(account);
+      if (!instance) continue;
+      const scope: BrainScope = { instance, account };
+      if (options.chatId) {
+        scope.conversationIds = [
+          options.rawIds ? options.chatId : accountKey(account, options.chatId),
+        ];
+      }
+      scopes.push(scope);
     }
-    const embeddingVector = `[${queryEmbedding.join(',')}]`;
+    return scopes;
+  }
 
+  private async askBrain(
+    query: string,
+    scope: BrainScope,
+    options: SearchOptions,
+    limit: number
+  ): Promise<BrainChunk[]> {
+    const brain = this.brain as BrainSearchConfig;
+    const filters: Record<string, unknown> = {
+      account: scope.account,
+      types: ['conversation_chunk'],
+    };
+    if (options.platform) filters.platform = options.platform;
+    if (scope.conversationIds) filters.conversation_ids = scope.conversationIds;
+    if (options.from)
+      filters.from = new Date(options.from.getTime() - CHUNK_WINDOW_SLACK_MS).toISOString();
+    if (options.to) filters.to = options.to.toISOString();
+
+    const response = await this.fetchImpl(
+      `${brain.url}/instances/${encodeURIComponent(scope.instance)}/search`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(brain.apiKey ? { 'X-API-Key': brain.apiKey } : {}),
+        },
+        body: JSON.stringify({
+          query,
+          limit: Math.min(limit, BRAIN_MAX_HITS),
+          filters,
+          // The chunk with ITS message ids, not the whole parent window.
+          expand_windows: false,
+          // `skirmshop` hides WhatsApp/Telegram from its customer chat; the
+          // professional account's conversations live there and this caller
+          // is internal.
+          include_internal: true,
+        }),
+        signal: AbortSignal.timeout(brain.timeoutMs),
+      }
+    );
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => '')).slice(0, 200);
+      throw new Error(`brain ${scope.instance} ${response.status}: ${detail}`);
+    }
+    const body = (await response.json()) as {
+      documents?: Array<{ score?: number; metadata?: Record<string, unknown> }>;
+    };
+    return (body.documents || [])
+      .filter(
+        d => d.metadata?.type === 'conversation_chunk' && d.metadata?.account === scope.account
+      )
+      .map(d => ({
+        score: Number(d.score) || 0,
+        messageIds: Array.isArray(d.metadata?.message_ids)
+          ? (d.metadata?.message_ids as unknown[]).map(String)
+          : [],
+      }))
+      .filter(c => c.messageIds.length > 0);
+  }
+
+  /** The rows behind a set of `wa_message_id`s, with the tool's filters applied exactly. */
+  private async messagesById(waMessageIds: string[], options: SearchOptions) {
     let sql = `
-      SELECT 
+      SELECT
         m.id as message_id,
+        m.wa_message_id,
         m.conversation_id,
         m.content,
         m.sender_wa_id,
         m.wa_timestamp,
         m.platform,
         m.account,
-        m.message_type,
-        1 - (me.embedding <=> $1::vector) as similarity
+        m.message_type
       FROM messages m
-      JOIN message_embeddings me ON m.id = me.message_id
-      WHERE 1 - (me.embedding <=> $1::vector) > 0.7
+      WHERE m.wa_message_id = ANY($1::text[])
         AND (m.is_deleted IS NULL OR m.is_deleted = false)
     `;
-
-    const params: unknown[] = [embeddingVector];
+    const params: unknown[] = [waMessageIds];
     let paramIndex = 2;
-
+    const add = (clause: string, value: unknown) => {
+      sql += ` AND ${clause.replace('?', `$${paramIndex}`)}`;
+      params.push(value);
+      paramIndex++;
+    };
+    const { chatId, from, to, sender } = options;
     if (chatId) {
-      if (options.rawIds) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(chatId);
-      } else if (options.account) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(accountKey(options.account, chatId));
-      } else {
-        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(chatId));
-      }
-      paramIndex++;
+      if (options.rawIds) add('m.conversation_id = ?', chatId);
+      else if (options.account) add('m.conversation_id = ?', accountKey(options.account, chatId));
+      else add('m.conversation_id = ANY(?::text[])', inEveryNamespace(chatId));
     }
-
-    if (from) {
-      sql += ` AND m.wa_timestamp >= $${paramIndex}`;
-      params.push(from);
-      paramIndex++;
-    }
-
-    if (to) {
-      sql += ` AND m.wa_timestamp <= $${paramIndex}`;
-      params.push(to);
-      paramIndex++;
-    }
-
+    if (from) add('m.wa_timestamp >= ?', from);
+    if (to) add('m.wa_timestamp <= ?', to);
     if (sender) {
-      if (options.rawIds) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(sender);
-      } else if (options.account) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(accountKey(options.account, sender));
-      } else {
-        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(sender));
-      }
-      paramIndex++;
+      if (options.rawIds) add('m.sender_wa_id = ?', sender);
+      else if (options.account) add('m.sender_wa_id = ?', accountKey(options.account, sender));
+      else add('m.sender_wa_id = ANY(?::text[])', inEveryNamespace(sender));
     }
-
-    if (options.account) {
-      sql += ` AND m.account = $${paramIndex}`;
-      params.push(options.account);
-      paramIndex++;
-    }
-    if (options.platform) {
-      sql += ` AND m.platform = $${paramIndex}`;
-      params.push(options.platform);
-      paramIndex++;
-    }
+    if (options.account) add('m.account = ?', options.account);
+    if (options.platform) add('m.platform = ?', options.platform);
     const messageTypes = messageTypesFor(options.mediaType);
     if (messageTypes) {
       sql += mediaTypePredicate('m', paramIndex);
       params.push(messageTypes);
       paramIndex++;
     }
-
-    sql += ` ORDER BY similarity DESC, m.wa_timestamp DESC LIMIT $${paramIndex}`;
-    params.push(limit);
-
     const result = await this.dbClient.query(sql, params);
-
-    return result.rows.map(row => ({
-      messageId: row.message_id,
-      conversationId: row.conversation_id,
-      content: row.content || '',
-      senderWaId: row.sender_wa_id,
-      waTimestamp: row.wa_timestamp,
-      similarity: parseFloat(row.similarity),
-      platform: row.platform,
-      account: row.account,
-      messageType: row.message_type,
-    }));
+    return result.rows;
   }
 
   /**
-   * Hybrid search: combines keyword and semantic search
+   * Semantic first (the brain), keyword second (Postgres full-text), and it
+   * says which one answered and why the second one had to.
    */
-  async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
-    // Try semantic search first, fallback to keyword search
+  async searchDetailed(query: string, options: SearchOptions = {}): Promise<SearchOutcome> {
+    let fallbackReason = 'sin coincidencias semánticas';
     try {
       const semanticResults = await this.semanticSearch(query, options);
-      if (semanticResults.length > 0) {
-        return semanticResults;
-      }
+      if (semanticResults.length > 0) return { results: semanticResults, mode: 'semantic' };
     } catch (error) {
-      this.logger.warn(`Semantic search failed, falling back to keyword search: ${error}`);
+      fallbackReason = `búsqueda semántica no disponible: ${(error as Error)?.message || error}`;
+      this.logger.warn(`Semantic search failed, falling back to keyword search: ${fallbackReason}`);
     }
+    return { results: await this.keywordSearch(query, options), mode: 'text', fallbackReason };
+  }
 
-    // Fallback to keyword search
-    return this.keywordSearch(query, options);
+  async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+    return (await this.searchDetailed(query, options)).results;
   }
 }
 
