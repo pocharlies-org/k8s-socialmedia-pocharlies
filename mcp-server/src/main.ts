@@ -6,7 +6,6 @@ import { Pool } from 'pg';
 import { EventConsumers } from './infrastructure/events/consumers';
 import { MessageIngestionService } from './application/message-ingestion.service';
 import { InstagramIngestionService } from './application/instagram-ingestion.service';
-import { EmbeddingJob } from './infrastructure/jobs/embedding-job';
 
 // SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -18,7 +17,6 @@ if (!DATABASE_URL) {
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-change-in-production';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 async function main() {
@@ -54,22 +52,14 @@ async function main() {
     console.log(`Ingestion health endpoint listening on port ${PORT}`);
   });
 
-  // Start embedding job only if OPENAI_API_KEY is configured
-  let embeddingJob: EmbeddingJob | null = null;
-  if (OPENAI_API_KEY) {
-    embeddingJob = new EmbeddingJob(NATS_URL, dbPool, OPENAI_API_KEY, ENCRYPTION_KEY, NATS_CA_CERT);
-    await embeddingJob.start();
-    console.log('Embedding pipeline started (OpenAI)');
-  } else {
-    console.log('OPENAI_API_KEY not set - embedding pipeline disabled');
-  }
+  // Embeddings: none here. Semantic search lives in the brain (INFRA-486/487),
+  // fed by the brain-windows CronJob; this process only ingests.
 
   console.log('MCP Server message ingestion pipeline started');
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`${signal} received, shutting down...`);
-    if (embeddingJob) await embeddingJob.stop();
     await consumers.disconnect();
     await dbPool.end();
     healthServer.close();

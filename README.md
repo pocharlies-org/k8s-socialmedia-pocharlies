@@ -1,6 +1,6 @@
 # mcp-socialmedia
 
-Personal-use MCP (Model Context Protocol) server that bridges WhatsApp, Telegram and Instagram to Claude / LLMs. Stores messages in PostgreSQL + pgvector, caches in Redis, files in MinIO, events in NATS. LLM access via LiteLLM proxy.
+Personal-use MCP (Model Context Protocol) server that bridges WhatsApp, Telegram and Instagram to Claude / LLMs. Stores messages in PostgreSQL (semantic search lives in the brain), caches in Redis, files in MinIO, events in NATS. LLM access via LiteLLM proxy.
 
 Repo: `git@github.com:pocharlies/whatsappmcp.git` (the directory is `mcp-socialmedia`; the GitHub name is legacy).
 
@@ -76,7 +76,7 @@ LLM_CHAT_MODEL=...                           # whatever LiteLLM is routing
 
 Falls back to OpenAI `gpt-4o-mini` if `LLM_BASE_URL` is unset.
 
-Embeddings: pgvector + bge-m3 via infinity-emb. The OpenAI SDK must use `encoding_format: 'float'` — see [MEMORY](./.claude/projects/-home-dibanez-mcp-socialmedia/memory/openai_sdk_v4_base64_dim_bug.md).
+Semantic search: in the brain (`skirmshop-brain`, `POST /instances/{id}/search` with `filters`), the single vector index of the WhatsApp/Telegram conversations that the `brain-windows` CronJob pushes (INFRA-486/487). This repo stores no vectors.
 
 ## Quick start
 
@@ -153,10 +153,9 @@ WHATSAPP_WEBHOOK_VERIFY_TOKEN=
 LLM_BASE_URL=http://litellm-router:4000/v1
 LLM_CHAT_MODEL=
 
-# Embeddings
-EMBEDDING_BASE_URL=http://bge-m3-embedding:8000/v1
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSION=1024
+# Semantic search (brain)
+BRAIN_SEARCH_URL=http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local
+BRAIN_MESSAGING_SEARCH_KEY=
 
 # Sending
 ENABLE_SENDING=true

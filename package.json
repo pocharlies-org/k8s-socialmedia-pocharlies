@@ -16,8 +16,7 @@
     "import:whatsapp-db": "tsx scripts/import-data.ts whatsapp-db",
     "import:whatsapp-txt": "tsx scripts/import-data.ts whatsapp-txt",
     "import:telegram": "tsx scripts/import-data.ts telegram",
-    "snapshot:whatsapp-history": "bash scripts/whatsapp-history-snapshot.sh",
-    "backfill:embeddings": "pnpm --filter @mcp-socialmedia/server backfill:embeddings"
+    "snapshot:whatsapp-history": "bash scripts/whatsapp-history-snapshot.sh"
   },
   "dependencies": {
     "minio": "^7.1.3"

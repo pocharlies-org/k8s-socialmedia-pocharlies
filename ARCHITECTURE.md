@@ -1,7 +1,7 @@
 # ARCHITECTURE.md — k8s-socialmedia-pocharlies
 
 > `mcp-socialmedia` (el repo GitHub histórico se llama `whatsappmcp`): conectores de WhatsApp, Telegram e Instagram, servidor MCP y
-> manifiestos. Guarda mensajes en Postgres+pgvector, caché Redis, ficheros MinIO, eventos NATS. **Monorepo código + k8s.**
+> manifiestos. Guarda mensajes en Postgres (la búsqueda semántica, en el brain: INFRA-486), caché Redis, ficheros MinIO, eventos NATS. **Monorepo código + k8s.**
 > Escrito por `architect` (SC-1426).
 
 ## 1. Clientes y versiones
@@ -17,7 +17,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 
 ## 2. Dependencias, en ambos sentidos
 
-- **Depende de** — Postgres compartido + pgvector, Redis/Valkey, MinIO, NATS (`whatsapp-mcp-nats.whatsapp-mcp`), LiteLLM, Meta Graph/Cloud
+- **Depende de** — Postgres compartido, el brain (`skirmshop-brain`, búsqueda semántica `/instances/{id}/search`), Redis/Valkey, MinIO, NATS (`whatsapp-mcp-nats.whatsapp-mcp`), LiteLLM, Meta Graph/Cloud
   API, Baileys parcheado (`patches/@whiskeysockets__baileys@7.0.0-rc13.patch`), Harbor, 1Password/ExternalSecrets.
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
   (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 67 entradas** (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,

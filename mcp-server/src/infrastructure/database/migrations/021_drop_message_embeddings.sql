@@ -1,0 +1,14 @@
+-- 021 — pgvector out: semantic search lives in the brain (INFRA-486, Dani 04-10-2026)
+--
+-- message_embeddings was a second vector index of the same WhatsApp/Telegram
+-- text, with the same model (bge-m3, vector(1024)) the brain already uses for
+-- the conversation windows that brain-windows pushes (ADR 0002). Decision: one
+-- index, the brain's. social_search_messages asks the brain since #206; its
+-- writer (EmbeddingService + the NATS embedding job) and its backfill are gone
+-- in the same change as this file.
+--
+-- What is lost: ~357k derived vectors (measured 04-10), regenerable from
+-- `messages` and no longer read by anything (git grep across ~/k8s and ~/src:
+-- only this repo ever touched the table). The `vector` extension stays: other
+-- objects may use it and dropping it is not this file's business.
+DROP TABLE IF EXISTS message_embeddings;

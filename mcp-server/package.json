@@ -12,7 +12,6 @@
     "db:migrate": "tsx src/infrastructure/database/migrate.ts",
     "instagram:validate": "INSTAGRAM_BACKFILL_VALIDATE_ONLY=true tsx src/jobs/instagram-backfill.ts",
     "instagram:backfill": "tsx src/jobs/instagram-backfill.ts",
-    "backfill:embeddings": "tsx src/infrastructure/jobs/backfill-embeddings.ts",
     "lint": "eslint src --ext .ts",
     "test": "pnpm --filter @mcp-socialmedia/shared run build && jest",
     "test:watch": "jest --watch",

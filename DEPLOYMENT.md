@@ -10,7 +10,7 @@ The setup is a **single-host docker-compose** stack on x86 at `192.168.50.142`. 
 ┌────────────────── x86  192.168.50.142 ────────────────────┐
 │                                                            │
 │  Infra (docker-compose.yml):                              │
-│    postgres (pgvector)  redis  nats  minio                │
+│    postgres             redis  nats  minio                │
 │                                                            │
 │  Connectors:                                               │
 │    whatsapp-connector       :3001  (whatsapp-web.js)      │
@@ -32,7 +32,7 @@ The setup is a **single-host docker-compose** stack on x86 at `192.168.50.142`. 
 - mTLS certs in [certs/](./certs/) (regenerate with [scripts/generate-certs.sh](./scripts/generate-certs.sh))
 - A populated `.env` (see [README.md](./README.md#key-environment))
 - LiteLLM proxy reachable at `LLM_BASE_URL` (separate stack — not part of this repo)
-- Embedding server reachable at `EMBEDDING_BASE_URL` (e.g. `bge-m3-embedding:8000/v1`)
+- Brain API reachable at `BRAIN_SEARCH_URL` with `BRAIN_MESSAGING_SEARCH_KEY` for semantic search (without them `social_search_messages` is text-only and says so)
 
 ## Deploying changes
 

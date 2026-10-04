@@ -98,12 +98,6 @@ spec:
           value: 'false'
         - name: MINIO_BUCKET
           value: socialmedia-media
-        - name: EMBEDDING_BASE_URL
-          value: http://bge-m3-embedding.llm.svc.cluster.local:8000/v1
-        - name: EMBEDDING_MODEL
-          value: bge-m3
-        - name: EMBEDDING_DIMENSION
-          value: '1024'
         - name: WA_RECONNECT_BACKFILL_WINDOW_HOURS
           value: '6'
         - name: WA_RECONNECT_BACKFILL_MAX_MESSAGES
@@ -287,12 +281,6 @@ spec:
           value: 'false'
         - name: MINIO_BUCKET
           value: socialmedia-media
-        - name: EMBEDDING_BASE_URL
-          value: http://bge-m3-embedding.llm.svc.cluster.local:8000/v1
-        - name: EMBEDDING_MODEL
-          value: bge-m3
-        - name: EMBEDDING_DIMENSION
-          value: '1024'
         - name: WA_RECONNECT_BACKFILL_WINDOW_HOURS
           value: '6'
         - name: WA_RECONNECT_BACKFILL_MAX_MESSAGES
@@ -476,12 +464,6 @@ spec:
           value: 'false'
         - name: MINIO_BUCKET
           value: socialmedia-media
-        - name: EMBEDDING_BASE_URL
-          value: http://bge-m3-embedding.llm.svc.cluster.local:8000/v1
-        - name: EMBEDDING_MODEL
-          value: bge-m3
-        - name: EMBEDDING_DIMENSION
-          value: '1024'
         - name: WA_RECONNECT_BACKFILL_WINDOW_HOURS
           value: '6'
         - name: WA_RECONNECT_BACKFILL_MAX_MESSAGES

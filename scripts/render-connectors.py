@@ -182,11 +182,6 @@ def render_whatsapp(account):
             _env("S3_PRESIGN_EXPIRY_SECONDS", "3600"),
         ]
     env += S3_ENV
-    env += [
-        _env("EMBEDDING_BASE_URL", "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1"),
-        _env("EMBEDDING_MODEL", "bge-m3"),
-        _env("EMBEDDING_DIMENSION", "1024"),
-    ]
     if d["allowWebRenew"]:
         # First, not last: it used to arrive via an overlay strategic-merge
         # patch, which prepends; keeping the position keeps the live pod spec

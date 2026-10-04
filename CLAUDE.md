@@ -2,7 +2,7 @@
 
 ## Qué es
 
-Servidor MCP multi-plataforma (WhatsApp + Telegram + Instagram) que expone tools a Claude/LLMs por SSE. Almacena mensajes en Postgres+pgvector, usa Redis (cache), MinIO (ficheros) y NATS (event bus). LLM vía LiteLLM.
+Servidor MCP multi-plataforma (WhatsApp + Telegram + Instagram) que expone tools a Claude/LLMs por SSE. Almacena mensajes en Postgres (la búsqueda semántica vive en el brain, INFRA-486), usa Redis (cache), MinIO (ficheros) y NATS (event bus). LLM vía LiteLLM.
 
 ## Dónde corre
 
