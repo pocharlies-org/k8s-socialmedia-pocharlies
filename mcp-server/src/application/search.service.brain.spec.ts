@@ -193,7 +193,7 @@ it('sin URL o sin la clave de mensajería no hay búsqueda semántica', async ()
   expect(brainSearchConfigFromEnv({ BRAIN_SEARCH_URL: 'http://brain/', BRAIN_MESSAGING_SEARCH_KEY: 'k' })).toEqual({
     url: 'http://brain',
     apiKey: 'k',
-    timeoutMs: 8000,
+    timeoutMs: 10000,
     minScore: DEFAULT_SEMANTIC_MIN_SCORE,
   });
   expect(
