@@ -49,8 +49,8 @@ images:
   # /health por sub del conector IG (puerta por actor de social_list_accounts) y,
   # de paso, SC-1258 #96 (tolerar 0 cuentas de env con CREDENTIAL_STORE_ENABLED).
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.74
-    digest: sha256:b69814790dbdb288a5053bb9e11d9a23c20ba5cffc2e8ade71e35ded8df8aeb9
+    newTag: instagram-076af514cff0c79203b12132aa562e96cec2ce69
+    digest: sha256:3c9fc23b9471c6f5bf169824413542b836c29bdf7c6858b748010d116af207db
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
