@@ -101,6 +101,8 @@ done
 
 # 5. WhatsApp — pair phone (first time)
 curl http://localhost:3001/api/v1/auth/qr   # scan with WhatsApp mobile
+# In k8s: QR page at https://whatsapp.e-dani.com/qr/page (Keycloak SSO login first).
+# LAN: https://whatsapp-pro.lan.e-dani.com/qr/page and https://whatsapp-leila.lan.e-dani.com/qr/page
 
 # 6. Telegram — generate session string (first time)
 docker compose exec telegram-connector npx tsx src/generate-session.ts
