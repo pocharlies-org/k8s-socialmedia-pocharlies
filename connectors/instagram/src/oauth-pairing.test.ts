@@ -213,11 +213,37 @@ test('long-lived exchange enforces the 60-day floor', async () => {
   assert.equal(out.accessToken, 'EAAL-long');
   assert.ok(out.expiresAt > Date.now() + 50 * 24 * 3600 * 1000, '≈60 days ahead');
 
+  // Medido 05-10-2026 emparejando @skirmshopES: Meta cuenta los 60 días desde
+  // el instante de emisión, así que un token legítimo llega con 5183999. Con el
+  // suelo exacto el pairing fallaba siempre (el 400 que veía el usuario).
+  const metaRoundsDown = metaFetch({
+    '/access_token': () => ({
+      access_token: 'EAAL-meta',
+      token_type: 'bearer',
+      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 1,
+    }),
+  });
+  const outMeta = await exchangeForLongLivedToken('SHORT', CONFIG, metaRoundsDown.fetch);
+  assert.equal(outMeta.accessToken, 'EAAL-meta');
+
   const shorty = metaFetch({
     '/access_token': () => ({ access_token: 'EAAL', token_type: 'bearer', expires_in: 3600 }),
   });
   await assert.rejects(
     exchangeForLongLivedToken('SHORT', CONFIG, shorty.fetch),
+    /refusing tokens under 5184000/
+  );
+
+  // Fuera de la holgura, un token recortado de verdad se sigue rechazando.
+  const tooShort = metaFetch({
+    '/access_token': () => ({
+      access_token: 'EAAL',
+      token_type: 'bearer',
+      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 3600,
+    }),
+  });
+  await assert.rejects(
+    exchangeForLongLivedToken('SHORT', CONFIG, tooShort.fetch),
     /refusing tokens under 5184000/
   );
 });
@@ -264,6 +290,17 @@ test('refresh hits refresh_access_token with ig_refresh_token and keeps the floo
   const url = new URL(calls[0]);
   assert.equal(url.searchParams.get('grant_type'), 'ig_refresh_token');
   assert.equal(url.searchParams.get('access_token'), 'EAAL-current');
+
+  // Misma cuenta atrás de Meta en el refresh (medido 05-10-2026).
+  const metaRoundsDown = metaFetch({
+    '/refresh_access_token': () => ({
+      access_token: 'EAAL-next',
+      token_type: 'bearer',
+      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 68,
+    }),
+  });
+  const outMeta = await refreshInstagramToken('EAAL-current', metaRoundsDown.fetch);
+  assert.equal(outMeta.accessToken, 'EAAL-next');
 
   const bad = metaFetch({
     '/refresh_access_token': () => ({ access_token: 'X', expires_in: 60 }),
