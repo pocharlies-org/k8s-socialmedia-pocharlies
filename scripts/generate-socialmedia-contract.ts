@@ -1,5 +1,11 @@
 #!/usr/bin/env tsx
 
+// CONTRACT: mcp.socialmedia-tools.v2 — este generador es la superficie del catálogo
+// de tools MCP registrada en CONTRACTS.yaml: nombres, effect, authScope y esquemas
+// nunca se renombran ni se borran (breaking = .vN+1 al lado); el digest se propaga a
+// contracts/socialmedia-tools.{json,md}, mcp-server/src/mcp/contract.generated.ts y
+// las anotaciones de k8s/base/manifest.yaml. Gate: `pnpm contract:check`.
+
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

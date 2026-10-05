@@ -1,6 +1,6 @@
 /**
- * Image quality and play-once of a WhatsApp media send (ported from the NAS
- * fork's media-quality.ts and its sendFile options).
+ * Image quality, play-once and the audio payload of a WhatsApp media send
+ * (ported from the NAS fork's media-quality.ts and its sendFile options).
  *
  * - `quality`: `source` (default, what /messages/media/send always did: the
  *   fetched bytes go out untouched), `standard` (long edge 1600 px, JPEG 80)
@@ -65,6 +65,30 @@ export function checkMediaOptions(
       );
     }
   }
+}
+
+/**
+ * The Baileys payload for an audio attachment (INFRA-592).
+ *
+ * OGG/Opus is WhatsApp's voice note: it must go out with `ptt: true` and the
+ * `audio/ogg; codecs=opus` mimetype. Sent as a plain audio message
+ * (`ptt: false`) WhatsApp accepts it, stores it — status stops at `sent` and
+ * it is NEVER delivered (measured 05-10: two AUDIO sends stuck at `sent`;
+ * the same clip through `sendVoice` reached `read`). Other audio (mp3…)
+ * keeps the audio-message form. No caption: WhatsApp's `AudioMessage` has no
+ * caption field (baileys drops it via `fromObject`) — the text of a send
+ * with attachments already goes out as its own message upstream.
+ */
+export function audioMessagePayload(
+  contentType: string,
+  buf: Buffer
+): { audio: Buffer; mimetype: string; ptt: boolean } {
+  const voice = /ogg|opus/.test(contentType.toLowerCase());
+  return {
+    audio: buf,
+    mimetype: voice ? 'audio/ogg; codecs=opus' : contentType,
+    ptt: voice,
+  };
 }
 
 export async function prepareImageQuality(

@@ -78,9 +78,10 @@ const attachment = {
         'an S3 client; s3:// only appears in READ results because ingestion presigns them), ' +
         'and internal hosts that resolve to nothing (labels.local-style). The response ' +
         'Content-Type decides the WhatsApp message type: image/* → photo, video/* → video, ' +
-        'audio/* → audio, anything else → document (fileName taken from the URL last path ' +
-        'segment, so prefer URLs ending in the real filename). Telegram fetches http(s) ' +
-        'connector-side too; non-http paths pass through and fail for cluster-internal URLs.',
+        'audio/ogg → native voice note (ptt), other audio/* → audio message, anything else → ' +
+        'document (fileName taken from the URL last path segment, so prefer URLs ending in ' +
+        'the real filename). Telegram fetches http(s) connector-side too; non-http paths ' +
+        'pass through and fail for cluster-internal URLs.',
     },
     name: { type: 'string' },
     mimeType: { type: 'string' },

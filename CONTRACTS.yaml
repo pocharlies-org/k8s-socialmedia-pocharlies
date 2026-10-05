@@ -7,8 +7,9 @@
 # later parts of SC-1197 (P1b social-api, P2 status, P4b telegram) add their
 # entries in the same push as the surface.
 #
-# The MCP tool contract stays where it is (contracts/socialmedia-tools.*,
-# checked by `pnpm contract:check`); it is not duplicated here.
+# The MCP tool contract keeps generating outside the registry
+# (contracts/socialmedia-tools.*, checked by `pnpm contract:check`); its
+# surface is registered as mcp.socialmedia-tools.v2.
 #
 # Enforced by the generic checker — k8s-gitops-pocharlies/scripts/check-contracts.py
 # — from the global pre-push hook and as a CI backstop.
@@ -2301,3 +2302,26 @@ contracts:
       Consumidor: el workflow <tenant>.brain.conversation-window-deleted de
       pocharlies-org/synapse → brain.delete_document. Renombrar la clave o
       los campos es breaking: nueva entrada .v2.
+  - id: mcp.socialmedia-tools.v2
+    kind: mcp-tools
+    value: socialmedia-tools
+    role: publisher
+    files:
+      - scripts/generate-socialmedia-contract.ts
+      - mcp-server/src/mcp/tool-registry.contract.spec.ts
+    status: active
+    note: >-
+      El catálogo de tools MCP (73) se genera desde
+      mcp-server/src/mcp/tool-registry.ts y el generador propaga el digest a cuatro
+      puntos: contracts/socialmedia-tools.{json,md},
+      mcp-server/src/mcp/contract.generated.ts y las dos anotaciones
+      contracts.e-dani.com/socialmedia-digest de k8s/base/manifest.yaml. Su gate es
+      `pnpm contract:check`. Consumidor: AgentGateway /social vende el catálogo en
+      k8s-agentgateway-pocharlies/backends/social/socialmedia-tools.json y deriva de él su
+      ledger CEL y su anotación de digest (scripts/generate-social-authorization.py
+      --write, CI en modo --check): un bump del digest exige re-venderlo allí, y nada
+      detecta la deriva (check-mcp-coverage.py compara la anotación contra su propia copia
+      vendida). Los nombres de tool, effect, authScope y los esquemas nunca se renombran ni
+      se borran: breaking es .vN+1 al lado; un cambio de solo descripción es `migrate`.
+      INFRA-592: descripción de social_send_message.attachments[].url (ogg/opus → nota de
+      voz nativa), digest sha256:e30a45214c5bc91b836454ccce87a4f9c515771cd8f51231ad8b0feb60c0993d.

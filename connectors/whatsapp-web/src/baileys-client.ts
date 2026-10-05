@@ -264,6 +264,7 @@ import {
 } from './presence';
 import { createHash } from 'crypto';
 import {
+  audioMessagePayload,
   checkMediaOptions,
   MediaQuality,
   parseMediaQuality,
@@ -2984,7 +2985,9 @@ export class BaileysClient extends EventEmitter {
       } else payload = { image: buf, caption, ...once };
     } else if (contentType.startsWith('video/')) payload = { video: buf, caption, ...once };
     else if (contentType.startsWith('audio/'))
-      payload = { audio: buf, mimetype: contentType, ptt: false };
+      // INFRA-592: OGG/Opus goes out as the native voice note (ptt:true);
+      // sent as a plain audio message WhatsApp never delivers it.
+      payload = audioMessagePayload(contentType, buf);
     else
       payload = {
         document: buf,
