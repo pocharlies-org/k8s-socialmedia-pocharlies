@@ -149,6 +149,14 @@ spec:
             cidr: 100.71.117.127/32 # ks5-cp-2
         - ipBlock:
             cidr: 100.75.189.75/32  # ks5-cp-3
+        # INFRA-560: inter-node traffic over the flannel overlay arrives source-NATed
+        # to the sender node's flannel.1 address (10.42.0.0 — not its tailnet /32),
+        # so the /32 allowlist alone 502s the callback whenever traefik-edge lands on
+        # a node other than the one hosting instagram-connector (ks5-cp-3). Same
+        # ipBlock the sibling whatsapp-mcp-allow-traefik-http already carries. The
+        # /32s above are kept: they cover the tailnet path.
+        - ipBlock:
+            cidr: 10.42.0.0/16  # flannel.1 node IPs — source NAT of the pod overlay
       ports:
         - protocol: TCP
           port: 3003
