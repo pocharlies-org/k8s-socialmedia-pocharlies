@@ -388,6 +388,16 @@ spec:
             - { name: CREDENTIAL_STORE_ENABLED, value: "false" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: INSTAGRAM_OAUTH_REDIRECT_URI, value: "https://whatsapp.e-dani.com/oauth/instagram/callback" }
+            # Instagram Login (graph.instagram.com) authorize exige el **Instagram App ID**
+            # (1869504556900523, alias de la app de Meta 1431837657952463); con el id de
+            # Facebook www.instagram.com/oauth/authorize corta con «Invalid platform app»
+            # (medido 06-10-2026, pairing @skirmshopES). No es un secreto: va en git, no en
+            # el Secret, que se re-renderiza desde 1Password (external-secrets force-sync
+            # 05-10-2026 23:14Z borró las dos claves que estaban añadidas a mano y el conector
+            # cayó al fallback de Facebook con el reinicio del pin). El secreto de intercambio
+            # sigue siendo FACEBOOK_APP_SECRET — la caída de `ig_exchange_token` con el id de
+            # Instagram es lo que diría que hace falta INSTAGRAM_LOGIN_APP_SECRET aparte.
+            - { name: INSTAGRAM_LOGIN_APP_ID, value: "1869504556900523" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 30m, memory: 64Mi }
