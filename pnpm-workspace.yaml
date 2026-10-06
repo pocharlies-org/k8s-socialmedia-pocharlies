@@ -38,6 +38,11 @@ overrides:
   # 4.x — so the peer range is stale metadata, not a real incompatibility.
   # Drop this override once baileys widens the range.
   link-preview-js: ^4.0.1
+  # CVE-2026-90711 is fixed in 2.0.8. proxy-addr is transitive: express 4.22.2 and
+  # 5.2.1 both declare `~2.0.7`, so 2.0.8 is inside the range the parents already
+  # ask for. `pnpm update proxy-addr` will not move a transitive, so the resolver
+  # is pointed at it here. Drop this entry when express ships a lock on 2.0.8.
+  proxy-addr: ^2.0.8
 
 # pnpm >=10 blocks postinstall scripts unless listed here. Only the ones that
 # genuinely need to run are enabled, so the runtime images stay free of a native
