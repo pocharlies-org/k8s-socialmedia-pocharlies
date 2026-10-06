@@ -11,6 +11,7 @@ import { createHmac } from 'node:crypto';
 import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import {
   IG_AUTHORIZE_URL,
+  IG_MIN_ACCEPTED_EXPIRES_IN,
   IG_MIN_LONG_LIVED_EXPIRES_IN,
   PairingFetch,
   PairingResponse,
@@ -213,38 +214,39 @@ test('long-lived exchange enforces the 60-day floor', async () => {
   assert.equal(out.accessToken, 'EAAL-long');
   assert.ok(out.expiresAt > Date.now() + 50 * 24 * 3600 * 1000, '≈60 days ahead');
 
-  // Medido 05-10-2026 emparejando @skirmshopES: Meta cuenta los 60 días desde
-  // el instante de emisión, así que un token legítimo llega con 5183999. Con el
-  // suelo exacto el pairing fallaba siempre (el 400 que veía el usuario).
-  const metaRoundsDown = metaFetch({
-    '/access_token': () => ({
-      access_token: 'EAAL-meta',
-      token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 1,
-    }),
-  });
-  const outMeta = await exchangeForLongLivedToken('SHORT', CONFIG, metaRoundsDown.fetch);
-  assert.equal(outMeta.accessToken, 'EAAL-meta');
+  // Meta ancla la caducidad a la emisión del token ORIGINAL (el short-lived
+  // vive hasta 24 h), así que un token legítimo llega recortado: medidos
+  // 5183999 y 5183932 (05-10-2026) y 5124806 (06-10-2026, 16,4 h por debajo).
+  for (const [token, expiresIn] of [
+    ['EAAL-meta', IG_MIN_LONG_LIVED_EXPIRES_IN - 1],
+    ['EAAL-meta-24h', 5_124_806],
+  ] as const) {
+    const { fetch } = metaFetch({
+      '/access_token': () => ({ access_token: token, token_type: 'bearer', expires_in: expiresIn }),
+    });
+    const outMeta = await exchangeForLongLivedToken('SHORT', CONFIG, fetch);
+    assert.equal(outMeta.accessToken, token);
+  }
 
   const shorty = metaFetch({
     '/access_token': () => ({ access_token: 'EAAL', token_type: 'bearer', expires_in: 3600 }),
   });
   await assert.rejects(
     exchangeForLongLivedToken('SHORT', CONFIG, shorty.fetch),
-    /refusing tokens under 5184000/
+    /refusing tokens under 5011200/
   );
 
-  // Fuera de la holgura, un token recortado de verdad se sigue rechazando.
+  // Fuera de la holgura (2 días), un token recortado de verdad se rechaza.
   const tooShort = metaFetch({
     '/access_token': () => ({
       access_token: 'EAAL',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 3600,
+      expires_in: IG_MIN_ACCEPTED_EXPIRES_IN - 3600,
     }),
   });
   await assert.rejects(
     exchangeForLongLivedToken('SHORT', CONFIG, tooShort.fetch),
-    /refusing tokens under 5184000/
+    /refusing tokens under 5011200/
   );
 });
 
@@ -305,7 +307,7 @@ test('refresh hits refresh_access_token with ig_refresh_token and keeps the floo
   const bad = metaFetch({
     '/refresh_access_token': () => ({ access_token: 'X', expires_in: 60 }),
   });
-  await assert.rejects(refreshInstagramToken('EAAL', bad.fetch), /refusing tokens under 5184000/);
+  await assert.rejects(refreshInstagramToken('EAAL', bad.fetch), /refusing tokens under 5011200/);
 });
 
 // ── session key convention ───────────────────────────────────────────────

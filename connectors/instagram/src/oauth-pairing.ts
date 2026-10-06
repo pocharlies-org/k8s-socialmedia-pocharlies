@@ -56,14 +56,14 @@ export const IG_PAIRING_SCOPES = [
 /** 60 days — the long-lived token the epic's criterion 3 demands. */
 export const IG_MIN_LONG_LIVED_EXPIRES_IN = 5_184_000;
 /**
- * Meta counts the 60 days down from the moment it issues the token, so a
- * genuine long-lived one arrives a few seconds short: measured 05-10-2026
- * pairing @skirmshopES, `ig_exchange_token` answered 5183999 and 5183932 and
- * both were refused by an exact 5184000 floor — the pairing could never
- * finish. The floor is enforced with this slack; a short-lived token
- * (1 h = 3600 s) stays rejected by a wide margin.
+ * Meta anchors the long-lived expiry to the issuance instant of the ORIGINAL
+ * short-lived token (which lives up to 24 h), so a genuine long-lived one can
+ * arrive up to ~24 h short of 60 days. Measured pairing @skirmshopES:
+ * 5183999 and 5183932 (05-10-2026, refused by a 300 s slack) and 5124806
+ * (06-10-2026, 16.4 h short — refused by the 300 s slack too). Slack = 2 days;
+ * a short-lived token (1 h = 3600 s) stays rejected by a wide margin.
  */
-export const IG_LONG_LIVED_SLACK_S = 300;
+export const IG_LONG_LIVED_SLACK_S = 172_800;
 export const IG_MIN_ACCEPTED_EXPIRES_IN = IG_MIN_LONG_LIVED_EXPIRES_IN - IG_LONG_LIVED_SLACK_S;
 
 /** Meta: only tokens at least 24 h old may be refreshed. */
@@ -284,7 +284,7 @@ export async function exchangeForLongLivedToken(
   }
   if (typeof data.expires_in !== 'number' || data.expires_in < IG_MIN_ACCEPTED_EXPIRES_IN) {
     throw new Error(
-      `instagram long-lived exchange returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_LONG_LIVED_EXPIRES_IN}s (60 days)`
+      `instagram long-lived exchange returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_ACCEPTED_EXPIRES_IN}s (60-day floor with slack)`
     );
   }
   const now = Date.now();
@@ -345,7 +345,7 @@ export async function refreshInstagramToken(
   }
   if (typeof data.expires_in !== 'number' || data.expires_in < IG_MIN_ACCEPTED_EXPIRES_IN) {
     throw new Error(
-      `instagram token refresh returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_LONG_LIVED_EXPIRES_IN}s`
+      `instagram token refresh returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_ACCEPTED_EXPIRES_IN}s (60-day floor with slack)`
     );
   }
   return {
