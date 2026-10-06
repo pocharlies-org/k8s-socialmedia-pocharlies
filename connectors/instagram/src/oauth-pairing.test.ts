@@ -1,9 +1,9 @@
 /**
  * SC-1194 P1 (SC-1143): Instagram Login pairing plumbing, Meta mocked.
  * Covers epic criteria 2 and 3 at code+test level: authorize URL shape, state
- * signing, the 60-day floor on the long-lived exchange, refresh, and the
- * store.put under the sub's session_key (envelope crypto itself is specced
- * under the mcp-server jest harness for shared/).
+ * signing, the short-token tripwire floor on the long-lived exchange, refresh,
+ * and the store.put under the sub's session_key (envelope crypto itself is
+ * specced under the mcp-server jest harness for shared/).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,6 @@ import { createHmac } from 'node:crypto';
 import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import {
   IG_AUTHORIZE_URL,
-  IG_MIN_LONG_LIVED_EXPIRES_IN,
   PairingFetch,
   PairingResponse,
   buildAuthorizeUrl,
@@ -26,6 +25,15 @@ import {
   signPairingState,
   verifyPairingState,
 } from './oauth-pairing';
+
+/**
+ * Real long-lived `expires_in` measured from Meta pairing @skirmshopES on
+ * 06-10-2026 (59,31 days). Meta counts the 60 days down from the moment it
+ * issues the token and has moved the TTL twice in 24 h — 5183999 and 5183932
+ * were measured on 05-10 — so "a genuine long-lived token" is this measured
+ * value, never a fixture derived from the floor constant (INFRA-611).
+ */
+const META_LONG_LIVED_EXPIRES_IN = 5124806;
 
 const STATE_SECRET = deriveStateSecret(Buffer.alloc(32, 7));
 const CONFIG = {
@@ -201,51 +209,70 @@ test('code exchange posts the authorization_code grant server-side', async () =>
   assert.match(body, /client_secret=test-app-secret/);
 });
 
-test('long-lived exchange enforces the 60-day floor', async () => {
-  const { fetch } = metaFetch({
+test('long-lived exchange enforces the 7-day tripwire floor', async () => {
+  // INFRA-611 C1: 06-10-2026 emparejando @skirmshopES, Meta respondió
+  // ig_exchange_token con 5124806 (59,31 días) y el suelo clavado junto a los
+  // 60 días nominales lo rechazaba: el pairing moría en el callback.
+  const measured = metaFetch({
     '/access_token': () => ({
       access_token: 'EAAL-long',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+      expires_in: META_LONG_LIVED_EXPIRES_IN,
     }),
   });
-  const out = await exchangeForLongLivedToken('SHORT', CONFIG, fetch);
+  const out = await exchangeForLongLivedToken('SHORT', CONFIG, measured.fetch);
   assert.equal(out.accessToken, 'EAAL-long');
-  assert.ok(out.expiresAt > Date.now() + 50 * 24 * 3600 * 1000, '≈60 days ahead');
+  assert.ok(out.expiresAt > Date.now() + 50 * 24 * 3600 * 1000, '≈59 days ahead');
 
-  // Medido 05-10-2026 emparejando @skirmshopES: Meta cuenta los 60 días desde
-  // el instante de emisión, así que un token legítimo llega con 5183999. Con el
-  // suelo exacto el pairing fallaba siempre (el 400 que veía el usuario).
-  const metaRoundsDown = metaFetch({
+  // Medidos 05-10-2026: Meta cuenta los 60 días desde el instante de emisión,
+  // así que un token legítimo llega recortado.
+  for (const expiresIn of [5183999, 5183932]) {
+    const { fetch } = metaFetch({
+      '/access_token': () => ({
+        access_token: 'EAAL-meta',
+        token_type: 'bearer',
+        expires_in: expiresIn,
+      }),
+    });
+    const accepted = await exchangeForLongLivedToken('SHORT', CONFIG, fetch);
+    assert.equal(accepted.accessToken, 'EAAL-meta', `measured long-lived ${expiresIn} is accepted`);
+  }
+
+  // Borde del suelo: la guarda rechaza solo por debajo en sentido estricto.
+  const edge = metaFetch({
     '/access_token': () => ({
-      access_token: 'EAAL-meta',
+      access_token: 'EAAL-edge',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 1,
+      expires_in: 604800,
     }),
   });
-  const outMeta = await exchangeForLongLivedToken('SHORT', CONFIG, metaRoundsDown.fetch);
-  assert.equal(outMeta.accessToken, 'EAAL-meta');
+  const outEdge = await exchangeForLongLivedToken('SHORT', CONFIG, edge.fetch);
+  assert.equal(outEdge.accessToken, 'EAAL-edge', 'exactly 7 days is accepted');
 
-  const shorty = metaFetch({
-    '/access_token': () => ({ access_token: 'EAAL', token_type: 'bearer', expires_in: 3600 }),
-  });
-  await assert.rejects(
-    exchangeForLongLivedToken('SHORT', CONFIG, shorty.fetch),
-    /refusing tokens under 5184000/
-  );
-
-  // Fuera de la holgura, un token recortado de verdad se sigue rechazando.
-  const tooShort = metaFetch({
+  const underEdge = metaFetch({
     '/access_token': () => ({
       access_token: 'EAAL',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 3600,
+      expires_in: 604799,
     }),
   });
   await assert.rejects(
-    exchangeForLongLivedToken('SHORT', CONFIG, tooShort.fetch),
-    /refusing tokens under 5184000/
+    exchangeForLongLivedToken('SHORT', CONFIG, underEdge.fetch),
+    /refusing tokens under 604800/
   );
+
+  // El fallo que el suelo existe para cazar: un token corto (1 h) colado como
+  // largo nunca se guarda (criterio 3 de la épica). El mensaje nombra el
+  // valor recibido y el grant del canje.
+  const shorty = metaFetch({
+    '/access_token': () => ({ access_token: 'EAAL', token_type: 'bearer', expires_in: 3600 }),
+  });
+  await assert.rejects(exchangeForLongLivedToken('SHORT', CONFIG, shorty.fetch), err => {
+    assert.match((err as Error).message, /expires_in=3600/);
+    assert.match((err as Error).message, /refusing tokens under 604800/);
+    assert.match((err as Error).message, /ig_exchange_token/);
+    return true;
+  });
 });
 
 test('long-lived exchange sends ig_exchange_token and the client secret', async () => {
@@ -253,7 +280,7 @@ test('long-lived exchange sends ig_exchange_token and the client secret', async 
     '/access_token': () => ({
       access_token: 'EAAL',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+      expires_in: META_LONG_LIVED_EXPIRES_IN,
     }),
   });
   await exchangeForLongLivedToken('SHORT', CONFIG, fetch);
@@ -282,7 +309,7 @@ test('refresh hits refresh_access_token with ig_refresh_token and keeps the floo
     '/refresh_access_token': () => ({
       access_token: 'EAAL-next',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+      expires_in: META_LONG_LIVED_EXPIRES_IN,
     }),
   });
   const out = await refreshInstagramToken('EAAL-current', fetch);
@@ -291,21 +318,32 @@ test('refresh hits refresh_access_token with ig_refresh_token and keeps the floo
   assert.equal(url.searchParams.get('grant_type'), 'ig_refresh_token');
   assert.equal(url.searchParams.get('access_token'), 'EAAL-current');
 
-  // Misma cuenta atrás de Meta en el refresh (medido 05-10-2026).
-  const metaRoundsDown = metaFetch({
+  // INFRA-611 C2: el refresh aplica el mismo suelo que el canje, y un
+  // long-lived real medido (5124806) debe pasar también aquí.
+  const boundary = metaFetch({
     '/refresh_access_token': () => ({
       access_token: 'EAAL-next',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN - 68,
+      expires_in: 604800,
     }),
   });
-  const outMeta = await refreshInstagramToken('EAAL-current', metaRoundsDown.fetch);
-  assert.equal(outMeta.accessToken, 'EAAL-next');
+  const outEdge = await refreshInstagramToken('EAAL-current', boundary.fetch);
+  assert.equal(outEdge.accessToken, 'EAAL-next', 'exactly 7 days is accepted on refresh');
+
+  const shorty = metaFetch({
+    '/refresh_access_token': () => ({ access_token: 'X', expires_in: 3600 }),
+  });
+  await assert.rejects(refreshInstagramToken('EAAL', shorty.fetch), /refusing tokens under 604800/);
 
   const bad = metaFetch({
     '/refresh_access_token': () => ({ access_token: 'X', expires_in: 60 }),
   });
-  await assert.rejects(refreshInstagramToken('EAAL', bad.fetch), /refusing tokens under 5184000/);
+  await assert.rejects(refreshInstagramToken('EAAL', bad.fetch), err => {
+    assert.match((err as Error).message, /expires_in=60/);
+    assert.match((err as Error).message, /refusing tokens under 604800/);
+    assert.match((err as Error).message, /ig_refresh_token/);
+    return true;
+  });
 });
 
 // ── session key convention ───────────────────────────────────────────────
@@ -347,14 +385,14 @@ test('session key: first account under sub, second under sub:username', () => {
 
 // ── full pairing orchestration ───────────────────────────────────────────
 
-test('pairing stores the 60-day credential under the sub (criterion 2)', async () => {
+test('pairing stores the long-lived credential under the sub (criterion 2)', async () => {
   const store = new FakeStore();
   const { fetch, calls } = metaFetch({
     'api.instagram.com/oauth/access_token': () => ({ access_token: 'SHORT', user_id: '178' }),
     'grant_type=ig_exchange_token': () => ({
       access_token: 'EAAL-long',
       token_type: 'bearer',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+      expires_in: META_LONG_LIVED_EXPIRES_IN,
     }),
     '/me?': () => ({
       id: '17841444094675941',
@@ -384,8 +422,8 @@ test('pairing stores the 60-day credential under the sub (criterion 2)', async (
   assert.equal(put.payload.businessAccountId, '17841444094675941');
   assert.equal(put.payload.username, 'skirmshopes');
   assert.ok(
-    (put.payload.expiresAt as number) >= now + (IG_MIN_LONG_LIVED_EXPIRES_IN - 5) * 1000,
-    'expiry recorded ~60 days out'
+    (put.payload.expiresAt as number) >= now + (META_LONG_LIVED_EXPIRES_IN - 5) * 1000,
+    'expiry recorded from the measured 59-day expires_in'
   );
   assert.equal(put.payload.issuedAt, now);
 });
@@ -414,7 +452,7 @@ test('pairing of a second account lands under sub:username', async () => {
     'api.instagram.com/oauth/access_token': () => ({ access_token: 'SHORT' }),
     'grant_type=ig_exchange_token': () => ({
       access_token: 'EAAL-two',
-      expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+      expires_in: META_LONG_LIVED_EXPIRES_IN,
     }),
     '/me?': () => ({ id: '222', username: 'barbelpapis' }),
   });
