@@ -197,9 +197,11 @@ Flow (Instagram API with Instagram Login — Meta's standard OAuth, per the CTO 
    `whatsapp.e-dani.com` at the edge, mirrored for LAN/tailnet by
    `lan-instagram-callback` in k8s-infra, 5bcfb28 — SC-1254; the netpol
    `whatsapp-mcp-allow-traefik-instagram` admits the traefik-edge hostNetwork sources as a per-node /32
-   allowlist, 8bfa7d1). Code → short-lived token → 60-day long-lived exchange
+   allowlist, 8bfa7d1). Code → short-lived token → ~60-day long-lived exchange
    (`graph.instagram.com/v21.0/access_token?grant_type=ig_exchange_token`) runs
-   server-side; tokens under 5.184.000 s of `expires_in` are refused.
+   server-side; tokens under 604.800 s (7 days) of `expires_in` are refused — a
+   tripwire against storing a short-lived token as long-lived, not a promise about
+   Meta's TTL (nominal ~60 days, measured drifting; INFRA-611).
 3. The credential lands via `store.put` under `session_key = <sub>` (or
    `<sub>:<account>` for a second account). A caller with no row gets an explicit
    `no instagram credential for this user` — house tokens are never adopted, another
