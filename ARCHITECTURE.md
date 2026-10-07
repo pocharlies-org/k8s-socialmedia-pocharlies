@@ -20,7 +20,8 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 - **Depende de** — Postgres compartido + pgvector, Redis/Valkey, MinIO, NATS (`whatsapp-mcp-nats.whatsapp-mcp`), LiteLLM, Meta Graph/Cloud
   API, Baileys parcheado (`patches/@whiskeysockets__baileys@7.0.0-rc13.patch`), Harbor, 1Password/ExternalSecrets.
 - **Búsqueda semántica → `skirmshop-brain`** (API `POST /instances/{instancia}/search`, `BRAIN_SEARCH_URL`; clave con alcance
-  `BRAIN_MESSAGING_SEARCH_KEY`, que sembrará INFRA-637: el brain exige `filters.account`). Hacia el otro lado, el brain depende de
+  `BRAIN_MESSAGING_SEARCH_KEY`, Secret `whatsapp-mcp-brain-search` (item 1Password `brain-messaging-search`) montado solo en `mcp-sse`, INFRA-637:
+  el brain exige `filters.account`). Hacia el otro lado, el brain depende de
   `brain-windows` (este repo) para su contenido.
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
   (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 67 entradas** (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
@@ -79,7 +80,7 @@ Total de casos Jest: **pendiente de medir**.
 - Nombres heredados: directorio `mcp-socialmedia`, repo `whatsappmcp`, imágenes `whatsappmcp-*`: no renombrar (rompe pins y contratos).
 - WhatsApp Web personal usa sesión persistente: perderla exige re-emparejar (`http.whatsapp-pairing…`).
 - `auto-reply-worker` personal está deshabilitado (tombstone): las respuestas de WhatsApp Business las lleva Synapse.
-- `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). Sin `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) la búsqueda semántica queda dormida y todo cae a texto.
+- `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) llega a `mcp-sse` por el ExternalSecret `whatsapp-mcp-brain-search` (item `brain-messaging-search`, el mismo que lee el brain: lo compara por igualdad), con `secretKeyRef` **sin `optional`**: `mcp-sse` es `Recreate` con `hostPort: 3010`, así que sin el Secret el pod no arranca y cae todo `/social`; el item se crea antes de fusionar. Con el brain caído o un valor distinto (401) la búsqueda cae a texto con `fallbackReason`. `mcp-server` no la monta: nadie lo llama (el gateway va a `mcp-sse:3010`). ArgoCD no evalúa la salud de un ExternalSecret aquí: la sync-wave `-1` del ES ordena su creación, no espera al Secret.
 - Envío 1:1 sin tctoken (SKIRM-92): `outbound_history` cuenta cualquier OUTBOUND no fallido de la conversación canónica (enviado desde el móvil del dueño o por el conector tras el guard). Un envío que WhatsApp rechaza con 463 solo deja de contar si `setMessageStatus` (`'failed'`) llega después de que exista la fila; un ack muy temprano la deja contando.
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 

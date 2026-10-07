@@ -69,6 +69,37 @@ spec:
       remoteRef: { key: whatsapp-mcp-synapse-rabbitmq/url }
 
 ---
+# INFRA-637: clave de busqueda de mensajeria del brain (BRAIN_MESSAGING_SEARCH_KEY:
+# solo POST /instances/{id}/search, siempre con filters.account). Item propio
+# `brain-messaging-search` (vault k8s-pocharlies, campo `password`), el MISMO que
+# lee skirmshop-brain-secrets en skirmshop-brain-k8s: el brain compara por
+# igualdad. Solo la monta mcp-sse (el gateway vive en mcp-sse:3010; nadie llama a
+# mcp-server). Forma Connect (onepassword-connect, key + property).
+# sync-wave -1: mcp-sse es Recreate con hostPort y su secretKeyRef no es optional;
+# ArgoCD crea este ES antes de tocar el Deployment (onda 0). Ojo: aqui ArgoCD no
+# evalua la salud de un ExternalSecret, asi que la onda ordena la creacion, no espera
+# a que el Secret exista; con el item presente el pod que gane la carrera reintenta
+# solo. Sin item, mcp-sse queda en CreateContainerConfigError y /social cae.
+# NO se fusiona hasta que el item exista: op://k8s-pocharlies/brain-messaging-search/password.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: whatsapp-mcp-brain-search
+  namespace: whatsapp-mcp
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword-connect, kind: ClusterSecretStore }
+  target:
+    name: whatsapp-mcp-brain-search
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: BRAIN_MESSAGING_SEARCH_KEY
+      remoteRef: { key: brain-messaging-search, property: password }
+
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -557,9 +588,15 @@ spec:
             # Busqueda semantica: en el brain (INFRA-486/487), el unico indice
             # vectorial de WhatsApp/Telegram. La API (pods `skirmshop-brain`),
             # no la de ingesta. La clave con alcance BRAIN_MESSAGING_SEARCH_KEY
-            # llega por envFrom (item 1Password `whatsapp-mcp`); sin ella la
-            # tool busca solo por texto y lo dice en `fallbackReason`.
+            # llega del Secret `whatsapp-mcp-brain-search` (item 1Password
+            # `brain-messaging-search`, INFRA-637), SIN optional a proposito: si
+            # faltara, un pod que arrancara sin ella caeria a texto en silencio;
+            # asi falla a la vista (y el ES con sync-wave -1 llega antes). El
+            # brain responde 401 si el valor no es el suyo y la tool lo dice en
+            # `fallbackReason`.
             - { name: BRAIN_SEARCH_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
+            - name: BRAIN_MESSAGING_SEARCH_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-brain-search, key: BRAIN_MESSAGING_SEARCH_KEY } }
             - name: MCP_SSE_AUTH_TOKEN
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-sse-secrets, key: MCP_SSE_AUTH_TOKEN } }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
