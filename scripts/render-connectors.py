@@ -151,6 +151,7 @@ def whatsapp_defaults(account_id):
         # F1.7 honest voice: presign voice notes to S3 before the NATS emit.
         "emitAudioAttachments": False,
         "allowWebRenew": False,
+        "connectorMemoryLimit": "512Mi",
         "env": [],  # extra env appended last
     }
 
@@ -218,7 +219,7 @@ def render_whatsapp(account):
                     "envFrom": SECRETS_ENV_FROM,
                     "resources": {
                         "requests": {"cpu": "50m", "memory": "128Mi"},
-                        "limits": {"memory": "512Mi"},
+                        "limits": {"memory": d["connectorMemoryLimit"]},
                     },
                     "readinessProbe": {
                         "httpGet": {"path": "/api/v1/health", "port": 3001},
