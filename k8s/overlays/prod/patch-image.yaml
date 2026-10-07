@@ -26,6 +26,10 @@
 # media we send is stored (upsert `append`), document fileName, reply quotes in
 # metadata, no self-link in 1:1 chats, privacy-hidden avatar = 404. Digest
 # resolved from Harbor (skopeo). whatsapp-pairing stays on v1.3.91.
+#
+# SKIRM-92 07-10: the three house whatsapp-connector* advance v1.3.99 -> v1.3.103
+# (run 37680671534, deploy/prod@db096e9: #224 — el guard 1:1 cuenta el historial
+# OUTBOUND). Digest checked against Harbor (crane). whatsapp-pairing stays on v1.3.91.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,7 +40,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.99@sha256:6cab95123d55e4964e3a849f6b29b69d01ee0505c070f563089b61f84e031a7e
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.103@sha256:0d742e13875e958ce596d3e5e903edb2bb07c0c1bb386fa03b79dc244d5daf71
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -48,7 +52,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.99@sha256:6cab95123d55e4964e3a849f6b29b69d01ee0505c070f563089b61f84e031a7e
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.103@sha256:0d742e13875e958ce596d3e5e903edb2bb07c0c1bb386fa03b79dc244d5daf71
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 apiVersion: apps/v1
@@ -61,7 +65,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-leila
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.99@sha256:6cab95123d55e4964e3a849f6b29b69d01ee0505c070f563089b61f84e031a7e
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.103@sha256:0d742e13875e958ce596d3e5e903edb2bb07c0c1bb386fa03b79dc244d5daf71
 ---
 apiVersion: apps/v1
 kind: Deployment
