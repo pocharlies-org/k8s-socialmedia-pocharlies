@@ -29,9 +29,9 @@ overrides:
   # Reaches us through @nestjs/platform-express, which still ships 2.0.2.
   # CVE-2026-77037, CVE-2026-77078 and CVE-2026-82333 are fixed in 2.3.0.
   multer: ^2.3.0
-  # GHSA-rgj7-g3m4-5g8c is fixed in 0.35.4. Reaches us as a peer of the image
+  # GHSA-wq5f-xc86-pv6w (librsvg) is fixed in 0.35.5. Reaches us as a peer of the image
   # pipeline; the 0.35.x API is unchanged.
-  sharp: ^0.35.4
+  sharp: ^0.35.5
   # CVE-2026-43897 is fixed in 4.0.1. baileys 7.0.0-rc13 (the newest release)
   # still declares a `^3.0.0` peer range, but it only ever calls
   # `getLinkPreview(text, options?)`, whose name and signature are unchanged in
