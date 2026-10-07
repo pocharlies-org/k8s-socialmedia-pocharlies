@@ -8,9 +8,10 @@
 
 | cliente | repositorio / ruta | versión desplegada | cómo se despliega |
 |---|---|---|---|
-| `whatsapp-connector` (Baileys, :3001), `telegram-connector` (gramjs, :3002), `telegram-sync` (telethon, :3080), `instagram-connector` (:3003), `whatsapp-cloud-connector` (:3004) | `connectors/*` | imágenes por `tag@digest` (p. ej. instagram `sha-985a199ea567@sha256:38c14176…`; pool `v1.3.57`) | ArgoCD app `socialmedia` |
+| `whatsapp-connector` (Baileys, :3001), `telegram-connector` (gramjs, :3002), `telegram-sync` (telethon, :3080), `instagram-connector` (:3003), `whatsapp-cloud-connector` (:3004); `whatsapp-pairing` (:3001) y `telegram-pairing` (:3002) son la misma imagen del conector con `start:pairing` (pools por `sub`, hoy `replicas: 0`) | `connectors/*` | imágenes por `tag@digest` (p. ej. instagram `sha-985a199ea567@sha256:38c14176…`; pool `v1.3.57`) | ArgoCD app `socialmedia` |
 | `mcp-server` (:3000) y `mcp-sse` (:3010), superficie en `contracts/socialmedia-tools.json` | `mcp-server/src` | digest del `mcp-server`, compartido con los CronJobs de digest | ídem |
 | Puente Synapse | `connectors/whatsapp-synapse-bridge` | digest | ídem |
+| Consola `dgx-messages` (lee `/social` y las rutas de los conectores; ver su `ARCHITECTURE.md`) | repo `dgx-messages` (tronco `main`) | imagen propia en Harbor, pin por digest en su `k8s/deployment.yaml` | ArgoCD app `dgx-messages` (ns `messages`), no desde este repo |
 
 Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGateway `/social`; un cambio de herramienta toca el catálogo
 `contracts/socialmedia-tools.json` y el gateway.
@@ -24,7 +25,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
   el brain exige `filters.account`). Hacia el otro lado, el brain depende de
   `brain-windows` (este repo) para su contenido.
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
-  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 67 entradas** (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
+  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 94 entradas** (`grep -c '^  - id:' CONTRACTS.yaml`) (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
   más `contracts/socialmedia-tools.json`): nunca renombrar, solo `.vN+1` + `Contract-Change:`.
 - **ArgoCD** `socialmedia`: repo `pocharlies-org/k8s-socialmedia-pocharlies`, path `k8s/overlays/prod`, tronco **`deploy/prod`**
   (`origin/deploy/prod` = 5a06f33), sync automático `prune: false`.
@@ -50,7 +51,8 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Doc de la API social | `docs/social-api.md`, ADRs en `docs/adr` | `docs/` | operadores |
 | ¿Es un primer contacto 1:1? (evidencia de contacto conocido) | `BaileysClient.knownDirectContactEvidence` + `chat-state.ts` `hasInboundHistory` / `hasOutboundHistory` | `connectors/whatsapp-web/src/` | todas las rutas de envío 1:1, vía `guardDirectSend` |
 | Búsqueda semántica de mensajes | `mcp-server/src/application/search.service.ts` `SearchService.semanticSearch` | `mcp-server/src/application/` | `MCPServer.handleSearchMessages`; una instancia caída sale como `meta.partialErrors` (`completeness: 'partial'`), no tumba las demás |
-| Clave opaca por cuenta (`personal` sin prefijo, el resto namespaceadas — migración 002) | `mcp-server/src/domain/account.ts` (`accountKey` / `normalizeAccount`) | `mcp-server/src/domain/` | MCP y job de embeddings; `connectors/telegram-sync/sync/db.py` es **espejo en Python** de la misma regla (no puede importar TS): cambiar una sin la otra deja mensajes sin embedding |
+| Clave opaca por cuenta (`personal` sin prefijo, el resto namespaceadas — migración 002) | `mcp-server/src/domain/account.ts` (`accountKey` / `normalizeAccount`) | `mcp-server/src/domain/` | MCP y job de embeddings; hay **tres copias** de la misma regla: la de `mcp-server`, `connectors/whatsapp-web/src/db-writer.ts` (`accountKey`, línea 40) y el espejo en Python de `connectors/telegram-sync/sync/db.py` (no puede importar TS): cambiar una sin las otras deja mensajes sin embedding |
+| Recuperación de medios de Telegram (reintento con espera creciente, estado en `messages.metadata`) | `media_recovery.run` + `db.pending_media` / `db.media_transaction` / `db.media_result` | `connectors/telegram-sync/sync/` | `telegram-sync` (una tarea por cuenta, junto al consumidor NATS y la historia); pide el mensaje exacto a `GET /api/v1/messages/single/:chatId/:msgId` y los bytes a `.../messages/media/...` del conector |
 
 ## 5. Cómo se construye aquí
 
@@ -63,13 +65,18 @@ reconexión de WhatsApp acotado (`WA_RECONNECT_BACKFILL_*`, INFRA-112). `CLAUDE.
 ```sh
 python3 scripts/render-connectors.py --check && python3 -m unittest scripts/test_render_connectors.py
 pnpm -r test                                  # jest (mcp-server, conectores)
-python -m pytest connectors/telegram-sync/tests   # 14 casos (edits 4, voice_unwrap 10)
+python -m pytest connectors/telegram-sync/tests   # 33 casos (edits 4, insert_message 2, media_backlog_postgres 3, media_recovery 14, voice_unwrap 10)
+pnpm --filter ./connectors/telegram test          # 77 casos, node:test con lista explícita de ficheros en package.json
 ```
+Los tests de telegram-sync con PostgreSQL (`test_edits`, `test_media_backlog_postgres`, la carrera de `test_media_recovery`) se saltan sin
+`TELEGRAM_SYNC_TEST_DATABASE_URL`, y un «skipped» no es un pase. Los tests de los conectores TS no son jest ni `supertest`: `tsx --test` sobre una
+lista explícita en `connectors/*/package.json` (un test nuevo que no se añade ahí no corre nunca en CI), y las pruebas HTTP arrancan la app y llaman con `fetch`.
 Total de casos Jest: **pendiente de medir**.
 
 ## 7. CI/CD y despliegue
 
-- `ci.yml` (`arc-k8s`): render-check del generado, tests de Node/Python; `release.yml` (`workflow_dispatch`) →
+- `ci.yml` (`arc-k8s`): render-check del generado, tests de Node/Python (el job `telegram-sync-tests` levanta un PostgreSQL 16 y fija
+  `TELEGRAM_SYNC_TEST_DATABASE_URL`); `release.yml` (`workflow_dispatch`) →
   `reusable-release.yml@5cbfd9dd…`; `release-instagram.yml`, `release-telegram-albums.yml`, `promote-telegram-albums.yml`, `deploy-stg.yml`.
 - Despliegue: build de imagen → PR que sube `tag@digest` en `k8s/overlays/prod` → merge a `deploy/prod` → ArgoCD. **Validación en producción**:
   `social_list_accounts`/`social_validate_account` vía `/social`, un mensaje de prueba, estado de sesión de WhatsApp. Synced ≠ funcionando.
@@ -82,6 +89,12 @@ Total de casos Jest: **pendiente de medir**.
 - `auto-reply-worker` personal está deshabilitado (tombstone): las respuestas de WhatsApp Business las lleva Synapse.
 - `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) llega a `mcp-sse` por el ExternalSecret `whatsapp-mcp-brain-search` (item `brain-messaging-search`, el mismo que lee el brain: lo compara por igualdad), con `secretKeyRef` **sin `optional`**: `mcp-sse` es `Recreate` con `hostPort: 3010`, así que sin el Secret el pod no arranca y cae todo `/social`; el item se crea antes de fusionar. Con el brain caído o un valor distinto (401) la búsqueda cae a texto con `fallbackReason`. `mcp-server` no la monta: nadie lo llama (el gateway va a `mcp-sse:3010`). ArgoCD no evalúa la salud de un ExternalSecret aquí: la sync-wave `-1` del ES ordena su creación, no espera al Secret.
 - Envío 1:1 sin tctoken (SKIRM-92): `outbound_history` cuenta cualquier OUTBOUND no fallido de la conversación canónica (enviado desde el móvil del dueño o por el conector tras el guard). Un envío que WhatsApp rechaza con 463 solo deja de contar si `setMessageStatus` (`'failed'`) llega después de que exista la fila; un ack muy temprano la deja contando.
+- Medios de Telegram (SKIRM-101): el estado de reintento vive en `messages.metadata` (`media_status` retry/stored/unavailable/deleted,
+  `media_attempts`, `media_next_retry` en epoch), sin tabla ni columna. Cada fallo espera 30 s duplicando por intento hasta 3600 s, o el `Retry-After` de un
+  429 si es mayor. Tiempo real, historia y recuperación comparten `db.media_transaction` (`SELECT … FOR UPDATE` del mensaje, que se mantiene durante la descarga y
+  la subida a MinIO: `idle_in_transaction_session_timeout` debe ser 0 o mayor que `CONNECTOR_MEDIA_TIMEOUT`, 150 s). El primer arranque lanza el atraso entero
+  (5 mensajes cada 30 s por cuenta). El conector corta una descarga a los 120 s (504), un `FLOOD_WAIT` sale como 429 y se conserva el `Proxy` de
+  `telegramReadClient`: mtcute pasa `floodSleepThreshold: Infinity` explícito en sus descargas y `withParams()` deja ganar los parámetros explícitos.
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
-Última verificación contra el código: 2026-10-07 · 9b785b4 (origin/deploy/prod)
+Última verificación contra el código: 2026-10-08 · 5675ea0 (origin/deploy/prod)
