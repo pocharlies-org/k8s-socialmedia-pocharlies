@@ -102,9 +102,14 @@ images:
   # v1.3.95 (run 37052617556, deploy/prod@6696025): sobre v1.3.94 solo cambia #198 — el cron
   # brain-windows importa en vmsingle brain_windows_refused_deletes{account} y el fin de pasada
   # (alertas BrainWindowsMassDeleteRefused y BrainWindowsPassStale, k8s-observability#69).
+  # v1.3.102 (run 37632009415, deploy/prod@f9d181f): sobre v1.3.98 trae #206 (INFRA-635, busqueda
+  # semantica desde el brain con aislamiento por cuenta; una instancia caida sale en
+  # meta.partialErrors y no tumba las demas; sin BRAIN_MESSAGING_SEARCH_KEY, INFRA-637, cae a
+  # texto con fallbackReason), #219 (SDK MCP 1.31.0 y sharp 0.35.5) y #209 (descripcion de la
+  # tool de audio). 73 tools, contrato sin cambios.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.98
-    digest: sha256:13f35105f1b896a68dd4d0bf13fb79d38c7a6445eab1f0fb00136ade239b4752
+    newTag: v1.3.102
+    digest: sha256:d666d0fc2fdf198af310c5b0213991e69980002cde9338dc05557f709e15cf27
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
