@@ -21,7 +21,7 @@ logging.basicConfig(
 
 
 async def main():
-    from sync import db, history, transcriber, bridge, nats_consumer
+    from sync import db, history, transcriber, bridge, nats_consumer, media_recovery
     from sync.connector_client import ConnectorClient
 
     account = os.environ.get("CONNECTOR_ACCOUNT", "personal")
@@ -52,7 +52,8 @@ async def main():
 
     nats_task = asyncio.create_task(nats_consumer.run(pool, connector, account))
     history_task = asyncio.create_task(history.run(pool, connector))
-    tasks = [nats_task, history_task, bridge_task]
+    media_task = asyncio.create_task(media_recovery.run(pool, connector, account))
+    tasks = [nats_task, history_task, bridge_task, media_task]
 
     try:
         import faster_whisper  # noqa: F401
