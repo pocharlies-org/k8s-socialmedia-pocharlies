@@ -152,6 +152,10 @@ contracts:
       can be attached is 403 {error, failureClass: "account_restricted"}
       instead of the 500; /messages/media/send answers the same 403 for it.
       A known contact is never held back for a missing or expired tctoken.
+      SKIRM-92 (additive, loosens the 403): an OUTBOUND message that is not
+      failed on the canonical conversation (sent from the owner's phone or by
+      the connector after its own preflight) also makes the person a known
+      contact.
   - id: http.whatsapp-connector.messages-edit.v1
     kind: http-route
     value: /messages/edit

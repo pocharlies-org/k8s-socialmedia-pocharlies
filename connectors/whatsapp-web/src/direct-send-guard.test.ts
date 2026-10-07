@@ -10,10 +10,15 @@
  *
  * Policy now, the same for text, file, voice, sticker/GIF, contact cards,
  * poll, event, forward and group-invite cards: a known contact (fresh
- * tctoken, any tctoken record, or an INBOUND message on the canonical
- * conversation of their PN or LID) always gets the message; only a true
- * first contact goes through the token preflight and is refused when no
- * token can be attached.
+ * tctoken, any tctoken record, an INBOUND message, or a non-failed OUTBOUND
+ * message on the canonical conversation of their PN or LID) always gets the
+ * message; only a true first contact goes through the token preflight and is
+ * refused when no token can be attached.
+ *
+ * SKIRM-92 (07-10): a chat the owner opened by typing from the main phone has
+ * only OUTBOUND (fromMe) rows and no tctoken, and was refused as a cold
+ * first contact. An OUTBOUND row counts as evidence (`outbound_history`)
+ * unless WhatsApp rejected it (status 'failed', ack 463).
  *
  * No socket and no DB: fake sock / fake key store, stubbed pg.Pool#query.
  *
@@ -27,7 +32,7 @@ import type { Server } from 'node:http';
 import express from 'express';
 import pg from 'pg';
 import { BaileysClient, WhatsAppSendError } from './baileys-client';
-import { hasInboundHistory } from './chat-state';
+import { hasInboundHistory, hasOutboundHistory } from './chat-state';
 import { createRouter } from './api/controller';
 import { generateHMACSignature } from './api/auth';
 
@@ -83,7 +88,12 @@ function keyStore(tctoken: Record<string, unknown> = {}) {
  * cstoken possible), WhatsApp answers the token iq with no token.
  */
 function makeClient(tctoken: Record<string, unknown> = {}, inbound = false) {
-  const calls = { issued: [] as string[], sent: [] as string[], history: [] as string[][] };
+  const calls = {
+    issued: [] as string[],
+    sent: [] as string[],
+    history: [] as string[][],
+    outbound: [] as string[][],
+  };
   const sock = {
     ev: { on: () => {}, emit: () => {} },
     user: { id: '34600111222:5@s.whatsapp.net' },
@@ -127,7 +137,20 @@ function makeClient(tctoken: Record<string, unknown> = {}, inbound = false) {
     calls.history.push(ids);
     return inbound;
   };
+  client.directOutboundHistory = async (ids: string[]) => {
+    calls.outbound.push(ids);
+    return false;
+  };
   return { client, sock, calls };
+}
+
+/** SKIRM-92: the chat holds a non-failed OUTBOUND message (typed on the owner's phone). */
+function withOutbound<T extends { client: Any; calls: { outbound: string[][] } }>(made: T): T {
+  made.client.directOutboundHistory = async (ids: string[]) => {
+    made.calls.outbound.push(ids);
+    return true;
+  };
+  return made;
 }
 
 const restricted = (e: unknown) =>
@@ -165,6 +188,26 @@ test('no tctoken record at all but an INBOUND message in the DB: sends, looked u
   assert.deepEqual(calls.issued, []);
 });
 
+test("no tctoken record and no INBOUND but an OUTBOUND (sent from the owner's phone): sends, looked up by LID and PN", async () => {
+  const { client, calls } = withOutbound(makeClient());
+  const infos: string[] = [];
+  client.logger = { ...client.logger, info: (m: unknown) => infos.push(String(m)) };
+  assert.equal(await client.sendMessage(LID, 'hola'), 'M1');
+  assert.deepEqual(calls.history, [[LID, PN]], 'INBOUND is asked first');
+  assert.deepEqual(calls.outbound, [[LID, PN]]);
+  assert.deepEqual(calls.sent, [LID]);
+  assert.deepEqual(calls.issued, [], 'no first-contact preflight');
+  assert.ok(infos.some(m => m.includes('evidence=outbound_history')));
+});
+
+test('an OUTBOUND-only chat addressed by phone sends too, looked up by PN and LID', async () => {
+  const { client, calls } = withOutbound(makeClient());
+  assert.equal(await client.sendMessage('34659695630@c.us', 'hola'), 'M1');
+  assert.deepEqual(calls.outbound, [[PN, LID]]);
+  assert.deepEqual(calls.sent, [PN]);
+  assert.deepEqual(calls.issued, []);
+});
+
 test('a fresh tctoken sends without touching the DB', async () => {
   const { client, calls } = makeClient({
     [LID]: { token: Buffer.from([1]), timestamp: String(now() - DAY) },
@@ -184,6 +227,14 @@ test('never contacted (no record, no inbound, no salt): text refused before reac
   assert.deepEqual(calls.issued, ['34610729350@s.whatsapp.net'], 'the preflight still tried');
 });
 
+test('never contacted, OUTBOUND looked up too: still refused before reaching WhatsApp', async () => {
+  const { client, calls } = makeClient();
+  await assert.rejects(client.sendMessage('34610729350@c.us', 'hola'), restricted);
+  assert.equal(calls.outbound.length, 1, 'the OUTBOUND history was consulted');
+  assert.deepEqual(calls.sent, []);
+  assert.deepEqual(calls.issued, ['34610729350@s.whatsapp.net'], 'the preflight still tried');
+});
+
 test('a failed history lookup counts as no history: a stranger stays refused', async () => {
   const { client, calls } = makeClient();
   client.directInboundHistory = async () => {
@@ -193,11 +244,22 @@ test('a failed history lookup counts as no history: a stranger stays refused', a
   assert.deepEqual(calls.sent, []);
 });
 
+test('a failed OUTBOUND lookup counts as no history: a stranger stays refused', async () => {
+  const { client, calls } = makeClient();
+  client.directOutboundHistory = async () => {
+    throw new Error('connection refused');
+  };
+  await assert.rejects(client.sendMessage('34610729350@c.us', 'hola'), restricted);
+  assert.deepEqual(calls.sent, []);
+  assert.deepEqual(calls.issued, ['34610729350@s.whatsapp.net'], 'the preflight still tried');
+});
+
 test('with ingest off (pairing pool) only the tctoken store counts', async () => {
-  const { client, calls } = makeClient({}, true);
+  const { client, calls } = withOutbound(makeClient({}, true));
   client.ingest = false;
   await assert.rejects(client.sendMessage(LID, 'hola'), restricted);
   assert.deepEqual(calls.history, []);
+  assert.deepEqual(calls.outbound, []);
 });
 
 test('WA_DIRECT_PRIVACY_PREFLIGHT=false skips the guard', async () => {
@@ -243,6 +305,15 @@ for (const [name, send] of otherPaths) {
     const stranger = makeClient();
     await assert.rejects(send(stranger.client, '34610729350@c.us'), restricted);
     assert.deepEqual(stranger.calls.sent, []);
+  });
+}
+
+for (const [name, send] of otherPaths) {
+  test(`${name}: an OUTBOUND-only chat (sent from the phone) sends without the preflight`, async () => {
+    const { client, calls } = withOutbound(makeClient());
+    await send(client, LID);
+    assert.deepEqual(calls.sent, [LID]);
+    assert.deepEqual(calls.issued, []);
   });
 }
 
@@ -311,6 +382,102 @@ test('hasInboundHistory: no conversation for the number is false, without a mess
       pool.calls.some(c => /FROM messages/.test(c.sql)),
       false
     );
+  } finally {
+    pool.restore();
+  }
+});
+
+test('hasOutboundHistory: a non-failed OUTBOUND on the canonical conversation or a merged twin', async () => {
+  process.env.CONNECTOR_ACCOUNT = 'personal';
+  const pool = stubPool(sql => {
+    if (/WITH RECURSIVE hop/.test(sql)) {
+      return [{ id: '138942326272106@lid', external_id: '138942326272106@lid' }];
+    }
+    if (/direction = 'OUTBOUND'/.test(sql)) return [{ hit: true }];
+    return [];
+  });
+  try {
+    assert.equal(await hasOutboundHistory(['138942326272106@lid', PN]), true);
+    const outbound = pool.calls.find(c => /direction = 'OUTBOUND'/.test(c.sql))!;
+    assert.match(outbound.sql, /status IS DISTINCT FROM 'failed'/);
+    assert.match(outbound.sql, /c\.merged_into = t\.id/);
+    assert.doesNotMatch(outbound.sql, /INBOUND/);
+    assert.deepEqual(outbound.params[0], ['138942326272106@lid']);
+  } finally {
+    pool.restore();
+  }
+});
+
+test('hasOutboundHistory: only failed OUTBOUND rows (the query finds none) is false', async () => {
+  const pool = stubPool(sql => {
+    if (/WITH RECURSIVE hop/.test(sql)) return [{ id: LID, external_id: LID }];
+    if (/direction = 'OUTBOUND'/.test(sql)) return [{ hit: false }];
+    return [];
+  });
+  try {
+    assert.equal(await hasOutboundHistory([LID, PN]), false);
+  } finally {
+    pool.restore();
+  }
+});
+
+test('hasOutboundHistory: no conversation for the number is false, without a messages query', async () => {
+  const pool = stubPool(() => []);
+  try {
+    assert.equal(await hasOutboundHistory(['34610729350@s.whatsapp.net']), false);
+    assert.equal(
+      pool.calls.some(c => /FROM messages/.test(c.sql)),
+      false
+    );
+  } finally {
+    pool.restore();
+  }
+});
+
+test('hasInboundHistory still ignores OUTBOUND, and does not apply the failed filter', async () => {
+  const pool = stubPool(sql => {
+    if (/WITH RECURSIVE hop/.test(sql)) return [{ id: LID, external_id: LID }];
+    return /direction = 'INBOUND'/.test(sql) ? [{ hit: true }] : [];
+  });
+  try {
+    assert.equal(await hasInboundHistory([LID]), true);
+    const inbound = pool.calls.find(c => /FROM messages/.test(c.sql))!;
+    assert.doesNotMatch(inbound.sql, /OUTBOUND|'failed'/);
+  } finally {
+    pool.restore();
+  }
+});
+
+/** A client wired to the real history seams over a stubbed DB: INBOUND never hits, OUTBOUND as told. */
+function clientOverStubbedDb(outboundHit: boolean) {
+  const pool = stubPool(sql => {
+    if (/WITH RECURSIVE hop/.test(sql)) return [{ id: LID, external_id: LID }];
+    if (/direction = 'INBOUND'/.test(sql)) return [{ hit: false }];
+    if (/direction = 'OUTBOUND'/.test(sql)) return [{ hit: outboundHit }];
+    return [];
+  });
+  const made = makeClient();
+  delete made.client.directInboundHistory;
+  delete made.client.directOutboundHistory;
+  return { ...made, pool };
+}
+
+test('real seams, DB stubbed: a conversation with a non-failed OUTBOUND sends', async () => {
+  const { client, calls, pool } = clientOverStubbedDb(true);
+  try {
+    assert.equal(await client.sendMessage(LID, 'hola'), 'M1');
+    assert.deepEqual(calls.issued, []);
+  } finally {
+    pool.restore();
+  }
+});
+
+test('real seams, DB stubbed: no usable OUTBOUND (only failed ones) is refused', async () => {
+  const { client, calls, pool } = clientOverStubbedDb(false);
+  try {
+    await assert.rejects(client.sendMessage(LID, 'hola'), restricted);
+    assert.deepEqual(calls.sent, []);
+    assert.equal(calls.issued.length, 1, 'the preflight still tried');
   } finally {
     pool.restore();
   }
