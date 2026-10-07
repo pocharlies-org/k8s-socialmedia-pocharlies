@@ -1,4 +1,8 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { accountKey, stripAccount, normalizeAccount, accountList } from './account';
+import { AccountRegistryError, resetAccountRegistryCache } from './account-registry';
 
 describe('account helpers', () => {
   it('keeps personal ids bare (no backfill of existing rows)', () => {
@@ -29,6 +33,75 @@ describe('account helpers', () => {
       'professional:tg_123'
     );
     expect(accountKey('personal', 'tg_123')).toBe('tg_123');
+  });
+
+  // SKIRM-107 (guard adoptado del fork NAS, jibanez-staticduo): un id ya
+  // namespaced a OTRA cuenta no se escribe ni se lee bajo esta.
+  describe('cross-account guard', () => {
+    it('rejects an id namespaced to another account, personal included', () => {
+      expect(() => accountKey('professional', 'leila:123')).toThrow(AccountRegistryError);
+      expect(() => accountKey('professional', 'leila:123')).toThrow('Cross-account identifier');
+      expect(() => accountKey('personal', 'leila:123')).toThrow('Cross-account identifier');
+      expect(() => accountKey('leila', 'professional:123@s.whatsapp.net')).toThrow(
+        'Cross-account identifier'
+      );
+    });
+
+    it('keeps the idempotent and bare cases', () => {
+      expect(accountKey('professional', 'professional:123')).toBe('professional:123');
+      expect(accountKey('leila', 'leila:123')).toBe('leila:123');
+      expect(accountKey('personal', '123')).toBe('123');
+      expect(accountKey('professional', '123')).toBe('professional:123');
+    });
+
+    it('does not read a native JID colon as another account', () => {
+      expect(accountKey('professional', '34660242739:12@s.whatsapp.net')).toBe(
+        'professional:34660242739:12@s.whatsapp.net'
+      );
+      expect(accountKey('personal', '34660242739:12@s.whatsapp.net')).toBe(
+        '34660242739:12@s.whatsapp.net'
+      );
+    });
+
+    describe('with a disabled account in the registry', () => {
+      let dir: string;
+      const previous = process.env.SOCIAL_ACCOUNTS_FILE;
+      beforeAll(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'account-guard-'));
+        const file = path.join(dir, 'accounts.json');
+        const wa = (accountId: string, extra: object = {}) => ({
+          channel: 'whatsapp',
+          accountId,
+          connectorUrl: `http://wa-${accountId}:3001`,
+          ...extra,
+        });
+        fs.writeFileSync(
+          file,
+          JSON.stringify([wa('personal'), wa('professional'), wa('old', { enabled: false })])
+        );
+        process.env.SOCIAL_ACCOUNTS_FILE = file;
+        resetAccountRegistryCache();
+      });
+      afterAll(() => {
+        if (previous === undefined) delete process.env.SOCIAL_ACCOUNTS_FILE;
+        else process.env.SOCIAL_ACCOUNTS_FILE = previous;
+        resetAccountRegistryCache();
+        fs.rmSync(dir, { recursive: true, force: true });
+      });
+
+      // accountKey does not validate the account (no normalizeAccount): the
+      // account-less search walks disabled namespaces too, and their historical
+      // rows keep their prefix.
+      it('a disabled account still namespaces, and its own prefix is still idempotent', () => {
+        expect(accountKey('old', '123')).toBe('old:123');
+        expect(accountKey('old', 'old:123')).toBe('old:123');
+      });
+
+      it('a disabled account namespace still counts as another account for the guard', () => {
+        expect(() => accountKey('professional', 'old:123')).toThrow('Cross-account identifier');
+        expect(() => accountKey('old', 'professional:123')).toThrow('Cross-account identifier');
+      });
+    });
   });
 
   it('round-trips accountKey <-> stripAccount for every account', () => {

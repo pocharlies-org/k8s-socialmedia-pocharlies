@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import pino from 'pino';
-import { accountKey, type Account } from '../domain/account';
+import { accountKey, stripAccount, type Account } from '../domain/account';
 import { accountNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
 import { mediaTypePredicate, messageTypesFor, type MediaType } from './media-type-filter';
 
@@ -351,8 +351,14 @@ export class SearchService {
    */
   private brainScopes(options: SearchOptions): BrainScope[] {
     const namespaces = options.account ? [options.account] : accountNamespaces();
+    // Account-less and the chat id already carries an account's prefix (`leila:…`,
+    // as the index returns it): only that account's scope can hold it, and
+    // accountKey would refuse it as a cross-account identifier for the others.
+    const own =
+      options.chatId && !options.rawIds && !options.account ? stripAccount(options.chatId) : null;
     const scopes: BrainScope[] = [];
     for (const account of namespaces) {
+      if (own && own.id !== options.chatId && own.account !== account) continue;
       const instance = brainInstanceForNamespace(account);
       if (!instance) continue;
       const scope: BrainScope = { instance, account };
@@ -596,7 +602,13 @@ export async function ensureSearchIndexes(
   }
 }
 
-/** Account-less filter: the raw id under every declared namespace (personal = bare). */
+/**
+ * Account-less filter: the raw id under every declared namespace (personal = bare).
+ * An id that already carries an account's prefix is that account's row as stored:
+ * it is looked up as given, never widened to the other accounts (accountKey would
+ * refuse it as a cross-account identifier).
+ */
 function inEveryNamespace(id: string): string[] {
+  if (stripAccount(id).id !== id) return [id];
   return [...new Set(accountNamespaces().map(a => accountKey(a, id)))];
 }
