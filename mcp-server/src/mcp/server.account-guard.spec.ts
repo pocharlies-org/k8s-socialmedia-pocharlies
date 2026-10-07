@@ -51,13 +51,33 @@ describe('social_list_messages (handleWhatsAppGetMessages)', () => {
   );
 });
 
-describe('DatabaseRepository per-user lookups', () => {
-  it('refuses a user or conversation id namespaced to another account', async () => {
+describe('DatabaseRepository per-user lookups (social_get_user_messages)', () => {
+  const user = '34600@s.whatsapp.net';
+  function repository() {
     const query = jest.fn(async (..._args: unknown[]) => ({ rows: [] as any[] }));
-    const repo = new DatabaseRepository({ query } as any);
-    await expect(repo.getUserInfo('leila:34600@s.whatsapp.net', 'professional')).rejects.toThrow(
+    return { query, repo: new DatabaseRepository({ query } as any) };
+  }
+
+  it('looks the user and the conversation up under the requested account as before', async () => {
+    const { query, repo } = repository();
+    await repo.getMessagesByUser(user, { conversationId: user }, 'professional');
+    await repo.getMessagesByUser(user, { conversationId: `professional:${user}` }, 'professional');
+    for (const call of query.mock.calls as unknown as Array<[string, unknown[]]>) {
+      expect(call[1].slice(0, 2)).toEqual([`professional:${user}`, `professional:${user}`]);
+    }
+  });
+
+  it('refuses a user or conversation id namespaced to another account', async () => {
+    const { query, repo } = repository();
+    await expect(repo.getUserInfo(`leila:${user}`, 'professional')).rejects.toThrow(
       'Cross-account identifier'
     );
+    await expect(repo.getMessagesByUser(`leila:${user}`, {}, 'professional')).rejects.toThrow(
+      'Cross-account identifier'
+    );
+    await expect(
+      repo.getMessagesByUser(user, { conversationId: `leila:${user}` }, 'professional')
+    ).rejects.toThrow('Cross-account identifier');
     expect(query).not.toHaveBeenCalled();
   });
 });
