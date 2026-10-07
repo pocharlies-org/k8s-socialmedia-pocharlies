@@ -2325,3 +2325,7 @@ contracts:
       se borran: breaking es .vN+1 al lado; un cambio de solo descripción es `migrate`.
       INFRA-592: descripción de social_send_message.attachments[].url (ogg/opus → nota de
       voz nativa), digest sha256:e30a45214c5bc91b836454ccce87a4f9c515771cd8f51231ad8b0feb60c0993d.
+      INFRA-635: aditivo, sin tocar el digest ni los esquemas. El envelope de
+      social_search_messages (handleSearchMessages en server.ts) puede llevar
+      meta.partialErrors y source.completeness 'partial' cuando una instancia del brain
+      cae y otras contestan; la respuesta completa no cambia de forma.
