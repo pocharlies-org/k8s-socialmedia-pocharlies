@@ -1,7 +1,7 @@
 # ARCHITECTURE.md — k8s-socialmedia-pocharlies
 
 > `mcp-socialmedia` (el repo GitHub histórico se llama `whatsappmcp`): conectores de WhatsApp, Telegram e Instagram, servidor MCP y
-> manifiestos. Guarda mensajes en Postgres, caché Redis, ficheros MinIO, eventos NATS. **Monorepo código + k8s.**
+> manifiestos. Guarda mensajes en Postgres+pgvector, caché Redis, ficheros MinIO, eventos NATS. **Monorepo código + k8s.**
 > Escrito por `architect` (SC-1426).
 
 ## 1. Clientes y versiones
@@ -17,7 +17,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 
 ## 2. Dependencias, en ambos sentidos
 
-- **Depende de** — Postgres compartido, Redis/Valkey, MinIO, NATS (`whatsapp-mcp-nats.whatsapp-mcp`), LiteLLM, Meta Graph/Cloud
+- **Depende de** — Postgres compartido + pgvector, Redis/Valkey, MinIO, NATS (`whatsapp-mcp-nats.whatsapp-mcp`), LiteLLM, Meta Graph/Cloud
   API, Baileys parcheado (`patches/@whiskeysockets__baileys@7.0.0-rc13.patch`), Harbor, 1Password/ExternalSecrets.
 - **Búsqueda semántica → `skirmshop-brain`** (API `POST /instances/{instancia}/search`, `BRAIN_SEARCH_URL`; clave con alcance
   `BRAIN_MESSAGING_SEARCH_KEY`, que sembrará INFRA-637: el brain exige `filters.account`). Hacia el otro lado, el brain depende de
@@ -37,7 +37,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Python (telethon) | `connectors/telegram-sync` | ingesta Telegram | — |
 | `scripts/render-connectors.py` | PyYAML 6.0.2 | **genera** `generated/connectors.yaml` desde una fuente única | editar el generado a mano |
 | Kustomize base + overlays | — | render | Helm |
-| Búsqueda semántica de mensajes | brain (`/instances/{instancia}/search`) | la lectura **ya no usa pgvector ni embeddings de LiteLLM**; sin clave o con el brain caído contesta Postgres full-text y lo dice (`fallbackReason`) | embeber el query en este repo |
+| Búsqueda semántica de mensajes | brain (`/instances/{instancia}/search`) | la lectura **ya no usa pgvector ni embeddings de LiteLLM**; sin clave o con el brain caído contesta Postgres full-text y lo dice (`fallbackReason`); el escritor (`EmbeddingJob` → `message_embeddings`, pgvector) sigue activo y queda como deuda: retirarlo es otro cambio, con el cierre de INFRA-486 | embeber el query en este repo |
 
 ## 4. Componentes compartidos
 
@@ -81,4 +81,4 @@ Total de casos Jest: **pendiente de medir**.
 - `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). Sin `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) la búsqueda semántica queda dormida y todo cae a texto.
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
-Última verificación contra el código: 2026-10-01 · 5a06f33 (origin/deploy/prod)
+Última verificación contra el código: 2026-10-07 · 7957cdb (origin/deploy/prod)
