@@ -171,6 +171,9 @@ spec:
       port: 3001
   - match: Host(`whatsapp.lan.e-dani.com`)
     kind: Rule
+    middlewares:
+    - name: sso-chain
+      namespace: keycloak
     services:
     - name: whatsapp-connector
       port: 3001
@@ -360,6 +363,9 @@ spec:
       port: 3001
   - match: Host(`whatsapp-pro.lan.e-dani.com`)
     kind: Rule
+    middlewares:
+    - name: sso-chain
+      namespace: keycloak
     services:
     - name: whatsapp-connector-professional
       port: 3001
@@ -549,6 +555,9 @@ spec:
       port: 3001
   - match: Host(`whatsapp-leila.lan.e-dani.com`)
     kind: Rule
+    middlewares:
+    - name: sso-chain
+      namespace: keycloak
     services:
     - name: whatsapp-connector-leila
       port: 3001

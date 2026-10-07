@@ -55,13 +55,28 @@ class RenderConnectorsTest(unittest.TestCase):
         self.assertEqual(env["CONNECTOR_ACCOUNT"], "acme")
         self.assertEqual(env["WA_QR_PUBLIC_URL"], "https://whatsapp-acme.lan.e-dani.com/qr/page")
         self.assertNotIn("ALLOW_WEB_RENEW", env)  # unauthenticated renew is opt-in
-        # LAN: /api/public denied, /qr* behind Keycloak, the rest open (HMAC /api/v1).
+        # LAN: /api/public denied, /qr* and the whole host behind Keycloak (SKIRM-110).
         lan = next(d for d in yaml.safe_load_all(manifest) if d and d["kind"] == "IngressRoute")
         mws = {r["match"]: [m["name"] for m in r.get("middlewares", [])] for r in lan["spec"]["routes"]}
         host = "Host(`whatsapp-acme.lan.e-dani.com`)"
         self.assertEqual(mws[f"{host} && PathPrefix(`/api/public`)"], ["connector-public-api-deny"])
         self.assertEqual(mws[f"{host} && PathPrefix(`/qr`)"], ["sso-chain"])
-        self.assertEqual(mws[host], [])
+        self.assertEqual(mws[host], ["sso-chain"])
+
+    def test_every_whatsapp_lan_host_is_behind_sso_chain(self):
+        manifest, _ = rc.render(copy.deepcopy(REGISTRY))
+        lans = [d for d in yaml.safe_load_all(manifest) if d and d["kind"] == "IngressRoute"]
+        self.assertGreaterEqual(len(lans), 3)  # personal, professional, leila
+        for lan in lans:
+            hosts = {r["match"].split(" && ")[0] for r in lan["spec"]["routes"]}
+            self.assertEqual(len(hosts), 1, lan["metadata"]["name"])
+            by_match = {r["match"]: r.get("middlewares", []) for r in lan["spec"]["routes"]}
+            host = hosts.pop()
+            sso = [{"name": "sso-chain", "namespace": "keycloak"}]
+            deny = [{"name": "connector-public-api-deny", "namespace": rc.NAMESPACE}]
+            self.assertEqual(by_match[f"{host} && PathPrefix(`/api/public`)"], deny, lan["metadata"]["name"])
+            self.assertEqual(by_match[f"{host} && PathPrefix(`/qr`)"], sso, lan["metadata"]["name"])
+            self.assertEqual(by_match[host], sso, lan["metadata"]["name"])  # catch-all: /api/v1, /status
 
     def test_new_telegram_account_renders_pair(self):
         manifest, _ = rc.render([{"channel": "telegram", "accountId": "acme", "connectorUrl": None}])
