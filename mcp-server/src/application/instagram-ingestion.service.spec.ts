@@ -64,3 +64,20 @@ describe('InstagramIngestionService account isolation', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('InstagramIngestionService and the accountKey guard (SKIRM-107 C3)', () => {
+  it('never routes ids through accountKey: ids shaped like another namespace are stored as they come', async () => {
+    for (const account of ['skirmshop', 'barbelpapis']) {
+      const { calls, service } = capture();
+      await service.handleEvent({
+        ...dm(account),
+        senderId: 'leila:1',
+        conversationId: 'professional:t1',
+        messageId: 'personal:m1',
+      });
+      expect(insertInto(calls, 'conversations')[0]).toBe(`ig_${account}_thread_professional:t1`);
+      expect(insertInto(calls, 'messages')[0]).toBe(`ig_${account}_personal:m1`);
+      expect(insertInto(calls, 'participants')[0]).toBe(`ig_${account}_leila:1`);
+    }
+  });
+});

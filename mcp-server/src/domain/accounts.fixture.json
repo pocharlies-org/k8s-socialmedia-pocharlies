@@ -1,0 +1,61 @@
+[
+  {
+    "channel": "whatsapp",
+    "accountId": "personal",
+    "label": "Personal",
+    "connectorUrl": "http://wa-personal",
+    "enabled": true
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "secondary",
+    "label": "Secondary",
+    "connectorUrl": "http://wa-secondary",
+    "enabled": true
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "arbitrary_3",
+    "label": "Third",
+    "connectorUrl": "http://wa-third",
+    "enabled": true
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "disabled",
+    "label": "Disabled",
+    "connectorUrl": "http://wa-disabled",
+    "enabled": false
+  },
+  {
+    "channel": "instagram",
+    "accountId": "instagram",
+    "label": "Instagram",
+    "connectorUrl": "http://ig",
+    "enabled": true,
+    "namespace": "personal"
+  },
+  {
+    "channel": "instagram",
+    "accountId": "other_ig",
+    "label": "Other Instagram",
+    "connectorUrl": "http://ig-other",
+    "enabled": true,
+    "namespace": "secondary"
+  },
+  {
+    "channel": "instagram",
+    "accountId": "personal",
+    "label": "Shared account ID",
+    "connectorUrl": "http://ig-personal",
+    "enabled": true,
+    "namespace": "personal"
+  },
+  {
+    "channel": "whatsapp",
+    "accountId": "instagram",
+    "label": "Channel name as account",
+    "connectorUrl": "http://wa-channel-name",
+    "enabled": true
+  }
+]

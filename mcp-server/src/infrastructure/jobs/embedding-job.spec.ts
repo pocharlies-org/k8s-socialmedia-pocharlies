@@ -92,3 +92,13 @@ describe('lookupMessageId — la carrera con telegram-sync', () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 });
+
+it('SKIRM-107: un waMessageId namespaced a OTRA cuenta no se busca bajo la del evento', () => {
+  const e: Event = {
+    eventType: 'MessageReceived',
+    conversationId: '123@c.us',
+    waMessageId: 'leila:3EB0AA',
+    account: 'professional',
+  };
+  expect(() => EmbeddingJob.messageKeyFor(e)).toThrow('Cross-account identifier');
+});

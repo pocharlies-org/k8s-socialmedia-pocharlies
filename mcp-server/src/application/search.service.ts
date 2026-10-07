@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import pino from 'pino';
-import { accountKey, type Account } from '../domain/account';
+import { accountKey, stripAccount, type Account } from '../domain/account';
 import { accountNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
 import { mediaTypePredicate, messageTypesFor, type MediaType } from './media-type-filter';
 
@@ -350,7 +350,14 @@ export class SearchService {
    * account's chunks even if two ever shared an instance.
    */
   private brainScopes(options: SearchOptions): BrainScope[] {
-    const namespaces = options.account ? [options.account] : accountNamespaces();
+    // An account-less chat id that already names an account is asked of that account only.
+    const carried =
+      options.chatId && !options.rawIds ? carriedNamespace(options.chatId) : undefined;
+    const namespaces = options.account
+      ? [options.account]
+      : carried
+        ? [carried]
+        : accountNamespaces();
     const scopes: BrainScope[] = [];
     for (const account of namespaces) {
       const instance = brainInstanceForNamespace(account);
@@ -596,7 +603,18 @@ export async function ensureSearchIndexes(
   }
 }
 
-/** Account-less filter: the raw id under every declared namespace (personal = bare). */
+/** The namespace an id already carries ('professional:42@…' → 'professional'); undefined for a bare id. */
+function carriedNamespace(id: string): string | undefined {
+  const parsed = stripAccount(id);
+  return parsed.id === id ? undefined : parsed.account;
+}
+
+/**
+ * Account-less filter: the raw id under every declared namespace (personal = bare).
+ * An id that already names an account is that account's alone (accountKey would
+ * refuse it under any other): it is not widened.
+ */
 function inEveryNamespace(id: string): string[] {
+  if (carriedNamespace(id)) return [id];
   return [...new Set(accountNamespaces().map(a => accountKey(a, id)))];
 }
