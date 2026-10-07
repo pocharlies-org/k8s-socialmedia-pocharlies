@@ -47,6 +47,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Catálogo de tools | `contracts/socialmedia-tools.json` / `.md` | `contracts/` | gateway, Hermes |
 | Registro de contratos | `CONTRACTS.yaml` | raíz | todos |
 | Doc de la API social | `docs/social-api.md`, ADRs en `docs/adr` | `docs/` | operadores |
+| ¿Es un primer contacto 1:1? (evidencia de contacto conocido) | `BaileysClient.knownDirectContactEvidence` + `chat-state.ts` `hasInboundHistory` / `hasOutboundHistory` | `connectors/whatsapp-web/src/` | todas las rutas de envío 1:1, vía `guardDirectSend` |
 | Búsqueda semántica de mensajes | `mcp-server/src/application/search.service.ts` `SearchService.semanticSearch` | `mcp-server/src/application/` | `MCPServer.handleSearchMessages`; una instancia caída sale como `meta.partialErrors` (`completeness: 'partial'`), no tumba las demás |
 | Clave opaca por cuenta (`personal` sin prefijo, el resto namespaceadas — migración 002) | `mcp-server/src/domain/account.ts` (`accountKey` / `normalizeAccount`) | `mcp-server/src/domain/` | MCP y job de embeddings; `connectors/telegram-sync/sync/db.py` es **espejo en Python** de la misma regla (no puede importar TS): cambiar una sin la otra deja mensajes sin embedding |
 
@@ -79,6 +80,7 @@ Total de casos Jest: **pendiente de medir**.
 - WhatsApp Web personal usa sesión persistente: perderla exige re-emparejar (`http.whatsapp-pairing…`).
 - `auto-reply-worker` personal está deshabilitado (tombstone): las respuestas de WhatsApp Business las lleva Synapse.
 - `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). Sin `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) la búsqueda semántica queda dormida y todo cae a texto.
+- Envío 1:1 sin tctoken (SKIRM-92): `outbound_history` cuenta cualquier OUTBOUND no fallido de la conversación canónica (enviado desde el móvil del dueño o por el conector tras el guard). Un envío que WhatsApp rechaza con 463 solo deja de contar si `setMessageStatus` (`'failed'`) llega después de que exista la fila; un ack muy temprano la deja contando.
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
-Última verificación contra el código: 2026-10-07 · 7957cdb (origin/deploy/prod)
+Última verificación contra el código: 2026-10-07 · 9b785b4 (origin/deploy/prod)

@@ -163,11 +163,22 @@ export async function resolveCanonicalConversation(
 }
 
 /**
- * Whether the person behind a 1:1 chat ever wrote to this account: an INBOUND
- * message on the canonical conversation of any of `chatIds` (its PN and its
- * LID) or on a twin merged into it. False when there is no such conversation.
+ * What counts as history, by direction. The SQL interpolates this closed map
+ * (never input), so the literals stay greppable. An OUTBOUND row with status
+ * 'failed' (WhatsApp rejected the send, ack 463) is no history: a refused chat
+ * must not vouch for itself.
  */
-export async function hasInboundHistory(chatIds: string[]): Promise<boolean> {
+const HISTORY_FILTER = {
+  INBOUND: "m.direction = 'INBOUND'",
+  OUTBOUND: "m.direction = 'OUTBOUND' AND m.status IS DISTINCT FROM 'failed'",
+} as const;
+
+/**
+ * Whether the canonical conversation of any of `chatIds` (a 1:1's PN and its
+ * LID), or a twin merged into it, holds a message of this `kind`. False when
+ * there is no such conversation.
+ */
+async function hasHistory(chatIds: string[], kind: keyof typeof HISTORY_FILTER): Promise<boolean> {
   const canonical = new Set<string>();
   for (const chatId of chatIds) {
     const conversation = await resolveCanonicalConversation(chatId);
@@ -184,11 +195,25 @@ export async function hasInboundHistory(chatIds: string[]): Promise<boolean> {
      )
      SELECT EXISTS (
        SELECT 1 FROM messages m
-        WHERE m.conversation_id IN (SELECT id FROM twin) AND m.direction = 'INBOUND'
+        WHERE m.conversation_id IN (SELECT id FROM twin) AND ${HISTORY_FILTER[kind]}
      ) AS hit`,
     [[...canonical], MAX_MERGE_HOPS]
   );
   return result.rows[0]?.hit === true;
+}
+
+/** Whether the person behind a 1:1 chat ever wrote to this account (an INBOUND message). */
+export async function hasInboundHistory(chatIds: string[]): Promise<boolean> {
+  return hasHistory(chatIds, 'INBOUND');
+}
+
+/**
+ * Whether this account ever wrote to the person behind a 1:1 chat: typed by
+ * the owner on the main phone (fromMe, ingested as OUTBOUND) or sent by the
+ * connector. A message WhatsApp rejected (status 'failed') does not count.
+ */
+export async function hasOutboundHistory(chatIds: string[]): Promise<boolean> {
+  return hasHistory(chatIds, 'OUTBOUND');
 }
 
 /** Bare id of the newest message of a conversation of this account (for lastMessages). */

@@ -183,6 +183,7 @@ import {
   muteFromBaileys,
   MuteState,
   hasInboundHistory,
+  hasOutboundHistory,
   pinFromBaileys,
   recordInboundChatState,
   resolveCanonicalConversation,
@@ -7650,11 +7651,13 @@ export class BaileysClient extends EventEmitter {
   /**
    * The one policy for every new 1:1 send (text, file, voice, sticker/GIF,
    * contact cards, poll, event, forward, group-invite card). Someone who
-   * already talks to this account always gets it: Baileys attaches their
+   * already talks to this account, or whose chat the owner already opened
+   * (typed from the main phone), always gets it: Baileys attaches their
    * tctoken when fresh, else a cstoken when the NCT salt exists, else
    * nothing — as WA Web and whatsmeow, which never hold a send back for a
-   * missing or expired tctoken. Only a true first contact goes through the
-   * token preflight, which refuses (account_restricted) when no token can be
+   * missing or expired tctoken. Only a true first contact (no token record,
+   * no INBOUND and no non-failed OUTBOUND message) goes through the token
+   * preflight, which refuses (account_restricted) when no token can be
    * attached: a token-less first message counts as a reach-out.
    */
   private async guardDirectSend(rawJid: string, started = Date.now()): Promise<void> {
@@ -7688,12 +7691,14 @@ export class BaileysClient extends EventEmitter {
    * Why a 1:1 target is not a first contact, or null when it is: a fresh
    * tctoken; any tctoken record (theirs, expired or emptied by Baileys'
    * cleanup, or ours issued after an earlier send to them); an INBOUND
-   * message on the canonical conversation of their PN or LID (ingest only —
+   * message on the canonical conversation of their PN or LID; or an OUTBOUND
+   * one that did not fail — typed by the owner on the main phone, or sent by
+   * the connector after it passed this guard (history is ingest only —
    * tctokens expire in 4 weekly buckets and Baileys prunes the records).
    */
   private async knownDirectContactEvidence(
     rawJid: string
-  ): Promise<'tctoken' | 'token_record' | 'inbound_history' | null> {
+  ): Promise<'tctoken' | 'token_record' | 'inbound_history' | 'outbound_history' | null> {
     const sock = this.sock as any;
     const keys = sock?.authState?.keys;
     const lidMapping = sock?.signalRepository?.lidMapping;
@@ -7717,10 +7722,11 @@ export class BaileysClient extends EventEmitter {
         ? await getPNForLID(rawJid).catch(() => null)
         : await getLIDForPN(rawJid).catch(() => null);
       const ids = [rawJid, ...(twin ? [jidNormalizedUser(twin)] : [])];
-      return (await this.directInboundHistory(ids)) ? 'inbound_history' : null;
+      if (await this.directInboundHistory(ids)) return 'inbound_history';
+      return (await this.directOutboundHistory(ids)) ? 'outbound_history' : null;
     } catch (error) {
       this.logger.warn(
-        `WhatsApp direct send: inbound history lookup failed rawJid=${rawJid}: ${errorMessage(error)}`
+        `WhatsApp direct send: history lookup failed rawJid=${rawJid}: ${errorMessage(error)}`
       );
       return null;
     }
@@ -7729,6 +7735,11 @@ export class BaileysClient extends EventEmitter {
   /** Seam for tests (no DB): see hasInboundHistory. */
   private directInboundHistory(chatIds: string[]): Promise<boolean> {
     return hasInboundHistory(chatIds);
+  }
+
+  /** Seam for tests (no DB): see hasOutboundHistory. */
+  private directOutboundHistory(chatIds: string[]): Promise<boolean> {
+    return hasOutboundHistory(chatIds);
   }
 
   private async prepareDirectPrivacyToken(
@@ -7747,17 +7758,8 @@ export class BaileysClient extends EventEmitter {
     const keys = sock.authState?.keys;
     if (!keys) return;
 
-    const hasValidToken = async (): Promise<{ ok: boolean; storageJid: string }> => {
-      const storageJid = await resolveTcTokenJid(rawJid, getLIDForPN);
-      const tokenData = await keys.get('tctoken', [storageJid]);
-      const entry = tokenData?.[storageJid];
-      const token = entry?.token;
-      const tokenLength = typeof token?.length === 'number' ? token.length : 0;
-      return {
-        ok: tokenLength > 0 && !isTcTokenExpired(entry?.timestamp),
-        storageJid,
-      };
-    };
+    // Never null here: the socket and its key store were checked above.
+    const hasValidToken = async () => (await this.readDirectPrivacyTokenState(rawJid))!;
 
     let tokenState = await hasValidToken();
     if (tokenState.ok) return;
