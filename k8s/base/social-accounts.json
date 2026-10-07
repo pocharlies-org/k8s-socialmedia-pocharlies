@@ -9,6 +9,7 @@
       "name": "whatsapp-connector",
       "sessionPvc": "whatsapp-session-data",
       "connectorAccountEnv": false,
+      "connectorMemoryLimit": "1Gi",
       "lanIngress": "whatsapp-lan",
       "lanHost": "whatsapp.lan.e-dani.com",
       "qrPublicUrl": "https://whatsapp.e-dani.com/qr/page",
