@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import asyncpg
 
@@ -298,6 +299,94 @@ async def attachment_exists_for_message(pool: asyncpg.Pool, message_id: int) -> 
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT 1 FROM attachments WHERE message_id = $1 LIMIT 1", message_id)
     return row is not None
+
+
+# --- Media recovery (SKIRM-101; from jibanez-staticduo 7b81bd24, adapted to prod) ---
+# Retry state lives in messages.metadata (media_status, media_attempts,
+# media_next_retry): no table, no migration. Production shapes: messages.id and
+# attachments.message_id are bigint, message_type is stored in capitals and
+# attachments has file_url only. $2 are the capitalised downloadable types.
+
+PENDING_MEDIA_SQL = """
+SELECT m.id, m.message_type, m.metadata
+FROM messages m
+WHERE m.platform = 'telegram' AND m.account = $1
+  AND m.message_type = ANY($2::text[])
+  AND m.metadata ? 'telegram_chat_id' AND m.metadata ? 'telegram_message_id'
+  AND COALESCE(m.metadata->>'media_status', '') NOT IN ('deleted', 'unavailable')
+  AND COALESCE((m.metadata->>'media_next_retry')::double precision, 0) <= EXTRACT(EPOCH FROM NOW())
+  AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
+ORDER BY COALESCE((m.metadata->>'media_next_retry')::double precision, 0), m.wa_timestamp
+LIMIT $3
+"""
+
+MEDIA_BACKLOG_SQL = """
+SELECT COUNT(*) AS total_missing,
+       COUNT(*) FILTER (
+         WHERE m.metadata ? 'telegram_chat_id' AND m.metadata ? 'telegram_message_id'
+           AND COALESCE(m.metadata->>'media_status', '') NOT IN ('deleted', 'unavailable')
+           AND COALESCE((m.metadata->>'media_next_retry')::double precision, 0) <= EXTRACT(EPOCH FROM NOW())
+           AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
+       ) AS eligible_now
+FROM messages m
+WHERE m.platform = 'telegram' AND m.account = $1
+  AND m.message_type = ANY($2::text[])
+  AND NOT EXISTS (
+    SELECT 1 FROM attachments a WHERE a.message_id = m.id
+      AND NULLIF(BTRIM(a.file_url), '') IS NOT NULL
+  )
+"""
+
+
+def _downloadable_types() -> list[str]:
+    return sorted(t.upper() for t in mapping.DOWNLOADABLE_TYPES)
+
+
+async def pending_media(pool: asyncpg.Pool, account: str, limit: int = 5) -> list[dict]:
+    """Telegram messages of this account with no attachment whose retry is due."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(PENDING_MEDIA_SQL, account, _downloadable_types(), limit)
+    result = []
+    for row in rows:
+        item = dict(row)
+        if isinstance(item["metadata"], str):
+            item["metadata"] = json.loads(item["metadata"])
+        result.append(item)
+    return result
+
+
+async def media_backlog(pool: asyncpg.Pool, account: str) -> dict[str, int]:
+    """Count messages missing a stored attachment, and the subset pending_media can pick now."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(MEDIA_BACKLOG_SQL, account, _downloadable_types())
+    return {key: int(row[key]) for key in ("total_missing", "eligible_now")}
+
+
+@asynccontextmanager
+async def media_transaction(pool: asyncpg.Pool, message_id: int):
+    # Lock the message rather than an absent attachment: realtime and recovery
+    # can then share the same idempotency guard, including across processes.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.fetchrow("SELECT id FROM messages WHERE id = $1 FOR UPDATE", message_id)
+            yield conn
+
+
+async def media_result(conn, message_id: int, status: str, delay: float = 0) -> None:
+    """Record an attempt: next retry = now + max(delay, 30 s * 2^attempts, capped at 3600 s)."""
+    await conn.execute(
+        "UPDATE messages SET metadata = metadata || jsonb_build_object("
+        "'media_status', $2::text, "
+        "'media_attempts', COALESCE((metadata->>'media_attempts')::int, 0) + 1, "
+        "'media_next_retry', EXTRACT(EPOCH FROM NOW()) + GREATEST($3::double precision, "
+        "LEAST(3600, 30 * power(2, LEAST(7, COALESCE((metadata->>'media_attempts')::int, 0)))))) "
+        "WHERE id = $1", message_id, status, delay,
+    )
+
+
+async def record_media_result(pool: asyncpg.Pool, message_id: int, status: str, delay: float = 0) -> None:
+    async with pool.acquire() as conn:
+        await media_result(conn, message_id, status, delay)
 
 
 # --- Transcription helpers ---------------------------------------------------
