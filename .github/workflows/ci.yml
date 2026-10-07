@@ -19,9 +19,10 @@ permissions:
 
 jobs:
   # ADR 0001 decision 5: per-account connectors are rendered from the registry.
+  # Los verificadores de PR usan runners publicos para no depender de ARC.
   connectors-generated:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    runs-on: arc-k8s
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,7 +36,7 @@ jobs:
   # throwaway Postgres (tests/test_edits.py; without the DSN those are skipped).
   telegram-sync-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    runs-on: arc-k8s
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16-alpine
@@ -50,6 +51,7 @@ jobs:
           --health-retries 30
     env:
       TELEGRAM_SYNC_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
+      TELEGRAM_MEDIA_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
       PYTHONPYCACHEPREFIX: /tmp/telegram-sync-pycache
     defaults:
       run:
@@ -64,9 +66,37 @@ jobs:
       - run: pip install pytest==8.3.3 $(grep -v '^faster-whisper' requirements.txt)
       - run: python -m pytest -p no:cacheprovider -rs tests
 
+  whatsapp-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/whatsapp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/whatsapp/package-lock.json
+      - name: Install media test dependencies
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+      - name: Install connector dependencies for app contract tests
+        working-directory: .
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --filter @mcp-socialmedia/shared build
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    runs-on: arc-k8s
+    runs-on: ubuntu-latest
     env:
       RUN_S3_INTEGRATION: "1"
       S3_ENDPOINT: http://127.0.0.1:9000
@@ -117,12 +147,17 @@ jobs:
 
   standard:
     needs: [s3-tests]
-    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@main
     with:
-      runner: arc-k8s
+      runner: ${{ github.repository_owner == 'pocharlies-org' && 'arc-k8s' || 'ubuntu-latest' }}
       node_version: "22"
       pnpm_version: "11.18.0"
+      # En pull_request, github.repository_owner es el dueño de la base, así que también
+      # es 'pocharlies-org' en PRs de fork: esas ejecuciones no reciben secretos de Harbor
+      # (las imágenes base del proxy-cache contestan 401). Se construye solo cuando el
+      # commit de cabecera está en este repo: push al tronco y PRs internos.
+      run_docker_build: ${{ github.repository_owner == 'pocharlies-org' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       docker_build_timeout: 12m
       kustomize_paths: k8s/overlays/stg k8s/overlays/prod
       images: |
@@ -135,4 +170,132 @@ jobs:
           {"name":"whatsappmcp-whatsapp-open-worker","context":".","dockerfile":"workers/whatsapp-open-worker/Dockerfile"},
           {"name":"whatsappmcp-mcp-server","context":".","dockerfile":"mcp-server/Dockerfile"}
         ]
-    secrets: inherit
+    secrets:
+      # Fork PRs receive no repository secrets. The checker repository is public,
+      # so the scoped workflow token can fetch it; internal runs keep their PAT.
+      FRAMEWORK_REPO_TOKEN: ${{ secrets.FRAMEWORK_REPO_TOKEN || github.token }}
+      HARBOR_USER: ${{ secrets.HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      OPENCLAW_TELEGRAM_BOT_TOKEN: ${{ secrets.OPENCLAW_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_CI_BOT_TOKEN }}
+      OPENCLAW_TELEGRAM_TARGET: ${{ secrets.OPENCLAW_TELEGRAM_TARGET || secrets.TELEGRAM_CI_CHAT_ID }}
+      OPENCLAW_TELEGRAM_THREAD_ID: ${{ secrets.OPENCLAW_TELEGRAM_THREAD_ID || secrets.TELEGRAM_CI_THREAD_ID }}
+
+  # The reusable's contract checkout requires a secret that fork PRs cannot receive.
+  # Run the same gates locally with read-only checkout and no repository secrets.
+  standard-fork-app:
+    name: standard / Lint, test, build
+    needs: [s3-tests]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make g++
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+        env:
+          NODE_ENV: test
+      - run: pnpm build
+
+  standard-fork-manifests:
+    name: standard / Lint and validate manifests
+    needs: [s3-tests]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install yamllint==1.37.1
+      - name: Install manifest validators
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl --retry 3 --retry-all-errors -fsSL \
+            'https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.5.0/kustomize_v5.5.0_linux_amd64.tar.gz' \
+            -o "$RUNNER_TEMP/kustomize.tar.gz"
+          echo "6703a3a70a0c47cf0b37694030b54f1175a9dfeb17b3818b623ed58b9dbc2a77  $RUNNER_TEMP/kustomize.tar.gz" | sha256sum --check --strict
+          tar xzf "$RUNNER_TEMP/kustomize.tar.gz" -C "$RUNNER_TEMP/bin" kustomize
+          curl --retry 3 --retry-all-errors -fsSL \
+            'https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz' \
+            -o "$RUNNER_TEMP/kubeconform.tar.gz"
+          echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum --check --strict
+          tar xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP/bin" kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: YAML lint
+        run: |
+          set -euo pipefail
+          mapfile -d '' yaml_files < <(find . -type f \( -name '*.yaml' -o -name '*.yml' \) \
+            -not -path './.git/*' -not -path './docs/audit-*/*' -not -path './templates/*' \
+            -print0 | sort -z)
+          if [ "${#yaml_files[@]}" -gt 0 ]; then
+            python3 -m yamllint -d '{extends: relaxed, rules: {line-length: {max: 220}}}' "${yaml_files[@]}"
+          fi
+      - name: Validate raw manifests and overlays
+        run: |
+          set -euo pipefail
+          manifests=()
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              ./.git/*|./docs/audit-*/*|./templates/*|*/overlays/*/patch*.yaml|*/overlays/*/patch*.yml) continue ;;
+            esac
+            if grep -q '^apiVersion:' "$file"; then manifests+=("$file"); fi
+          done < <(find . -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 | sort -z)
+          schema='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          if [ "${#manifests[@]}" -gt 0 ]; then
+            kubeconform -kubernetes-version 1.32.0 -schema-location default \
+              -schema-location "$schema" -ignore-missing-schemas \
+              -skip IngressRoute,ClusterExternalSecret -summary -output pretty "${manifests[@]}"
+          fi
+          for path in k8s/overlays/stg k8s/overlays/prod; do
+            if [ ! -f "$path/kustomization.yaml" ] && [ ! -f "$path/kustomization.yml" ]; then
+              echo "Skipping missing kustomization: $path"
+              continue
+            fi
+            kustomize build "$path" > "$RUNNER_TEMP/$(basename "$path").yaml"
+            kubeconform -kubernetes-version 1.32.0 -schema-location default \
+              -schema-location "$schema" -ignore-missing-schemas \
+              -skip IngressRoute,ClusterExternalSecret -summary -output pretty \
+              "$RUNNER_TEMP/$(basename "$path").yaml"
+          done
+
+  standard-fork-contracts:
+    name: standard / Contract surface
+    needs: [s3-tests]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install PyYAML==6.0.3
+      - name: Enforce contract rules
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [ -f CONTRACTS.yaml ] || exit 0
+          # Same public checker as the reusable, pinned and hash-verified; no token needed.
+          curl --retry 3 --retry-all-errors -fsSL \
+            'https://raw.githubusercontent.com/pocharlies-org/k8s-gitops-pocharlies/188b011546ae8ddeacf3cc3be2d63b8b493811a6/scripts/check-contracts.py' \
+            -o "$RUNNER_TEMP/check-contracts.py"
+          echo "608ec9d88d4a59db5c0686806251234b23bdbfbf77fbd8239d9b7ad84477a339  $RUNNER_TEMP/check-contracts.py" | sha256sum --check --strict
+          if ! [[ "$PR_BASE_SHA" =~ ^[0-9a-f]{40}$ && "$PR_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'Pull request range does not contain full Git commit SHAs'
+            exit 1
+          fi
+          python3 "$RUNNER_TEMP/check-contracts.py" --repo . --range "$PR_BASE_SHA..$PR_HEAD_SHA"

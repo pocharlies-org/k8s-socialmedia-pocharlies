@@ -404,7 +404,7 @@ test('markAsRead sends receipts for every unread key and records them as read', 
     );
     const update = calls.find(c => /UPDATE messages SET status = 'read'/i.test(c.sql))!;
     assert.deepEqual(update.params[0], ['professional:U2', 'professional:U1']);
-    assert.ok(calls.some(c => /UPDATE conversations SET unread_count/i.test(c.sql)));
+    assert.ok(calls.some(c => /UPDATE conversations SET\s+unread_count/i.test(c.sql)));
   } finally {
     restore();
   }
@@ -481,7 +481,7 @@ test('POST /messages/forward: 200 with the new messageId, 404 when the original 
     const body = { chatId: '34600@c.us', messageId: 'X', toChatId: '34611@c.us' };
     const ok = await post('/messages/forward', body);
     assert.equal(ok.status, 200);
-    assert.deepEqual(await ok.json(), { forwarded: true, messageId: 'NEWID' });
+    assert.deepEqual(await ok.json(), { ok: true, forwarded: true, messageId: 'NEWID' });
 
     known = false;
     const missing = await post('/messages/forward', body);

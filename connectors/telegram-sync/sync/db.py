@@ -4,12 +4,25 @@
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from uuid import UUID
 
 import asyncpg
 
 from sync import mapping
 
 logger = logging.getLogger(__name__)
+
+# Preserve PostgreSQL's native ID type when passing it back to asyncpg.
+MessageId = int | UUID
+
+
+def utc_timestamp(value: datetime) -> datetime:
+    """The unified NAS tables store TIMESTAMP without time zone in UTC."""
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
 
 # This sync instance serves exactly one account ("personal" by default,
 # "professional" for the second instance). Non-personal row ids are namespaced
@@ -133,18 +146,20 @@ async def insert_message_ex(
     reply_to_message_id: int | None = None,
     topic_id: int | None = None,
     needs_transcription: bool = False,
-) -> tuple[int | None, bool]:
+) -> tuple[MessageId | None, bool]:
     """Insert a message into the unified table.
 
     Returns (message_id, is_new): is_new=True when this call actually created the
     row, False when it already existed (ON CONFLICT). Callers gate one-shot side
     effects (avatar/media pulls) on is_new to stay idempotent
     when realtime + history backfill see the same message."""
+    timestamp = utc_timestamp(timestamp)
     raw_conv_id = f"tg_{chat_id}"
     conv_id = account_key(raw_conv_id)
     wa_msg_id = account_key(f"tg_{chat_id}_{telegram_message_id}")
     sender_wa_id = account_key(f"tg_{sender_id}") if sender_id else None
     is_group = chat_type in ("group", "supergroup")
+    conversation_type = "GROUP" if is_group else "INDIVIDUAL"
     reply_ref = account_key(f"tg_{chat_id}_{reply_to_message_id}") if reply_to_message_id else None
 
     metadata = {
@@ -163,7 +178,7 @@ async def insert_message_ex(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute(ENSURE_CONVERSATION_SQL, conv_id, chat_title, is_group, chat_type, timestamp, raw_conv_id, ACCOUNT)
+            await conn.execute(ENSURE_CONVERSATION_SQL, conv_id, chat_title, is_group, conversation_type, timestamp, raw_conv_id, ACCOUNT)
             if sender_id:
                 await conn.execute(ENSURE_PARTICIPANT_SQL, sender_wa_id, sender_name, ACCOUNT)
                 await conn.execute(LINK_PARTICIPANT_SQL, conv_id, sender_wa_id)
@@ -174,47 +189,15 @@ async def insert_message_ex(
                 is_forwarded, reply_ref, json.dumps(metadata), ACCOUNT,
             )
             if new_id is not None:
-                return int(new_id), True
+                return new_id, True
             # ON CONFLICT — fetch existing id so callers (e.g. attachment writer) can still wire up
             existing = await conn.fetchval(GET_MESSAGE_ID_SQL, wa_msg_id)
-            return (int(existing) if existing is not None else None), False
+            return existing, False
 
 
-async def insert_message(
-    pool: asyncpg.Pool,
-    telegram_message_id: int,
-    chat_id: int,
-    chat_title: str | None,
-    chat_type: str,
-    sender_id: int | None,
-    sender_name: str | None,
-    content: str | None,
-    message_type: str,
-    direction: str,
-    timestamp,
-    is_forwarded: bool = False,
-    reply_to_message_id: int | None = None,
-    topic_id: int | None = None,
-    needs_transcription: bool = False,
-) -> int | None:
-    """Back-compat wrapper: returns the message id (new or existing), or None."""
-    msg_id, _is_new = await insert_message_ex(
-        pool,
-        telegram_message_id,
-        chat_id,
-        chat_title,
-        chat_type,
-        sender_id,
-        sender_name,
-        content,
-        message_type,
-        direction,
-        timestamp,
-        is_forwarded=is_forwarded,
-        reply_to_message_id=reply_to_message_id,
-        topic_id=topic_id,
-        needs_transcription=needs_transcription,
-    )
+async def insert_message(pool: asyncpg.Pool, *args, **kwargs) -> MessageId | None:
+    """Legacy ID-only view of insert_message_ex, with identical arguments."""
+    msg_id, _is_new = await insert_message_ex(pool, *args, **kwargs)
     return msg_id
 
 
@@ -260,7 +243,7 @@ async def mark_message_edited(
     edited_at: str,
     source: str,
     actor: str | None = None,
-) -> int | None:
+) -> MessageId | None:
     """Record an edit on the row of this account; the messages.id changed, or
     None when there is nothing to do (unknown row, same text)."""
     wa_msg_id = account_key(f"tg_{chat_id}_{telegram_message_id}")
@@ -269,12 +252,12 @@ async def mark_message_edited(
             MARK_EDITED_SQL,
             wa_msg_id, social_account_id(), content, edited_at, source, actor,
         )
-    return int(row_id) if row_id is not None else None
+    return row_id if row_id is not None else None
 
 
 async def insert_attachment(
     pool: asyncpg.Pool,
-    message_id: int,
+    message_id: MessageId,
     file_type: str,
     mime_type: str | None,
     file_name: str | None,
@@ -294,10 +277,91 @@ async def insert_attachment(
         )
 
 
-async def attachment_exists_for_message(pool: asyncpg.Pool, message_id: int) -> bool:
+async def attachment_exists_for_message(pool: asyncpg.Pool, message_id: MessageId) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT 1 FROM attachments WHERE message_id = $1 LIMIT 1", message_id)
     return row is not None
+
+
+PENDING_MEDIA_SQL = """
+SELECT m.id, m.message_type, m.metadata
+FROM messages m
+WHERE m.platform = 'telegram' AND m.account = $1
+  AND lower(m.message_type) = ANY($2::text[])
+  AND m.metadata ? 'telegram_chat_id' AND m.metadata ? 'telegram_message_id'
+  AND COALESCE(m.metadata->>'media_status', '') NOT IN ('deleted', 'unavailable')
+  AND COALESCE((m.metadata->>'media_next_retry')::double precision, 0) <= EXTRACT(EPOCH FROM NOW())
+  AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
+ORDER BY COALESCE((m.metadata->>'media_next_retry')::double precision, 0), m.wa_timestamp
+LIMIT $3
+"""
+
+
+async def pending_media(pool: asyncpg.Pool, account: str, limit: int = 5) -> list[dict]:
+    from sync.mapping import DOWNLOADABLE_TYPES
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(PENDING_MEDIA_SQL, account, sorted(DOWNLOADABLE_TYPES), limit)
+    result = []
+    for row in rows:
+        item = dict(row)
+        if isinstance(item['metadata'], str):
+            item['metadata'] = json.loads(item['metadata'])
+        result.append(item)
+    return result
+
+
+MEDIA_BACKLOG_SQL = """
+SELECT COUNT(*) AS total_missing,
+       COUNT(*) FILTER (
+         WHERE m.metadata ? 'telegram_chat_id' AND m.metadata ? 'telegram_message_id'
+           AND COALESCE(m.metadata->>'media_status', '') NOT IN ('deleted', 'unavailable')
+           AND COALESCE((m.metadata->>'media_next_retry')::double precision, 0) <= EXTRACT(EPOCH FROM NOW())
+           AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
+       ) AS eligible_now
+FROM messages m
+WHERE m.platform = 'telegram' AND m.account = $1
+  AND lower(m.message_type) = ANY($2::text[])
+  AND NOT EXISTS (
+    SELECT 1 FROM attachments a WHERE a.message_id = m.id
+      AND COALESCE(NULLIF(BTRIM(a.file_url), ''), NULLIF(BTRIM(a.storage_key), '')) IS NOT NULL
+  )
+"""
+
+
+async def media_backlog(pool: asyncpg.Pool, account: str) -> dict[str, int]:
+    """Count missing media keys and the subset selectable by pending_media."""
+    from sync.mapping import DOWNLOADABLE_TYPES
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(MEDIA_BACKLOG_SQL, account, sorted(DOWNLOADABLE_TYPES))
+    return {key: int(row[key]) for key in ('total_missing', 'eligible_now')}
+
+
+@asynccontextmanager
+async def media_transaction(pool: asyncpg.Pool, message_id: MessageId):
+    # Lock the message rather than an absent attachment: realtime and recovery
+    # can then share the same idempotency guard, including across processes.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.fetchrow("SELECT id FROM messages WHERE id = $1 FOR UPDATE", message_id)
+            yield conn
+
+
+async def media_result(conn, message_id: MessageId, status: str,
+                       delay: float = 0) -> None:
+    await conn.execute(
+        "UPDATE messages SET metadata = metadata || jsonb_build_object("
+        "'media_status', $2::text, "
+        "'media_attempts', COALESCE((metadata->>'media_attempts')::int, 0) + 1, "
+        "'media_next_retry', EXTRACT(EPOCH FROM NOW()) + GREATEST($3::double precision, "
+        "LEAST(3600, 30 * power(2, LEAST(7, COALESCE((metadata->>'media_attempts')::int, 0)))))) "
+        "WHERE id = $1", message_id, status, delay,
+    )
+
+
+async def record_media_result(pool: asyncpg.Pool, message_id: MessageId,
+                              status: str, delay: float = 0) -> None:
+    async with pool.acquire() as conn:
+        await media_result(conn, message_id, status, delay)
 
 
 # --- Transcription helpers ---------------------------------------------------
@@ -320,7 +384,7 @@ async def get_pending_transcription(pool: asyncpg.Pool) -> dict | None:
     return dict(row) if row else None
 
 
-async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: int):
+async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: MessageId):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE messages SET metadata = jsonb_set(metadata, '{transcription_status}', '\"processing\"') "
@@ -328,7 +392,7 @@ async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: int):
         )
 
 
-async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
+async def complete_transcription(pool: asyncpg.Pool, msg_id: MessageId, text: str):
     # Belt & braces (INFRA-364): `content` is prose the brain reads. If an STT
     # backend ever hands back its raw response body (`{"text":"…"}`) instead of
     # the transcript, unwrap it here — the single writer of transcriptions —
@@ -343,7 +407,7 @@ async def complete_transcription(pool: asyncpg.Pool, msg_id: int, text: str):
         )
 
 
-async def fail_transcription(pool: asyncpg.Pool, msg_id: int, error: str, increment_attempts: bool = True):
+async def fail_transcription(pool: asyncpg.Pool, msg_id: MessageId, error: str, increment_attempts: bool = True):
     # $2 must be cast explicitly: as a jsonb_build_object value arg its type is
     # "any", which asyncpg cannot infer ("could not determine data type of
     # parameter $2") and the UPDATE throws.

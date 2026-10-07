@@ -22,12 +22,44 @@ import type {
   StoredCredential,
 } from '@mcp-socialmedia/shared';
 import { createInstagramApp, loadAccounts } from './main';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /** Env without a single account field — the exact state C10 leaves behind. */
 const EMPTY_ACCOUNTS_ENV = {
   INSTAGRAM_ACCOUNTS: '',
   INSTAGRAM_ACCESS_TOKEN: '',
 } as NodeJS.ProcessEnv;
+
+test('registry app isolates account listing and keeps OAuth routes before account authorization', async () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'ig-registry-app-')), 'accounts.json');
+  writeFileSync(file, JSON.stringify([
+    { channel: 'instagram', accountId: 'test-one', enabled: true, secretEnv: 'ONE' },
+    { channel: 'instagram', accountId: 'second', enabled: true, secretEnv: 'TWO' },
+  ]));
+  const env = { SOCIAL_ACCOUNTS_FILE: file, INSTAGRAM_ACCOUNTS: 'test-one,second', ONE: 'one', TWO: 'two' };
+  const accounts = loadAccounts({ env });
+  assert.equal(accounts.size, 2);
+  assert.equal(accounts.get('test-one')?.ready, false);
+  const app = await createInstagramApp({ env, accounts, credentialStore: null, publisher: { publish() {} } });
+  const { server, base } = await listen(app);
+  const get = (path: string, token = '') => fetch(base + path, { headers: { authorization: `Bearer ${token}` } });
+  try {
+    assert.deepEqual(await (await get('/health')).json(), { status: 'alive' });
+    assert.equal((await get('/api/v1/accounts')).status, 401);
+    const list = await get('/api/v1/accounts', 'one');
+    assert.equal(list.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await list.json(), { accounts: [{ name: 'test-one', status: 'setup-required' }] });
+    assert.equal((await get('/api/v1/second/profile', 'one')).status, 401);
+    assert.equal((await get('/api/v1/test-one/profile', 'one')).status, 503);
+    const oauth = await fetch(base + '/api/v1/oauth/instagram/authorize-url', { headers: { 'x-user-sub': 'test-user' } });
+    assert.equal(oauth.status, 400);
+    assert.equal((await oauth.json()).error.code, 'instagram_pairing_unavailable');
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
 
 class FakeStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();

@@ -35,7 +35,8 @@
  * The caller (controller) only comes here when the client ingests: the per-sub
  * pairing pool (ingest off) never touches this table.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { parseMediaQuality, type MediaQuality } from './media-quality';
 import { connectorAccount, getPool } from './db-writer';
 
 export const IDEMPOTENCY_HEADER = 'idempotency-key';
@@ -50,6 +51,8 @@ export type SendReservationState =
   | 'claimed'
   /** an earlier attempt failed before reaching WhatsApp: send again */
   | 'retry'
+  /** Adapter name for a retryable attempt; persisted state remains prepared/failed. */
+  | 'prepared'
   /** already sent: answer the recorded outcome */
   | 'sent'
   /** an earlier attempt may or may not have gone out */
@@ -181,7 +184,17 @@ export function mediaRequestHash(input: {
   viewOnce?: boolean;
   quality?: string;
   fileName?: string;
+  asGif?: boolean;
+  sourceDigest?: string;
+  sourceMimeType?: string;
 }): string {
+  if (input.sourceDigest || input.sourceMimeType || input.asGif) {
+    return mediaSourceRequestHash({
+      ...input,
+      quality: input.quality as MediaQuality | undefined,
+      asGif: !!input.asGif,
+    });
+  }
   // viewOnce / quality / fileName only enter the hash when set, so a key
   // recorded before they existed still replays the same plain send.
   const options: Record<string, unknown>[] =
@@ -209,7 +222,10 @@ export function voiceRequestHash(input: {
   conversationId: string;
   audioBase64: string;
   mimeType: string;
+  sourceDigest?: string;
+  sourceMimeType?: string;
 }): string {
+  if (input.sourceDigest || input.sourceMimeType) return voiceSourceRequestHash(input);
   return createHash('sha256')
     .update(JSON.stringify(['voice', input.conversationId, input.mimeType.toLowerCase()]))
     .update('\0')
@@ -368,4 +384,255 @@ export async function recordSendFailure(
   } catch (recordError) {
     console.warn(`send idempotency failure record failed: ${describeError(recordError)}`);
   }
+}
+
+export type AdapterSendReservation = SendReservation & { messageId: string };
+
+export async function reserveTextSend(input: {
+  token: string;
+  conversationId: string;
+  content: string;
+  replyToMessageId?: string;
+}): Promise<AdapterSendReservation> {
+  const requestHash = createHash('sha256')
+    .update(
+      JSON.stringify(['text', input.conversationId, input.content, input.replyToMessageId || null])
+    )
+    .digest('hex');
+  return reserveAdapter(input.token, requestHash);
+}
+
+export async function reservePinSend(input: {
+  token: string;
+  conversationId: string;
+  targetMessageId: string;
+  pinned: boolean;
+  duration: number;
+}): Promise<AdapterSendReservation> {
+  const hash = createHash('sha256')
+    .update(
+      JSON.stringify([
+        'pin-message',
+        input.conversationId,
+        input.targetMessageId,
+        input.pinned,
+        input.duration,
+      ])
+    )
+    .digest('hex');
+  return reserveAdapter(input.token, hash);
+}
+
+export async function reserveEventResponseSend(input: {
+  token: string;
+  conversationId: string;
+  eventMessageId: string;
+  attendance: string;
+  extraGuestCount: number;
+}): Promise<AdapterSendReservation> {
+  const hash = createHash('sha256')
+    .update(
+      JSON.stringify([
+        'event-response',
+        input.conversationId,
+        input.eventMessageId,
+        input.attendance,
+        input.extraGuestCount,
+      ])
+    )
+    .digest('hex');
+  return reserveAdapter(input.token, hash);
+}
+
+/**
+ * A created poll is identified by its whole payload: the same token reused with
+ * a different question, option list or choice count is a different send, so it
+ * has to conflict instead of silently replaying the first one.
+ */
+export async function reservePollSend(input: {
+  token: string;
+  conversationId: string;
+  name: string;
+  values: string[];
+  selectableCount?: number;
+}): Promise<AdapterSendReservation> {
+  const hash = createHash('sha256')
+    .update(
+      JSON.stringify([
+        'poll-creation',
+        input.conversationId,
+        input.name,
+        input.values,
+        input.selectableCount ?? null,
+      ])
+    )
+    .digest('hex');
+  return reserveAdapter(input.token, hash);
+}
+
+export async function reservePollVoteSend(input: {
+  token: string;
+  conversationId: string;
+  pollMessageId: string;
+  options: string[];
+}): Promise<AdapterSendReservation> {
+  const hash = createHash('sha256')
+    .update(JSON.stringify(['poll-vote', input.conversationId, input.pollMessageId, input.options]))
+    .digest('hex');
+  return reserveAdapter(input.token, hash);
+}
+
+export async function reserveEventCreationSend(input: {
+  token: string;
+  conversationId: string;
+  name: string;
+  description?: string;
+  startDate: string;
+  endDate?: string;
+  location?: { degreesLatitude?: number; degreesLongitude?: number; name?: string };
+  call?: string;
+  isCancelled?: boolean;
+  extraGuestsAllowed?: boolean;
+}): Promise<AdapterSendReservation> {
+  const hash = createHash('sha256')
+    .update(
+      JSON.stringify([
+        'event-creation',
+        input.conversationId,
+        input.name,
+        input.description ?? null,
+        input.startDate,
+        input.endDate ?? null,
+        input.location ?? null,
+        input.call ?? null,
+        input.isCancelled ?? null,
+        input.extraGuestsAllowed ?? null,
+      ])
+    )
+    .digest('hex');
+  return reserveAdapter(input.token, hash);
+}
+
+export async function reserveMediaSend(
+  input: MediaSourceInput & { token: string }
+): Promise<AdapterSendReservation> {
+  return reserveAdapter(input.token, mediaSourceRequestHash(input));
+}
+
+export async function reserveVoiceSend(
+  input: VoiceSourceInput & { token: string }
+): Promise<AdapterSendReservation> {
+  return reserveAdapter(input.token, voiceSourceRequestHash(input));
+}
+
+async function reserveAdapter(key: string, requestHash: string): Promise<AdapterSendReservation> {
+  const token = key.trim();
+  if (!token || token.length > 200) throw new Error('Invalid sendToken');
+  const reservation = await reserveSend(token, requestHash);
+  return {
+    ...reservation,
+    sentAt: reservation.sentAt,
+    messageId: reservation.messageId || idempotentMessageId(randomUUID()),
+    ...(reservation.state === 'retry' ? { state: 'prepared' as const } : {}),
+  };
+}
+
+/** Adapter callers reserve by key and claim by the stable message ID. */
+export async function claimReservedSend(key: string, messageId: string): Promise<void> {
+  const result = await getPool().query(
+    `UPDATE whatsapp_send_attempts SET status = 'pending', error = NULL, updated_at = NOW()
+     WHERE account = $1 AND key_hash = $2 AND message_id = $3
+       AND status IN ('prepared', 'failed') RETURNING message_id`,
+    [connectorAccount(), idempotencyKeyHash(key), messageId]
+  );
+  if (!result.rowCount) throw new SendAlreadyClaimedError();
+}
+
+export const confirmTextSend = confirmSend;
+
+function validateSourceMetadata(input: { sourceDigest?: string; sourceMimeType?: string }): void {
+  if (input.sourceDigest && !/^[a-f0-9]{64}$/i.test(input.sourceDigest))
+    throw new Error('Invalid sourceDigest');
+  if (
+    input.sourceMimeType !== undefined &&
+    (typeof input.sourceMimeType !== 'string' || !input.sourceMimeType.trim())
+  )
+    throw new Error('Invalid sourceMimeType');
+  if (input.sourceDigest && !input.sourceMimeType)
+    throw new Error('sourceMimeType is required with sourceDigest');
+}
+
+interface MediaSourceInput {
+  quality?: MediaQuality;
+  conversationId: string;
+  fileUrl: string;
+  fileName?: string;
+  caption?: string;
+  asSticker: boolean;
+  asGif: boolean;
+  replyToMessageId?: string;
+  sourceDigest?: string;
+  sourceMimeType?: string;
+  /** Replay protection for play-once media: the same bytes replayed without
+   * the flag (or vice versa) are a different message. The marker is appended
+   * only when true so every pre-existing fingerprint stays byte-identical. */
+  viewOnce?: boolean;
+}
+
+export function mediaSourceRequestHash(input: MediaSourceInput): string {
+  validateSourceMetadata(input);
+  const quality = parseMediaQuality(input.quality);
+  const dataHeader = input.fileUrl.match(/^data:([^,]*),/i)?.[1];
+  const outputMimeType =
+    dataHeader
+      ?.replace(/;base64$/i, '')
+      .trim()
+      .toLowerCase() || null;
+  const sourceMimeType = input.sourceMimeType?.trim().toLowerCase() || outputMimeType;
+  const requestHash = createHash('sha256')
+    .update(
+      JSON.stringify([
+        'media',
+        input.conversationId,
+        input.fileName || null,
+        input.caption || null,
+        input.asSticker,
+        input.asGif,
+        input.replyToMessageId || null,
+        outputMimeType,
+        sourceMimeType,
+        // Preserve existing source reservations across upgrades.
+        ...(quality === 'source' ? [] : [quality]),
+        ...(input.viewOnce === true ? ['viewOnce'] : []),
+      ])
+    )
+    .update('\0')
+    .update(input.sourceDigest || input.fileUrl)
+    .digest('hex');
+  return requestHash;
+}
+
+interface VoiceSourceInput {
+  conversationId: string;
+  audioBase64: string;
+  mimeType: string;
+  sourceDigest?: string;
+  sourceMimeType?: string;
+}
+
+export function voiceSourceRequestHash(input: VoiceSourceInput): string {
+  validateSourceMetadata(input);
+  const requestHash = createHash('sha256')
+    .update(
+      JSON.stringify([
+        'voice',
+        input.conversationId,
+        input.mimeType.toLowerCase(),
+        input.sourceMimeType?.trim().toLowerCase() || input.mimeType.toLowerCase(),
+      ])
+    )
+    .update('\0')
+    .update(input.sourceDigest || input.audioBase64)
+    .digest('hex');
+  return requestHash;
 }

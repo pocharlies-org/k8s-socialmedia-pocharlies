@@ -173,6 +173,25 @@ test('a fresh tctoken sends without touching the DB', async () => {
   assert.deepEqual(calls.history, []);
 });
 
+test('a failed canonical phone lookup preserves the raw recipient and direct-send guard', async () => {
+  const original = pg.Pool.prototype.query;
+  (pg.Pool.prototype as Any).query = async () => {
+    throw new Error('fixture database unavailable');
+  };
+  try {
+    const known = makeClient({
+      [LID]: { token: Buffer.from([1]), timestamp: String(now() - DAY) },
+    });
+    assert.equal(await known.client.sendMessage(PN, 'hola'), 'M1');
+    assert.deepEqual(known.calls.sent, [PN]);
+    const stranger = makeClient();
+    await assert.rejects(stranger.client.sendMessage('34610729350@c.us', 'hola'), restricted);
+    assert.deepEqual(stranger.calls.sent, []);
+  } finally {
+    (pg.Pool.prototype as Any).query = original;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // A true first contact is still refused, on every send path
 // ---------------------------------------------------------------------------

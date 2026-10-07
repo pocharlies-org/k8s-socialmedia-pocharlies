@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">SocialMedia</title>
+  <desc id="desc">SocialMedia chat icon</desc>
+  <circle cx="32" cy="32" r="30" fill="#21c063"/>
+  <path d="M17 18.5A6.5 6.5 0 0 1 23.5 12h17A6.5 6.5 0 0 1 47 18.5v16a6.5 6.5 0 0 1-6.5 6.5H31l-10 7v-7h-.5a6.5 6.5 0 0 1-6.5-6.5v-16A6.5 6.5 0 0 1 20.5 12" fill="#161717"/>
+  <path d="M24 25.5h16M24 32h10" fill="none" stroke="#21c063" stroke-linecap="round" stroke-width="3"/>
+</svg>

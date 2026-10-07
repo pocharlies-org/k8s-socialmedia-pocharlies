@@ -125,7 +125,7 @@ it('pregunta al brain de la instancia de la cuenta, con su alcance, y resuelve l
   // los ids de los fragmentos van a Postgres, con los filtros exactos de la tool
   const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
   expect(sql).toContain('m.wa_message_id = ANY($1::text[])');
-  expect(sql).toContain('m.wa_timestamp >= $3');
+  expect(sql).toContain('m.wa_timestamp >= $4');
   expect(params[0]).toEqual(expect.arrayContaining(['3EB0A', '3EB0B', '3EB0C']));
 
   // orden: fragmento mejor primero, y dentro de él por hora; similarity = la del fragmento

@@ -364,10 +364,16 @@ test('not indexed: sender-key noise, a status without time, chats and channel po
       { source: 'live', publishEvent: false }
     );
     assert.equal(calls.filter(c => isStatusInsert(c.sql)).length, 0);
-    const posts = calls.filter(c => isMessageInsert(c.sql));
+    const posts = calls.filter(c => /INSERT INTO whatsapp_novedades_messages/.test(c.sql));
     assert.ok(
       posts.some(c => c.params.includes('120363400253693272@newsletter')),
-      'a channel post stays a messages row of its channel conversation'
+      'a channel post is stored with its channel scope'
+    );
+    assert.equal(
+      calls.filter(
+        c => isMessageInsert(c.sql) && c.params.includes('120363400253693272@newsletter')
+      ).length,
+      0
     );
   } finally {
     restore();
@@ -582,7 +588,7 @@ test('channel posts: channels from conversations, posts from messages, names onl
       ['professional:111@newsletter', 'professional:222@newsletter'],
       2,
     ]);
-    assert.match(posts.sql, /ORDER BY m\.wa_timestamp DESC, m\.wa_message_id DESC/);
+    assert.match(posts.sql, /ORDER BY m\.wa_timestamp DESC, m\.wa_message_id COLLATE "C" DESC/);
     assert.equal(list.channels, 2);
     assert.deepEqual(list.posts, [
       {
@@ -616,7 +622,11 @@ test('channel posts: channels from conversations, posts from messages, names onl
       nextCursor: null,
       channels: 0,
     });
-    assert.equal(none.calls.length, 1, 'no channel, no messages query');
+    assert.equal(
+      none.calls.filter(call => /FROM messages m/.test(call.sql)).length,
+      0,
+      'no legacy channel, no messages query'
+    );
   } finally {
     none.restore();
   }
@@ -625,6 +635,132 @@ test('channel posts: channels from conversations, posts from messages, names onl
 // ---------------------------------------------------------------------------
 // Publish
 // ---------------------------------------------------------------------------
+
+test('channel feed merges isolated posts and legacy rows, preserving scope and paging equal provider IDs', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool((sql, params) => {
+    if (/FROM conversations\s+WHERE account_id/.test(sql))
+      return [{ id: 'professional:111@newsletter' }];
+    if (/FROM messages m\s+JOIN conversations c/.test(sql))
+      return [
+        {
+          wa_message_id: 'professional:OLD',
+          conversation_id: 'professional:111@newsletter',
+          external_id: '111@newsletter',
+          channel_name: 'Legacy',
+          message_type: 'TEXT',
+          content: 'older',
+          wa_timestamp: new Date(NOW_MS - 1000),
+          has_media: false,
+        },
+      ];
+    if (/SELECT DISTINCT channel_jid/.test(sql))
+      return [{ channel_jid: '111@newsletter' }, { channel_jid: '222@newsletter' }];
+    if (/FROM whatsapp_novedades_messages n/.test(sql)) {
+      assert.equal(params[0], 'professional');
+      assert.match(sql, /NOT n\.is_deleted AND n\.superseded_by IS NULL/);
+      return ['222@newsletter', '111@newsletter']
+        .filter(channel => params[2] == null || channel < String(params[4]))
+        .map(channel => ({
+          channel_jid: channel,
+          message_id: 'SAME',
+          message_timestamp_ms: NOW_MS,
+          message_type: 'conversation',
+          message_payload: { conversation: channel, secret: 'never-returned' },
+          channel_name: channel === '222@newsletter' ? 'New' : 'Legacy',
+        }));
+    }
+    return [];
+  });
+  try {
+    const { client } = makeClient();
+    const first = await client.listChannelPosts({ limit: 1 });
+    assert.deepEqual(Object.keys(first).sort(), ['channels', 'nextCursor', 'posts']);
+    assert.equal(first.channels, 2);
+    assert.equal(first.posts[0].channelId, '222@newsletter');
+    assert.equal(first.posts[0].messageId, 'SAME');
+    assert.equal(first.posts[0].messageType, 'TEXT');
+    assert.doesNotMatch(JSON.stringify(first), /never-returned|message_payload/);
+    assert.ok(first.nextCursor);
+    const second = await client.listChannelPosts(
+      parseChannelPostsQuery({ limit: 1, cursor: first.nextCursor })
+    );
+    assert.equal(second.posts[0].channelId, '111@newsletter');
+    assert.equal(second.posts[0].messageId, 'SAME');
+    const source = calls
+      .filter(call => /FROM whatsapp_novedades_messages n/.test(call.sql))
+      .at(-1)!;
+    assert.deepEqual(source.params, ['professional', null, NOW_MS, 'SAME', '222@newsletter', 2]);
+    assert.ok(second.nextCursor);
+  } finally {
+    restore();
+  }
+});
+
+test('channel feed filters authoritative isolated tombstones before limiting legacy rows', async () => {
+  useAccount('professional');
+  const { restore } = stubPool(sql => {
+    if (/FROM conversations\s+WHERE account_id/.test(sql))
+      return [{ id: 'professional:111@newsletter' }];
+    if (/FROM messages m\s+JOIN conversations c/.test(sql)) {
+      assert.match(sql, /NOT EXISTS \(\s+SELECT 1 FROM whatsapp_novedades_messages n/);
+      assert.match(sql, /n\.account = c\.account AND n\.channel_jid = c\.external_id/);
+      assert.match(sql, /regexp_replace\(m\.wa_message_id.* IN/);
+      return [
+        {
+          wa_message_id: 'professional:OLDER',
+          external_id: '111@newsletter',
+          content: 'older visible post',
+          wa_timestamp: new Date(NOW_MS - 1000),
+          message_type: 'TEXT',
+        },
+      ];
+    }
+    return [];
+  });
+  try {
+    const { client } = makeClient();
+    const result = await client.listChannelPosts({ limit: 1 });
+    assert.equal(result.posts[0].messageId, 'OLDER');
+    assert.equal(result.nextCursor, null);
+  } finally {
+    restore();
+  }
+});
+
+test('channel feed falls back to legacy rows when isolated tables are not migrated', async () => {
+  useAccount('professional');
+  const { restore } = stubPool(sql => {
+    if (/FROM conversations\s+WHERE account_id/.test(sql))
+      return [{ id: 'professional:111@newsletter' }];
+    if (/FROM messages m\s+JOIN conversations c/.test(sql)) {
+      if (/NOT EXISTS/.test(sql))
+        return Object.assign(new Error('table missing'), { code: '42P01' });
+      return [
+        {
+          wa_message_id: 'professional:OLD',
+          external_id: '111@newsletter',
+          content: 'legacy',
+          wa_timestamp: new Date(NOW_MS),
+          message_type: 'TEXT',
+          has_media: false,
+        },
+      ];
+    }
+    if (/whatsapp_novedades_messages/.test(sql))
+      return Object.assign(new Error('table missing'), { code: '42P01' });
+    return [];
+  });
+  try {
+    const { client } = makeClient();
+    const result = await client.listChannelPosts({ limit: 5 });
+    assert.equal(result.channels, 1);
+    assert.equal(result.posts[0].text, 'legacy');
+    assert.equal(result.nextCursor, null);
+  } finally {
+    restore();
+  }
+});
 
 async function withImageServer(
   body: Buffer,

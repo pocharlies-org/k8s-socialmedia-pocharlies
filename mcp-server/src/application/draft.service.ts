@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { Pool } from 'pg';
-import pino from 'pino';
+import type pino from 'pino';
+import { createServiceLogger } from './service-logger';
 import { NO_THINKING } from './llm-request';
 
 export interface DraftConstraints {
@@ -47,12 +48,7 @@ export class DraftService {
     });
     this.llmModel = llmModel || 'gpt-4o-mini';
     this.dbClient = dbClient;
-    this.logger = pino({
-      transport: {
-        target: 'pino-pretty',
-        options: { colorize: true },
-      },
-    });
+    this.logger = createServiceLogger();
   }
 
   /**

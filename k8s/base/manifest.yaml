@@ -425,7 +425,7 @@ spec:
       annotations:
         # Sin reloader: cambiar la key de LiteLLM exige rodar el pod (envFrom).
         litellm.e-dani.com/key-alias: "socialmedia"
-        contracts.e-dani.com/socialmedia-digest: "sha256:e30a45214c5bc91b836454ccce87a4f9c515771cd8f51231ad8b0feb60c0993d"
+        contracts.e-dani.com/socialmedia-digest: "sha256:8845fb27cdbbac6ebceb195f48542dd7f24401b22d46eb50c0b94b0f73e9fa26"
     spec:
       enableServiceLinks: false
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
@@ -501,7 +501,7 @@ spec:
       annotations:
         # Sin reloader: cambiar la key de LiteLLM exige rodar el pod (envFrom).
         litellm.e-dani.com/key-alias: "socialmedia"
-        contracts.e-dani.com/socialmedia-digest: "sha256:e30a45214c5bc91b836454ccce87a4f9c515771cd8f51231ad8b0feb60c0993d"
+        contracts.e-dani.com/socialmedia-digest: "sha256:8845fb27cdbbac6ebceb195f48542dd7f24401b22d46eb50c0b94b0f73e9fa26"
     spec:
       enableServiceLinks: false
       nodeSelector:
@@ -717,6 +717,7 @@ spec:
           image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
           command: ["sh", "-c", "cd mcp-server && tsx src/infrastructure/database/migrate.ts"]
           env:
+            - { name: EMBEDDING_DIMENSION, value: "1024" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:

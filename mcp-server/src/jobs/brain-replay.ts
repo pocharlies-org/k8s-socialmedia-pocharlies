@@ -61,7 +61,7 @@ function requireDatabaseUrl(env: NodeJS.ProcessEnv): string {
 export function replayOptionsFromEnv(env: NodeJS.ProcessEnv): ReplayOptions {
   return {
     databaseUrl: requireDatabaseUrl(env),
-    brainUrl: env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local',
+    brainUrl: env.BRAIN_URL || '',
     apiKey: env.BRAIN_API_KEY || '',
     batch: parseInt(env.BATCH || env.BRAIN_INGEST_BATCH || '500', 10),
     limit: parseInt(env.LIMIT || env.BRAIN_INGEST_MAX_ROWS || '0', 10),
@@ -152,6 +152,9 @@ async function replayAccount(pool: Pool, opts: ReplayOptions, account: Account):
 }
 
 export async function runReplay(opts: ReplayOptions): Promise<void> {
+  if (process.env.BRAIN_ENABLED === 'false' || !opts.brainUrl) {
+    throw new Error('Brain replay requires BRAIN_URL and BRAIN_ENABLED must not be false');
+  }
   if (!opts.apiKey && !opts.dryRun) {
     logger.warn('BRAIN_API_KEY not set — pushes will be unauthenticated (brain may reject)');
   }

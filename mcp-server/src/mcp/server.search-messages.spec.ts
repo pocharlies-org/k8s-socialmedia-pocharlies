@@ -75,15 +75,16 @@ describe('social_search_messages — Instagram', () => {
     });
     expect(out.isError).toBeFalsy();
     const { sql, params } = lastQuery();
-    expect(sql).toContain('m.conversation_id = $2');
-    expect(sql).toContain('m.sender_wa_id = $3');
-    expect(sql).toContain('m.account = $4');
-    expect(sql).toContain('m.platform = $5');
+    expect(sql).toContain('m.conversation_id = ANY($3::text[])');
+    expect(sql).toContain('m.sender_wa_id = ANY($4::text[])');
+    expect(sql).toContain('m.account = ANY($5::text[])');
+    expect(sql).toContain('m.platform = $6');
     expect(params).toEqual([
       'precio',
-      'ig_skirmshop_thread_42',
-      'ig_skirmshop_42',
-      'professional',
+      ['instagram:skirmshop'],
+      ['ig_skirmshop_thread_42'],
+      ['ig_skirmshop_42'],
+      ['professional'],
       'instagram',
       20,
     ]);
@@ -109,9 +110,9 @@ describe('social_search_messages — mediaType', () => {
     const { run, lastQuery } = serverWith();
     await run({ channel: 'instagram', accountId: 'barbelpapis', query: 'run', mediaType: 'video' });
     const { sql, params } = lastQuery();
-    expect(sql).toContain('upper(m.message_type) = ANY($4::text[])');
-    expect(sql).toContain("upper(split_part(m.content, ' |', 1)) = ANY($4::text[])");
-    expect(params).toEqual(['run', 'personal', 'instagram', ['VIDEO', 'VIDEO_NOTE'], 20]);
+    expect(sql).toContain('upper(m.message_type) = ANY($5::text[])');
+    expect(sql).toContain("upper(split_part(m.content, ' |', 1)) = ANY($5::text[])");
+    expect(params).toEqual(['run', ['instagram:barbelpapis'], ['personal'], 'instagram', ['VIDEO', 'VIDEO_NOTE'], 20]);
   });
 
   it('filters WhatsApp images keeping the namespaced chat id', async () => {
@@ -126,8 +127,9 @@ describe('social_search_messages — mediaType', () => {
     const { params } = lastQuery();
     expect(params).toEqual([
       'factura',
-      'professional:34600@s.whatsapp.net',
-      'professional',
+      ['whatsapp:professional'],
+      ['professional:34600@s.whatsapp.net'],
+      ['professional'],
       'whatsapp',
       messageTypesFor('image'),
       20,
@@ -159,10 +161,12 @@ describe('social_search_messages — mediaType', () => {
     const { run, lastQuery } = serverWith();
     await run({ query: 'hola', mediaType: 'any' });
     expect(lastQuery().sql).not.toContain('message_type) = ANY');
-    expect(lastQuery().sql).not.toContain('m.platform = ');
-    expect(lastQuery().params).toEqual(['hola', 20]);
+    expect(lastQuery().sql).not.toMatch(/AND m.platform = \$/);
+    const allowedScopes = lastQuery().params[1];
+    expect(allowedScopes).toEqual(expect.arrayContaining(['whatsapp:personal', 'instagram:skirmshop']));
+    expect(lastQuery().params).toEqual(['hola', allowedScopes, 20]);
     await run({ query: 'hola', mediaType: 'sticker' });
-    expect(lastQuery().params).toEqual(['hola', ['STICKER'], 20]);
+    expect(lastQuery().params).toEqual(['hola', allowedScopes, ['STICKER'], 20]);
   });
 
   it('rejects an unknown mediaType before touching the index', async () => {

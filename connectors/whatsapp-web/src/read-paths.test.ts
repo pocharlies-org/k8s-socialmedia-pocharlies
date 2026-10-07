@@ -65,6 +65,76 @@ async function loadClient(account: string): Promise<typeof import('./baileys-cli
 
 const whereParam = (q: CapturedQuery): unknown => q.params[0];
 
+for (const account of ['personal', 'professional']) {
+  for (const chatId of [undefined, '34600@s.whatsapp.net']) {
+    test(`${account} history backfill scopes ${chatId ? 'one chat' : 'all chats'} to WhatsApp account`, async () => {
+      const { calls, restore } = stubPoolQuery([]);
+      try {
+        const { BaileysClient } = await loadClient(account);
+        const client = new BaileysClient('/tmp/unused-session', 'k'.repeat(16));
+        Object.assign(client, { ready: true, sock: {} });
+        await client.backfillHistory({ chatId, dryRun: true });
+        const query = calls.find(call => call.sql.includes('SELECT DISTINCT ON'))!;
+        assert.match(query.sql, /JOIN messages m ON m.wa_message_id = k.wa_message_id/);
+        assert.match(query.sql, /WHERE m.account = \$1 AND m.platform = 'whatsapp'/);
+        assert.equal(query.params[0], account);
+        if (chatId) {
+          assert.match(query.sql, /AND k.conversation_id = \$2/);
+          assert.equal(query.params[1], account === 'personal' ? chatId : `${account}:${chatId}`);
+        }
+      } finally {
+        restore();
+      }
+    });
+  }
+}
+
+test('history backfill sends bare keys and milliseconds, and stops at an unchanged cursor', async () => {
+  const timestamp = 1789250000000;
+  const { restore } = stubPoolQuery([
+    {
+      conversation_id: 'professional:34600@s.whatsapp.net',
+      wa_message_id: 'professional:OLD',
+      remote_jid: '34600@s.whatsapp.net',
+      from_me: false,
+      participant_jid: null,
+      message_timestamp_ms: String(timestamp),
+    },
+  ]);
+  const originalTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((callback: () => void) => {
+    queueMicrotask(callback);
+    return 0;
+  }) as unknown as typeof setTimeout;
+  try {
+    const { BaileysClient } = await loadClient('professional');
+    const sent: unknown[][] = [];
+    const client = new BaileysClient('/tmp/unused-session', 'k'.repeat(16));
+    Object.assign(client, {
+      ready: true,
+      sock: {
+        fetchMessageHistory: async (...args: unknown[]) => {
+          sent.push(args);
+        },
+      },
+    });
+    const result = await client.backfillHistory({ maxBatchesPerChat: 3 });
+    assert.equal(result.requested, 1);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0][2], timestamp);
+    assert.deepEqual(sent[0][1], {
+      id: 'OLD',
+      remoteJid: '34600@s.whatsapp.net',
+      fromMe: false,
+      participant: undefined,
+    });
+    assert.equal(result.candidates[0].chatId, '34600@s.whatsapp.net');
+  } finally {
+    globalThis.setTimeout = originalTimeout;
+    restore();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // stripAccountKey: inverse of accountKey
 // ---------------------------------------------------------------------------
@@ -143,7 +213,38 @@ test('professional setConversationState UPDATEs the namespaced conversation row'
   try {
     const w = await loadWriter('professional');
     await w.setConversationState('34600111222@s.whatsapp.net', 3, true);
-    assert.equal(whereParam(calls[0]), 'professional:34600111222@s.whatsapp.net');
+    const update = calls.find(call => /^\s*UPDATE conversations/i.test(call.sql))!;
+    assert.equal(whereParam(update), 'professional:34600111222@s.whatsapp.net');
+    assert.deepEqual(update.params, [
+      'professional:34600111222@s.whatsapp.net',
+      3,
+      true,
+      'professional',
+      ['professional:34600111222@s.whatsapp.net', 'professional:34600111222@c.us'],
+    ]);
+    assert.match(update.sql, /WHERE account = \$4/);
+    assert.match(update.sql, /other_lid\.account = \$4/);
+  } finally {
+    restore();
+  }
+});
+
+test('LID state events include only uniquely mapped PN rows and keep unread on canonical row', async () => {
+  const { calls, restore } = stubPoolQuery([]);
+  try {
+    const w = await loadWriter('professional');
+    await w.setConversationState('777@lid', 2, false);
+    const update = calls.find(call => /^\s*UPDATE conversations/i.test(call.sql))!;
+    assert.deepEqual(update.params, ['professional:777@lid', 2, false, 'professional', []]);
+    assert.match(update.sql, /WHEN \$2::integer IS NULL THEN unread_count/);
+    assert.match(
+      update.sql,
+      /WHEN id = \$1 THEN CASE WHEN \$2 < 0 THEN GREATEST\(unread_count, 1\) ELSE \$2 END/
+    );
+    assert.match(update.sql, /regexp_replace\(pn\.id/);
+    assert.match(update.sql, /COUNT\(\*\) FROM conversations other_lid/);
+    assert.match(update.sql, /\) = 1/);
+    assert.equal(calls.length, 1);
   } finally {
     restore();
   }
@@ -204,7 +305,9 @@ test('professional message-retry reconstruction queries with the namespaced wa_m
     const client = new BaileysClient('/tmp/unused-session', 'k'.repeat(16));
     const reconstruct = (
       client as unknown as {
-        reconstructMessageForRetryFromDb(id: string): Promise<{ conversation?: string } | undefined>;
+        reconstructMessageForRetryFromDb(
+          id: string
+        ): Promise<{ conversation?: string } | undefined>;
       }
     ).reconstructMessageForRetryFromDb.bind(client);
 
@@ -228,7 +331,9 @@ test('personal message-retry reconstruction keeps the wa_message_id bare', async
     const client = new BaileysClient('/tmp/unused-session', 'k'.repeat(16));
     const reconstruct = (
       client as unknown as {
-        reconstructMessageForRetryFromDb(id: string): Promise<{ conversation?: string } | undefined>;
+        reconstructMessageForRetryFromDb(
+          id: string
+        ): Promise<{ conversation?: string } | undefined>;
       }
     ).reconstructMessageForRetryFromDb.bind(client);
 

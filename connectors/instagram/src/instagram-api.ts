@@ -4,8 +4,7 @@
  * Handles all communication with Meta's Graph API for Instagram Business accounts.
  */
 
-const GRAPH_API_BASE = 'https://graph.instagram.com/v21.0';
-const FB_GRAPH_API_BASE = 'https://graph.facebook.com/v22.0';
+import { graphBaseUrl } from './url-config';
 
 export interface InstagramConfig {
   accessToken: string;
@@ -47,7 +46,7 @@ export async function discoverFacebookInstagramAccount(
   accessToken: string,
   expectedId?: string
 ): Promise<FacebookInstagramAccount | undefined> {
-  const url = new URL(`${FB_GRAPH_API_BASE}/me/accounts`);
+  const url = new URL(`${graphBaseUrl('facebook')}/me/accounts`);
   url.searchParams.set('fields', 'id,name,instagram_business_account{id,username,name}');
   url.searchParams.set('access_token', accessToken);
   const response = await fetch(url.toString());
@@ -94,6 +93,8 @@ export class InstagramAPI {
   private config: InstagramConfig;
 
   constructor(config: InstagramConfig) {
+    graphBaseUrl('instagram');
+    graphBaseUrl('facebook');
     this.config = config;
   }
 
@@ -118,7 +119,7 @@ export class InstagramAPI {
   }
 
   private primaryBaseUrl(): string {
-    return this.config.primaryApi === 'facebook-login' ? FB_GRAPH_API_BASE : GRAPH_API_BASE;
+    return this.config.primaryApi === 'facebook-login' ? graphBaseUrl('facebook') : graphBaseUrl('instagram');
   }
 
   private primaryAccessToken(): string {
@@ -175,7 +176,7 @@ export class InstagramAPI {
           'Set INSTAGRAM_<ACCOUNT>_FB_ACCESS_TOKEN in the connector .env.'
       );
     }
-    const url = new URL(`${FB_GRAPH_API_BASE}${endpoint}`);
+    const url = new URL(`${graphBaseUrl('facebook')}${endpoint}`);
     url.searchParams.set('access_token', this.config.fbAccessToken);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);

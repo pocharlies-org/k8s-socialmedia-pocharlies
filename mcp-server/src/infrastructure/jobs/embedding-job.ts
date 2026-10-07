@@ -3,6 +3,8 @@ import { Pool } from 'pg';
 import { EmbeddingService } from '../../application/embedding.service';
 import { EventType } from '@mcp-socialmedia/shared';
 import { accountKey, normalizeAccount } from '../../domain/account';
+import { requireAccount } from '../../domain/account-registry';
+import { isWhatsAppUpdate } from '../../domain/whatsapp-surface';
 import pino from 'pino';
 import * as fs from 'fs';
 
@@ -108,7 +110,9 @@ export class EmbeddingJob {
       ? `tg_${event.conversationId}_${event.telegramMessageId}`
       : event.waMessageId;
     if (!bare) return '';
-    return accountKey(normalizeAccount(event.account), bare);
+    const channel = event.telegramMessageId ? 'telegram' : 'whatsapp';
+    const scope = requireAccount(channel, normalizeAccount(event.account, channel));
+    return accountKey(scope.namespace, bare);
   }
 
   private async onMessage(err: Error | null, msg: { data: Uint8Array }): Promise<void> {
@@ -119,27 +123,38 @@ export class EmbeddingJob {
 
     try {
       const event = JSONCodec<MessageReceivedEvent>().decode(msg.data);
-      const key = EmbeddingJob.messageKeyFor(event);
-      if (key) {
-        const messageId = await lookupMessageId(
-          this.dbClient.query.bind(this.dbClient),
-          key,
-          event.telegramMessageId ? TELEGRAM_LOOKUP_WAITS_MS : []
-        );
-
-        if (messageId) {
-          // Process in background (don't await to avoid blocking)
-          this.embeddingService.processMessage(messageId).catch(error => {
-            this.logger.error(`Error processing embedding: ${error}`);
-          });
-        } else {
-          // Sin esto el agujero es mudo: el evento llega, no hay fila y nadie se entera.
-          this.logger.warn(`Embedding job: ningún mensaje con wa_message_id=${key}`);
-        }
-      }
+      await this.handleMessageReceived(event);
     } catch (error) {
       this.logger.error(`Error handling embedding job event: ${error}`);
     }
+  }
+
+  /** Resolves provider events within the declared account before embedding. */
+  async handleMessageReceived(event: MessageReceivedEvent): Promise<void> {
+    const channel = event.telegramMessageId ? 'telegram' : 'whatsapp';
+    if (channel === 'whatsapp' && isWhatsAppUpdate(event.conversationId)) return;
+    const account = requireAccount(channel, normalizeAccount(event.account, channel)).namespace;
+    const key = EmbeddingJob.messageKeyFor(event);
+    if (!key) return;
+    const remaining = channel === 'telegram' ? [...TELEGRAM_LOOKUP_WAITS_MS] : [];
+    for (;;) {
+      const result = await this.dbClient.query(
+        // Provider message keys are globally unique and account-namespaced.
+        // A merge trigger may have moved the row to another conversation ID.
+        `SELECT id FROM messages WHERE account = $1 AND platform = '${channel}'
+         AND wa_message_id = $2
+         AND (is_deleted IS NULL OR is_deleted = false) LIMIT 1`,
+        [account, key]
+      );
+      if (result.rows.length) {
+        await this.embeddingService.processMessage(String(result.rows[0].id));
+        return;
+      }
+      const wait = remaining.shift();
+      if (wait === undefined) break;
+      await new Promise(resolve => setTimeout(resolve, wait));
+    }
+    this.logger.warn(`Embedding job: no message found for provider key ${key}`);
   }
 
   async stop(): Promise<void> {

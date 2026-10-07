@@ -1,3 +1,7 @@
+import {
+  assertProfilePictureFailures,
+  assertTimestampedPictureQuery,
+} from './test-support/profile-query';
 /**
  * Privacy tokens and profile pictures (fase 3 / PR-10).
  *
@@ -110,26 +114,7 @@ function connected(client: Any, sock: unknown): void {
 // ---------------------------------------------------------------------------
 
 test('patched Baileys nests the timestamped tctoken inside the picture query', async () => {
-  const { buildProfilePictureQueryContent } = await import(`${BAILEYS}/Socket/chats.js`);
-  const { buildTcTokenFromJid } = await import(`${BAILEYS}/Utils/tc-token-utils.js`);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const jid = '34600@s.whatsapp.net';
-  const token = Buffer.from([4, 1, 33]);
-  const tcTokenContent = await buildTcTokenFromJid({
-    jid,
-    getLIDForPN: async () => null,
-    authState: { keys: { get: async () => ({ [jid]: { token, timestamp } }) } },
-  });
-  assert.deepEqual(buildProfilePictureQueryContent('image', tcTokenContent), [
-    {
-      tag: 'picture',
-      attrs: { type: 'image', query: 'url' },
-      content: [{ tag: 'tctoken', attrs: { t: timestamp }, content: token }],
-    },
-  ]);
-  assert.deepEqual(buildProfilePictureQueryContent('preview'), [
-    { tag: 'picture', attrs: { type: 'preview', query: 'url' } },
-  ]);
+  const { buildTcTokenFromJid, jid, token } = await assertTimestampedPictureQuery();
   // A token without a timestamp is unusable: no <tctoken> at all.
   assert.equal(
     await buildTcTokenFromJid({
@@ -144,7 +129,8 @@ test('patched Baileys nests the timestamped tctoken inside the picture query', a
 test('patched WAProto decodes the NCT salt from app-state (field 80) and history sync (field 19)', async () => {
   const { proto } = await import('@whiskeysockets/baileys');
   // Hand-encoded protobuf: tag varints, then length-delimited payloads.
-  const bytesField = (tag: number[], payload: Buffer) => Buffer.concat([Buffer.from([...tag, payload.length]), payload]);
+  const bytesField = (tag: number[], payload: Buffer) =>
+    Buffer.concat([Buffer.from([...tag, payload.length]), payload]);
   const inner = bytesField([0x0a], SALT); // salt = 1
   const action = Buffer.concat([
     Buffer.from([0x08, 0x01]), // timestamp = 1
@@ -187,7 +173,9 @@ test('patched relayMessage attaches <cstoken> only as the no-tctoken fallback', 
     `${process.cwd()}/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js`,
     'utf8'
   );
-  const tc = source.indexOf("tag: 'tctoken',\n                    attrs: {},\n                    content: tcTokenBuffer");
+  const tc = source.indexOf(
+    "tag: 'tctoken',\n                    attrs: {},\n                    content: tcTokenBuffer"
+  );
   const cs = source.indexOf("tag: 'cstoken'");
   assert.ok(tc > 0 && cs > tc, 'cstoken branch after the tctoken one');
   assert.match(
@@ -206,15 +194,32 @@ test('the next pairing keeps the NCT salt of its INITIAL_BOOTSTRAP history sync'
   // The connector leaves shouldSyncHistoryMessage to Baileys: WA_HISTORY_SYNC_ON_LOGIN
   // only decides what the DB ingests, never which history blobs Baileys decodes.
   const source = await readFile(`${process.cwd()}/src/baileys-client.ts`, 'utf8');
-  const socketOptions = source.slice(source.indexOf('makeWASocket({'), source.indexOf('this.bindSocketEvents(saveCreds)'));
+  const socketOptions = source.slice(
+    source.indexOf('makeWASocket({'),
+    source.indexOf('this.bindSocketEvents(saveCreds)')
+  );
   assert.ok(socketOptions.length > 0);
   assert.doesNotMatch(socketOptions, /shouldSyncHistoryMessage/);
-  for (const syncType of [T.INITIAL_BOOTSTRAP, T.NON_BLOCKING_DATA, T.RECENT, T.PUSH_NAME, T.ON_DEMAND]) {
-    assert.equal(DEFAULT_CONNECTION_CONFIG.shouldSyncHistoryMessage({ syncType } as Any), true, `syncType ${syncType}`);
+  for (const syncType of [
+    T.INITIAL_BOOTSTRAP,
+    T.NON_BLOCKING_DATA,
+    T.RECENT,
+    T.PUSH_NAME,
+    T.ON_DEMAND,
+  ]) {
+    assert.equal(
+      DEFAULT_CONNECTION_CONFIG.shouldSyncHistoryMessage({ syncType } as Any),
+      true,
+      `syncType ${syncType}`
+    );
   }
 
   // What the phone sends at pairing: HistorySync { syncType = 0, nctSalt = 19 }, inline and deflated.
-  const blob = Buffer.concat([Buffer.from([0x08, T.INITIAL_BOOTSTRAP]), Buffer.from([0x9a, 0x01, SALT.length]), SALT]);
+  const blob = Buffer.concat([
+    Buffer.from([0x08, T.INITIAL_BOOTSTRAP]),
+    Buffer.from([0x9a, 0x01, SALT.length]),
+    SALT,
+  ]);
   const emitted: Array<[string, Any]> = [];
   await processMessage(
     {
@@ -222,15 +227,23 @@ test('the next pairing keeps the NCT salt of its INITIAL_BOOTSTRAP history sync'
       message: {
         protocolMessage: {
           type: proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION,
-          historySyncNotification: { syncType: T.INITIAL_BOOTSTRAP, initialHistBootstrapInlinePayload: deflateSync(blob) },
+          historySyncNotification: {
+            syncType: T.INITIAL_BOOTSTRAP,
+            initialHistBootstrapInlinePayload: deflateSync(blob),
+          },
         },
       },
     },
     {
       shouldProcessHistoryMsg: true,
       ev: { emit: (name: string, value: unknown) => emitted.push([name, value]) },
-      creds: { me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' }, processedHistoryMessages: [] },
-      signalRepository: { lidMapping: { storeLIDPNMappings: async () => {}, getLIDForPN: async () => null } },
+      creds: {
+        me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' },
+        processedHistoryMessages: [],
+      },
+      signalRepository: {
+        lidMapping: { storeLIDPNMappings: async () => {}, getLIDForPN: async () => null },
+      },
       keyStore: keyStore(),
       options: {},
       getMessage: async () => undefined,
@@ -248,7 +261,9 @@ test('the connector logs the NCT salt when it arrives (the Baileys logger runs a
   const client = newClient();
   const handlers: Record<string, (u: Any) => unknown> = {};
   const infos: string[] = [];
-  client.sock = { ev: { on: (e: string, fn: (u: Any) => unknown) => (handlers[e] = fn), emit: () => {} } };
+  client.sock = {
+    ev: { on: (e: string, fn: (u: Any) => unknown) => (handlers[e] = fn), emit: () => {} },
+  };
   client.logger = { info: (m: string) => infos.push(m), warn() {}, error() {}, debug() {} };
   client.ingest = true;
   client.bindSocketEvents(async () => {});
@@ -259,7 +274,13 @@ test('the connector logs the NCT salt when it arrives (the Baileys logger runs a
   assert.ok(infos.some(m => /NCT salt stored in creds/.test(m)));
 
   // History outside the ingest window is not ingested, but its salt is still reported.
-  await handlers['messaging-history.set']({ chats: [], contacts: [], messages: [], syncType: 0, nctSalt: SALT });
+  await handlers['messaging-history.set']({
+    chats: [],
+    contacts: [],
+    messages: [],
+    syncType: 0,
+    nctSalt: SALT,
+  });
   assert.ok(infos.some(m => m === 'NCT salt received in history sync (syncType=0)'));
   assert.equal(infos.filter(m => /history\.set received/.test(m)).length, 0);
 });
@@ -274,13 +295,19 @@ test('canAttachCsToken: own LID, a salt and a LID recipient', () => {
   assert.equal(canAttachCsToken(creds, '34677431173@s.whatsapp.net'), false);
   assert.equal(canAttachCsToken({ me: { lid: '900:5@lid' } }, LID), false);
   assert.equal(canAttachCsToken({ me: {}, nctSalt: SALT }, LID), false);
-  assert.equal(canAttachCsToken({ me: { lid: '900:5@lid' }, nctSalt: Buffer.alloc(0) }, LID), false);
+  assert.equal(
+    canAttachCsToken({ me: { lid: '900:5@lid' }, nctSalt: Buffer.alloc(0) }, LID),
+    false
+  );
   assert.equal(canAttachCsToken(undefined, LID), false);
 });
 
 test('first message without tctoken goes out when a cstoken can be attached', async () => {
   const client = newClient();
-  const { sock, calls } = preflightSock({ me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' }, nctSalt: SALT }, null);
+  const { sock, calls } = preflightSock(
+    { me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' }, nctSalt: SALT },
+    null
+  );
   connected(client, sock);
   const id = await client.sendMessage(LID, 'hola');
   assert.equal(id, 'M1');
@@ -290,7 +317,10 @@ test('first message without tctoken goes out when a cstoken can be attached', as
 
 test('first message without tctoken and without salt is still refused before reaching WhatsApp', async () => {
   const client = newClient();
-  const { sock, calls } = preflightSock({ me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' } }, null);
+  const { sock, calls } = preflightSock(
+    { me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' } },
+    null
+  );
   connected(client, sock);
   await assert.rejects(
     client.sendMessage(LID, 'hola'),
@@ -305,11 +335,15 @@ test('first message without tctoken and without salt is still refused before rea
 
 test('a phone recipient with no LID mapping cannot carry a cstoken: refused', async () => {
   const client = newClient();
-  const { sock, calls } = preflightSock({ me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' }, nctSalt: SALT }, null);
+  const { sock, calls } = preflightSock(
+    { me: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' }, nctSalt: SALT },
+    null
+  );
   connected(client, sock);
   await assert.rejects(
     client.sendMessage('34677431173@c.us', 'hola'),
-    (e: unknown) => e instanceof WhatsAppSendError && e.details.failureClass === 'account_restricted'
+    (e: unknown) =>
+      e instanceof WhatsAppSendError && e.details.failureClass === 'account_restricted'
   );
   assert.deepEqual(calls.sent, []);
 });
@@ -325,7 +359,10 @@ test('a session without salt re-snapshots regular_high once; with salt or the ma
     const resyncs: Array<[string[], boolean]> = [];
     const sock = {
       authState: { creds, keys },
-      ev: { emit: (name: string, update: Record<string, unknown>) => name === 'creds.update' && Object.assign(creds, update) },
+      ev: {
+        emit: (name: string, update: Record<string, unknown>) =>
+          name === 'creds.update' && Object.assign(creds, update),
+      },
       resyncAppState: async (collections: string[], initial: boolean) => {
         resyncs.push([collections, initial]);
       },
@@ -361,7 +398,11 @@ test('a session without salt re-snapshots regular_high once; with salt or the ma
   // A manual resync never resets state.
   const client = newClient();
   const keys = keyStore({ 'app-state-sync-version': { regular_high: { version: 2 } } });
-  client.sock = { authState: { creds: {}, keys }, ev: { emit: () => {} }, resyncAppState: async () => {} };
+  client.sock = {
+    authState: { creds: {}, keys },
+    ev: { emit: () => {} },
+    resyncAppState: async () => {},
+  };
   await client.resyncChatState('manual');
   assert.equal(keys.sets.length, 0);
 });
@@ -371,24 +412,7 @@ test('a session without salt re-snapshots regular_high once; with salt or the ma
 // ---------------------------------------------------------------------------
 
 test('profile picture provider timeout stays distinct from private or missing photos', async () => {
-  const client = newClient();
-  const calls: number[] = [];
-  client.sock = {
-    profilePictureUrl: async (_jid: string, _type: string, timeout: number) => {
-      calls.push(timeout);
-      throw new Boom('provider timeout', { statusCode: 408 });
-    },
-  };
-  await assert.rejects(client.getProfilePictureBytes('34600@c.us'), ProfilePictureTimeoutError);
-  assert.deepEqual(calls, [8000]);
-  client.sock.profilePictureUrl = async () => {
-    throw new Boom('private', { statusCode: 403 });
-  };
-  assert.equal(await client.getProfilePictureBytes('34600@c.us'), null);
-  client.sock.profilePictureUrl = async () => {
-    throw new Boom('item-not-found', { statusCode: 404 });
-  };
-  assert.equal(await client.getProfilePictureBytes('34600@c.us'), null);
+  await assertProfilePictureFailures(newClient(), [403, 404]);
 });
 
 test('profile picture lookup that never answers is cut at the deadline', async () => {
@@ -468,7 +492,11 @@ test('GET /chats/:jid/photo: timeout 504, download failure 502, none 404', async
     assert.equal(bad.status, 502);
     assert.deepEqual(await bad.json(), { error: 'WhatsApp profile picture exceeds 10 MB' });
     behaviour = async () => Buffer.from([1, 2]);
-    assert.deepEqual(await (await get()).json(), { data: 'AQI=', size: 2, contentType: 'image/jpeg' });
+    assert.deepEqual(await (await get()).json(), {
+      data: 'AQI=',
+      size: 2,
+      contentType: 'image/jpeg',
+    });
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
   }

@@ -1,4 +1,4 @@
-FROM harbor.lan.e-dani.com/cache/library/node:22-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Debian security updates. The release pipeline refuses any image that still
 # carries a fixable HIGH/CRITICAL finding.
@@ -26,9 +26,9 @@ RUN pnpm install
 COPY mcp-server ./mcp-server
 COPY shared ./shared
 
-# Build shared package (ignore errors for development)
+# Build shared from the packaged sources before starting the server.
 WORKDIR /app/shared
-RUN pnpm exec tsc --skipLibCheck --noEmit false || true
+RUN pnpm exec tsc --skipLibCheck --noEmit false
 
 # Stay in root app directory
 WORKDIR /app

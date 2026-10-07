@@ -10,9 +10,9 @@
  *    row per status with its author, posted_at and expires_at (+24 h), so
  *    "recent statuses" and "statuses of one contact" read an index instead of
  *    `messages`. Content, type, media and revokes are JOINed from `messages`;
- *  - a channel (newsletter) post is a message of `<id>@newsletter`: it lands
- *    in `messages` too, one conversation per channel. Listing posts is a query
- *    over `messages` (no copy, no table of its own).
+ *  - new channel posts stay in the isolated Novedades store because provider
+ *    IDs are only unique per channel. The production feed reads that store
+ *    together with historical rows in `messages`, preferring isolated state.
  *
  * Rules (same as message-stars-pins.ts):
  *  - ids use the SAME namespacing as `messages` (accountKey);
@@ -27,10 +27,14 @@
  * The caller (BaileysClient) only calls in here when `ingest` is on: the
  * per-sub pairing pool never touches these tables.
  */
-import { jidNormalizedUser } from '@whiskeysockets/baileys';
+import { jidNormalizedUser, normalizeMessageContent } from '@whiskeysockets/baileys';
 import { accountKey, connectorAccount, getPool, stripAccountKey } from './db-writer';
 import { MessageMutationError, whatsappAccountId } from './message-mutations';
 import { externalIdCandidates } from './chat-state';
+import { novedadesPostItem } from './novedades-reader';
+import { deserializeDurableValue } from './whatsapp-capabilities';
+import { parsePollDefinition } from './poll-votes';
+import { parseEventDefinition } from './event-responses';
 
 const UNDEFINED_TABLE = '42P01';
 const MISSING_TABLE_RECHECK_MS = 5 * 60 * 1000;
@@ -105,11 +109,18 @@ function parseLimit(value: unknown): number {
 export interface TimeCursor {
   at: string;
   messageId: string;
+  channelId?: string;
 }
 
-/** The opaque keyset of both lists: base64url of {t, id}. */
+/** Opaque time keyset; channel feeds add their scoped ID as the final tie-breaker. */
 export function encodeTimeCursor(cursor: TimeCursor): string {
-  return Buffer.from(JSON.stringify({ t: cursor.at, id: cursor.messageId })).toString('base64url');
+  return Buffer.from(
+    JSON.stringify({
+      t: cursor.at,
+      id: cursor.messageId,
+      ...(cursor.channelId ? { channel: cursor.channelId } : {}),
+    })
+  ).toString('base64url');
 }
 
 function decodeTimeCursor(value: string): TimeCursor {
@@ -122,7 +133,17 @@ function decodeTimeCursor(value: string): TimeCursor {
       typeof parsed.id === 'string' &&
       parsed.id
     ) {
-      return { at: parsed.t, messageId: parsed.id };
+      if (
+        parsed.channel !== undefined &&
+        (typeof parsed.channel !== 'string' || !isChannelJid(parsed.channel))
+      ) {
+        throw invalid('cursor channel is invalid');
+      }
+      return {
+        at: parsed.t,
+        messageId: parsed.id,
+        ...(parsed.channel ? { channelId: parsed.channel } : {}),
+      };
     }
   } catch {
     // fall through
@@ -586,35 +607,47 @@ export interface ChannelPostList {
  * The channel conversations of this account (namespaced ids), all of them or
  * one. From `conversations` (a few thousand rows), never a scan of messages.
  */
-async function channelConversationIds(channelId?: string): Promise<string[]> {
-  const result = await getPool().query(
-    `SELECT id FROM conversations
+async function channelConversations(
+  channelId?: string
+): Promise<{ id: string; external_id?: string }[]> {
+  const result = await getPool().query<{ id: string; external_id?: string }>(
+    `SELECT id, external_id FROM conversations
       WHERE account_id = $1 AND merged_into IS NULL
         AND ${channelId ? 'external_id = $2' : "external_id LIKE '%@newsletter'"}`,
     channelId ? [whatsappAccountId(), channelId] : [whatsappAccountId()]
   );
-  return result.rows.map(row => String(row.id));
+  return result.rows;
 }
 
 /**
  * Posts of the channels this account receives (or of one), newest first,
- * from `messages`: the conversations of `<id>@newsletter`. A deleted post is
- * left out. Media: GET /messages/media/:channelId/:messageId.
+ * from historical `messages`, excluding posts with authoritative isolated
+ * state. Media: GET /messages/media/:channelId/:messageId.
  */
-export async function listChannelPosts(query: ChannelPostsQuery): Promise<ChannelPostList> {
-  const ids = await channelConversationIds(query.channelId);
-  if (!ids.length) return { posts: [], nextCursor: null, channels: 0 };
+async function legacyChannelPosts(
+  query: ChannelPostsQuery,
+  isolatedStore = true
+): Promise<ChannelPostList & { channelIds: string[] }> {
+  const conversations = await channelConversations(query.channelId);
+  const ids = conversations.map(row => String(row.id));
+  if (!ids.length) return { posts: [], nextCursor: null, channels: 0, channelIds: [] };
   const params: unknown[] = [ids];
   const filters = ['m.conversation_id = ANY($1::text[])', "m.platform = 'whatsapp'"];
   if (query.cursor) {
     params.push(query.cursor.at, accountKey(query.cursor.messageId));
-    filters.push(
-      `(m.wa_timestamp, m.wa_message_id) < ($${params.length - 1}::timestamptz, $${params.length}::text)`
-    );
+    if (query.cursor.channelId) {
+      params.push(query.cursor.channelId);
+      filters.push(`(m.wa_timestamp, m.wa_message_id COLLATE "C", c.external_id COLLATE "C") <
+        ($${params.length - 2}::timestamptz, $${params.length - 1}::text COLLATE "C", $${params.length}::text COLLATE "C")`);
+    } else {
+      filters.push(`(m.wa_timestamp, m.wa_message_id COLLATE "C") <
+        ($${params.length - 1}::timestamptz, $${params.length}::text COLLATE "C")`);
+    }
   }
   params.push(query.limit + 1);
-  const result = await getPool().query(
-    `SELECT m.wa_message_id, m.conversation_id, m.message_type, m.content, m.wa_timestamp,
+  const result = await getPool()
+    .query(
+      `SELECT m.wa_message_id, m.conversation_id, m.message_type, m.content, m.wa_timestamp,
             m.metadata->'poll' AS poll, m.metadata->'event' AS event,
             c.name AS channel_name, c.external_id,
             (SELECT a.mime_type FROM attachments a WHERE a.message_id = m.id
@@ -624,11 +657,26 @@ export async function listChannelPosts(query: ChannelPostsQuery): Promise<Channe
        JOIN conversations c ON c.id = m.conversation_id
       WHERE ${filters.join(' AND ')}
         AND NOT COALESCE(m.is_deleted, FALSE)
-      ORDER BY m.wa_timestamp DESC, m.wa_message_id DESC
+        ${
+          isolatedStore
+            ? `AND NOT EXISTS (
+          SELECT 1 FROM whatsapp_novedades_messages n
+          WHERE n.account = c.account AND n.channel_jid = c.external_id
+            AND regexp_replace(m.wa_message_id, '^[^:]+:', '') IN
+              (n.message_id, n.server_id, n.client_id)
+        )`
+            : ''
+        }
+      ORDER BY m.wa_timestamp DESC, m.wa_message_id COLLATE "C" DESC, c.external_id COLLATE "C" DESC
       LIMIT $${params.length}`,
-    params
-  );
-  const rows = result.rows.slice(0, query.limit);
+      params
+    )
+    .catch((error: unknown) => {
+      if (isolatedStore && (error as { code?: string }).code === UNDEFINED_TABLE) return null;
+      throw error;
+    });
+  if (!result) return legacyChannelPosts(query, false);
+  const rows = result.rows;
   const last = rows[rows.length - 1];
   return {
     posts: rows.map(row => {
@@ -658,5 +706,103 @@ export async function listChannelPosts(query: ChannelPostsQuery): Promise<Channe
           })
         : null,
     channels: ids.length,
+    channelIds: conversations.map(row => row.external_id || stripAccountKey(row.id)),
+  };
+}
+
+interface IsolatedChannelPostRow {
+  channel_jid: string;
+  message_id: string;
+  message_timestamp_ms: string | number;
+  message_type: string | null;
+  message_payload: unknown;
+  channel_name: string | null;
+}
+
+/** Preserve the production feed while newsletter IDs stay scoped to their channel. */
+export async function listChannelPosts(query: ChannelPostsQuery): Promise<ChannelPostList> {
+  const legacy = await legacyChannelPosts(query);
+  const channelIds = new Set(legacy.channelIds);
+  const posts = new Map(legacy.posts.map(post => [`${post.channelId}\0${post.messageId}`, post]));
+  try {
+    const account = connectorAccount();
+    const channels = await getPool().query<{ channel_jid: string }>(
+      `SELECT DISTINCT channel_jid FROM whatsapp_novedades_messages
+       WHERE account = $1 AND ($2::text IS NULL OR channel_jid = $2)`,
+      [account, query.channelId ?? null]
+    );
+    for (const channel of channels.rows) channelIds.add(channel.channel_jid);
+    const cursor = query.cursor;
+    const result = await getPool().query<IsolatedChannelPostRow>(
+      `SELECT n.channel_jid, n.message_id, n.message_timestamp_ms, n.message_type,
+              n.message_payload, c.name AS channel_name
+       FROM whatsapp_novedades_messages n
+       LEFT JOIN whatsapp_novedades_channels c ON c.account = n.account AND c.channel_jid = n.channel_jid
+       WHERE n.account = $1 AND ($2::text IS NULL OR n.channel_jid = $2)
+         AND n.visibility = 'visible' AND NOT n.is_deleted AND n.superseded_by IS NULL
+         AND n.message_timestamp_ms IS NOT NULL
+         AND ($3::bigint IS NULL OR (n.message_timestamp_ms, n.message_id COLLATE "C", n.channel_jid COLLATE "C") <
+              ($3::bigint, $4::text COLLATE "C", $5::text COLLATE "C"))
+       ORDER BY n.message_timestamp_ms DESC, n.message_id COLLATE "C" DESC, n.channel_jid COLLATE "C" DESC LIMIT $6`,
+      [
+        account,
+        query.channelId ?? null,
+        cursor ? Date.parse(cursor.at) : null,
+        cursor?.messageId ?? null,
+        cursor?.channelId ?? '',
+        query.limit + 1,
+      ]
+    );
+    for (const row of result.rows) {
+      const payload = deserializeDurableValue(row.message_payload);
+      const content = normalizeMessageContent(
+        payload as Parameters<typeof normalizeMessageContent>[0]
+      );
+      const poll = parsePollDefinition(content);
+      const event = parseEventDefinition(content);
+      const item = novedadesPostItem({
+        payload,
+        messageType: row.message_type,
+        messageId: row.message_id,
+        channelJid: row.channel_jid,
+        timestampMs: Number(row.message_timestamp_ms),
+        isDeleted: false,
+      });
+      const structured = { ...(poll ? { poll } : {}), ...(event ? { event } : {}) };
+      posts.set(`${row.channel_jid}\0${row.message_id}`, {
+        messageId: row.message_id,
+        channelId: row.channel_jid,
+        channelName:
+          row.channel_name && row.channel_name !== row.channel_jid ? row.channel_name : null,
+        messageType: poll ? 'POLL' : event ? 'EVENT' : item.kind.toUpperCase(),
+        text: item.text ?? poll?.question ?? event?.name ?? null,
+        hasMedia: item.mediaKind !== null,
+        mimeType: item.mimeType,
+        postedAt: item.timestamp || '',
+        ...(Object.keys(structured).length ? { structured } : {}),
+      });
+    }
+  } catch (error) {
+    if ((error as { code?: string }).code !== UNDEFINED_TABLE) throw error;
+  }
+  const ordered = [...posts.values()].sort(
+    (a, b) =>
+      Date.parse(b.postedAt) - Date.parse(a.postedAt) ||
+      (a.messageId < b.messageId ? 1 : a.messageId > b.messageId ? -1 : 0) ||
+      (a.channelId < b.channelId ? 1 : a.channelId > b.channelId ? -1 : 0)
+  );
+  const page = ordered.slice(0, query.limit);
+  const last = page[page.length - 1];
+  return {
+    posts: page,
+    channels: channelIds.size,
+    nextCursor:
+      ordered.length > query.limit && last
+        ? encodeTimeCursor({
+            at: last.postedAt,
+            messageId: last.messageId,
+            channelId: last.channelId,
+          })
+        : null,
   };
 }
