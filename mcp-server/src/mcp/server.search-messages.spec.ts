@@ -9,7 +9,12 @@ import { SOCIAL_TOOL_REGISTRY } from './tool-registry';
  * 'instagram', ids `ig_<account>_…` never namespace-prefixed, filed under the
  * account's DB namespace) and the mediaType filter on every channel.
  */
-function serverWith() {
+function serverWith(
+  brain: {
+    config: unknown;
+    fetchImpl: (url: string, init: RequestInit) => Promise<Response>;
+  } | null = null
+) {
   const server = Object.create(MCPServer.prototype) as MCPServer;
   const query = jest.fn(async (..._args: unknown[]) => ({ rows: [] as any[] }));
   useTestAccounts({
@@ -20,7 +25,8 @@ function serverWith() {
   Object.assign(searchService as unknown as Record<string, unknown>, {
     dbClient: { query },
     // No brain configured: search() falls back to the keyword (FTS) query.
-    brain: null,
+    brain: brain?.config ?? null,
+    fetchImpl: brain?.fetchImpl,
     logger: { warn: jest.fn() },
   });
   Object.assign(server as unknown as Record<string, unknown>, {
@@ -166,5 +172,54 @@ describe('social_search_messages — mediaType', () => {
     }));
     expect(out.structuredContent.error).toMatchObject({ code: 'invalid_request' });
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it('T8 an instance that is down is a partial read: meta.partialErrors, results of the others intact', async () => {
+    const fetchImpl = jest.fn(async (url: string) => {
+      if (url.includes('/instances/skirmshop/')) return new Response('down', { status: 502 });
+      return new Response(
+        JSON.stringify({
+          instance_id: 'personal',
+          documents: [
+            {
+              score: 0.9,
+              metadata: { type: 'conversation_chunk', account: 'personal', message_ids: ['3EB0A'] },
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+    const { run, query } = serverWith({
+      config: { url: 'http://brain', apiKey: 'k', timeoutMs: 1000, minScore: 0.2 },
+      fetchImpl,
+    });
+    query.mockResolvedValueOnce({
+      rows: [
+        {
+          message_id: 'id-1',
+          wa_message_id: '3EB0A',
+          conversation_id: 'c1',
+          content: 'hola',
+          sender_wa_id: 's',
+          wa_timestamp: new Date('2026-10-01T00:00:00Z'),
+          platform: 'whatsapp',
+          account: 'personal',
+          message_type: 'TEXT',
+        },
+      ],
+    });
+
+    const out = await run({ query: 'hola' });
+
+    expect(out.structuredContent.data.results).toHaveLength(1);
+    expect(out.structuredContent.data.mode).toBe('semantic');
+    expect(out.structuredContent.data.fallbackReason).toBeUndefined();
+    expect(out.structuredContent.meta.source.completeness).toBe('partial');
+    expect(out.structuredContent.meta.partialErrors[0]).toMatchObject({
+      accountId: 'professional',
+      code: 'provider_error',
+      message: expect.stringContaining('brain skirmshop 502'),
+    });
   });
 });

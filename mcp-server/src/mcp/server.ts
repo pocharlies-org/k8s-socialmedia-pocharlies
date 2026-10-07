@@ -3418,46 +3418,56 @@ export class MCPServer {
     rawIds?: boolean;
     mediaType?: MediaType;
   }) {
-    const { results, mode, fallbackReason } = await this.searchService.searchDetailed(args.query, {
-      chatId: args.chatId,
-      from: args.from ? new Date(args.from) : undefined,
-      to: args.to ? new Date(args.to) : undefined,
-      sender: args.sender,
-      limit: args.limit || 20,
-      account: args.account,
-      platform: args.platform,
-      rawIds: args.rawIds,
-      mediaType: args.mediaType,
-    });
+    const { results, mode, fallbackReason, partialErrors } =
+      await this.searchService.searchDetailed(args.query, {
+        chatId: args.chatId,
+        from: args.from ? new Date(args.from) : undefined,
+        to: args.to ? new Date(args.to) : undefined,
+        sender: args.sender,
+        limit: args.limit || 20,
+        account: args.account,
+        platform: args.platform,
+        rawIds: args.rawIds,
+        mediaType: args.mediaType,
+      });
 
     return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              results: results.map(r => ({
-                messageId: r.messageId,
-                conversationId: r.conversationId,
-                content: r.content,
-                sender: r.senderWaId,
-                timestamp: r.waTimestamp.toISOString(),
-                channel: r.platform,
-                accountId: r.account,
-                messageType: r.messageType ?? null,
-                similarity: r.similarity,
-                rank: r.rank,
-              })),
-              // Which branch answered: `semantic` = the brain (INFRA-486),
-              // `text` = Postgres full-text, with why the brain did not.
-              mode,
-              ...(fallbackReason ? { fallbackReason } : {}),
-            },
-            null,
-            2
-          ),
+      __canonicalResult: {
+        data: {
+          results: results.map(r => ({
+            messageId: r.messageId,
+            conversationId: r.conversationId,
+            content: r.content,
+            sender: r.senderWaId,
+            timestamp: r.waTimestamp.toISOString(),
+            channel: r.platform,
+            accountId: r.account,
+            messageType: r.messageType ?? null,
+            similarity: r.similarity,
+            rank: r.rank,
+          })),
+          // Which branch answered: `semantic` = the brain (INFRA-486),
+          // `text` = Postgres full-text, with why the brain did not.
+          mode,
+          ...(fallbackReason ? { fallbackReason } : {}),
         },
-      ],
+        // An instance that did not answer is a partial read, not a text fallback;
+        // `source` goes whole because executeCanonicalTool merges meta shallowly.
+        meta: partialErrors?.length
+          ? {
+              source: {
+                kind: 'localIndex',
+                asOf: new Date().toISOString(),
+                completeness: 'partial',
+              },
+              partialErrors: partialErrors.map(e => ({
+                accountId: e.accountId,
+                code: 'provider_error',
+                message: e.message,
+              })),
+            }
+          : {},
+      },
     };
   }
 

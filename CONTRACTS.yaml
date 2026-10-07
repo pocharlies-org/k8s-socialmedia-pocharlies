@@ -2272,11 +2272,9 @@ contracts:
     note: >-
       INFRA-364. Evento en el exchange topic `events` del vhost /synapse
       (RabbitMQ compartido; usuario whatsapp_mcp_brain_windows, solo
-      escritura en `events`). tenant = skirmshop si la instancia del brain
-      de la cuenta (registro de cuentas) es skirmshop, family en cualquier
-      otra (personal y, desde INFRA-487 —cada cuenta de mensajería en su
-      instancia—, leila). El mapeo cuenta→tenant no cambió con eso:
-      personal y leila → family, professional → skirmshop. Cuerpo JSON {data: {adapter (whatsapp|telegram), source_id
+      escritura en `events`). tenant = family si la instancia del brain de
+      la cuenta (registro de cuentas) es personal, skirmshop si es
+      skirmshop. Cuerpo JSON {data: {adapter (whatsapp|telegram), source_id
       (el del primer documento), payload_hash (sha256 hex del array
       documents), documents: [{source_id, content, metadata}]}}, con los
       MISMOS documentos que describe http.brain.push-ingest.conversation-window.v1

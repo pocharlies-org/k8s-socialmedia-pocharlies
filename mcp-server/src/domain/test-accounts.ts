@@ -24,10 +24,9 @@ export function useTestAccounts(maps: {
   const namespaces = new Set([...Object.keys(state.whatsapp), ...Object.keys(state.telegram)]);
   namespaces.add('personal');
   const entries: unknown[] = [];
-  // Same brain routing as prod: the professional namespace feeds 'skirmshop',
-  // leila her own instance (INFRA-487: one messaging account, one space).
+  // Same brain routing as prod: the professional namespace feeds 'skirmshop'.
   const brain = (ns: string) => ({
-    brainInstance: ns === 'professional' ? 'skirmshop' : ns === 'leila' ? 'leila' : 'personal',
+    brainInstance: ns === 'professional' ? 'skirmshop' : 'personal',
   });
   const wa = { personal: 'http://wa-personal', ...state.whatsapp };
   for (const [accountId, connectorUrl] of Object.entries(wa)) {

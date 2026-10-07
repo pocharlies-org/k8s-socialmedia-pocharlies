@@ -20,9 +20,9 @@ describe('brain ingest lib', () => {
   it('routes account and platform to Brain instance and adapter', () => {
     expect(instanceForAccount('personal')).toBe('personal');
     expect(instanceForAccount('professional')).toBe('skirmshop');
-    // INFRA-487 (Dani, 04-10-2026): cada cuenta de mensajería en su propia
-    // instancia; leila nunca ha tenido filas, así que no hay nada que mover.
-    expect(instanceForAccount('leila')).toBe('leila');
+    // SC-1144 fase 2: leila ingesta en la instancia personal hasta que el CTO
+    // decida otra; su PVC arranca vacío, así que no hay filas que mover.
+    expect(instanceForAccount('leila')).toBe('personal');
     expect(adapterForPlatform('telegram')).toBe('telegram');
     expect(adapterForPlatform('instagram')).toBe('instagram');
     expect(adapterForPlatform('whatsapp')).toBe('whatsapp');
@@ -72,7 +72,7 @@ describe('registry-driven namespaces and brain instances', () => {
     expect(ns).toEqual(expect.arrayContaining(['personal', 'professional', 'leila']));
     expect(lib.instanceForAccount('professional')).toBe('skirmshop');
     expect(lib.instanceForAccount('personal')).toBe('personal');
-    expect(lib.instanceForAccount('leila')).toBe('leila');
+    expect(lib.instanceForAccount('leila')).toBe('personal');
     expect(() => lib.instanceForAccount('ghost')).toThrow(/not declared/);
   });
 });

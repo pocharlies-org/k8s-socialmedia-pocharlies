@@ -117,6 +117,19 @@ describe('executeCanonicalTool identity gate', () => {
     );
   });
 
+  it('flag ON + social_search_messages without account -> searches the first account of the binding, not the whole registry', async () => {
+    // characterization (INFRA-635): holds before and after the brain search
+    enableBinding();
+    const server = createServer();
+    await runWithRequestActor({ sub: DANIEL }, () =>
+      server.executeCanonicalTool(definition('social_search_messages'), { channel: 'whatsapp', query: 'hola' })
+    );
+    expect(server.dispatchCanonicalTool).toHaveBeenCalledWith(
+      'searchMessages',
+      expect.objectContaining({ accountId: 'personal' })
+    );
+  });
+
   it('flag ON + bound sub + bound account passes through unchanged', async () => {
     enableBinding();
     const server = createServer();

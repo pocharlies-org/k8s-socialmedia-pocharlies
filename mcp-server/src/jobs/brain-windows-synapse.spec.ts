@@ -22,7 +22,7 @@ describe('brain-windows-synapse', () => {
   it('maps accounts to Synapse tenants through their brain instance', () => {
     expect(tenantForAccount('personal')).toBe('family');
     expect(tenantForAccount('professional')).toBe('skirmshop');
-    // INFRA-487: leila tiene su propia instancia y es de la familia, no de la tienda
+    // leila comparte la instancia personal y es de la familia, no de la tienda
     expect(tenantForAccount('leila')).toBe('family');
   });
 

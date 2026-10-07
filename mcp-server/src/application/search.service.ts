@@ -114,15 +114,25 @@ interface BrainScope {
 }
 
 interface BrainChunk {
+  /** The scope's account: with `messageIds` it is the key of the row it ranks. */
+  account: string;
   score: number;
   messageIds: string[];
 }
 
 export type SearchMode = 'semantic' | 'text';
 
+/** One brain instance that could not be asked, named by the account it serves. */
+export interface SearchFailure {
+  accountId: string;
+  message: string;
+}
+
 export interface SearchOutcome {
   results: SearchResult[];
   mode: SearchMode;
+  /** Semantic answered, but these accounts' instances did not (`meta.partialErrors`). */
+  partialErrors?: SearchFailure[];
   /** Why the keyword branch answered: no semantic match, or the brain failed. */
   fallbackReason?: string;
 }
@@ -264,35 +274,55 @@ export class SearchService {
    * Every hit is a chunk of 3-8 consecutive messages (ADR 0002 §2): its messages
    * come back in chunk order (best first) and, inside a chunk, in time order,
    * each with the chunk's score as `similarity`. Throws if the brain cannot be
-   * asked, so `searchDetailed` can say why it fell back.
+   * asked at all; one instance failing does not fail the others: it comes back in
+   * `failures`, so `searchDetailed` can say what is missing or why it fell back.
    */
-  async semanticSearch(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+  async semanticSearch(
+    query: string,
+    options: SearchOptions = {}
+  ): Promise<{ results: SearchResult[]; failures: SearchFailure[] }> {
     if (!this.brain)
       throw new Error('BRAIN_SEARCH_URL o BRAIN_MESSAGING_SEARCH_KEY sin configurar');
     // Instagram does not go through brain-windows: there are no chunks to find.
-    if (options.platform === 'instagram') return [];
+    if (options.platform === 'instagram') return { results: [], failures: [] };
     const limit = searchLimit(options.limit);
     const scopes = this.brainScopes(options);
-    if (!scopes.length) return [];
+    if (!scopes.length) return { results: [], failures: [] };
 
-    const perScope = await Promise.all(
+    const settled = await Promise.allSettled(
       scopes.map(scope => this.askBrain(query, scope, options, limit))
     );
+    const failures: SearchFailure[] = [];
+    const perScope: BrainChunk[][] = [];
+    settled.forEach((outcome, i) => {
+      if (outcome.status === 'fulfilled') perScope.push(outcome.value);
+      else
+        failures.push({
+          accountId: scopes[i].account,
+          message: (outcome.reason as Error)?.message || String(outcome.reason),
+        });
+    });
     const chunks = perScope
       .flat()
       .filter(c => c.score >= (this.brain as BrainSearchConfig).minScore)
       .sort((a, b) => b.score - a.score);
-    if (!chunks.length) return [];
+    if (!chunks.length) return { results: [], failures };
 
-    const best = new Map<string, { score: number; order: number }>();
+    // The key carries the account: a row only ranks under the scope whose chunk named it.
+    const rankKey = (account: string, id: string) => `${account}\u0000${id}`;
+    const best = new Map<string, { score: number; order: number; id: string }>();
     chunks.forEach((chunk, order) => {
       for (const id of chunk.messageIds) {
-        if (!best.has(id)) best.set(id, { score: chunk.score, order });
+        const key = rankKey(chunk.account, id);
+        if (!best.has(key)) best.set(key, { score: chunk.score, order, id });
       }
     });
-    const rows = await this.messagesById([...best.keys()], options);
-    return rows
-      .map(row => ({ row, rank: best.get(row.wa_message_id) as { score: number; order: number } }))
+    const rows = await this.messagesById([...new Set([...best.values()].map(b => b.id))], options);
+    const results = rows
+      .flatMap(row => {
+        const rank = best.get(rankKey(row.account, row.wa_message_id));
+        return rank ? [{ row, rank }] : [];
+      })
       .sort(
         (a, b) =>
           a.rank.order - b.rank.order ||
@@ -310,6 +340,7 @@ export class SearchService {
         account: row.account,
         messageType: row.message_type,
       }));
+    return { results, failures };
   }
 
   /**
@@ -352,40 +383,56 @@ export class SearchService {
       filters.from = new Date(options.from.getTime() - CHUNK_WINDOW_SLACK_MS).toISOString();
     if (options.to) filters.to = options.to.toISOString();
 
-    const response = await this.fetchImpl(
-      `${brain.url}/instances/${encodeURIComponent(scope.instance)}/search`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(brain.apiKey ? { 'X-API-Key': brain.apiKey } : {}),
-        },
-        body: JSON.stringify({
-          query,
-          limit: Math.min(limit, BRAIN_MAX_HITS),
-          filters,
-          // The chunk with ITS message ids, not the whole parent window.
-          expand_windows: false,
-          // `skirmshop` hides WhatsApp/Telegram from its customer chat; the
-          // professional account's conversations live there and this caller
-          // is internal.
-          include_internal: true,
-        }),
-        signal: AbortSignal.timeout(brain.timeoutMs),
-      }
-    );
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => '')).slice(0, 200);
-      throw new Error(`brain ${scope.instance} ${response.status}: ${detail}`);
-    }
-    const body = (await response.json()) as {
+    let body: {
+      instance_id?: string;
       documents?: Array<{ score?: number; metadata?: Record<string, unknown> }>;
     };
+    try {
+      const response = await this.fetchImpl(
+        `${brain.url}/instances/${encodeURIComponent(scope.instance)}/search`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(brain.apiKey ? { 'X-API-Key': brain.apiKey } : {}),
+          },
+          body: JSON.stringify({
+            query,
+            limit: Math.min(limit, BRAIN_MAX_HITS),
+            filters,
+            // The chunk with ITS message ids, not the whole parent window.
+            expand_windows: false,
+            // `skirmshop` hides WhatsApp/Telegram from its customer chat; the
+            // professional account's conversations live there and this caller
+            // is internal.
+            include_internal: true,
+          }),
+          signal: AbortSignal.timeout(brain.timeoutMs),
+        }
+      );
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => '')).slice(0, 200);
+        throw new Error(`brain ${scope.instance} ${response.status}: ${detail}`);
+      }
+      body = (await response.json()) as typeof body;
+    } catch (e) {
+      const message = (e as Error).message;
+      // the 'brain <instance> <status>' message above already names the instance
+      throw new Error(
+        message.startsWith(`brain ${scope.instance} `)
+          ? message
+          : `brain ${scope.instance}: ${message}`
+      );
+    }
+    // Each instance is its own collection: an answer from another one is not ours to read.
+    if (body.instance_id !== scope.instance)
+      throw new Error(`brain ${scope.instance}: respondió la instancia ${body.instance_id}`);
     return (body.documents || [])
       .filter(
         d => d.metadata?.type === 'conversation_chunk' && d.metadata?.account === scope.account
       )
       .map(d => ({
+        account: scope.account,
         score: Number(d.score) || 0,
         messageIds: Array.isArray(d.metadata?.message_ids)
           ? (d.metadata?.message_ids as unknown[]).map(String)
@@ -450,8 +497,19 @@ export class SearchService {
   async searchDetailed(query: string, options: SearchOptions = {}): Promise<SearchOutcome> {
     let fallbackReason = 'sin coincidencias semánticas';
     try {
-      const semanticResults = await this.semanticSearch(query, options);
-      if (semanticResults.length > 0) return { results: semanticResults, mode: 'semantic' };
+      const { results, failures } = await this.semanticSearch(query, options);
+      if (results.length > 0)
+        return {
+          results,
+          mode: 'semantic',
+          ...(failures.length ? { partialErrors: failures } : {}),
+        };
+      if (failures.length) {
+        fallbackReason = `búsqueda semántica no disponible: ${[...new Set(failures.map(f => f.message))].join('; ')}`;
+        this.logger.warn(
+          `Semantic search failed, falling back to keyword search: ${fallbackReason}`
+        );
+      }
     } catch (error) {
       fallbackReason = `búsqueda semántica no disponible: ${(error as Error)?.message || error}`;
       this.logger.warn(`Semantic search failed, falling back to keyword search: ${fallbackReason}`);
