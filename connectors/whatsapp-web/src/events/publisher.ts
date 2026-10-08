@@ -179,11 +179,15 @@ export class BoundedEventRetainer {
     return { ...this.counters, pendingSize: this.queue.length };
   }
 
-  /** Test seam: rewrite an entry's age so window expiry can be asserted. */
-  ageItem(key: string, ageMs: number): boolean {
+  /**
+   * Test seam: rewrite an entry's age so window expiry can be asserted. `nowMs`
+   * is the reference instant, so a spec can run on a fixed clock instead of
+   * the wall clock.
+   */
+  ageItem(key: string, ageMs: number, nowMs: number = Date.now()): boolean {
     const item = this.queue.find(entry => entry.key === key);
     if (!item) return false;
-    item.enqueuedAtMs = Date.now() - ageMs;
+    item.enqueuedAtMs = nowMs - ageMs;
     return true;
   }
 
@@ -203,7 +207,8 @@ export class EventPublisher {
   private nc: NatsConnection | null = null;
   private logger: pino.Logger;
   private caCertPath?: string;
-  private connected = false;
+  private isUp = false;
+  private readonly changeListeners = new Set<() => void>();
   private connecting = false;
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -271,6 +276,32 @@ export class EventPublisher {
     return this.connected;
   }
 
+  /**
+   * Subscribe to every change of the connection state or of the retention
+   * counters; returns the unsubscribe. Lets a caller (the specs) wait for a
+   * condition on this publisher by event instead of polling it against a clock.
+   */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private get connected(): boolean {
+    return this.isUp;
+  }
+
+  private set connected(value: boolean) {
+    if (this.isUp === value) return;
+    this.isUp = value;
+    this.changed();
+  }
+
+  private changed(): void {
+    for (const listener of [...this.changeListeners]) listener();
+  }
+
   /** Counters for the published-vs-received evidence (INFRA-290 criteria B/C). */
   retentionStats(): RetentionStats {
     return this.retainer.stats();
@@ -329,6 +360,7 @@ export class EventPublisher {
       this.logger.info('Disconnected from NATS');
     }
     this.connected = false;
+    this.changed();
   }
 
   /**
@@ -344,6 +376,7 @@ export class EventPublisher {
       try {
         this.nc.publish(subject, payload);
         this.retainer.countPublished();
+        this.changed();
         return;
       } catch (error) {
         this.logger.error(`Failed to publish, retaining event ${key}: ${String(error)}`);
@@ -357,6 +390,7 @@ export class EventPublisher {
         'NATS not connected, event retained for republication'
       );
     }
+    this.changed();
   }
 
   /** Republish everything the retainer is holding, oldest first. */
@@ -388,6 +422,7 @@ export class EventPublisher {
         }
         republished += batch.length;
         this.retainer.countRepublished(batch.length);
+        this.changed();
       }
       if (republished > 0) {
         this.logger.info(
@@ -397,6 +432,7 @@ export class EventPublisher {
       }
     } finally {
       this.draining = false;
+      this.changed();
     }
   }
 

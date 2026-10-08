@@ -27,6 +27,14 @@ class FakeStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();
   puts: { key: string; channel: CredentialChannel; payload: Record<string, unknown> }[] = [];
   putError: Error | null = null;
+  /** While set, every put parks here after announcing itself (see `nextPutStarted`). */
+  hold: Promise<void> | null = null;
+  private putStarted: Array<() => void> = [];
+
+  /** Resolves when the next put begins — an event to wait on instead of a sleep. */
+  nextPutStarted(): Promise<void> {
+    return new Promise(resolve => this.putStarted.push(resolve));
+  }
 
   async get(sessionKey: string, channel: CredentialChannel): Promise<StoredCredential | null> {
     return this.rows.get(`${sessionKey}/${channel}`) ?? null;
@@ -36,6 +44,8 @@ class FakeStore implements CredentialStore {
     channel: CredentialChannel,
     payload: Record<string, unknown>
   ): Promise<void> {
+    for (const announce of this.putStarted.splice(0)) announce();
+    if (this.hold) await this.hold;
     if (this.putError) throw this.putError;
     this.puts.push({ key: sessionKey, channel, payload });
     this.rows.set(`${sessionKey}/${channel}`, {
@@ -49,8 +59,6 @@ class FakeStore implements CredentialStore {
     this.rows.delete(`${sessionKey}/${channel}`);
   }
 }
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 test('credentialSessionKeyFromEnv: flag off or key unset → null (legacy path)', () => {
   assert.equal(credentialSessionKeyFromEnv({}), null);
@@ -126,22 +134,33 @@ test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir
   assert.equal(Buffer.from(files['session-1'], 'base64').toString(), 'second');
 });
 
-test('write-back: a put scheduled mid-flight runs a trailing put (last saveCreds lands)', async () => {
+test('write-back: a put scheduled mid-flight runs a trailing put (last saveCreds lands)', async t => {
+  // The debounce is a real, unref()'d setTimeout: faking it lets the spec fire
+  // it on demand, and the spec then waits on the store's own "put started"
+  // event, never on a sleep.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const store = new FakeStore();
   const authDir = await mkdtemp(join(tmpdir(), 'cred-wb2-'));
   await writeFile(join(authDir, 'creds.json'), 'v1');
 
+  let release!: () => void;
+  store.hold = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const firstPut = store.nextPutStarted();
+
   const wb = createCredentialWriteBack(store, 'sub-1', authDir, () => {}, 0);
   wb.schedule();
-  await sleep(1); // fire the first put
+  t.mock.timers.tick(0); // the debounce fires: the first put starts
+  await firstPut; // ...and is now in flight, parked inside the store
   await writeFile(join(authDir, 'creds.json'), 'v2');
   wb.schedule(); // lands while the first put is still in flight
+  release();
   await wb.flush();
 
-  assert.equal(store.puts.length >= 2, true);
-  const last = store.puts[store.puts.length - 1];
-  const files = (last.payload as { files: Record<string, string> }).files;
-  assert.equal(Buffer.from(files['creds.json'], 'base64').toString(), 'v2');
+  const creds = (put: { payload: Record<string, unknown> }) =>
+    Buffer.from((put.payload as { files: Record<string, string> }).files['creds.json'], 'base64').toString();
+  assert.deepEqual(store.puts.map(creds), ['v1', 'v2'], 'the in-flight put, then the trailing one');
 });
 
 test('write-back: store failures log and never throw into the socket handler', async () => {

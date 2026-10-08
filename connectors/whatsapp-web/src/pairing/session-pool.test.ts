@@ -19,7 +19,9 @@ import { Clock, FakeFactory, MemoryStore } from './test-fakes';
 const A = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
 const INVENTED = 'ffffffff-9999-4999-8999-ffffffffffff';
-const settle = () => new Promise(resolve => setTimeout(resolve, 25));
+// No real clock anywhere in this file (SKIRM-115): the pool's clock is the fake
+// `Clock`, and "the store has caught up" is `pool.flush()` (or `pool.close()`),
+// which awaits the write-back's own promise instead of sleeping and hoping.
 
 async function makePool(
   store = new MemoryStore(),
@@ -164,11 +166,11 @@ test('criterio 1d: tras connection open simulado hay exactamente 1 fila para A y
   const sock = factory.last(A);
   sock.emitQr('2@ref');
   await sock.saveCredsBeforeOpen();
-  await settle();
+  await pool.flush(); // lands anything the pre-open saveCreds scheduled
   assert.equal(store.rowsFor(A), 0, 'no row before the first open');
 
   await sock.open('34600111222:7@s.whatsapp.net', 'Ana');
-  await settle();
+  await pool.flush();
   assert.equal(store.rowsFor(A), 1);
   assert.equal(store.rowsFor(INVENTED), 0);
   assert.equal(store.rows.size, 1);
@@ -184,8 +186,7 @@ test('criterio 1e: reinicio del pool (instancia nueva) → me de A sale de la fi
   const first = await makePool(store);
   await first.pool.start(A);
   await first.factory.last(A).open('34600111222:7@s.whatsapp.net', 'Ana');
-  await settle();
-  await first.pool.close();
+  await first.pool.close(); // flushes the write-back of every live session
 
   const second = await makePool(store); // fresh process: empty memory, same store
   const me = await second.pool.me(A);
@@ -206,11 +207,10 @@ test('criterio 1f: loggedOut → fila borrada, estado expired', async () => {
   await pool.start(A);
   const sock = factory.last(A);
   await sock.open('34600111222:7@s.whatsapp.net');
-  await settle();
+  await pool.flush();
   assert.equal(store.rowsFor(A), 1);
 
-  await sock.loggedOut();
-  await settle();
+  await sock.loggedOut(); // resolves after the invalidation hook deleted the row
   assert.equal(store.rowsFor(A), 0);
   const st = await pool.status(A);
   assert.equal(st.state, 'expired');
@@ -226,14 +226,13 @@ test('arranque con fila existente: la sesión se carga en el auth dir antes de c
   const first = await makePool(store);
   await first.pool.start(A);
   await first.factory.last(A).open('34600111222:7@s.whatsapp.net');
-  await settle();
   await first.pool.close();
 
   const second = await makePool(store);
   await second.pool.start(A);
   const sock = second.factory.last(A);
   await sock.open('34600111222:7@s.whatsapp.net'); // reconnect with stored creds, no QR
-  await settle();
+  await second.pool.flush();
   assert.equal((await second.pool.status(A)).state, 'paired');
   assert.equal(store.rowsFor(A), 1);
 });

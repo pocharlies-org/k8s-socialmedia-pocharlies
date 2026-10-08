@@ -339,6 +339,16 @@ export class SessionPool {
     this.evictionTimer.unref?.();
   }
 
+  /**
+   * Land every pending write-back now (a scheduled debounce, the put in flight
+   * and its trailing run) and wait for it. Sockets stay open: this is the
+   * deterministic "the store has caught up" point that `close()` also passes
+   * through, without ending the sessions.
+   */
+  async flush(): Promise<void> {
+    await Promise.all([...this.sessions.values()].map(entry => entry.writeBack?.flush()));
+  }
+
   /** Flush every write-back and close every socket (SIGTERM). */
   async close(): Promise<void> {
     if (this.evictionTimer) clearInterval(this.evictionTimer);
