@@ -17,7 +17,11 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { writeNoSessionResponse } from './session-errors';
 import { randomUUID } from 'node:crypto';
 import { MCPServer } from './server';
-import { actorFromHeaders, runWithRequestActor } from '@mcp-socialmedia/shared';
+import {
+  actorFromHeaders,
+  requireConnectorSecret,
+  runWithRequestActor,
+} from '@mcp-socialmedia/shared';
 
 // SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -32,8 +36,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const LLM_BASE_URL = process.env.LLM_BASE_URL || '';
 const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || '';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-change-in-production';
-const CONNECTOR_SHARED_SECRET =
-  process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
+// SKIRM-103 F3-2: no key, no start; the placeholder warns, and CONNECTOR_SECRET_STRICT=true refuses it.
+const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
 const CONNECTOR_URL = process.env.CONNECTOR_URL || 'http://whatsapp-connector:3001';
 const SSE_PORT = parseInt(process.env.MCP_SSE_PORT || '3010', 10);
 const AUTH_TOKEN = process.env.MCP_SSE_AUTH_TOKEN || '';

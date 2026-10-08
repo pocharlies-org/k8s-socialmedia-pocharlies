@@ -28,6 +28,7 @@ function fakeRedis() {
 function createServer() {
   const server: any = Object.create(MCPServer.prototype);
   server.redisClient = fakeRedis();
+  server.connectorSecret = 'test-connector-secret'; // SKIRM-103: signs with the constructed secret, not env
   server.logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn() };
   useTestAccounts({
     whatsapp: {

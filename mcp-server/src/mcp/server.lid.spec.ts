@@ -68,6 +68,7 @@ describe('handleSendMessage professional @lid + phone fallback behavior', () => 
     });
     Object.assign(server as unknown as Record<string, unknown>, {
       dbClient: { query },
+      connectorSecret: 'test-connector-secret', // SKIRM-103: signs with the constructed secret, not env
       logger,
     });
     return {

@@ -3,8 +3,16 @@ import { BaileysClient, WhatsAppMessage } from './baileys-client';
 import { QRHandler } from './qr-handler';
 import { EventPublisher } from './events/publisher';
 import { createRouter } from './api/controller';
+import { createAuthQrV2Router } from './api/auth-qr';
+import { createPublicRouter } from './api/public-routes';
+import { createQrRouter } from './api/qr-routes';
 import { join } from 'path';
-import { MessageReceivedEvent, EventType, PostgresCredentialStore } from '@mcp-socialmedia/shared';
+import {
+  MessageReceivedEvent,
+  EventType,
+  PostgresCredentialStore,
+  requireConnectorSecret,
+} from '@mcp-socialmedia/shared';
 import { scrubSignalSessionLogs } from './signal-log-scrub';
 import { getPool } from './db-writer';
 import {
@@ -31,8 +39,8 @@ const ENCRYPTION_KEY =
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const PORT = parseInt(process.env.PORT || '3001', 10);
-const CONNECTOR_SHARED_SECRET =
-  process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
+// SKIRM-103 F3-2: no key, no start; the placeholder warns, and CONNECTOR_SECRET_STRICT=true refuses it.
+const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
 // When true, the public /qr/page renders a "Generate new QR" button wired to an
 // unauthenticated POST /qr/renew. Only enable on LAN-only deployments (e.g. the
 // professional connector at whatsapp-pro.e-dani.com) — never on the
@@ -82,6 +90,7 @@ async function main(): Promise<void> {
     next();
   });
   app.use('/api/v1', createRouter(client, qrHandler, CONNECTOR_SHARED_SECRET));
+  app.use('/api/v2', createAuthQrV2Router(qrHandler, CONNECTOR_SHARED_SECRET));
 
   app.get('/', (_req, res) => {
     res.redirect(302, '/qr/page');
@@ -95,115 +104,15 @@ async function main(): Promise<void> {
     res.redirect(302, '/api/v1/manual-open/page');
   });
 
-  // Live QR endpoint — serves QR as PNG image from memory
-  app.get('/qr', (_req, res) => {
-    const qrData = qrHandler.getCurrentQR();
-    if (qrData) {
-      const base64Data = qrData.qrCode.replace(/^data:image\/png;base64,/, '');
-      const imgBuffer = Buffer.from(base64Data, 'base64');
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.send(imgBuffer);
-    } else {
-      res.status(404).json({
-        status: 'no_qr',
-        message: 'No QR available — already connected or waiting for generation',
-      });
-    }
-  });
-
-  // QR page — smart page that polls /status and stops on connection
-  app.get('/qr/page', (_req, res) => {
-    const renewButton = ALLOW_WEB_RENEW
-      ? `<button id="renew-btn" onclick="renewQr()">Generate new QR</button>
-  <p id="renew-msg" class="waiting"></p>`
-      : '';
-    const renewScript = ALLOW_WEB_RENEW
-      ? `<script>
-async function renewQr() {
-  if (!confirm('Generate a new QR? This restarts the WhatsApp connection.')) return;
-  const btn = document.getElementById('renew-btn');
-  const msg = document.getElementById('renew-msg');
-  btn.disabled = true; msg.textContent = 'Regenerating QR...';
-  try {
-    const r = await fetch('/qr/renew', { method: 'POST' });
-    const d = await r.json().catch(() => ({}));
-    msg.textContent = r.ok ? 'New QR coming in a few seconds — scan it.' : ('Error: ' + (d.error || r.status));
-  } catch (e) { msg.textContent = 'Error: ' + e; }
-  setTimeout(() => { btn.disabled = false; }, 8000);
-}
-</script>`
-      : '';
-    res.setHeader('Content-Type', 'text/html');
-    res.send(`<!DOCTYPE html>
-<html><head><title>WhatsApp QR</title>
-<style>
-body{display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#111;color:#fff;font-family:sans-serif;flex-direction:column}
-img{width:400px;height:400px;border:4px solid #25D366;border-radius:8px}
-.connected{color:#25D366;font-size:2em;padding:20px;border:3px solid #25D366;border-radius:12px}
-.waiting{color:#666;font-size:1.2em}
-button{margin-top:18px;padding:12px 22px;font-size:1.05em;color:#fff;background:#25D366;border:none;border-radius:8px;cursor:pointer}
-button:disabled{opacity:.5;cursor:default}
-</style>
-<script>
-async function checkStatus() {
-  try {
-    const res = await fetch('/status');
-    const data = await res.json();
-    if (data.connected) {
-      document.getElementById('qr-section').style.display = 'none';
-      document.getElementById('connected-section').style.display = 'block';
-      return;
-    }
-  } catch(e) {}
-  document.getElementById('qr-img').src = '/qr?' + Date.now();
-  setTimeout(checkStatus, 3000);
-}
-window.onload = checkStatus;
-</script>
-</head><body>
-<div id="qr-section">
-  <h2>Scan with WhatsApp</h2>
-  <img id="qr-img" src="/qr" onerror="this.style.opacity='0.3'" />
-  <p class="waiting">Waiting for scan... (auto-refreshes every 3s)</p>
-  ${renewButton}
-</div>
-<div id="connected-section" style="display:none">
-  <p class="connected">WhatsApp Connected!</p>
-  <p>Session is saved. You can close this page.</p>
-</div>
-${renewScript}
-</body></html>`);
-  });
-
-  // Manual QR renew (LAN-only pages; gated by ALLOW_WEB_RENEW). Lets a human force
-  // a fresh QR when the socket is wedged/INITIALIZING instead of waiting for the
-  // watchdog. Same effect as MCP social_manage_session(action=renewQr) but without the HMAC secret, so it
-  // MUST stay disabled on the internet-exposed personal connector.
-  app.post('/qr/renew', async (_req, res) => {
-    if (!ALLOW_WEB_RENEW) {
-      res.status(403).json({ error: 'Web renew disabled (set ALLOW_WEB_RENEW=true)' });
-      return;
-    }
-    try {
-      console.log('Manual QR renew requested via web button');
-      qrHandler.clearQR();
-      await client.renewQR();
-      res.json({ ok: true, message: 'Renewing — new QR will appear shortly.' });
-    } catch (e) {
-      console.error('Manual QR renew failed:', e);
-      res.status(500).json({ error: String(e) });
-    }
-  });
-
-  // Status endpoint
-  app.get('/status', (_req, res) => {
-    res.json({
-      ...client.getStatus(),
-      natsConnected: eventPublisher.isConnected(),
-      session_path: SESSION_PATH,
-    });
-  });
+  app.use(
+    createQrRouter({
+      qrHandler,
+      client,
+      eventPublisher,
+      sessionPath: SESSION_PATH,
+      allowWebRenew: ALLOW_WEB_RENEW,
+    })
+  );
 
   app.listen(PORT, () => {
     console.log(`WhatsApp Connector API listening on port ${PORT}`);
@@ -272,49 +181,8 @@ ${renewScript}
     }
   );
 
-  // --- Public history endpoints (for sync service) ---
-  app.get('/api/public/chats', async (_req, res) => {
-    try {
-      const chats = await client.getChats();
-      res.json({
-        chats: chats.map((c: any) => ({
-          id: c.id?._serialized || c.id,
-          name: c.name,
-          isGroup: c.isGroup,
-          timestamp: c.timestamp,
-        })),
-      });
-    } catch (e) {
-      console.error('Error getting chats:', e);
-      res.status(500).json({ error: String(e) });
-    }
-  });
-
-  app.get('/api/public/history/:chatId', async (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 500;
-      const messages = await client.fetchChatHistory(req.params.chatId, limit);
-      res.json({ messages });
-    } catch (e) {
-      console.error('Error fetching history:', e);
-      res.status(500).json({ error: String(e) });
-    }
-  });
-
-  // Best-effort historical media backfill — wwebjs can usually only fetch the
-  // last ~50 messages per chat, so older media will be marked unavailable.
-  // Run via: curl -X POST 'http://localhost:3001/api/public/backfill-media?days=7&limit=200'
-  app.post('/api/public/backfill-media', async (req, res) => {
-    try {
-      const days = parseInt(req.query.days as string) || 7;
-      const limit = parseInt(req.query.limit as string) || 100;
-      const result = await client.backfillRecentMedia(days, limit);
-      res.json(result);
-    } catch (e) {
-      console.error('Backfill failed:', e);
-      res.status(500).json({ error: String(e) });
-    }
-  });
+  // SKIRM-103: the history endpoints (mcp-server providerGet, sync service) behind the HMAC.
+  app.use('/api/public', createPublicRouter(client, CONNECTOR_SHARED_SECRET));
 
   // SC-705: per-sub session lifecycle against the credential store. The load
   // must happen BEFORE connect() so a restarted pod comes back on its stored
