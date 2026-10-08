@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { resetAccountRegistryCache } from '../domain/account-registry';
 import { InstagramIngestionService, type InstagramEvent } from './instagram-ingestion.service';
 
 jest.mock('pino', () => () => ({ info: jest.fn(), debug: jest.fn(), error: jest.fn() }));
@@ -62,5 +66,47 @@ describe('InstagramIngestionService account isolation', () => {
     const { calls, service } = capture();
     await service.handleEvent(dm('ghost'));
     expect(calls).toHaveLength(0);
+  });
+});
+
+// SKIRM-107: Instagram files its rows under `ig_<account>_…` keys and never goes
+// through accountKey, so the cross-account guard leaves this path as it was.
+describe('InstagramIngestionService and the cross-account guard', () => {
+  it('stores an id that looks namespaced to another account under its ig_ key, as before', async () => {
+    const { calls, service } = capture();
+    await service.handleEvent({
+      ...dm('skirmshop'),
+      senderId: 'leila:1',
+      conversationId: 'leila:t1',
+      messageId: 'leila:m1',
+    });
+    expect(insertInto(calls, 'conversations')[0]).toBe('ig_skirmshop_thread_leila:t1');
+    expect(insertInto(calls, 'messages')[0]).toBe('ig_skirmshop_leila:m1');
+    expect(insertInto(calls, 'messages')[7]).toBe('professional');
+  });
+
+  it('a disabled Instagram account is still refused, as before', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-ingestion-'));
+    const file = path.join(dir, 'accounts.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify([
+        { channel: 'whatsapp', accountId: 'personal', connectorUrl: 'http://wa-personal:3001' },
+        { channel: 'instagram', accountId: 'old_ig', namespace: 'personal', enabled: false },
+      ])
+    );
+    const previous = process.env.SOCIAL_ACCOUNTS_FILE;
+    process.env.SOCIAL_ACCOUNTS_FILE = file;
+    resetAccountRegistryCache();
+    try {
+      const { calls, service } = capture();
+      await service.handleEvent(dm('old_ig'));
+      expect(calls).toHaveLength(0);
+    } finally {
+      if (previous === undefined) delete process.env.SOCIAL_ACCOUNTS_FILE;
+      else process.env.SOCIAL_ACCOUNTS_FILE = previous;
+      resetAccountRegistryCache();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

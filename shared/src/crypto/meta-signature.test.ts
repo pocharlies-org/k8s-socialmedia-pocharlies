@@ -22,6 +22,12 @@ test('valid signature with the only secret, or with any of several → true', ()
   assert.equal(verifyMetaSignature(BODY, sign(RAW, SECRET), [SECRET, OTHER]), true);
 });
 
+test('upper-case hex is the same digest, so it passes (the old whatsapp-cloud copy refused it)', () => {
+  const upper = 'sha256=' + sign(RAW, SECRET).slice('sha256='.length).toUpperCase();
+  assert.equal(verifyMetaSignature(BODY, upper, [SECRET]), true);
+  assert.equal(verifyMetaSignature(BODY, upper, [OTHER]), false);
+});
+
 test('missing header, wrong secret, other body or re-serialised JSON → false', () => {
   assert.equal(verifyMetaSignature(BODY, undefined, [SECRET]), false);
   assert.equal(verifyMetaSignature(BODY, '', [SECRET]), false);
