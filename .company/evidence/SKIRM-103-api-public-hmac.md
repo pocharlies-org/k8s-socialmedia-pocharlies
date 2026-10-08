@@ -18,6 +18,7 @@ Rama `SKIRM-103-api-public-hmac` sobre `origin/deploy/prod` = 5ed41bc. Todo en e
 |---|---|
 | `pnpm --filter @mcp-socialmedia/connector test` (construye `shared` antes) | **562 tests, 561 pass, 0 fail, 1 skipped** (el tronco: 538, 536 pass, 1 fail —`criterio 1f: loggedOut`, temporizadores, lo arregla #232—, 1 skipped; +24 = 5 + 12 + 5 + 2) |
 | `pnpm --filter @mcp-socialmedia/server test` (jest) | **57 suites pasan, 1 skipped; 683 tests pass, 8 skipped, 0 fail** |
+| `pnpm --filter ./connectors/instagram --filter ./connectors/telegram --filter ./connectors/whatsapp-cloud --filter ./connectors/whatsapp-synapse-bridge --filter ./workers/whatsapp-open-worker test` (no cambian; dependen de `shared`) | exit 0: instagram 41/41, telegram 66/66, synapse-bridge 40/40, el resto sin fallos |
 | `pnpm --filter @mcp-socialmedia/shared test` | `echo 'No tests configured'`: shared no tiene runner; su helper lo prueba el jest de mcp-server, como los specs de `session-store` |
 | `pnpm -r build` | exit 0 |
 | `pnpm --filter shared --filter connector --filter server run lint` | exit 0; 0 errores (9 + 799 + 1240 warnings, los de siempre; los nuevos son del código movido tal cual) |
