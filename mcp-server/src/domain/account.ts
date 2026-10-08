@@ -40,8 +40,16 @@ export function normalizeAccount(value: unknown): Account {
  * Idempotent: an id that already carries the account prefix is returned
  * unchanged, so a namespaced id read back from the DB (and handed to a tool
  * again) is never double-prefixed.
+ * An id namespaced to ANOTHER account is refused (SKIRM-107, guard from the NAS
+ * fork): it would be written or read under the wrong account. `personal` is
+ * covered too, since its bare form would hand out the other account's row.
+ * `account` is not validated here (no normalizeAccount): the account-less search
+ * walks every declared namespace, disabled ones included.
  */
 export function accountKey(account: Account, id: string): string {
+  const parsed = stripAccount(id);
+  if (parsed.id !== id && parsed.account !== account)
+    throw new AccountRegistryError('Cross-account identifier');
   if (account === 'personal') return id;
   const prefix = `${account}:`;
   return id.startsWith(prefix) ? id : `${prefix}${id}`;
