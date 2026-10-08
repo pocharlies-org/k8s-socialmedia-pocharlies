@@ -11,7 +11,7 @@
 | `whatsapp-connector` (Baileys, :3001), `telegram-connector` (gramjs, :3002), `telegram-sync` (telethon, :3080), `instagram-connector` (:3003), `whatsapp-cloud-connector` (:3004) | `connectors/*` | imágenes por `tag@digest` (p. ej. instagram `sha-985a199ea567@sha256:38c14176…`; pool `v1.3.57`) | ArgoCD app `socialmedia` |
 | `mcp-server` (:3000) y `mcp-sse` (:3010), superficie en `contracts/socialmedia-tools.json` | `mcp-server/src` | digest del `mcp-server`, compartido con los CronJobs de digest | ídem |
 | Puente Synapse | `connectors/whatsapp-synapse-bridge` | digest | ídem |
-| API de emparejamientos por sub: `social-api` (:3020, imagen `mcp-server`), `whatsapp-pairing` (:3001, imagen del conector, entrypoint `start:pairing`), `telegram-pairing` (:3002) | `k8s/base/social-pairing.yaml` | mismo pin que `mcp-server` y los conectores (`images:` del overlay prod) | ídem |
+| API de emparejamientos por sub: `social-api` (:3020, imagen `mcp-server`), `whatsapp-pairing` (:3001, imagen del conector, `src/pairing/main.ts`), `telegram-pairing` (:3002) | `k8s/base/social-pairing.yaml` | `social-api`: el `images:` del overlay prod (el pin de `mcp-server`); `whatsapp-pairing` y `telegram-pairing`: sus propias secciones de `k8s/overlays/prod/patch-image.yaml`, que no siguen a los conectores de la casa | ídem |
 | `dgx-messages` (consola, ns `messages`) | fuera de este repo | su propia imagen | cliente de `social-api` (`SOCIAL_API_ALLOWED_AZP=dgx-messages`, `networkpolicy-social-pairing.yaml`); lee los adjuntos de `socialmedia-media` (:9000, `networkpolicy.yaml`) |
 
 Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGateway `/social`; un cambio de herramienta toca el catálogo
