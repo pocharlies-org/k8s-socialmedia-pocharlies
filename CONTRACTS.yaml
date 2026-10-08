@@ -983,12 +983,12 @@ contracts:
       base64, size}; 404 no media. Registered with the sending gate (the route
       predates the registry). The path, the body fields and the 200 shape are
       contract: changing any is breaking — a new `.v2` entry beside this one.
-      SKIRM-101, additive: this route and GET /api/v1/peers/:id/photo
-      (http.telegram-connector.peers-photo.v1) now cut a download at
-      TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS (120 s) and answer 429 when Telegram
-      imposes a flood wait (Retry-After header, body {error, retryAfter}), 504
-      when the deadline expires and 502 on any other upstream failure, where they
-      answered a generic 500. The 200 and 404 shapes do not change.
+      SKIRM-101, additive: the download is cut at
+      TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS (120 s by default) and the route
+      answers 429 when Telegram imposes a flood wait (Retry-After header, body
+      {error, retryAfter}), 504 when the deadline expires and 502 on any other
+      upstream failure, where it answered a generic 500. The 200 and the 404 no
+      media do not change.
   - id: http.telegram-connector.messages-forward.v1
     kind: http-route
     value: /messages/forward
@@ -1263,6 +1263,12 @@ contracts:
       with the sending gate (the route predates the registry). The path, the
       body fields and the 200 shape are contract: changing any is breaking — a
       new `.v2` entry beside this one.
+      SKIRM-101, additive: the download is cut at 20 s and the route answers 429
+      when Telegram imposes a flood wait (Retry-After header, body {error,
+      retryAfter}), 504 when the deadline expires and 502 on any other upstream
+      failure. A failure to look the peer up or to download every candidate,
+      which used to be a 404, is now a 502. The 404 no photo and the 200 do not
+      change.
   - id: http.instagram-connector.health.v1
     kind: http-route
     value: /health

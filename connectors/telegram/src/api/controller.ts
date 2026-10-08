@@ -702,7 +702,6 @@ export function createRouter(
         const messages = await client.getMessages(chatId, limit, offsetId);
         res.json({ messages });
       } catch (error) {
-        if (respondRateLimit(res, error)) return;
         logger.error(`Error getting messages: ${String(error)}`);
         res.status(500).json({ error: 'Failed to get messages' });
       }

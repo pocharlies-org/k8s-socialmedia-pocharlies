@@ -227,11 +227,10 @@ test('single message and flood wait HTTP contracts support durable recovery', as
     client.getMessage = async () => null;
     assert.equal((await get('/messages/single/123/1')).status, 404);
     const flood = async () => { throw tl.RpcError.fromTl({ _: 'rpc_error', errorCode: 420, errorMessage: 'FLOOD_WAIT_18' }); };
-    client.getMessages = flood;
     client.getMessage = flood;
     client.downloadMedia = flood;
     client.downloadPeerPhoto = flood;
-    for (const route of ['/messages/123', '/messages/single/123/1', '/messages/media/123/1', '/peers/123/photo']) {
+    for (const route of ['/messages/single/123/1', '/messages/media/123/1', '/peers/123/photo']) {
       const res = await get(route);
       assert.equal(res.status, 429);
       assert.equal(res.headers.get('Retry-After'), '18');

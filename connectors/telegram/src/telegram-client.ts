@@ -693,14 +693,7 @@ export class TelegramClientWrapper extends EventEmitter {
     const params: { limit: number; offset?: { id: number; date: number } } = { limit };
     if (offsetId) params.offset = { id: offsetId, date: 0 };
 
-    const messages = await withDownloadDeadline(
-      signal =>
-        telegramReadClient(this.client.withParams({ abortSignal: signal }), signal).getHistory(
-          toMtcutePeer(chatId),
-          params
-        ),
-      mediaDeadlineMs()
-    );
+    const messages = await this.client.getHistory(toMtcutePeer(chatId), params);
     const out: TelegramMessage[] = [];
     for (const m of messages) {
       const p = await this.parseMessage(m);
