@@ -38,9 +38,13 @@ images:
   # patch-image.yaml, now the authority for those two names.
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
+  # SKIRM-101 08-10: v1.3.82 -> v1.3.105 (run 37739696589, deploy/prod@129b8ea: #229 —
+  # recuperacion de medios de Telegram con tope de 8 intentos por mensaje; sin migraciones
+  # SQL). Digest checked against Harbor (crane). Moves telegram-sync and
+  # telegram-sync-professional (same image name); the connector side is in patch-image.yaml.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.82
-    digest: sha256:3fbf891f0fd28e7f962b4b4f5ab06522bb49f014702619914c397ab59e3618a1
+    newTag: v1.3.105
+    digest: sha256:7a25fbf0e39d95145e1ca0602ca63135ed651599cc91e43246bbee1aefe288d0
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
