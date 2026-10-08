@@ -55,6 +55,7 @@ def retry_after(response: httpx.Response) -> float:
             seconds = 30.0
     return max(1.0, seconds) if math.isfinite(seconds) else 30.0
 
+
 def is_throttled(error: Exception) -> bool:
     """Telegram (429) or the connector (503, not connected) said "wait": that says
     nothing about the message being fetched."""

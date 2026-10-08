@@ -36,6 +36,20 @@ it('Telegram: tg_<chat>_<mensaje>, con su cuenta cuando no es la default', () =>
   expect(EmbeddingJob.messageKeyFor(pro)).toBe('professional:tg_-1004409526898_8972');
 });
 
+it('SKIRM-107: un id ya namespaced a otra cuenta no se convierte en clave (el handler lo registra)', () => {
+  const e: Event = {
+    eventType: 'MessageReceived',
+    conversationId: '123@c.us',
+    waMessageId: 'leila:3EB0AA',
+    account: 'professional',
+  };
+  expect(() => EmbeddingJob.messageKeyFor(e)).toThrow('Cross-account identifier');
+  // el prefijo de la propia cuenta sigue siendo idempotente
+  expect(EmbeddingJob.messageKeyFor({ ...e, waMessageId: 'professional:3EB0AA' })).toBe(
+    'professional:3EB0AA'
+  );
+});
+
 it('un evento sin id util no manda una consulta vacía', () => {
   const e: Event = { eventType: 'MessageReceived', conversationId: '123@c.us' };
   expect(EmbeddingJob.messageKeyFor(e)).toBe('');
