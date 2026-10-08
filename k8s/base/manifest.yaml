@@ -595,6 +595,8 @@ spec:
             # brain responde 401 si el valor no es el suyo y la tool lo dice en
             # `fallbackReason`.
             - { name: BRAIN_SEARCH_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
+            # INFRA-743: lecturas frias de Qdrant (2-50 s, INFRA-744); con los 10 s por defecto del cliente caia a texto. Delante: gateway /social 120 s.
+            - { name: BRAIN_SEARCH_TIMEOUT_MS, value: "30000" }
             - name: BRAIN_MESSAGING_SEARCH_KEY
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-brain-search, key: BRAIN_MESSAGING_SEARCH_KEY } }
             - name: MCP_SSE_AUTH_TOKEN
