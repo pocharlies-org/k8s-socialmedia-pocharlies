@@ -30,9 +30,9 @@ Los dos que pasan en rojo son la conducta que debe conservarse (firma buena → 
 
 ```
 $ pnpm --filter ./shared test
-ok 1..5  (valid con uno o varios secretos; cabecera ausente / otro secreto / otro cuerpo / JSON reserializado;
+ok 1..6  (valid con uno o varios secretos; hex en mayúsculas; cabecera ausente / otro secreto / otro cuerpo / JSON reserializado;
           lista vacía; vacíos descartados; forma sha256=<64 hex> sin llegar a timingSafeEqual)
-# tests 5 / # pass 5 / # fail 0
+# tests 6 / # pass 6 / # fail 0
 
 $ pnpm --filter ./connectors/instagram test        (la suite entera, con el fichero nuevo en la lista)
 ok 42..53  (los 12 de webhook-signature.test.ts)
@@ -44,7 +44,7 @@ $ pnpm contract:check                                  → Socialmedia contract 
 $ python3 scripts/render-connectors.py --check         → exit 0
 $ pnpm --filter ./connectors/whatsapp-cloud test       → exit 0 sin ejecutar nada: ese paquete no tiene script `test`
 $ pnpm -r --workspace-concurrency=1 --no-bail test
-    shared 5/5 · instagram 53/53 · telegram 66/66 · whatsapp-synapse-bridge 40/40 · mcp-server 634 pasan, 8 skipped
+    shared 6/6 · instagram 53/53 · telegram 66/66 · whatsapp-synapse-bridge 40/40 · mcp-server 634 pasan, 8 skipped
     whatsapp-web: 537 pasan / 1 falla en el barrido y 0 en solitario (ver abajo)
 ```
 
@@ -61,7 +61,7 @@ Quitar el descarte de secretos vacíos en `verifyMetaSignature` (`.filter(() => 
 
 ## Una línea por criterio
 
-- C1 · `shared/src/crypto/meta-signature.test.ts` (5 tests), en `scripts.test` de `shared/package.json`.
+- C1 · `shared/src/crypto/meta-signature.test.ts` (6 tests), en `scripts.test` de `shared/package.json`.
 - C1b · tests 4 y 5 de `shared`; `metaAppSecrets` con el entorno de prod simulado (tests 6 y 7 de instagram); el espía de `timingSafeEqual` (test 5 de `shared`) no se llama con cabeceras mal formadas y sí con una buena.
 - C2 · tests 1, 2, 3, 4 y 7 de `webhook-signature.test.ts` con `createInstagramApp` y `fetch`; fichero añadido a `scripts.test` de `connectors/instagram`.
 - C3 · `whatsapp-cloud` compila (`build` exit 0) usando la función compartida; no tiene tests ni script `test`.
@@ -71,3 +71,12 @@ Quitar el descarte de secretos vacíos en `verifyMetaSignature` (`.filter(() => 
 - C6 · `git grep -n -i "x-hub-signature"`: solo `shared`, `instagram/src/webhook.ts` y `whatsapp-cloud/src/webhook.ts` (más `CONTRACTS.yaml` y `ARCHITECTURE.md` en prosa).
 - C7 · ver arriba.
 - C8 · entrada `http.instagram-connector.webhook.v1` al final de `CONTRACTS.yaml`; trailer `Contract-Change: add http.instagram-connector.webhook.v1`.
+
+## Tras el merge con `deploy/prod@129b8ea` (#228, #230, #233, #229)
+
+Merge sin rebase (`git merge origin/deploy/prod`); conflictos solo en `ARCHITECTURE.md` (§2, §4, §8) y `CONTRACTS.yaml`,
+resueltos conservando las dos partes. `grep -c '^  - id:' CONTRACTS.yaml` → 95 (93 de base, `messages-single.v1` de #229 y
+`webhook.v1` de esta PR); `git diff origin/deploy/prod -- CONTRACTS.yaml` no quita ninguna línea.
+Repetido sobre el árbol fusionado: `shared` 6/6, `instagram` 53/53, build de `whatsapp-cloud` exit 0, `pnpm contract:check`
+OK (73 tools), `render-connectors.py --check` exit 0 y el pre-push de contratos `contracts: OK (95 entries)`.
+El sexto test de `shared` fija que el hex en mayúsculas pasa (la copia vieja de `whatsapp-cloud` lo rechazaba).
