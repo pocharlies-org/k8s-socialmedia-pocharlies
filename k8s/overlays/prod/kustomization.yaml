@@ -107,9 +107,14 @@ images:
   # meta.partialErrors y no tumba las demas; sin BRAIN_MESSAGING_SEARCH_KEY, INFRA-637, cae a
   # texto con fallbackReason), #219 (SDK MCP 1.31.0 y sharp 0.35.5) y #209 (descripcion de la
   # tool de audio). 73 tools, contrato sin cambios.
+  # v1.3.104 (run 37711962973, deploy/prod@5ed41bc): sobre v1.3.102 trae #230 (SKIRM-107):
+  # accountKey lanza "Cross-account identifier" si el id ya viene namespaced a otra cuenta
+  # (tambien bajo personal), e inEveryNamespace/brainScopes buscan un id namespaced solo en la
+  # cuenta que lleva. INFRA-637 (#226) no toca la imagen. Sin migraciones nuevas. 73 tools,
+  # contrato sin cambios.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.102
-    digest: sha256:d666d0fc2fdf198af310c5b0213991e69980002cde9338dc05557f709e15cf27
+    newTag: v1.3.104
+    digest: sha256:2f79fb08b3af249151503052b03e2446a7594fbfa99c5ba234115dcec0f6acee
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
