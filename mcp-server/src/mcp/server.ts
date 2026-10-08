@@ -1063,9 +1063,15 @@ export class MCPServer {
   }
 
   private async providerGet(baseUrl: string, path: string, timeoutMs = 30000): Promise<any> {
+    // SKIRM-103: /api/public/* sits behind createHMACAuth; a GET has no body, so it signs "{}".
+    const timestamp = Math.floor(Date.now() / 1000);
     const response = await fetch(`${baseUrl}${path}`, {
-      // SC-705: forward the verified caller identity to the connector.
-      headers: actorRequestHeaders(),
+      headers: {
+        'X-Connector-Signature': generateHMACSignature({}, timestamp, this.connectorSecret),
+        'X-Connector-Timestamp': timestamp.toString(),
+        // SC-705: forward the verified caller identity to the connector.
+        ...actorRequestHeaders(),
+      },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
@@ -4041,7 +4047,6 @@ export class MCPServer {
 
     // Call connector API to send message
     const connectorUrl = this.waUrl(expectedAccount);
-    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
     const timestamp = Math.floor(Date.now() / 1000);
     const body = {
       sendToken: args.sendToken,
@@ -4049,7 +4054,7 @@ export class MCPServer {
       content: draft.content,
     };
 
-    const signature = generateHMACSignature(body, timestamp, sharedSecret);
+    const signature = generateHMACSignature(body, timestamp, this.connectorSecret);
 
     try {
       const response = await fetch(`${connectorUrl}/api/v1/messages/send`, {
@@ -4116,7 +4121,6 @@ export class MCPServer {
     // reaches Baileys verbatim (groups: sock.groupMetadata() times out).
     const conversationId = bareWhatsAppJid(args.chatId);
     const connectorUrl = this.waUrl(account);
-    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
     const timestamp = Math.floor(Date.now() / 1000);
     const body = {
       sendToken: `direct-${Date.now()}`,
@@ -4125,7 +4129,7 @@ export class MCPServer {
       ...(args.replyTo ? { replyToMessageId: args.replyTo } : {}),
     };
 
-    const signature = generateHMACSignature(body, timestamp, sharedSecret);
+    const signature = generateHMACSignature(body, timestamp, this.connectorSecret);
 
     try {
       const response = await fetch(`${connectorUrl}/api/v1/messages/send`, {
@@ -4262,12 +4266,11 @@ export class MCPServer {
     }
 
     const connectorUrl = this.waUrl(args.account);
-    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
 
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const body = { action: 'logout' };
-      const signature = generateHMACSignature(body, timestamp, sharedSecret);
+      const signature = generateHMACSignature(body, timestamp, this.connectorSecret);
 
       const response = await fetch(`${connectorUrl}/api/v1/auth/logout`, {
         method: 'POST',

@@ -3,6 +3,7 @@ import { syncSocialAccountsBestEffort } from '../infrastructure/database/social-
 import Redis, { RedisOptions } from 'ioredis';
 import * as fs from 'fs';
 import { MCPServer } from './server';
+import { requireConnectorSecret } from '@mcp-socialmedia/shared';
 
 // SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -17,8 +18,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const LLM_BASE_URL = process.env.LLM_BASE_URL || '';
 const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || '';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-change-in-production';
-const CONNECTOR_SHARED_SECRET =
-  process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
+// SKIRM-103 F3-2: fail closed — a missing or placeholder HMAC key stops the process.
+const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
 const CONNECTOR_URL = process.env.CONNECTOR_URL || 'http://whatsapp-connector:3001';
 
 async function main() {
