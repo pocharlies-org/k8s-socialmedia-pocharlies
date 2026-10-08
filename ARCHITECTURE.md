@@ -34,7 +34,8 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 - **Quién llama a qué, y con qué firma.** La API de los conectores se firma con una sola clave, `CONNECTOR_SHARED_SECRET`: HMAC-SHA256 de
   `<ts>:<cuerpo JSON>` en `x-connector-timestamp` y `x-connector-signature`, ventana de 5 min. `mcp-sse` (código de `mcp-server`) firma
   sus llamadas al conector de WhatsApp, `providerGet` incluido (un GET no tiene cuerpo: firma `{}`); el conector exige la firma en
-  `/api/public/*` (SKIRM-103), en `/api/v2/auth/qr` y en las rutas de `/api/v1` que montan `auth` en `controller.ts`. Sin firma y sin SSO a propósito: `/qr`, `/qr/page`, `/qr/renew`, `/status` (los hosts `.lan` los cubre `sso-chain`; dgx-infra
+  `/api/public/*` (SKIRM-103), en `/api/v2/auth/qr` y en toda ruta de `/api/v1` salvo `/health`, `/manual-open/page` y `GET /auth/qr` (SKIRM-120: `src/api/v1-auth.test.ts` recorre
+  la tabla de rutas de `controller.ts` y falla si una nueva queda sin `auth`). Sin firma y sin SSO a propósito: `/qr`, `/qr/page`, `/qr/renew`, `/status` (los hosts `.lan` los cubre `sso-chain`; dgx-infra
   sondea `/status`) y `GET /api/v1/auth/qr` (v1, deprecated hasta 2027-01-31). El conector de Telegram queda fuera de SKIRM-103 (SKIRM-111).
 - **ArgoCD** `socialmedia`: repo `pocharlies-org/k8s-socialmedia-pocharlies`, path `k8s/overlays/prod`, tronco **`deploy/prod`**
   (`origin/deploy/prod` = 897435e), sync automático `prune: false`.

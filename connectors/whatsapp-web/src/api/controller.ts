@@ -1272,7 +1272,7 @@ export function createRouter(
   });
 
   // History sync endpoint
-  router.post('/history/sync', (req: Request, res: Response): void => {
+  router.post('/history/sync', auth, (req: AuthenticatedRequest, res: Response): void => {
     const limit = parseInt((req.query as any).limit || '500', 10);
 
     if (!client.isConnected()) {
@@ -1305,7 +1305,7 @@ export function createRouter(
   });
 
   // Get chat history
-  router.get('/history/:chatId', (req: Request, res: Response): void => {
+  router.get('/history/:chatId', auth, (req: AuthenticatedRequest, res: Response): void => {
     const chatId = req.params.chatId;
     const limit = parseInt((req.query as any).limit || '100', 10);
 
