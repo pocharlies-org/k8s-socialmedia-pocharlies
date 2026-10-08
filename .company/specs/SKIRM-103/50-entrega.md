@@ -2,7 +2,7 @@ Rol: developer · Fecha: 2026-10-08 · Sesión: 715ef7e4-8c79-4f49-a12d-59a7c433
 
 # SKIRM-103 · Entrega
 
-PR: https://github.com/pocharlies-org/k8s-socialmedia-pocharlies/pull/234 (rama `SKIRM-103-api-public-hmac` → `deploy/prod`, desde 5ed41bc). Evidencia: `.company/evidence/SKIRM-103-api-public-hmac.md` (en la PR).
+PR: https://github.com/pocharlies-org/k8s-socialmedia-pocharlies/pull/234 (rama `SKIRM-103-api-public-hmac` → `deploy/prod`; trunk fusionado hasta 129b8ea, con #229 y #233 ya dentro). Evidencia: `.company/evidence/SKIRM-103-api-public-hmac.md` (en la PR).
 
 **PARA SECURITY:** al revisar `controller.ts` para esta historia he visto dos rutas de `/api/v1` del conector de WhatsApp que **no montan `auth`**: `GET /api/v1/history/:chatId` (devuelve mensajes del chat, `controller.ts:1308`) y `POST /api/v1/history/sync` (lanza la descarga de historial, `:1275`). Es el mismo dato que `/api/public/history/:chatId`, que esta PR cierra. No tienen consumidor en el repo ni en los clones barridos (`rg "api/v1/history"` en dgx-infra, jarvis, synapse, labels, control-panel, openclaw, agentgateway, infra: nada). El borde `.lan` ya va tras `sso-chain` (SKIRM-110) y el público también, pero cualquier pod del cluster llega al puerto 3001 (NetworkPolicy del ns, medido por sre). ¿Se cierran con `auth` en una historia propia (cambia una superficie sin entrada en `CONTRACTS.yaml`) y cuentan para el cierre de F3? No las toco: fuera del alcance de la spec.
 
@@ -82,7 +82,7 @@ No ha aparecido ningún consumidor vivo sin firma que obligue a detenerse. Lo qu
 - `test-env.ts` da `CONNECTOR_SHARED_SECRET=test-connector-secret` por defecto: `presence.test.ts` ejercitaba el notifier sin clave y dependía del placeholder.
 - `server.lid.spec.ts` y `server.canonical-v2.acceptance.spec.ts` construían `MCPServer` sin secreto (el `|| ''` del entorno lo tapaba): ahora lo reciben.
 - La spec dice "`mcp-server` (:3000)" como cliente que firma: el Deployment `mcp-server` es el ingestor (`src/main.ts`); el que firma y pasa por el guard es `mcp-sse`. `ARCHITECTURE.md` lo dice así.
-- El diff de `ARCHITECTURE.md` y `CONTRACTS.yaml` puede chocar con #229/#231 (mismas zonas): el segundo en fusionar rebasa una vez.
+- `ARCHITECTURE.md` y `CONTRACTS.yaml` ya están fusionados con #229 (conflicto resuelto conservando las dos partes; 98 entradas). #231 (SKIRM-102) toca las mismas zonas: el segundo en fusionar rebasa una vez.
 
 ## No ejecutado
 
