@@ -115,7 +115,13 @@ test('loadCredentialSession: no row → fresh; row → applied into the auth dir
   assert.equal(await readFile(join(dst, 'creds.json'), 'utf-8'), '{"a":1}');
 });
 
-test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir', async () => {
+test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir', async t => {
+  // Two saveCreds are a burst only if no debounce fires between them. With a
+  // real 10 ms timer the awaited file write in the middle can outlast it on a
+  // loaded runner: the first put starts, flush() then finds it in flight and
+  // forces a trailing one (SKIRM-115, `2 !== 1`). The debounce is faked so
+  // that, whatever the load, it cannot fire before flush() takes over.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const store = new FakeStore();
   const authDir = await mkdtemp(join(tmpdir(), 'cred-wb-'));
   await writeFile(join(authDir, 'creds.json'), 'first');
@@ -124,7 +130,7 @@ test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir
   wb.schedule();
   await writeFile(join(authDir, 'session-1'), 'second');
   wb.schedule(); // burst: only the trailing run must hit the store
-  await wb.flush();
+  await wb.flush(); // cancels the pending debounce and runs once
 
   assert.equal(store.puts.length, 1);
   assert.equal(store.puts[0].key, 'sub-1');
