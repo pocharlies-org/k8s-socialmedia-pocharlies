@@ -33,4 +33,4 @@ eslint (ficheros tocados)                    # 0 errores
 - Una cuenta no escribe sobre la fila de otra con el mismo jid en la misma base: prueba 16.
 - Sin conversación para el jid la escritura sigue siendo el `UPDATE` sobre su propio id: prueba 15.
 - `POST /messages/pins` rechaza con 400 un `conversationId` que no es una cadena: `controller-pins.test.ts`.
-- Ninguna tool, ruta ni entrada de `CONTRACTS.yaml` cambia; el catálogo y su digest no se tocan.
+- Ninguna tool ni ruta cambia y `CONTRACTS.yaml` no gana ni pierde entradas: solo el texto de la nota de `messages-pins.v1` y `chats-modify.v1` (commit con `Contract-Change: migrate`); el catálogo y su digest no se tocan.
