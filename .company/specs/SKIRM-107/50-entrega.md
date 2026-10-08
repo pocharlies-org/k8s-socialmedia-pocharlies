@@ -2,7 +2,7 @@ Rol: developer · Fecha: 2026-10-08 · Sesión: 715ef7e4-8c79-4f49-a12d-59a7c433
 
 # SKIRM-107 · F5 guard de cuentas en accountKey
 
-PR: https://github.com/pocharlies-org/k8s-socialmedia-pocharlies/pull/230 (rama `SKIRM-107-guard-cuentas` → `deploy/prod`, commits `d8fed29` y `96765d9`)
+PR: https://github.com/pocharlies-org/k8s-socialmedia-pocharlies/pull/230 (rama `SKIRM-107-guard-cuentas-r2` → `deploy/prod`, rebasada sobre `cb1fe60` / #228; commits de código `5bba8ed` (guard, con co-autor) y `a7a2c69` (test de `getMessagesByUser`); el commit de esta nota va encima)
 
 ## Qué se hizo
 
@@ -41,7 +41,7 @@ Tests: 15 failed, 37 passed, 52 total
 Con el cambio:
 ```
 pnpm --filter ./mcp-server test -- account        → 5 suites, 53 tests passed (C1)
-pnpm --filter @mcp-socialmedia/server test --runInBand → 55 passed, 1 skipped; 666 passed, 8 skipped (los skipped ya lo eran)
+pnpm --filter @mcp-socialmedia/server test --runInBand → 55 passed, 1 skipped; 667 passed, 8 skipped (los skipped ya lo eran; repetido tras rebasar sobre `cb1fe60`, junto con build, tsc --noEmit y contract:check, todos exit 0)
 pnpm -r --workspace-concurrency=1 test            → exit 0 (shared, workers, 4 conectores, mcp-server)
 pnpm --filter @mcp-socialmedia/server build (tsc) → exit 0
 pnpm --filter @mcp-socialmedia/server lint        → 0 errores (1240 avisos; no se midió la línea base)
@@ -85,7 +85,7 @@ Ningún llamador legítimo lanza ya: los ids que llegan de proveedor y los que p
 - [x] C4. `server.search-messages.spec.ts` sin cambios y verde; casos de `inEveryNamespace` con id prefijada y con cuenta deshabilitada.
 - [x] C5. `rg "Cross-account identifier|namespaceAccountId"` solo encuentra `account.ts` (y los specs); `ARCHITECTURE.md` §4 lista los dos espejos sin guard con el motivo.
 - [x] C6. `pnpm contract:check` verde, 73 tools, digest `sha256:e30a4521…c0993d` sin cambio.
-- [x] C7. `pnpm -r test` verde (en serie), `pnpm-lock.yaml` sin cambios, `Co-authored-by: jibanez-staticduo <staticduo@gmail.com>` en `d8fed29`, rutas de origen citadas.
+- [x] C7. `pnpm -r test` verde (en serie), `pnpm-lock.yaml` sin cambios, `Co-authored-by: jibanez-staticduo <staticduo@gmail.com>` en `5bba8ed`, rutas de origen citadas.
 - [x] C8. Tabla de llamadores arriba.
 
 ## Cómo se verifica
@@ -95,5 +95,5 @@ En copia limpia de la rama: `pnpm install --frozen-lockfile`, `pnpm contract:che
 ## Riesgos y notas
 
 - Un cliente que pase un id prefijado de otra cuenta (o prefijado sin `accountId`) a una tool recibe el error en vez de un resultado vacío; la ingestión de un evento con id ajeno se pierde y queda en el log.
-- La rama no está rebasada sobre `5675ea0` (INFRA-637, solo `k8s/`, `ARCHITECTURE.md` y `CLAUDE.md` en otras líneas): el rebase local fue limpio, pero el `push --force-with-lease` para reescribir la rama remota quedó denegado y no se insistió; el PR se publicó con push normal y GitHub resuelve el merge.
+- Rebase sobre `origin/deploy/prod@cb1fe60` (#228, SKIRM-110) hecho, que incluye también `5675ea0` (INFRA-637). Único conflicto: la fila de `accountKey` de `ARCHITECTURE.md` §4, resuelta con el texto de este PR (única con guard + dos espejos sin guard); «Última verificación» y el resto del fichero son los del tronco (`git diff origin/deploy/prod -- ARCHITECTURE.md` solo toca esa fila). El `push --force-with-lease` sobre la rama remota quedó denegado dos veces; la rama rebasada se publica como `SKIRM-107-guard-cuentas-r2` y el coordinador cambia la cabeza de la PR #230. La rama antigua `SKIRM-107-guard-cuentas` (head `4a2bba1`, sobre `ca667c6`) queda obsoleta.
 - Documento que refleja el cambio: `ARCHITECTURE.md` §4 y `.company/changes/skirm-107-guard-cuentas.md`.
