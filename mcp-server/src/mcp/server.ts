@@ -2061,6 +2061,12 @@ export class MCPServer {
                 account: accountIdValue,
                 replyTo: args.replyTo ?? undefined,
                 threadId: args.threadId ?? undefined,
+                // SKIRM-118: Telegram goes by the mimeType the caller declares (the
+                // connector does not sniff the URL); absent unless audio/ogg.
+                ...(pickString(attachmentValue, ['mimeType']).split(';')[0].trim().toLowerCase() ===
+                'audio/ogg'
+                  ? { voiceNote: true }
+                  : {}),
               });
         operations.push(this.legacyResultData(sent));
       }
