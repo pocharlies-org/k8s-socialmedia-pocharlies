@@ -125,9 +125,8 @@ contracts:
       Path, method, the absence of auth and the response shape are contract;
       changing any of them is breaking — a new `.v2` entry beside this one.
       SKIRM-103: deprecated, and still served unauthenticated and unchanged until
-      remove_after (security accepted that, F3-3: the QR exists only while the
-      session is unpaired, and what it allows is hijacking the pairing, not reading
-      data). No consumer outside this registry: the house QR flow is /qr/page.
+      remove_after. No consumer outside this registry: the house QR flow is
+      /qr/page.
   - id: http.whatsapp-connector.auth-qr.v2
     kind: http-route
     value: /api/v2/auth/qr
@@ -163,11 +162,9 @@ contracts:
       HMAC-signed since SKIRM-103 (x-connector-timestamp + x-connector-signature
       over "<ts>:{}", the same scheme as /api/v1; a GET has no body): without them
       401, with them 200 {chats [{id, name, isGroup, timestamp}]} or 500 {error}.
-      Until SKIRM-103 it answered without any credential and only the edge
-      (connector-public-api-deny) kept it from outside the cluster. The path, the
-      signature scheme and the 200 shape are contract: changing any is breaking — a
-      new `.v2` entry beside this one. Each rejection is logged without headers,
-      body or signature, one line per reason every 10 s.
+      The path, the signature scheme and the 200 shape are contract: changing any
+      is breaking — a new `.v2` entry beside this one. Each rejection is logged
+      without headers, body or signature, one line per reason every 10 s.
   - id: http.whatsapp-connector.public-history.v1
     kind: http-route
     value: /api/public/history/:chatId
