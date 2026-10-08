@@ -7,11 +7,15 @@ patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
   - path: patch-nodepool.yaml
-  # SC-705 / SC-1214: per-user credential store. WhatsApp keeps the flag OFF
-  # (house connectors set no CREDENTIAL_SESSION_KEY); the ON flip is
-  # Instagram-only and lives in the second document of
-  # patch-credential-store.yaml; rollback = revert of that document.
-  # ON is prod-only, stg stays OFF.
+  # SC-705 / SC-1214 / SC-1257: per-user credential store. INCIDENT ROLLBACK
+  # state: the Instagram-only ON flip (#86, squash b03f60f) is reverted here
+  # (supersedes draft #89, built on a pre-squash trunk). instagram-connector
+  # falls back to the base manifest's explicit "false"; WhatsApp keeps its
+  # explicit "false" in patch-credential-store.yaml. The SC-1197 pairing flag
+  # (patch-social-pairing-on.yaml) is untouched. The rollback is of the flag,
+  # not of the image: the instagram-connector pin keeps its own history under
+  # images: (SC-1256 moved it v1.3.55 -> v1.3.74). Re-flip = revert of this
+  # revert. ON is prod-only, stg stays OFF.
   - path: patch-credential-store.yaml
   # SC-1197 encendido: SOCIAL_PAIRING_API=on + replicas 1 + CREDENTIAL_STORE_ENABLED
   # en social-api y los dos pools. Rollback = revert de este fichero y su linea.
