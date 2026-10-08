@@ -79,13 +79,15 @@ async def _handle_event(event: dict, pool: asyncpg.Pool, connector: ConnectorCli
         kwargs["direction"], mt, bool(kwargs["content"]), chat_id, is_new,
     )
 
-    if mt in mapping.DOWNLOADABLE_TYPES:
+    # Side effects only on a genuinely new row (idempotent vs history backfill).
+    if not is_new:
+        return
+
+    # Media → MinIO + attachment row (guarded internally too).
+    if event.get("attachments") and mt in mapping.DOWNLOADABLE_TYPES:
         asyncio.create_task(
             media_download.download_and_store_media(connector, pool, event, message_id, mt)
         )
-
-    if not is_new:
-        return
 
     # Lazy avatars for the conversation and the sender.
     asyncio.create_task(

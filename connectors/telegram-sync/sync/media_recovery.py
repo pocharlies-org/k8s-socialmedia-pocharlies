@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 
 import httpx
@@ -12,7 +13,8 @@ from sync.connector_client import retry_after
 
 logger = logging.getLogger(__name__)
 BATCH_SIZE = 5
-INTERVAL = 30
+# Seconds between cycles: the queries sweep `messages` for the personal account (0.3 to 0.8 s each), so no tighter default.
+INTERVAL = float(os.environ.get('MEDIA_RECOVERY_INTERVAL_S', '60'))
 
 
 async def recover_batch(pool, connector, account: str) -> int:

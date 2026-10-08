@@ -8,6 +8,7 @@ Adapted from the fork's tests/test_media_recovery.py (jibanez-staticduo): ids ar
 bigint here, so the UUID fixtures became ints and the fakes live in fakes.py.
 """
 import asyncio
+import importlib
 import json
 import os
 import time
@@ -17,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from sync import db, history, media_download, media_recovery, nats_consumer
+from sync import db, media_download, media_recovery
 from sync.connector_client import ConnectorClient
 from fakes import Context, Pool
 
@@ -133,37 +134,6 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.connector.get_message.await_count, 1)
 
 
-class TriggerTests(unittest.IsolatedAsyncioTestCase):
-    """Realtime and history also try the download for a row that already exists
-    and for events that carry no attachments entry (SKIRM-101, 101-4)."""
-
-    async def test_realtime_event_for_existing_row_without_attachments_tries_download(self):
-        event = {'conversationId': '7', 'telegramMessageId': '42', 'messageType': 'PHOTO',
-                 'content': '', 'isOutbound': False, 'telegramTimestamp': '2026-10-08T10:00:00Z'}
-        with patch('sync.db.insert_message_ex', new=AsyncMock(return_value=(5, False))), \
-             patch('sync.media_download.download_and_store_media', new=AsyncMock()) as download, \
-             patch('sync.avatar_sync.ensure_conversation_avatar', new=AsyncMock()) as avatar:
-            await nats_consumer._handle_event(event, None, None, 'personal')
-            await asyncio.sleep(0)
-        download.assert_awaited_once()
-        self.assertEqual(download.await_args.args[3:], (5, 'photo'))
-        avatar.assert_not_awaited()  # avatars stay a new-row side effect
-
-    async def test_history_for_existing_row_without_attachments_tries_download(self):
-        page = [{'conversationId': '7', 'telegramMessageId': '42', 'messageType': 'PHOTO',
-                 'content': '', 'isOutbound': False, 'telegramTimestamp': '2026-10-08T10:00:00Z'}]
-        connector = AsyncMock()
-        connector.get_messages.side_effect = [page, []]
-        with patch('sync.db.get_sync_state', new=AsyncMock(return_value=None)), \
-             patch('sync.db.insert_message_ex', new=AsyncMock(return_value=(5, False))), \
-             patch('sync.db.update_sync_state', new=AsyncMock()), \
-             patch('sync.db.mark_chat_completed', new=AsyncMock()), \
-             patch('sync.media_download.download_and_store_media', new=AsyncMock()) as download:
-            await history.import_chat(connector, None, {'id': 7, 'name': 'Chat'})
-        download.assert_awaited_once()
-        self.assertEqual(download.await_args.args[3:], (5, 'photo'))
-
-
 class ConnectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_rate_limit_pauses_other_read_routes(self):
         routes = []
@@ -219,6 +189,17 @@ class ConnectorTests(unittest.IsolatedAsyncioTestCase):
         for timeout in [0, 20, float('inf'), float('nan')]:
             with self.assertRaises(ValueError):
                 ConnectorClient('http://connector', 'test', media_timeout=timeout)
+
+
+def test_recovery_interval_defaults_to_60_seconds_and_is_configurable(monkeypatch):
+    monkeypatch.delenv('MEDIA_RECOVERY_INTERVAL_S', raising=False)
+    try:
+        assert importlib.reload(media_recovery).INTERVAL == 60
+        monkeypatch.setenv('MEDIA_RECOVERY_INTERVAL_S', '5')
+        assert importlib.reload(media_recovery).INTERVAL == 5
+    finally:
+        monkeypatch.delenv('MEDIA_RECOVERY_INTERVAL_S', raising=False)
+        importlib.reload(media_recovery)
 
 
 # ── C4 against a real Postgres: the row lock, not the process lock, serializes ──

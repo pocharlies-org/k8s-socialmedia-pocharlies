@@ -346,7 +346,7 @@ WHERE m.platform = 'telegram' AND m.account = $1
   AND lower(m.message_type) = ANY($2::text[])
   AND NOT EXISTS (
     SELECT 1 FROM attachments a WHERE a.message_id = m.id
-      AND COALESCE(NULLIF(BTRIM(a.file_url), ''), NULLIF(BTRIM(a.storage_key), '')) IS NOT NULL
+      AND NULLIF(BTRIM(a.file_url), '') IS NOT NULL
   )
 """
 

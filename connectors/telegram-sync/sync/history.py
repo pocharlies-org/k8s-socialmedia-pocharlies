@@ -87,14 +87,14 @@ async def import_chat(connector: ConnectorClient, pool: asyncpg.Pool, dialog: di
             highest_seen = max(highest_seen, tg_id)
             if is_new:
                 new_count += 1
-            if (HISTORY_MEDIA
-                    and kwargs["message_type"] in media_download.DOWNLOADABLE_TYPES):
-                try:
-                    await media_download.download_and_store_media(
-                        connector, pool, m, message_id, kwargs["message_type"]
-                    )
-                except Exception as e:
-                    logger.warning("history media error (msg %s): %s", message_id, e)
+                if (HISTORY_MEDIA and m.get("attachments")
+                        and kwargs["message_type"] in media_download.DOWNLOADABLE_TYPES):
+                    try:
+                        await media_download.download_and_store_media(
+                            connector, pool, m, message_id, kwargs["message_type"]
+                        )
+                    except Exception as e:
+                        logger.warning("history media error (msg %s): %s", message_id, e)
 
         # Advance the cursor to the oldest id in this page and page OLDER. Do NOT
         # stop on a short page: Telegram/connector can return < limit even when
