@@ -983,6 +983,10 @@ contracts:
       base64, size}; 404 no media. Registered with the sending gate (the route
       predates the registry). The path, the body fields and the 200 shape are
       contract: changing any is breaking — a new `.v2` entry beside this one.
+      SKIRM-101 (note only; the 200 and 404 shapes do not change): an upstream
+      failure is now 502 (was 500), a download past its deadline 504, and a
+      Telegram FLOOD_WAIT 429 with a `Retry-After` header and body {error,
+      retryAfter}. Consumer telegram-sync honours the header.
   - id: http.telegram-connector.messages-forward.v1
     kind: http-route
     value: /messages/forward
@@ -1257,6 +1261,9 @@ contracts:
       with the sending gate (the route predates the registry). The path, the
       body fields and the 200 shape are contract: changing any is breaking — a
       new `.v2` entry beside this one.
+      SKIRM-101 (note only): upstream failures are 502 (were 500 or an
+      empty 404), a download past its deadline 504, FLOOD_WAIT 429 with
+      `Retry-After`; the 200 and 404 shapes do not change.
   - id: http.instagram-connector.health.v1
     kind: http-route
     value: /health
@@ -2333,3 +2340,21 @@ contracts:
       social_search_messages (handleSearchMessages en server.ts) puede llevar
       meta.partialErrors y source.completeness 'partial' cuando una instancia del brain
       cae y otras contestan; la respuesta completa no cambia de forma.
+  - id: http.telegram-connector.messages-single.v1
+    kind: http-route
+    value: /messages/single/:chatId/:msgId
+    role: provider
+    files:
+      - connectors/telegram/src/api/controller.ts
+    status: active
+    note: >-
+      SKIRM-101. HMAC-signed route of the house Telegram connectors
+      (telegram-connector, telegram-connector-professional). GET
+      /api/v1/messages/single/:chatId/:msgId (read, ungated), consumed by
+      telegram-sync (media recovery: it re-reads the exact message before
+      downloading its media). 200 {message}, the same message object as an item
+      of GET /messages/:chatId; 404 message not found; 400 invalid message id;
+      503 not connected; 429 FLOOD_WAIT with `Retry-After` and body {error,
+      retryAfter}; 502 upstream failure; 504 deadline exceeded. The path, the
+      message shape and the status codes are contract: changing any is breaking
+      — a new `.v2` entry beside this one.

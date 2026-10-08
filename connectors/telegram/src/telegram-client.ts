@@ -11,6 +11,9 @@ import {
   Peer,
   User,
   Chat,
+  MtArgumentError,
+  MtUnsupportedError,
+  tl,
 } from '@mtcute/node';
 import type { ITelegramStorageProvider } from '@mtcute/node';
 import type { CommonSendParams } from '@mtcute/node/methods.js';
@@ -27,6 +30,71 @@ import {
   editOwnTextMessage,
   inboundTextEdit,
 } from './message-edit';
+
+const AVATAR_DEADLINE_MS = 20_000;
+
+function mediaDeadlineMs(): number {
+  const seconds = Number(process.env.TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS ?? 120);
+  return (Number.isFinite(seconds) && seconds >= 1 && seconds <= 600 ? seconds : 120) * 1000;
+}
+
+export function telegramRetryAfter(error: unknown): number | null {
+  if (error && tl.RpcError.is(error, 'FLOOD_WAIT_%d')) return Math.max(1, Math.ceil(error.seconds));
+  return null;
+}
+
+export class TelegramDownloadTimeoutError extends Error {
+  constructor(deadlineMs: number) {
+    super(`Telegram download exceeded its ${deadlineMs / 1000} second deadline`);
+    this.name = 'TelegramDownloadTimeoutError';
+  }
+}
+
+export function isTelegramDownloadTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TelegramDownloadTimeoutError';
+}
+
+async function withDownloadDeadline<T>(operation: (signal: AbortSignal) => Promise<T>, deadlineMs = AVATAR_DEADLINE_MS): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new TelegramDownloadTimeoutError(deadlineMs);
+      // Cancels mtcute's RPC retries and download workers, even after HTTP clients leave.
+      controller.abort(error);
+      reject(error);
+    }, deadlineMs);
+  });
+  try {
+    return await Promise.race([operation(controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function telegramReadClient<T extends object>(client: T, signal: AbortSignal): T {
+  const wrapped = new WeakMap<object, object>();
+  const wrap = (target: any): any => {
+    if (wrapped.has(target)) return wrapped.get(target);
+    const proxy = new Proxy(target, {
+      get(object, property, receiver) {
+        if (property === 'call') {
+          // mtcute downloads request infinite flood sleep themselves. Force the
+          // wait to propagate so the durable recovery queue can schedule it.
+          return (request: unknown, options: object = {}) => object.call(request, {
+            ...options, abortSignal: signal, floodSleepThreshold: 0,
+          });
+        }
+        const value = Reflect.get(object, property, receiver);
+        return value && typeof value === 'object' && 'storage' in value && 'call' in value
+          ? wrap(value) : value;
+      },
+    });
+    wrapped.set(target, proxy);
+    return proxy;
+  };
+  return wrap(client);
+}
 
 /**
  * SC-1145: in-memory storage driver with a save() hook.
@@ -619,13 +687,28 @@ export class TelegramClientWrapper extends EventEmitter {
     const params: { limit: number; offset?: { id: number; date: number } } = { limit };
     if (offsetId) params.offset = { id: offsetId, date: 0 };
 
-    const messages = await this.client.getHistory(toMtcutePeer(chatId), params);
+    const messages = await withDownloadDeadline(signal =>
+      telegramReadClient(this.client.withParams({ abortSignal: signal }), signal)
+        .getHistory(toMtcutePeer(chatId), params), mediaDeadlineMs());
     const out: TelegramMessage[] = [];
     for (const m of messages) {
       const p = await this.parseMessage(m);
       if (p) out.push(p);
     }
     return out;
+  }
+
+  async getMessage(chatId: string, messageId: number): Promise<TelegramMessage | null> {
+    if (!this.connected) throw new Error('Not connected to Telegram');
+    return withDownloadDeadline(async signal => {
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
+      const messages = await client.getMessages(toMtcutePeer(chatId), [messageId]);
+      signal.throwIfAborted();
+      if (!messages[0]) return null;
+      const parsed = await this.parseMessage(messages[0]);
+      if (!parsed) throw new Error('Failed to parse existing Telegram message');
+      return parsed;
+    }, mediaDeadlineMs());
   }
 
   /**
@@ -1235,13 +1318,17 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async downloadMedia(chatId: string, messageId: number): Promise<Buffer | null> {
     if (!this.connected) throw new Error('Not connected');
-    const messages = await this.client.getMessages(toMtcutePeer(chatId), [messageId]);
-    const msg = messages[0];
-    if (!msg || !msg.media) return null;
-    const media: any = msg.media;
-    if (typeof media.fileId !== 'string') return null;
-    const u8 = await this.client.downloadAsBuffer(media.fileId);
-    return Buffer.from(u8);
+    return withDownloadDeadline(async signal => {
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
+      const messages = await client.getMessages(toMtcutePeer(chatId), [messageId]);
+      signal.throwIfAborted();
+      const msg = messages[0];
+      if (!msg || !msg.media) return null;
+      const media: any = msg.media;
+      if (typeof media.fileId !== 'string') return null;
+      const u8 = await client.downloadAsBuffer(media.fileId, { abortSignal: signal });
+      return Buffer.from(u8);
+    }, mediaDeadlineMs());
   }
 
   /**
@@ -1250,27 +1337,31 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async downloadPeerPhoto(peerId: string): Promise<Buffer | null> {
     if (!this.connected) throw new Error('Not connected');
-    let peer: any;
-    try {
-      peer = await this.client.getPeer(toMtcutePeer(peerId));
-    } catch (e) {
-      return null;
-    }
-    const photo: any = peer.photo;
-    if (!photo) return null;
-    // mtcute exposes a downloadable file id under photo.big (full) or photo.small (thumb).
-    // Different mtcute builds use slightly different shapes — try a few.
-    const candidates: any[] = [photo.big, photo.small, photo, photo.fileId];
-    for (const c of candidates) {
-      if (!c) continue;
-      try {
-        const u8 = await this.client.downloadAsBuffer(c);
-        if (u8 && u8.length > 0) return Buffer.from(u8);
-      } catch (e) {
-        // try next candidate
+    return withDownloadDeadline(async signal => {
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
+      const peer: any = await client.getPeer(toMtcutePeer(peerId));
+      signal.throwIfAborted();
+      const photo: any = peer.photo;
+      if (!photo) return null;
+      // All candidate shapes share the operation's deadline.
+      const candidates: any[] = [photo.big, photo.small, photo, photo.fileId];
+      let shapeError: unknown;
+      for (const c of candidates) {
+        if (!c) continue;
+        signal.throwIfAborted();
+        try {
+          const u8 = await client.downloadAsBuffer(c, { abortSignal: signal });
+          if (u8 && u8.length > 0) return Buffer.from(u8);
+        } catch (e) {
+          signal.throwIfAborted();
+          // Unsupported shapes can still fall back to the next candidate.
+          if (!(e instanceof MtArgumentError) && !(e instanceof MtUnsupportedError)) throw e;
+          shapeError = e;
+        }
       }
-    }
-    return null;
+      if (shapeError) throw shapeError;
+      return null;
+    });
   }
 
   /**
