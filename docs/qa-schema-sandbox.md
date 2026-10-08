@@ -19,20 +19,20 @@ Key columns "merged_into" and "id" are of incompatible types: text and uuid
 
 El repo **no puede recrear producción desde cero**; la única forma fiel de probar
 una migración nueva es partir del esquema real. El sandbox hace exactamente eso:
-vuelca solo el esquema de producción, lo restaura en un Postgres desechable y
-aplica las migraciones del repo con el runner real — el ledger `_migrations`
-baselina todo lo que ya existe (por tabla primaria) y cualquier migración nueva
-corre de verdad. (Diagnóstico completo: adjunto `nota-it-informe.md` en SKIRM-89.)
+vuelca el esquema de producción y su ledger, lo restaura en un Postgres desechable
+y aplica las migraciones del repo con el runner real. El ledger salta lo que prod
+ya tiene aplicado y cualquier migración nueva corre de verdad. (Diagnóstico
+completo: `nota-it-informe.md` en SKIRM-89, anexo.)
 
 ## Uso (en el x86, desde la raíz del repo, con `npm ci` hecho)
 
 ```bash
-scripts/qa-schema-sandbox.sh up      # volcado de esquema + restauración + migraciones del repo
+scripts/qa-schema-sandbox.sh up      # volcado de esquema y ledger + restauración + migraciones del repo
 scripts/qa-schema-sandbox.sh test    # up + migración de prueba (índice único en messages)
-scripts/qa-schema-sandbox.sh down    # tira el contenedor y borra el volcado de /tmp
+scripts/qa-schema-sandbox.sh down    # tira el contenedor y borra los volcados de /tmp
 ```
 
-Dentro del sandbox:
+Dentro del sandbox (solo escucha en loopback):
 
 ```bash
 docker exec -it qa-schema-whatsappmcp psql -U postgres -d whatsappmcp
@@ -46,21 +46,39 @@ EXTRA_MIGRATIONS_DIR=/tmp/mis-migraciones scripts/qa-schema-sandbox.sh test
 
 El runner de prueba deja el sandbox levantado; al terminar, siempre `down`.
 
+### Prueba negativa: una migración rota tiene que parar `test`
+
+```bash
+mkdir -p /tmp/neg && printf 'SELECT * FROM tabla_que_no_existe;\n' > /tmp/neg/998_rota.sql
+EXTRA_MIGRATIONS_DIR=/tmp/neg scripts/qa-schema-sandbox.sh test; echo EXIT=$?
+# → sandbox: migración fallida: Error: Migration 998_rota.sql failed: relation "tabla_que_no_existe" does not exist
+# → EXIT=1
+```
+
+Medida el 08-10 en el x86: `EXIT=1`. La migración fallida no queda en el ledger del
+sandbox (el runner la revierte). Cada `test` vacía el staging de `/tmp`, así que la
+migración rota no se arrastra a la siguiente ejecución. Al terminar, `down`.
+
 ## Qué hace exactamente
 
-1. `kubectl -n databases exec postgres-shared-2 -- pg_dump -U postgres -d
-   whatsappmcp --schema-only --no-owner --no-privileges` → `/tmp/qa-schema-whatsappmcp.sql`
-   en el x86. **Esquema puro, sin datos de mensajes**; el volcado no sale del x86
-   y se borra al terminar. Es la única operación contra producción (solo lectura).
+1. Lecturas de producción, solo `pg_dump` vía `kubectl -n databases exec postgres-shared-2`:
+   - `--schema-only --no-owner --no-privileges` → `/tmp/qa-schema-whatsappmcp.sql`
+     (esquema puro, ~88 KB);
+   - `--data-only -t _migrations` → `/tmp/qa-schema-whatsappmcp-ledger.sql`: las 20
+     filas del ledger (nombre de fichero, fecha y flag `baseline`), ningún dato de
+     mensajes. Sin él el runner re-ejecutaría 002, 005, 012, 014, 015 y 017, que prod
+     ya tiene aplicadas.
+   Los volcados no salen del x86 y se borran al terminar.
 2. Levanta `pgvector/pgvector:pg16` como contenedor desechable (prefijo de nombre
-   `qa-schema-`/`skirm89-`, puerto aleatorio ligado a 127.0.0.1). La imagen lleva
-   la extensión `vector`, que usa el runner.
-3. Restaura el volcado y aplica las migraciones del repo con `migrate.ts` a través
-   de `scripts/qa-schema-migrate.ts` (wrapper que solo fija la BD y, para `test`,
-   un directorio de migraciones en staging — el runner y el repo no se tocan).
-4. Verifica el resultado: tablas en `public` (~39, como en producción) y
-   `conversations.id` de tipo `text` (si saliera `uuid`, el esquema restaurado es
-   falso y el script falla).
+   `qa-schema-`/`skirm89-`). Se publica con `-p 127.0.0.1::5432`: puerto aleatorio
+   **solo en loopback**. Si `docker port` no devuelve `127.0.0.1:NNNN`, el script se
+   niega a seguir. La imagen lleva la extensión `vector`, que usa el runner.
+3. Restaura el esquema y, después, el ledger. Aplica las migraciones del repo con
+   `migrate.ts` a través de `scripts/qa-schema-migrate.ts` (wrapper que solo fija la
+   BD y, para `test`, un directorio de staging; el runner y el repo no se tocan).
+4. Verifica el resultado: tablas en `public` (~39, como en producción), filas en
+   `_migrations` (20 tras `up`) y `conversations.id` de tipo `text` (si saliera
+   `uuid`, el esquema restaurado es falso y el script falla).
 
 ## Notas
 

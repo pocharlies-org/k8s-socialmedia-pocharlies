@@ -9,12 +9,12 @@
 # docs/qa-schema-sandbox.md.
 #
 # Uso (desde la raíz del repo, en el x86):
-#   scripts/qa-schema-sandbox.sh up      volcado de esquema de prod + Postgres
+#   scripts/qa-schema-sandbox.sh up      volcado de esquema y ledger de prod + Postgres
 #                                        desechable + restauración + migraciones
-#                                        del repo (el ledger baselina lo existente)
+#                                        del repo (el ledger salta lo ya aplicado)
 #   scripts/qa-schema-sandbox.sh test    up + una migración de prueba (índice
 #                                        único sobre messages) aplicada encima
-#   scripts/qa-schema-sandbox.sh down    tira el contenedor y borra el volcado
+#   scripts/qa-schema-sandbox.sh down    tira el contenedor y borra los volcados
 #
 # Opciones por entorno:
 #   SANDBOX_NAME   nombre del contenedor docker (default: qa-schema-whatsappmcp;
@@ -24,8 +24,10 @@
 #   EXTRA_MIGRATIONS_DIR  directorio con *.sql extra que se aplican junto a las
 #                  del repo (para pruebas; no se escriben en el repo)
 #
-# Seguridad: la única lectura de producción es `pg_dump --schema-only` (sin
-# datos). El volcado vive solo en /tmp del x86 y se borra al terminar.
+# Seguridad: las únicas lecturas de producción son `pg_dump --schema-only` y
+# `pg_dump --data-only -t _migrations` (solo nombres de fichero, fechas y flag;
+# ningún dato de mensajes). Los volcados viven en /tmp del x86 y se borran al
+# terminar. El Postgres del sandbox se publica solo en 127.0.0.1.
 
 set -euo pipefail
 
@@ -34,6 +36,7 @@ MIGRATIONS_DIR="$REPO_ROOT/mcp-server/src/infrastructure/database/migrations"
 SANDBOX_NAME="${SANDBOX_NAME:-qa-schema-whatsappmcp}"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:pg16}"
 DUMP_FILE="/tmp/${SANDBOX_NAME}.sql"
+LEDGER_FILE="/tmp/${SANDBOX_NAME}-ledger.sql"
 STAGE_DIR="/tmp/${SANDBOX_NAME}-migrations"
 KUBE_NS=databases
 KUBE_POD=postgres-shared-2
@@ -48,8 +51,20 @@ require() {
   command -v "$1" >/dev/null 2>&1 || { echo "falta $1 en el PATH" >&2; exit 1; }
 }
 
+# Lectura de producción (solo pg_dump). PG17 emite `SET transaction_timeout = 0;`,
+# que PG16 (imagen del sandbox) no conoce: se filtra.
+prod_dump() {
+  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -- \
+    pg_dump -U postgres -d "$PROD_DB" "$@" \
+    | sed '/^SET transaction_timeout = 0;$/d'
+}
+
+# Puerto publicado en loopback. Con `-p 127.0.0.1::5432` docker devuelve
+# "127.0.0.1:NNNN"; cualquier otra salida (otra interfaz) da cadena vacía y el
+# script se niega a seguir.
 sandbox_port() {
-  docker port "$SANDBOX_NAME" 5432/tcp 2>/dev/null | head -1 | awk -F: '{print $2}'
+  docker port "$SANDBOX_NAME" 5432/tcp 2>/dev/null | head -1 \
+    | sed -n 's/^127\.0\.0\.1:\([0-9]\{1,5\}\)$/\1/p'
 }
 
 sandbox_psql() {
@@ -71,9 +86,9 @@ wait_ready() {
 
 do_down() {
   docker rm -f "$SANDBOX_NAME" >/dev/null 2>&1 || true
-  rm -f "$DUMP_FILE"
+  rm -f "$DUMP_FILE" "$LEDGER_FILE"
   rm -rf "$STAGE_DIR"
-  echo "sandbox $SANDBOX_NAME retirado; volcado de /tmp borrado"
+  echo "sandbox $SANDBOX_NAME retirado; volcados de /tmp borrados"
 }
 
 do_up() {
@@ -82,7 +97,7 @@ do_up() {
   require npx
   [[ -d "$REPO_ROOT/node_modules/pg" ]] || { echo "ejecuta npm ci en el repo primero (falta node_modules/pg)" >&2; exit 1; }
 
-  # 1. Esquema puro de producción (sin datos, sin salir del x86).
+  # 1. Esquema y ledger de producción (solo lectura, sin salir del x86).
   #    Si el sandbox ya tiene el esquema restaurado, se omite volcado+restauración.
   if docker ps --format '{{.Names}}' | grep -qx "$SANDBOX_NAME" \
      && docker exec "$SANDBOX_NAME" psql -U postgres -d "$PROD_DB" -At \
@@ -91,6 +106,7 @@ do_up() {
     wait_ready
     local port0
     port0=$(sandbox_port)
+    [[ -n "$port0" ]] || { echo "el sandbox no publica su puerto en 127.0.0.1" >&2; exit 1; }
     echo "== aplicando migraciones del repo con migrate.ts =="
     DATABASE_URL="postgres://postgres@127.0.0.1:$port0/$PROD_DB" \
       npx tsx "$REPO_ROOT/scripts/qa-schema-migrate.ts"
@@ -98,17 +114,13 @@ do_up() {
     return 0
   fi
   echo "== volcando esquema de producción ($KUBE_NS/$KUBE_POD, bd $PROD_DB) =="
-  # El volcado de PG17 (producción) incluye `SET transaction_timeout = 0;`, un
-  # parámetro que PG16 (imagen pgvector del sandbox) no reconoce: se filtra.
-  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -- \
-    pg_dump -U postgres -d "$PROD_DB" --schema-only --no-owner --no-privileges \
-    | sed '/^SET transaction_timeout = 0;$/d' \
-    > "$DUMP_FILE"
-  local dump_bytes
-  dump_bytes=$(wc -c < "$DUMP_FILE")
-  echo "   $dump_bytes bytes en $DUMP_FILE"
+  prod_dump --schema-only --no-owner --no-privileges > "$DUMP_FILE"
+  echo "   $(wc -c < "$DUMP_FILE") bytes de esquema en $DUMP_FILE"
+  # Ledger: sin él el runner re-ejecutaría las migraciones que prod ya tiene aplicadas.
+  prod_dump --data-only -t _migrations > "$LEDGER_FILE"
+  echo "   $(grep -c '^[0-9][0-9][0-9]_.*\.sql' "$LEDGER_FILE" || true) filas de ledger en $LEDGER_FILE"
 
-  # 2. Postgres desechable (puerto aleatorio solo en loopback)
+  # 2. Postgres desechable, publicado solo en loopback con puerto aleatorio
   if docker ps --format '{{.Names}}' | grep -qx "$SANDBOX_NAME"; then
     echo "== reutilizando contenedor $SANDBOX_NAME ya levantado =="
   else
@@ -117,34 +129,38 @@ do_up() {
     docker run -d --name "$SANDBOX_NAME" \
       -e POSTGRES_HOST_AUTH_METHOD=trust \
       -e POSTGRES_DB="$PROD_DB" \
-      -P "$PG_IMAGE" >/dev/null
+      -p 127.0.0.1::5432 "$PG_IMAGE" >/dev/null
   fi
   wait_ready
   local port
   port=$(sandbox_port)
-  [[ -n "$port" ]] || { echo "no se encontró el puerto del sandbox" >&2; exit 1; }
+  [[ -n "$port" ]] || { echo "no se encontró el puerto loopback del sandbox (127.0.0.1)" >&2; exit 1; }
   echo "   listo en 127.0.0.1:$port"
 
-  # 3. Restaurar el esquema (la imagen arranca con la bd POSTGRES_DB vacía)
-  echo "== restaurando esquema en el sandbox =="
+  # 3. Restaurar esquema y ledger (la imagen arranca con la bd POSTGRES_DB vacía)
+  echo "== restaurando esquema y ledger en el sandbox =="
   docker cp "$DUMP_FILE" "$SANDBOX_NAME:/tmp/sandbox-dump.sql"
   sandbox_psql -q -f /tmp/sandbox-dump.sql
-  rm -f "$DUMP_FILE"
-  docker exec "$SANDBOX_NAME" rm -f /tmp/sandbox-dump.sql
+  docker cp "$LEDGER_FILE" "$SANDBOX_NAME:/tmp/sandbox-ledger.sql"
+  sandbox_psql -q -f /tmp/sandbox-ledger.sql
+  rm -f "$DUMP_FILE" "$LEDGER_FILE"
+  docker exec "$SANDBOX_NAME" rm -f /tmp/sandbox-dump.sql /tmp/sandbox-ledger.sql
 
-  # 4. Migraciones del repo con el runner real: el ledger baselina lo que ya
-  #    existe por tabla primaria; cualquier migración nueva corre de verdad.
+  # 4. Migraciones del repo con el runner real: el ledger salta lo aplicado en prod;
+  #    cualquier migración nueva corre de verdad.
   echo "== aplicando migraciones del repo con migrate.ts =="
   DATABASE_URL="postgres://postgres@127.0.0.1:$port/$PROD_DB" \
     npx tsx "$REPO_ROOT/scripts/qa-schema-migrate.ts"
 
   # 5. Verificación mínima del esquema restaurado
   echo "== verificación =="
-  local tables id_type
+  local tables id_type ledger
   tables=$(sandbox_psql -At -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
   id_type=$(sandbox_psql -At -c "SELECT atttypid::regtype FROM pg_attribute WHERE attrelid='conversations'::regclass AND attname='id'")
+  ledger=$(sandbox_psql -At -c "SELECT count(*) FROM _migrations")
   echo "   tablas en public: $tables (producción: ~39)"
   echo "   conversations.id: $id_type (debe ser 'text', no 'uuid')"
+  echo "   filas en _migrations: $ledger"
   [[ "$id_type" == "text" ]] || { echo "   ESQUEMA INCORRECTO: conversations.id=$id_type" >&2; exit 1; }
   echo "sandbox arriba: docker exec -it $SANDBOX_NAME psql -U postgres -d $PROD_DB"
 }
@@ -152,6 +168,7 @@ do_up() {
 do_test() {
   do_up
   echo "== migración de prueba (índice único sobre messages) =="
+  rm -rf "$STAGE_DIR"
   mkdir -p "$STAGE_DIR"
   cp "$MIGRATIONS_DIR"/*.sql "$STAGE_DIR"/
   if [[ -n "${EXTRA_MIGRATIONS_DIR:-}" ]]; then
