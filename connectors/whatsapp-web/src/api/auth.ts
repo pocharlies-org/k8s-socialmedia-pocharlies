@@ -5,12 +5,18 @@ export interface AuthenticatedRequest extends Request {
   authenticated?: boolean;
 }
 
-export function createHMACAuth(sharedSecret: string) {
+export type HMACRejectReason = 'missing_headers' | 'stale_timestamp' | 'invalid_signature';
+
+export function createHMACAuth(
+  sharedSecret: string,
+  onReject?: (req: Request, reason: HMACRejectReason) => void
+) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
     const signature = req.headers['x-connector-signature'] as string;
     const timestamp = req.headers['x-connector-timestamp'] as string;
 
     if (!signature || !timestamp) {
+      onReject?.(req, 'missing_headers');
       res.status(401).json({ error: 'Missing authentication headers' });
       return;
     }
@@ -21,6 +27,7 @@ export function createHMACAuth(sharedSecret: string) {
     const timeDiff = Math.abs(now - requestTime);
 
     if (timeDiff > 300) {
+      onReject?.(req, 'stale_timestamp');
       res.status(401).json({ error: 'Request timestamp too old or too far in future' });
       return;
     }
@@ -34,6 +41,7 @@ export function createHMACAuth(sharedSecret: string) {
 
     // Use timing-safe comparison
     if (providedSignature.length !== expectedSignature.length) {
+      onReject?.(req, 'invalid_signature');
       res.status(401).json({ error: 'Invalid signature' });
       return;
     }
@@ -41,6 +49,7 @@ export function createHMACAuth(sharedSecret: string) {
     const isValid = timingSafeEqual(Buffer.from(providedSignature), Buffer.from(expectedSignature));
 
     if (!isValid) {
+      onReject?.(req, 'invalid_signature');
       res.status(401).json({ error: 'Invalid signature' });
       return;
     }

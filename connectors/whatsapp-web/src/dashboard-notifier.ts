@@ -2,13 +2,14 @@
 // HMAC scheme matches the dashboard's `/api/messages/_connector/*` endpoints.
 
 import { createHmac } from 'crypto';
+import { requireConnectorSecret } from '@mcp-socialmedia/shared';
 
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://100.83.56.98:9002';
-const SECRET = process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
 
 function sign(body: string): { ts: string; sig: string } {
   const ts = Math.floor(Date.now() / 1000).toString();
-  const sig = createHmac('sha256', SECRET).update(`${ts}:${body}`).digest('hex');
+  // SKIRM-103 F3-2: no placeholder fallback; with no usable key this throws and nothing is sent.
+  const sig = createHmac('sha256', requireConnectorSecret()).update(`${ts}:${body}`).digest('hex');
   return { ts, sig: `sha256=${sig}` };
 }
 
@@ -17,8 +18,8 @@ export async function notifyDashboard(
   payload: Record<string, unknown>
 ): Promise<void> {
   const body = JSON.stringify(payload);
-  const { ts, sig } = sign(body);
   try {
+    const { ts, sig } = sign(body);
     const ac = new AbortController();
     // Dashboard's asyncpg pool cold-starts can take 5-8s after a restart;
     // 4s was firing the abort before fetch had a chance. 12s leaves headroom

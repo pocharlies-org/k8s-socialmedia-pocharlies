@@ -12,6 +12,7 @@ import {
 import { MuteState } from '../chat-state';
 import { QRHandler } from '../qr-handler';
 import { createHMACAuth, AuthenticatedRequest } from './auth';
+import { sendCurrentQR } from './auth-qr';
 import {
   connectorAccount,
   createWhatsAppManualOpenRequest,
@@ -811,16 +812,9 @@ export function createRouter(
 
   // Get QR code (no auth required for local dev)
   // CONTRACT: http.whatsapp-connector.auth-qr — path, no-auth and {qrCode, expiresAt} are frozen
-  router.get('/auth/qr', (req: Request, res: Response) => {
-    const qr = qrHandler.getCurrentQR();
-    if (!qr) {
-      res.status(404).json({ error: 'No QR code available' });
-      return;
-    }
-    res.json({
-      qrCode: qr.qrCode,
-      expiresAt: qr.expiresAt.toISOString(),
-    });
+  // Deprecated (SKIRM-103): still served unauthenticated until remove_after; use auth-qr.v2.
+  router.get('/auth/qr', (_req: Request, res: Response) => {
+    sendCurrentQR(qrHandler, res);
   });
 
   // Logout and clear session (requires auth)

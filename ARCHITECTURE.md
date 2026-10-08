@@ -26,8 +26,13 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
   el brain exige `filters.account`). Hacia el otro lado, el brain depende de
   `brain-windows` (este repo) para su contenido.
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
-  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 93 entradas** (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
+  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 97 entradas** (`grep -c '^  - id:' CONTRACTS.yaml`) (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
   más `contracts/socialmedia-tools.json`): nunca renombrar, solo `.vN+1` + `Contract-Change:`.
+- **Quién llama a qué, y con qué firma.** La API de los conectores se firma con una sola clave, `CONNECTOR_SHARED_SECRET`: HMAC-SHA256 de
+  `<ts>:<cuerpo JSON>` en `x-connector-timestamp` y `x-connector-signature`, ventana de 5 min. `mcp-sse` (código de `mcp-server`) firma
+  sus llamadas al conector de WhatsApp, `providerGet` incluido (un GET no tiene cuerpo: firma `{}`); el conector exige la firma en
+  `/api/public/*` (SKIRM-103), en `/api/v2/auth/qr` y en las rutas de `/api/v1` que montan `auth` en `controller.ts`. Sin firma y sin SSO a propósito: `/qr`, `/qr/page`, `/qr/renew`, `/status` (los hosts `.lan` los cubre `sso-chain`; dgx-infra
+  sondea `/status`) y `GET /api/v1/auth/qr` (v1, deprecated hasta 2027-01-31). El conector de Telegram sigue con `/api/public/*` sin firma (SKIRM-111).
 - **ArgoCD** `socialmedia`: repo `pocharlies-org/k8s-socialmedia-pocharlies`, path `k8s/overlays/prod`, tronco **`deploy/prod`**
   (`origin/deploy/prod` = 5675ea0), sync automático `prune: false`.
 
@@ -52,6 +57,8 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Doc de la API social | `docs/social-api.md`, ADRs en `docs/adr` | `docs/` | operadores |
 | ¿Es un primer contacto 1:1? (evidencia de contacto conocido) | `BaileysClient.knownDirectContactEvidence` + `chat-state.ts` `hasInboundHistory` / `hasOutboundHistory` | `connectors/whatsapp-web/src/` | todas las rutas de envío 1:1, vía `guardDirectSend` |
 | Búsqueda semántica de mensajes | `mcp-server/src/application/search.service.ts` `SearchService.semanticSearch` | `mcp-server/src/application/` | `MCPServer.handleSearchMessages`; una instancia caída sale como `meta.partialErrors` (`completeness: 'partial'`), no tumba las demás |
+| Puerta HMAC de un router de conector | `createHMACAuth(secret, onReject?)` (el esquema compartido es `verifyHMACSignature` en `shared`) | `connectors/whatsapp-web/src/api/auth.ts` | `/api/v1`, `/api/public` (`createPublicRouter`, que registra los rechazos), `/api/v2/auth/qr` |
+| Clave HMAC de los conectores: ¿es utilizable? | `requireConnectorSecret()` — lanza si falta, está vacía o es el placeholder del repositorio (SKIRM-103) | `shared/src/crypto/connector-secret.ts` | `whatsapp-web` (`main.ts`, `dashboard-notifier.ts`) y `mcp-server` (`mcp/index.ts`, `mcp/sse-server.ts`); telegram, whatsapp-cloud y sus notifiers siguen con el valor por defecto hasta SKIRM-111 |
 | Clave opaca por cuenta (`personal` sin prefijo, el resto namespaceadas — migración 002) | `mcp-server/src/domain/account.ts` (`accountKey` / `normalizeAccount`) — **la única con guard**: `accountKey` lanza `Cross-account identifier` si el id ya está namespaced a otra cuenta (SKIRM-107); sin `normalizeAccount` dentro, porque la búsqueda sin cuenta (`inEveryNamespace`, `brainScopes`) recorre también cuentas deshabilitadas | `mcp-server/src/domain/` | MCP y job de embeddings. Dos **espejos sin guard** de la misma regla (no pueden importar TS): `connectors/whatsapp-web/src/db-writer.ts` `accountKey` y `connectors/telegram-sync/sync/db.py` `account_key`. No llevan el guard porque cada proceso escribe solo su cuenta (`CONNECTOR_ACCOUNT`) y los ids vienen del proveedor (un JID nativo no lleva estos prefijos); cambiar la regla en una sin las otras deja mensajes sin embedding |
 
 ## 5. Cómo se construye aquí
@@ -85,6 +92,19 @@ Total de casos Jest: **pendiente de medir**.
 - `auto-reply-worker` personal está deshabilitado (tombstone): las respuestas de WhatsApp Business las lleva Synapse.
 - `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) llega a `mcp-sse` por el ExternalSecret `whatsapp-mcp-brain-search` (item `brain-messaging-search`, el mismo que lee el brain: lo compara por igualdad), con `secretKeyRef` **sin `optional`**: `mcp-sse` es `Recreate` con `hostPort: 3010`, así que sin el Secret el pod no arranca y cae todo `/social`; el item se crea antes de fusionar. Con el brain caído o un valor distinto (401) la búsqueda cae a texto con `fallbackReason`. `mcp-server` no la monta: nadie lo llama (el gateway va a `mcp-sse:3010`). ArgoCD no evalúa la salud de un ExternalSecret aquí: la sync-wave `-1` del ES ordena su creación, no espera al Secret.
 - Envío 1:1 sin tctoken (SKIRM-92): `outbound_history` cuenta cualquier OUTBOUND no fallido de la conversación canónica (enviado desde el móvil del dueño o por el conector tras el guard). Un envío que WhatsApp rechaza con 463 solo deja de contar si `setMessageStatus` (`'failed'`) llega después de que exista la fila; un ack muy temprano la deja contando.
+- `/api/public/*` del conector de WhatsApp (SKIRM-103): `chats`, `history/:chatId` y `backfill-media` exigen la firma HMAC del conector
+  (`createPublicRouter` en `connectors/whatsapp-web/src/api/public-routes.ts`; el borde las sigue negando con `connector-public-api-deny`). Un GET firma
+  `{}` y `backfill-media` lleva sus parámetros en la query con el cuerpo vacío. **Firma a mano**: `ts=$(date +%s); sig=$(printf '%s:{}' "$ts" | openssl dgst -sha256 -hmac "$CONNECTOR_SHARED_SECRET" -hex | sed 's/^.* //')`
+  y las cabeceras `x-connector-timestamp: $ts`, `x-connector-signature: sha256=$sig`. La firma cubre `ts:cuerpo`, no método, ruta ni query: dentro de los 5 minutos
+  vale para cualquier ruta de cuerpo vacío (también `POST /auth/logout`) y no hay caché de repetición; es el esquema de `/api/v1`. Cada rechazo deja una línea
+  `[public-api] rejected <método> <ruta> ip=… reason=…` (una por motivo cada 10 s; sin cabeceras, cuerpo, firma, query ni el chatId): así se ve en minutos un consumidor no enumerado.
+  `/api/v2/auth/qr` es la carga de `GET /api/v1/auth/qr` con firma; la v1 sigue abierta y deprecated hasta 2027-01-31.
+- **Orden de despliegue de SKIRM-103 (security F3-1, F3-2).** `CONNECTOR_SHARED_SECRET` vale hoy el placeholder del repositorio (`dev-secret-change-in-production`) y
+  `whatsapp-web` y `mcp-server` (en producción, `mcp-sse`: el Deployment `mcp-server` es el ingestor y no firma) se niegan a arrancar con él, con él ausente o vacío.
+  Fusionar la PR no despliega nada; los pines van **con el Secret ya rotado (SC-2092) y en esa misma ventana**: comprobar antes, por sha256 y sin imprimirla, que la clave
+  del Secret no es el placeholder (`mcp-sse` es `Recreate` y cae `/social` si arranca sin clave válida); luego `mcp-server` (firma; mueve también `mcp-sse`, los CronJobs de brain y el
+  Job migrador) y después **un conector cada vez** por `k8s/overlays/prod/patch-image.yaml` (leila → professional → personal), con `restartCount` estable y la sesión sin re-emparejar.
+  La puerta no protege nada hasta la rotación: con el placeholder, cualquier pod o dispositivo de la LAN firma.
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
-Última verificación contra el código: 2026-10-08 · 5675ea0 (origin/deploy/prod)
+Última verificación contra el código: 2026-10-08 · 5ed41bc (origin/deploy/prod)

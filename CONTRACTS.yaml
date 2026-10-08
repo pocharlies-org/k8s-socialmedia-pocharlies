@@ -113,7 +113,9 @@ contracts:
     role: provider
     files:
       - connectors/whatsapp-web/src/api/controller.ts
-    status: active
+    status: deprecated
+    replaced_by: http.whatsapp-connector.auth-qr.v2
+    remove_after: 2027-01-31
     note: >-
       GET /api/v1/auth/qr of the house WhatsApp connectors (personal, professional,
       leila): unauthenticated, 200 {qrCode, expiresAt} (qrCode a PNG data URL,
@@ -122,6 +124,89 @@ contracts:
       touch it: per-sub QR lives only on http.whatsapp-pairing.internal-sessions.v1.
       Path, method, the absence of auth and the response shape are contract;
       changing any of them is breaking — a new `.v2` entry beside this one.
+      SKIRM-103: deprecated, and still served unauthenticated and unchanged until
+      remove_after (security accepted that, F3-3: the QR exists only while the
+      session is unpaired, and what it allows is hijacking the pairing, not reading
+      data). No consumer outside this registry: the house QR flow is /qr/page.
+  - id: http.whatsapp-connector.auth-qr.v2
+    kind: http-route
+    value: /api/v2/auth/qr
+    anchor: "router.get('/auth/qr'"
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/auth-qr.ts
+    status: active
+    note: >-
+      GET /api/v2/auth/qr of the house WhatsApp connectors: the payload of
+      http.whatsapp-connector.auth-qr (200 {qrCode, expiresAt} or 404
+      {"error":"No QR code available"}) behind the connector HMAC (SKIRM-103):
+      x-connector-timestamp + x-connector-signature over "<ts>:{}", a GET having no
+      body; without them 401. A new path rather than the v1 one with a door, because
+      closing a route in place is the breaking change this registry forbids. Born
+      without consumers; it exists so v1's replaced_by resolves and so a client has
+      somewhere to move before v1 is removed. Path, signature scheme and payload are
+      contract: changing any is breaking — a new `.v3` entry beside this one.
+  - id: http.whatsapp-connector.public-chats.v1
+    kind: http-route
+    value: /api/public/chats
+    anchor: "router.get('/chats'"
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/public-routes.ts
+    status: active
+    note: >-
+      GET /api/public/chats of the house WhatsApp connectors (note: /api/public,
+      not /api/v1): the chats the account sees, consumed by the MCP server's
+      providerGet (mcp-server/src/mcp/server.ts listConversationsFor and
+      canonicalGetConversation: social_list_conversations, social_get_conversation
+      and the target resolver; mcp-sse runs the same code).
+      HMAC-signed since SKIRM-103 (x-connector-timestamp + x-connector-signature
+      over "<ts>:{}", the same scheme as /api/v1; a GET has no body): without them
+      401, with them 200 {chats [{id, name, isGroup, timestamp}]} or 500 {error}.
+      Until SKIRM-103 it answered without any credential and only the edge
+      (connector-public-api-deny) kept it from outside the cluster. The path, the
+      signature scheme and the 200 shape are contract: changing any is breaking — a
+      new `.v2` entry beside this one. Each rejection is logged without headers,
+      body or signature, one line per reason every 10 s.
+  - id: http.whatsapp-connector.public-history.v1
+    kind: http-route
+    value: /api/public/history/:chatId
+    anchor: "router.get('/history/:chatId'"
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/public-routes.ts
+    status: active
+    note: >-
+      GET /api/public/history/:chatId?limit= of the house WhatsApp connectors:
+      the stored history of one chat (limit default 500), consumed by the MCP
+      server's providerGet (mcp-server/src/mcp/server.ts canonicalListMessages:
+      social_list_messages with readSource provider). Signed like
+      http.whatsapp-connector.public-chats.v1 (over
+      "<ts>:{}", the limit travels in the query and is not signed): without it
+      401, with it 200 {messages} or 500 {error}. dgx-infra
+      services/dashboard/api/routes_history.py also names it, with
+      WA_URL=http://localhost:3001, which is not the connector from the dashboard
+      pod (sre confirmed the call is dead, SKIRM-99); it carries no signature and
+      is not migrated. The path, the signature scheme and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.public-backfill-media.v1
+    kind: http-route
+    value: /api/public/backfill-media
+    anchor: "router.post('/backfill-media'"
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/public-routes.ts
+    status: active
+    note: >-
+      POST /api/public/backfill-media?days=&limit= of the house WhatsApp
+      connectors (defaults 7 and 100): a manual best-effort media backfill that is
+      today a no-op in the Baileys client, 200 {ok, unavailable, total}, 500
+      {error}. No consumer in code or in the cluster (sre, SKIRM-99): it was run by
+      hand with curl. Signed like http.whatsapp-connector.public-chats.v1 over
+      "<ts>:{}" with an EMPTY body, the parameters in the query (the how-to is the
+      comment above createPublicRouter); without the signature 401. The path, the
+      signature scheme and the 200 shape are contract: changing any is breaking —
+      a new `.v2` entry beside this one.
   - id: http.whatsapp-connector.messages-forward.v1
     kind: http-route
     value: /messages/forward
