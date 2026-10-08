@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "lint": "eslint src --ext .ts",
-    "test": "echo 'No tests configured'"
+    "test": "tsx --test src/crypto/meta-signature.test.ts"
   },
   "dependencies": {
     "crypto": "^1.0.1",

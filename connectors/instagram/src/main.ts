@@ -21,7 +21,7 @@ import {
   credentialStoreEnabled,
 } from '@mcp-socialmedia/shared';
 import { discoverFacebookInstagramAccount, InstagramAPI, InstagramConfig } from './instagram-api';
-import { WebhookEvent, createWebhookRouter } from './webhook';
+import { WebhookEvent, WebhookLog, createWebhookRouter } from './webhook';
 import { InstagramEventPublisher } from './publisher';
 import {
   IG_PAIRING_SCOPES,
@@ -169,6 +169,27 @@ export interface InstagramAppOptions {
   /** Null while CREDENTIAL_STORE_ENABLED is off (SC-1194 flag-gating). */
   credentialStore: CredentialStore | null;
   publisher: InstagramEventSink;
+  /** Test seam for the webhook's warnings; defaults to the module logger. */
+  log?: WebhookLog;
+}
+
+/**
+ * SKIRM-102 (security F2-1): the closed list of Meta app secrets that may sign POST /webhook —
+ * the Facebook app, the Instagram Login app and the app secret of each loaded account. Empty
+ * values are dropped (main.ts gives '' when FACEBOOK_APP_SECRET is missing and the accounts
+ * inherit it) and repeats removed. INSTAGRAM_WEBHOOK_SECRET, INSTAGRAM_INTERNAL_API_TOKEN and
+ * WEBHOOK_VERIFY_TOKEN are not secrets of a Meta app and never enter.
+ */
+export function metaAppSecrets(
+  env: NodeJS.ProcessEnv,
+  accounts: Map<string, AccountEntry>
+): string[] {
+  const secrets = [
+    env.FACEBOOK_APP_SECRET,
+    env.INSTAGRAM_LOGIN_APP_SECRET,
+    ...[...accounts.values()].map(entry => entry.config.appSecret),
+  ];
+  return [...new Set(secrets.filter((secret): secret is string => !!secret))];
 }
 
 /**
@@ -253,19 +274,31 @@ export async function createInstagramApp(opts: InstagramAppOptions): Promise<Exp
     60,
     parseInt(env.INSTAGRAM_OAUTH_STATE_TTL_SEC || '600', 10) || 600
   );
-  const WEBHOOK_VERIFY_TOKEN = env.WEBHOOK_VERIFY_TOKEN || 'instagram-verify-token';
+  const WEBHOOK_VERIFY_TOKEN = env.WEBHOOK_VERIFY_TOKEN || '';
 
   const bizIdToAccount = await registerInstagramIds(accounts);
 
   const app = express();
-  app.use(express.json());
+  // rawBody: Meta signs the original bytes, not the parsed JSON (webhookSignatureGuard).
+  app.use(
+    express.json({
+      verify: (req, _res, buffer) => {
+        (req as Request & { rawBody?: Buffer }).rawBody = buffer;
+      },
+    })
+  );
 
   // Webhook routes — shared endpoint, routes by business account ID in payload
   app.use(
     '/',
-    createWebhookRouter(WEBHOOK_VERIFY_TOKEN, bizIdToAccount, (account, event) => {
-      publisher.publish(account, event);
-    })
+    createWebhookRouter(
+      WEBHOOK_VERIFY_TOKEN,
+      bizIdToAccount,
+      (account, event) => {
+        publisher.publish(account, event);
+      },
+      { secrets: metaAppSecrets(env, accounts), log: opts.log }
+    )
   );
 
   // Health check — all accounts
