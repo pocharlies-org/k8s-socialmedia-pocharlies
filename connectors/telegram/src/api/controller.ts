@@ -1,5 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { TelegramClientWrapper, TelegramMessageEdit } from '../telegram-client';
+import {
+  TelegramClientWrapper,
+  TelegramMessageEdit,
+  isTelegramDownloadTimeout,
+  telegramRetryAfter,
+} from '../telegram-client';
 import { MessageMutationError, classifyEditError, sendingDisabledReason } from '../message-edit';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import pino from 'pino';
@@ -10,6 +15,40 @@ const logger = pino({
     options: { colorize: true },
   },
 });
+
+function respondRateLimit(res: Response, error: unknown): boolean {
+  const retryAfter = telegramRetryAfter(error);
+  if (retryAfter === null) return false;
+  res.set('Retry-After', String(retryAfter));
+  res.status(429).json({ error: 'Telegram rate limit', retryAfter });
+  return true;
+}
+
+function downloadRoute(
+  download: (req: Request) => Promise<Buffer | null>,
+  absent: string,
+  contentType?: string
+): (req: Request, res: Response) => void {
+  return (req, res) => {
+    void (async () => {
+      try {
+        const buffer = await download(req);
+        if (!buffer) {
+          res.status(404).json({ error: absent });
+          return;
+        }
+        res.json({
+          data: buffer.toString('base64'),
+          size: buffer.length,
+          ...(contentType ? { contentType } : {}),
+        });
+      } catch (error) {
+        if (respondRateLimit(res, error)) return;
+        res.status(isTelegramDownloadTimeout(error) ? 504 : 502).json({ error: String(error) });
+      }
+    })();
+  };
+}
 
 /**
  * Authentication middleware
@@ -670,6 +709,38 @@ export function createRouter(
   });
 
   /**
+   * GET /messages/single/:chatId/:msgId - Fetch the exact message when repairing
+   * a previously failed media download (telegram-sync media recovery).
+   */
+  // CONTRACT: http.telegram-connector.messages-single.v1
+  router.get('/messages/single/:chatId/:msgId', (req: Request, res: Response): void => {
+    void (async () => {
+      const messageId = Number(req.params.msgId);
+      if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+        res.status(400).json({ error: 'Invalid message ID' });
+        return;
+      }
+      if (!client.isClientConnected()) {
+        res.status(503).json({ error: 'Not connected to Telegram' });
+        return;
+      }
+      try {
+        const message = await client.getMessage(req.params.chatId, messageId);
+        if (!message) {
+          res.status(404).json({ error: 'Message not found' });
+          return;
+        }
+        res.json({ message });
+      } catch (error) {
+        if (respondRateLimit(res, error)) return;
+        res
+          .status(isTelegramDownloadTimeout(error) ? 504 : 502)
+          .json({ error: 'Failed to get message' });
+      }
+    })();
+  });
+
+  /**
    * POST /messages/search - Search messages
    * NOTE: Must be registered BEFORE /messages/:chatId POST route
    */
@@ -1087,20 +1158,13 @@ export function createRouter(
    * GET /messages/media/:chatId/:msgId - Download media
    */
   // CONTRACT: http.telegram-connector.messages-media-download.v1
-  router.get('/messages/media/:chatId/:msgId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        const buffer = await client.downloadMedia(req.params.chatId, parseInt(req.params.msgId));
-        if (!buffer) {
-          res.status(404).json({ error: 'No media' });
-          return;
-        }
-        res.json({ data: buffer.toString('base64'), size: buffer.length });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+  router.get(
+    '/messages/media/:chatId/:msgId',
+    downloadRoute(
+      req => client.downloadMedia(req.params.chatId, parseInt(req.params.msgId)),
+      'No media'
+    )
+  );
 
   /**
    * GET /peers/:id/photo - Download a peer's profile photo (big size).
@@ -1108,26 +1172,15 @@ export function createRouter(
    */
   // CONTRACT: http.telegram-connector.peers-photo.v1
   router.get('/peers/:id/photo', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
-        const buffer = await client.downloadPeerPhoto(req.params.id);
-        if (!buffer) {
-          res.status(404).json({ error: 'No photo' });
-          return;
-        }
-        res.json({
-          data: buffer.toString('base64'),
-          size: buffer.length,
-          contentType: 'image/jpeg',
-        });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
+    if (!client.isClientConnected()) {
+      res.status(503).json({ error: 'Not connected to Telegram' });
+      return;
+    }
+    downloadRoute(
+      request => client.downloadPeerPhoto(request.params.id),
+      'No photo',
+      'image/jpeg'
+    )(req, res);
   });
 
   /**
