@@ -14,7 +14,7 @@ import { verifyHMACSignature } from '@mcp-socialmedia/shared';
 import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
 
-const SECRET = 'rotated-connector-secret';
+const SECRET = 'connector-secret-under-test';
 
 interface Seen {
   method: string;
@@ -93,7 +93,7 @@ describe('providerGet signs the GET', () => {
     const wa = await connector('gated');
     try {
       await expect(
-        serverWithSecret(wa.url, 'the-old-placeholder').providerGet(wa.url, '/api/public/chats')
+        serverWithSecret(wa.url, 'some-other-key').providerGet(wa.url, '/api/public/chats')
       ).rejects.toThrow(/Provider query failed \(401\)/);
     } finally {
       await wa.close();

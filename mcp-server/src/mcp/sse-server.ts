@@ -36,7 +36,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const LLM_BASE_URL = process.env.LLM_BASE_URL || '';
 const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || '';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-change-in-production';
-// SKIRM-103 F3-2: fail closed — a missing or placeholder HMAC key stops the process.
+// SKIRM-103 F3-2: no key, no start; the placeholder warns, and CONNECTOR_SECRET_STRICT=true refuses it.
 const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
 const CONNECTOR_URL = process.env.CONNECTOR_URL || 'http://whatsapp-connector:3001';
 const SSE_PORT = parseInt(process.env.MCP_SSE_PORT || '3010', 10);

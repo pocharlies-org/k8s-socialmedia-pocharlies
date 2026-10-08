@@ -1,14 +1,18 @@
 /**
- * SKIRM-103 (F3-2, C11): the connector fails closed on its HMAC key.
+ * SKIRM-103 (F3-2, C11): the connector and its HMAC key.
  *
- * main.ts is started for real: with the key unset, empty or the placeholder
- * the process must die naming CONNECTOR_SHARED_SECRET, before it listens or
- * opens a WhatsApp socket. The "valid key starts" half is requireConnectorSecret
- * itself (mcp-server/src/mcp/connector-secret.spec.ts): a valid key lets main.ts
- * go on to open a Baileys socket, which a test must not do.
+ * main.ts is started for real: with the key unset or empty the process must die
+ * naming CONNECTOR_SHARED_SECRET, before it listens or opens a WhatsApp socket,
+ * and so must the repository's placeholder when the Deployment sets
+ * CONNECTOR_SECRET_STRICT=true. "The placeholder without the flag starts, with
+ * one warning" is requireConnectorSecret itself
+ * (mcp-server/src/mcp/connector-secret.spec.ts, which also starts the two
+ * mcp-server entrypoints that way): going on, main.ts would open a Baileys
+ * socket, which a test must not do.
  *
- * The dashboard notifier used to sign with the placeholder when the key was
- * missing; now it sends nothing.
+ * The dashboard notifier asks the helper on every signature: no key, or a
+ * strict-refused placeholder, sends nothing; the placeholder without the flag
+ * signs and sends, with one warning for the whole process.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,17 +25,17 @@ import { notifyDashboard } from './dashboard-notifier';
 const run = promisify(execFile);
 const PLACEHOLDER = 'dev-secret-change-in-production';
 
-async function startMain(secret: string | undefined) {
-  const env: Record<string, string> = {
+async function startMain(env: Record<string, string>) {
+  const childEnv: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     DATABASE_URL: 'postgresql://nobody:nobody@127.0.0.1:1/none',
     PORT: '0',
+    ...env,
   };
-  if (secret !== undefined) env.CONNECTOR_SHARED_SECRET = secret;
   try {
     await run(process.execPath, ['--import', 'tsx', join('src', 'main.ts')], {
       cwd: process.cwd(),
-      env,
+      env: childEnv,
       timeout: 60_000,
     });
     return { code: 0, output: '' };
@@ -41,48 +45,97 @@ async function startMain(secret: string | undefined) {
   }
 }
 
-test('main.ts no arranca con la clave HMAC ausente, vacía o el placeholder', async () => {
+test('main.ts no arranca con la clave HMAC ausente o vacía, ni con el placeholder si es estricto', async () => {
   const results = await Promise.all([
-    startMain(undefined),
-    startMain(''),
-    startMain(PLACEHOLDER),
+    startMain({}),
+    startMain({ CONNECTOR_SHARED_SECRET: '' }),
+    startMain({ CONNECTOR_SHARED_SECRET: PLACEHOLDER, CONNECTOR_SECRET_STRICT: 'true' }),
   ]);
   for (const r of results) {
     assert.notEqual(r.code, 0);
     assert.match(r.output, /CONNECTOR_SHARED_SECRET/);
     assert.doesNotMatch(r.output, /listening on port/);
   }
-  assert.match(results[2].output, /placeholder/);
+  assert.match(results[0].output, /unset or empty/);
+  assert.match(results[2].output, /is the placeholder/);
 });
 
-test('el notifier del dashboard no envía nada sin una clave utilizable (antes firmaba con el placeholder)', async () => {
+async function withNotifier(
+  env: Record<string, string | undefined>,
+  fn: (seen: { sent: { headers: Record<string, string> }[]; errors: string[]; warnings: string[] }) => Promise<void>
+) {
   const realFetch = globalThis.fetch;
-  const realSecret = process.env.CONNECTOR_SHARED_SECRET;
   const realWarn = console.warn;
-  const sent: { headers: Record<string, string> }[] = [];
-  const warnings: string[] = [];
+  const realError = console.error;
+  const saved = {
+    secret: process.env.CONNECTOR_SHARED_SECRET,
+    strict: process.env.CONNECTOR_SECRET_STRICT,
+  };
+  const seen = {
+    sent: [] as { headers: Record<string, string> }[],
+    errors: [] as string[],
+    warnings: [] as string[],
+  };
   globalThis.fetch = (async (_url: unknown, init?: { headers?: Record<string, string> }) => {
-    sent.push({ headers: init?.headers ?? {} });
+    seen.sent.push({ headers: init?.headers ?? {} });
     return { ok: true, status: 200 };
   }) as unknown as typeof fetch;
-  console.warn = (...args: unknown[]) => void warnings.push(args.join(' '));
+  console.warn = (...args: unknown[]) => void seen.warnings.push(args.join(' '));
+  console.error = (...args: unknown[]) => void seen.errors.push(args.join(' '));
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   try {
-    for (const bad of [undefined, '', PLACEHOLDER]) {
-      if (bad === undefined) delete process.env.CONNECTOR_SHARED_SECRET;
-      else process.env.CONNECTOR_SHARED_SECRET = bad;
-      await notifyDashboard('/_connector/typing', { chatId: 'x' });
-    }
-    assert.deepEqual(sent, []);
-    assert.equal(warnings.length, 3);
-
-    process.env.CONNECTOR_SHARED_SECRET = 'a-real-rotated-secret';
-    await notifyDashboard('/_connector/typing', { chatId: 'x' });
-    assert.equal(sent.length, 1);
-    assert.match(sent[0].headers['x-connector-signature'], /^sha256=[0-9a-f]{64}$/);
+    await fn(seen);
   } finally {
     globalThis.fetch = realFetch;
     console.warn = realWarn;
-    if (realSecret === undefined) delete process.env.CONNECTOR_SHARED_SECRET;
-    else process.env.CONNECTOR_SHARED_SECRET = realSecret;
+    console.error = realError;
+    for (const [key, value] of [
+      ['CONNECTOR_SHARED_SECRET', saved.secret],
+      ['CONNECTOR_SECRET_STRICT', saved.strict],
+    ] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
+}
+
+test('el notifier del dashboard no envía nada sin clave, o con el placeholder si es estricto', async () => {
+  const cases: Record<string, string | undefined>[] = [
+    { CONNECTOR_SHARED_SECRET: undefined, CONNECTOR_SECRET_STRICT: undefined },
+    { CONNECTOR_SHARED_SECRET: '', CONNECTOR_SECRET_STRICT: undefined },
+    { CONNECTOR_SHARED_SECRET: PLACEHOLDER, CONNECTOR_SECRET_STRICT: 'true' },
+  ];
+  for (const env of cases) {
+    await withNotifier(env, async seen => {
+      await notifyDashboard('/_connector/typing', { chatId: 'x' });
+      assert.deepEqual(seen.sent, [], JSON.stringify(env));
+      assert.equal(seen.warnings.length, 1); // its own "[dashboard-notifier] … failed" line
+    });
+  }
+});
+
+test('el notifier firma con una clave propia, y con el placeholder no estricto firma, envía y avisa una sola vez', async () => {
+  await withNotifier(
+    { CONNECTOR_SHARED_SECRET: 'a-key-of-our-own', CONNECTOR_SECRET_STRICT: undefined },
+    async seen => {
+      await notifyDashboard('/_connector/typing', { chatId: 'x' });
+      assert.equal(seen.sent.length, 1);
+      assert.match(seen.sent[0].headers['x-connector-signature'], /^sha256=[0-9a-f]{64}$/);
+      assert.deepEqual(seen.errors, []);
+    }
+  );
+
+  await withNotifier(
+    { CONNECTOR_SHARED_SECRET: PLACEHOLDER, CONNECTOR_SECRET_STRICT: undefined },
+    async seen => {
+      for (let i = 0; i < 4; i += 1) await notifyDashboard('/_connector/typing', { chatId: 'x' });
+      assert.equal(seen.sent.length, 4);
+      assert.match(seen.sent[0].headers['x-connector-signature'], /^sha256=[0-9a-f]{64}$/);
+      assert.equal(seen.errors.length, 1); // one line for the process, not one per signature
+      assert.match(seen.errors[0], /CONNECTOR_SHARED_SECRET is the placeholder/);
+    }
+  );
 });

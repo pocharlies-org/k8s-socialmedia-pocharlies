@@ -39,7 +39,7 @@ const ENCRYPTION_KEY =
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const PORT = parseInt(process.env.PORT || '3001', 10);
-// SKIRM-103 F3-2: fail closed — a missing or placeholder HMAC key stops the connector.
+// SKIRM-103 F3-2: no key, no start; the placeholder warns, and CONNECTOR_SECRET_STRICT=true refuses it.
 const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
 // When true, the public /qr/page renders a "Generate new QR" button wired to an
 // unauthenticated POST /qr/renew. Only enable on LAN-only deployments (e.g. the

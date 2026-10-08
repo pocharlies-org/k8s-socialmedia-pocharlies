@@ -75,6 +75,8 @@ export function createPublicRouter(
     }
   });
 
+  // Best-effort historical media backfill — wwebjs can usually only fetch the
+  // last ~50 messages per chat, so older media will be marked unavailable.
   // CONTRACT: http.whatsapp-connector.public-backfill-media.v1 — POST /api/public/backfill-media?days=&limit=, HMAC over "<ts>:{}", empty body
   router.post('/backfill-media', async (req: Request, res: Response) => {
     try {

@@ -188,7 +188,21 @@ test('timestamp fuera de la ventana de 5 minutos (con margen de reloj) → 401, 
   });
 });
 
-test('firma con otra clave (el placeholder que ya no vale) → 401', async () => {
+test('timestamp no numérico → 401 aunque la firma sea correcta para esa cadena (no se salta la ventana)', async () => {
+  await withServer(async ({ base, calls }) => {
+    for (const ts of ['abc', '', 'NaN', 'Infinity']) {
+      const headers = {
+        'x-connector-timestamp': ts,
+        'x-connector-signature': generateHMACSignature({}, ts as unknown as number, SECRET),
+      };
+      const r = await fetch(`${base}/api/public/chats`, { headers });
+      assert.equal(r.status, 401, `ts=${JSON.stringify(ts)}`);
+    }
+    assert.deepEqual(calls, []);
+  });
+});
+
+test('firma con otra clave (también la de ejemplo del repositorio) → 401', async () => {
   await withServer(async ({ base }) => {
     const r = await fetch(`${base}/api/public/chats`, {
       headers: signedHeaders({ secret: 'dev-secret-change-in-production' }),

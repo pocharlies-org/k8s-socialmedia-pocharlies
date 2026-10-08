@@ -8,7 +8,7 @@ const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://100.83.56.98:9002';
 
 function sign(body: string): { ts: string; sig: string } {
   const ts = Math.floor(Date.now() / 1000).toString();
-  // SKIRM-103 F3-2: no placeholder fallback; with no usable key this throws and nothing is sent.
+  // SKIRM-103 F3-2: no fallback key; with none (or a strict-refused placeholder) this throws and nothing is sent.
   const sig = createHmac('sha256', requireConnectorSecret()).update(`${ts}:${body}`).digest('hex');
   return { ts, sig: `sha256=${sig}` };
 }

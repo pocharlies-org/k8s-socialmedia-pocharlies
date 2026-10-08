@@ -26,7 +26,8 @@ export function createHMACAuth(
     const now = Math.floor(Date.now() / 1000);
     const timeDiff = Math.abs(now - requestTime);
 
-    if (timeDiff > 300) {
+    // A non-numeric timestamp gives NaN, and NaN > 300 is false: it must not skip the window.
+    if (!Number.isFinite(timeDiff) || timeDiff > 300) {
       onReject?.(req, 'stale_timestamp');
       res.status(401).json({ error: 'Request timestamp too old or too far in future' });
       return;
