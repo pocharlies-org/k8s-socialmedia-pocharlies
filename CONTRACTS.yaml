@@ -204,6 +204,39 @@ contracts:
       comment above createPublicRouter); without the signature 401. The path, the
       signature scheme and the 200 shape are contract: changing any is breaking —
       a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.history-sync.v1
+    kind: http-route
+    value: /history/sync
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      POST /api/v1/history/sync?limit= of the house WhatsApp connectors (limit
+      default 500): starts a background download of the chat history
+      (getAllChatsWithHistory) and answers at once. Signed like the rest of
+      /api/v1 (x-connector-timestamp + x-connector-signature over "<ts>:{}",
+      no body; the limit travels in the query and is not signed): without them
+      401, with them 200 {status: started, limit, message} or 503 {error} when
+      WhatsApp is not connected. No registered consumer. The path, the
+      signature scheme and the 200 shape are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
+  - id: http.whatsapp-connector.history-chat.v1
+    kind: http-route
+    value: /history/:chatId
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      GET /api/v1/history/:chatId?limit= of the house WhatsApp connectors
+      (limit default 100): the stored history of one chat (fetchChatHistory).
+      Signed like the rest of /api/v1 (x-connector-timestamp +
+      x-connector-signature over "<ts>:{}", the limit travels in the query and
+      is not signed): without them 401, with them 200 {chatId, count,
+      messages} or 500 {error}. No registered consumer. The path, the
+      signature scheme and the 200 shape are contract: changing any is
+      breaking — a new `.v2` entry beside this one.
   - id: http.whatsapp-connector.messages-forward.v1
     kind: http-route
     value: /messages/forward

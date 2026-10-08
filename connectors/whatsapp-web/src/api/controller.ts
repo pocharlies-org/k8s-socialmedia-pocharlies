@@ -1272,6 +1272,7 @@ export function createRouter(
   });
 
   // History sync endpoint
+  // CONTRACT: http.whatsapp-connector.history-sync.v1 — POST ?limit= (signed over "{}"), 200 {status, limit, message}, 503 {error}
   router.post('/history/sync', auth, (req: AuthenticatedRequest, res: Response): void => {
     const limit = parseInt((req.query as any).limit || '500', 10);
 
@@ -1305,6 +1306,7 @@ export function createRouter(
   });
 
   // Get chat history
+  // CONTRACT: http.whatsapp-connector.history-chat.v1 — GET ?limit= (signed over "{}"), 200 {chatId, count, messages}, 500 {error}
   router.get('/history/:chatId', auth, (req: AuthenticatedRequest, res: Response): void => {
     const chatId = req.params.chatId;
     const limit = parseInt((req.query as any).limit || '100', 10);

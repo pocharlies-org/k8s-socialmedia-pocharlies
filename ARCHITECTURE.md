@@ -29,7 +29,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
   el brain exige `filters.account`). Hacia el otro lado, el brain depende de
   `brain-windows` (este repo) para su contenido.
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
-  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 99 entradas** (`grep -c '^  - id:' CONTRACTS.yaml`) (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
+  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 101 entradas** (`grep -c '^  - id:' CONTRACTS.yaml`) (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
   más `contracts/socialmedia-tools.json`): nunca renombrar, solo `.vN+1` + `Contract-Change:`.
 - **Quién llama a qué, y con qué firma.** La API de los conectores se firma con una sola clave, `CONNECTOR_SHARED_SECRET`: HMAC-SHA256 de
   `<ts>:<cuerpo JSON>` en `x-connector-timestamp` y `x-connector-signature`, ventana de 5 min. `mcp-sse` (código de `mcp-server`) firma
