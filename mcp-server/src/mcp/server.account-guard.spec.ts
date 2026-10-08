@@ -51,7 +51,7 @@ describe('social_list_messages (handleWhatsAppGetMessages)', () => {
   );
 });
 
-describe('DatabaseRepository per-user lookups (social_get_user_messages)', () => {
+describe('DatabaseRepository per-user lookups (handleGetUserMessages)', () => {
   const user = '34600@s.whatsapp.net';
   function repository() {
     const query = jest.fn(async (..._args: unknown[]) => ({ rows: [] as any[] }));
