@@ -52,9 +52,12 @@ images:
   # SC-1256: v1.3.55 -> v1.3.74 (run 36725155383, deploy/prod@7f0dd82 — merge #123):
   # /health por sub del conector IG (puerta por actor de social_list_accounts) y,
   # de paso, SC-1258 #96 (tolerar 0 cuentas de env con CREDENTIAL_STORE_ENABLED).
+  # SKIRM-102 08-10: instagram-e69969eb -> v1.3.106 (run 37744603591, deploy/prod@897435e):
+  # #231, POST /webhook exige x-hub-signature-256 valido (401 sin firma o firma ajena, 503 si
+  # no hay secreto de app). Es lo unico que cambia en connectors/instagram desde e69969eb.
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: instagram-e69969eb788407ef443bc05eb9bd7504685c42b0
-    digest: sha256:6ac8aa71bbc7fe168502b894d63da8339ea72e9782c378f81779f0a536f27bad
+    newTag: v1.3.106
+    digest: sha256:bbd49fd3a9bb60198d3e776b82dbfe0a899f761a249a0318df86ac40911e0fc0
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la

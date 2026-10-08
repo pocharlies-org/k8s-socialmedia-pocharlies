@@ -2456,6 +2456,8 @@ contracts:
       se borran: breaking es .vN+1 al lado; un cambio de solo descripción es `migrate`.
       INFRA-592: descripción de social_send_message.attachments[].url (ogg/opus → nota de
       voz nativa), digest sha256:e30a45214c5bc91b836454ccce87a4f9c515771cd8f51231ad8b0feb60c0993d.
+      SKIRM-118: descripción de social_send_message.attachments[].url y .mimeType (Telegram
+      audio/ogg → nota de voz), digest sha256:b8e69e01a7aa7fbaf5cb37edf3c052c4d94adf146ed6762de6cddef0e788d053.
       INFRA-635: aditivo, sin tocar el digest ni los esquemas. El envelope de
       social_search_messages (handleSearchMessages en server.ts) puede llevar
       meta.partialErrors y source.completeness 'partial' cuando una instancia del brain
