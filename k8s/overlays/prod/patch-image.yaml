@@ -67,6 +67,12 @@ spec:
         - name: whatsapp-connector-leila
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.103@sha256:0d742e13875e958ce596d3e5e903edb2bb07c0c1bb386fa03b79dc244d5daf71
 ---
+# SKIRM-102 08-10: instagram-connector advances instagram-e69969eb -> v1.3.106
+# (Release Production run 37744603591, deploy/prod@897435e: #231 verifies
+# x-hub-signature-256 on POST /webhook). Since e69969eb that is the only commit
+# touching connectors/instagram or shared (git log e69969eb..897435e). Digest
+# checked against Harbor (crane). Same value as the `images:` block in
+# kustomization.yaml, which is the effective one (it runs after the patches).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -77,7 +83,7 @@ spec:
     spec:
       containers:
         - name: instagram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:instagram-e69969eb788407ef443bc05eb9bd7504685c42b0@sha256:6ac8aa71bbc7fe168502b894d63da8339ea72e9782c378f81779f0a536f27bad
+          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:v1.3.106@sha256:bbd49fd3a9bb60198d3e776b82dbfe0a899f761a249a0318df86ac40911e0fc0
 ---
 apiVersion: apps/v1
 kind: Deployment
