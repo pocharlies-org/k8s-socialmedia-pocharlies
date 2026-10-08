@@ -1,0 +1,4 @@
+Antes: en `whatsapp.lan`, `whatsapp-pro.lan` y `whatsapp-leila.lan` (`*.lan.e-dani.com`) solo `/qr` pasaba por `sso-chain`; `/api/v1/*` y `/status` respondían a la LAN sin credencial de sesión (`GET /api/v1/auth/qr` de leila daba 200).
+Ahora: el catch-all de cada host `.lan` también va tras `sso-chain` (ns `keycloak`): sin sesión de Keycloak la respuesta es una redirección al login. `/api/public` sigue con `connector-public-api-deny` y `/qr` con `sso-chain`; el host público no cambia.
+Quién se mueve: nadie que use el Service interno (`<conector>.whatsapp-mcp.svc.cluster.local:3001`: MCP `social_*`, Synapse, sondeo de salud de dgx-infra). Un cliente que llamara a un host `.lan` debe pasar al Service interno; `sre` lo confirma antes del merge (paso previo del spec).
+Decisión: SKIRM-110, `00-spec.md` y `nota-security-f2-f3-telegram.md` (U3, F3-5), adjuntos a la historia y a SKIRM-99.
