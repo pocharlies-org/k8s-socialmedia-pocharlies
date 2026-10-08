@@ -2486,7 +2486,9 @@ export function createRouter(
     void (async (): Promise<void> => {
       try {
         const body = optionalObject(req.body);
-        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const rawChatId = body.conversationId ?? body.chatId;
+        // Only a string is an id: String() would turn an array or an object into one.
+        const chatId = typeof rawChatId === 'string' ? optionalString(rawChatId) : undefined;
         if (!chatId) {
           res
             .status(400)

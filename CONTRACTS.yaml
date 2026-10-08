@@ -402,8 +402,9 @@ contracts:
       least 1 for markUnread; pinned_at (NULL = unpinned); muted + mute_until
       (NULL while muted = always) — the last three from migration 012, while it
       is missing the action still goes out and answers persisted: false. The
-      same columns follow the phone (chats.update / chats.upsert / history).
-      No NATS event. The path, the body fields, the action names, the 200
+      same columns follow the phone (chats.update / chats.upsert / history),
+      archived and unread_count included, always on the canonical row (never
+      on a merged tombstone). No NATS event. The path, the body fields, the action names, the 200
       shape and the failureClass values are contract: changing any is breaking
       — a new `.v2` entry beside this one.
       Also consumed by the MCP tool social_set_chat_state (mcp-server/src/mcp/server.ts canonicalSetChatState; added later, surface unchanged).
@@ -1876,8 +1877,8 @@ contracts:
       pinned messages of one chat, consumed by the MCP tool social_list_pinned
       (mcp-server/src/mcp/server.ts canonicalListPinned). A read: not gated,
       answers while disconnected. HMAC-signed body {conversationId} (bare or
-      account-prefixed; resolved to its canonical conversation); missing →
-      400 invalid_request. From whatsapp_message_pins joined to messages: not
+      account-prefixed; resolved to its canonical conversation); missing or
+      not a string → 400 invalid_request. From whatsapp_message_pins joined to messages: not
       expired, message not revoked, newest pin first, at most 3 (what WhatsApp
       shows). 200 {conversationId (canonical, bare), pinned [{messageId,
       conversationId, chatName, senderId, direction, messageType, content,

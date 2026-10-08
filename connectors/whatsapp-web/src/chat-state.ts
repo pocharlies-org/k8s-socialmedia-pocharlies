@@ -19,7 +19,7 @@
  *  - only a client with `ingest` on calls in here: the per-sub pairing pool
  *    never writes.
  */
-import { accountKey, getPool, stripAccountKey } from './db-writer';
+import { accountKey, getPool, setConversationState, stripAccountKey } from './db-writer';
 import { whatsappAccountId } from './message-mutations';
 
 const UNDEFINED_TABLE = '42P01';
@@ -313,7 +313,7 @@ export async function writeChatState(
  * returns whether a row was written.
  */
 export async function recordInboundChatState(jid: string, patch: ChatStatePatch): Promise<boolean> {
-  // Archive / unread of inbound events keep going through setConversationState.
+  // Archive / unread of inbound events: recordInboundConversationState.
   if (!touchesNewColumns(patch) || chatStateColumnsKnownMissing()) return false;
   try {
     const conversation = await resolveCanonicalConversation(jid);
@@ -323,6 +323,22 @@ export async function recordInboundChatState(jid: string, patch: ChatStatePatch)
     console.warn(`chat state persist failed for ${jid}: ${describeError(error)}`);
     return false;
   }
+}
+
+/**
+ * The archive / unread the phone reports (chats.update / chats.upsert / history),
+ * on the canonical conversation like a pin or mute: the UPDATE on the jid's own
+ * id would land on a tombstone, which no listing shows. With no conversation
+ * for the jid yet it stays the plain UPDATE on its own id (no row, no write).
+ */
+export async function recordInboundConversationState(
+  jid: string,
+  unreadCount: number | undefined,
+  archived?: boolean
+): Promise<void> {
+  if (unreadCount === undefined && archived === undefined) return;
+  const conversation = await resolveCanonicalConversation(jid);
+  await setConversationState(conversation?.id ?? jid, unreadCount, archived);
 }
 
 // ---------------------------------------------------------------------------
