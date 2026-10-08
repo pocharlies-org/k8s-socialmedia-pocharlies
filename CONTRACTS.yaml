@@ -2333,3 +2333,29 @@ contracts:
       social_search_messages (handleSearchMessages en server.ts) puede llevar
       meta.partialErrors y source.completeness 'partial' cuando una instancia del brain
       cae y otras contestan; la respuesta completa no cambia de forma.
+  - id: http.instagram-connector.webhook.v1
+    kind: http-route
+    value: /webhook
+    role: provider
+    files:
+      - connectors/instagram/src/webhook.ts
+    status: active
+    note: >-
+      /webhook of the instagram-connector, registered in Meta's webhook console
+      (the callback URL is Meta's, so Meta is the consumer and we cannot redeploy
+      it). GET ?hub.mode=subscribe&hub.verify_token=&hub.challenge= is unchanged:
+      200 with the challenge, 403 for a wrong token. SKIRM-102 (security
+      F2-1 to F2-6): POST now requires x-hub-signature-256 = sha256= plus the 64
+      hex characters of the HMAC-SHA256 of the raw body, keyed with any of
+      FACEBOOK_APP_SECRET, INSTAGRAM_LOGIN_APP_SECRET or the app secret of a
+      loaded account (empty values are discarded; INSTAGRAM_WEBHOOK_SECRET,
+      INSTAGRAM_INTERNAL_API_TOKEN and WEBHOOK_VERIFY_TOKEN are never accepted).
+      401 without a valid signature, 503 when no app secret is configured; the
+      200 goes out only after the signature is verified. Without
+      WEBHOOK_VERIFY_TOKEN the GET answers 503 (the connector has no default
+      token any more). Meta disables a subscription
+      that keeps failing, so a wrong or missing secret on this side shows as
+      repeated 401/503 here: each rejection is counted and logged (reason and
+      count, never the body or the signature). The route, the signature header
+      and the 401/503 answers are contract: changing any is breaking — a new
+      `.v2` entry beside this one.

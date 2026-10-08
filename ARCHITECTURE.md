@@ -8,9 +8,12 @@
 
 | cliente | repositorio / ruta | versión desplegada | cómo se despliega |
 |---|---|---|---|
-| `whatsapp-connector` (Baileys, :3001), `telegram-connector` (gramjs, :3002), `telegram-sync` (telethon, :3080), `instagram-connector` (:3003), `whatsapp-cloud-connector` (:3004) | `connectors/*` | imágenes por `tag@digest` (p. ej. instagram `sha-985a199ea567@sha256:38c14176…`; pool `v1.3.57`) | ArgoCD app `socialmedia` |
+| `whatsapp-connector` (Baileys, :3001), `telegram-connector` (gramjs, :3002), `telegram-sync` (telethon, :3080), `instagram-connector` (:3003) | `connectors/*` | imágenes por `tag@digest` (p. ej. instagram `sha-985a199ea567@sha256:38c14176…`; pool `v1.3.57`) | ArgoCD app `socialmedia` |
 | `mcp-server` (:3000) y `mcp-sse` (:3010), superficie en `contracts/socialmedia-tools.json` | `mcp-server/src` | digest del `mcp-server`, compartido con los CronJobs de digest | ídem |
 | Puente Synapse | `connectors/whatsapp-synapse-bridge` | digest | ídem |
+
+`whatsapp-cloud-connector` (:3004, `connectors/whatsapp-cloud`) no está desplegado: CI construye su imagen pero no hay manifiesto en `k8s/` (la Cloud API se
+eliminó el 27-05, ver `CLAUDE.md`); su código sigue en el repo y usa `verifyMetaSignature` (§4).
 
 Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGateway `/social`; un cambio de herramienta toca el catálogo
 `contracts/socialmedia-tools.json` y el gateway.
@@ -24,7 +27,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
   el brain exige `filters.account`). Hacia el otro lado, el brain depende de
   `brain-windows` (este repo) para su contenido.
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
-  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 67 entradas** (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
+  (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 94 entradas** (`grep -c '^  - id:' CONTRACTS.yaml`) (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
   más `contracts/socialmedia-tools.json`): nunca renombrar, solo `.vN+1` + `Contract-Change:`.
 - **ArgoCD** `socialmedia`: repo `pocharlies-org/k8s-socialmedia-pocharlies`, path `k8s/overlays/prod`, tronco **`deploy/prod`**
   (`origin/deploy/prod` = 5a06f33), sync automático `prune: false`.
@@ -50,6 +53,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Doc de la API social | `docs/social-api.md`, ADRs en `docs/adr` | `docs/` | operadores |
 | ¿Es un primer contacto 1:1? (evidencia de contacto conocido) | `BaileysClient.knownDirectContactEvidence` + `chat-state.ts` `hasInboundHistory` / `hasOutboundHistory` | `connectors/whatsapp-web/src/` | todas las rutas de envío 1:1, vía `guardDirectSend` |
 | Búsqueda semántica de mensajes | `mcp-server/src/application/search.service.ts` `SearchService.semanticSearch` | `mcp-server/src/application/` | `MCPServer.handleSearchMessages`; una instancia caída sale como `meta.partialErrors` (`completeness: 'partial'`), no tumba las demás |
+| Verificación de `x-hub-signature-256` (firma de los webhooks de Meta) | `verifyMetaSignature(rawBody, header, secrets)` | `shared/src/crypto/meta-signature.ts` | `instagram-connector` (`webhookSignatureGuard`), `whatsapp-cloud`; no es `verifyHMACSignature` (esquema `ts:cuerpo` de los conectores) |
 | Clave opaca por cuenta (`personal` sin prefijo, el resto namespaceadas — migración 002) | `mcp-server/src/domain/account.ts` (`accountKey` / `normalizeAccount`) | `mcp-server/src/domain/` | MCP y job de embeddings; `connectors/telegram-sync/sync/db.py` es **espejo en Python** de la misma regla (no puede importar TS): cambiar una sin la otra deja mensajes sin embedding |
 
 ## 5. Cómo se construye aquí
@@ -82,6 +86,7 @@ Total de casos Jest: **pendiente de medir**.
 - `auto-reply-worker` personal está deshabilitado (tombstone): las respuestas de WhatsApp Business las lleva Synapse.
 - `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) llega a `mcp-sse` por el ExternalSecret `whatsapp-mcp-brain-search` (item `brain-messaging-search`, el mismo que lee el brain: lo compara por igualdad), con `secretKeyRef` **sin `optional`**: `mcp-sse` es `Recreate` con `hostPort: 3010`, así que sin el Secret el pod no arranca y cae todo `/social`; el item se crea antes de fusionar. Con el brain caído o un valor distinto (401) la búsqueda cae a texto con `fallbackReason`. `mcp-server` no la monta: nadie lo llama (el gateway va a `mcp-sse:3010`). ArgoCD no evalúa la salud de un ExternalSecret aquí: la sync-wave `-1` del ES ordena su creación, no espera al Secret.
 - Envío 1:1 sin tctoken (SKIRM-92): `outbound_history` cuenta cualquier OUTBOUND no fallido de la conversación canónica (enviado desde el móvil del dueño o por el conector tras el guard). Un envío que WhatsApp rechaza con 463 solo deja de contar si `setMessageStatus` (`'failed'`) llega después de que exista la fila; un ack muy temprano la deja contando.
+- Webhook de Instagram (SKIRM-102, `http.instagram-connector.webhook.v1`): `POST /webhook` exige `x-hub-signature-256` (`sha256=` + 64 hex) sobre el cuerpo crudo (`express.json({ verify })` → `req.rawBody`), siempre y cerrado por defecto. Secretos aceptados, lista cerrada (`metaAppSecrets` en `connectors/instagram/src/main.ts`): `FACEBOOK_APP_SECRET`, `INSTAGRAM_LOGIN_APP_SECRET` (son dos apps de Meta y la firma no dice cuál firmó) y el `appSecret` de cada cuenta cargada, descartando los vacíos antes de comparar (una clave vacía firma cualquier cosa); nunca `INSTAGRAM_WEBHOOK_SECRET`, `INSTAGRAM_INTERNAL_API_TOKEN` ni `WEBHOOK_VERIFY_TOKEN`. Sin firma válida 401; sin ningún secreto 503; el 200 sale después de verificar y el cuerpo no se registra. `WEBHOOK_VERIFY_TOKEN` ya no tiene valor por defecto: sin él el GET de verificación responde 503. Meta desactiva una suscripción que falla muchas veces: tras un cambio de secretos se vigilan los rechazos (un `warn` por motivo cada 10 s, con contador).
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
 Última verificación contra el código: 2026-10-07 · 9b785b4 (origin/deploy/prod)
