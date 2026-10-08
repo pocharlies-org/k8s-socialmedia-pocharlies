@@ -22,7 +22,7 @@ telegram  tsx --test --test-name-pattern="single message and flood wait" src/dow
 
 Aviso (G-4): el rojo por módulo o ruta ausente prueba que hay que portarlo, no que prod falle; el valor del recuperador lo da la medición del pin (`sre`).
 
-## Verde (HEAD de la rama)
+## Verde (ronda 1, head 1fe21f6; las cifras vigentes están en la ronda 2)
 
 ```
 python -m pytest -p no:cacheprovider -rs -v tests          (con la variable de PostgreSQL)
@@ -53,4 +53,28 @@ Detector de copias (`company-duplicados`): ejecutado; ninguno de los fragmentos 
 - C6 `messages-single.v1` nueva (`add`), nota de `messages-media-download.v1` ampliada (`migrate`), checker en verde.
 - C7 suites completas verdes (arriba).
 - C8 cada commit con código del fork lleva `Co-authored-by: jibanez-staticduo <staticduo@gmail.com>` y cita las rutas de origen.
-- C9 `ARCHITECTURE.md`: §1, §2, §4, §6, §7, §8 y las cuatro contradicciones de G-5.
+- C9 `ARCHITECTURE.md`: §4, §6 y §8 (las cuatro correcciones de G-5 las hace #228 / SKIRM-110; ver ronda 2).
+
+## Ronda 2 (rehacer 1 de la PR #229: architect 21042, qa 21051)
+
+Rojo (fixture de `attachments` con las columnas reales de prod, SQL todavía con `storage_key`):
+
+```
+pytest tests/test_media_backlog_postgres.py
+  FAILED test_backlog_separates_missing_keys_from_eligible_messages
+  asyncpg.exceptions.UndefinedColumnError: column a.storage_key does not exist
+  1 failed, 2 passed
+```
+
+Verde con `MEDIA_BACKLOG_SQL` solo sobre `file_url` (HEAD de la rama, PostgreSQL 16 desechable, variable puesta):
+
+```
+python -m pytest -p no:cacheprovider -rs -v tests   -> 32 passed, 0 skipped
+  test_edits 4 · test_insert_message 2 · test_media_backlog_postgres 3 · test_media_recovery 13 · test_voice_unwrap 10
+  (fuera los 2 TriggerTests; nuevo: intervalo 60 s por defecto y configurable con MEDIA_RECOVERY_INTERVAL_S)
+pnpm --filter ./connectors/telegram test -> 77/77, 0 skipped · download-deadline.test.ts -> 11/11
+```
+
+Mutación repetida sobre el HEAD: sin `FOR UPDATE` en `media_transaction`, `test_realtime_and_recovery_race_stores_one_attachment` falla (1 failed, 12 deselected); con él pasa.
+
+Cambios de la ronda: `history.py` y `nats_consumer.py` idénticos a `origin/deploy/prod`; `getHistory` y `/messages/:chatId` como en prod; notas de `messages-media-download.v1` (120 s) y `peers-photo.v1` (20 s, fallo de `getPeer` 404 -> 502) con `Contract-Change: migrate` en las dos; `ARCHITECTURE.md` sin las correcciones G-5 (las pone #228).
