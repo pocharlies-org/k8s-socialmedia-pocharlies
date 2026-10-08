@@ -130,8 +130,26 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         response = httpx.Response(429, headers={'Retry-After': '420'}, request=httpx.Request('GET', 'http://connector'))
         self.connector.get_message.side_effect = httpx.HTTPStatusError('limited', request=response.request, response=response)
         await media_recovery.recover_batch(self.pool, self.connector, 'personal')
-        self.assertEqual(self.conn.statuses[-1][1:], ('retry', 420.0))
+        self.assertEqual(self.conn.statuses[-1][1:4], ('retry', 420.0, False))  # waits, does not count
         self.assertEqual(self.connector.get_message.await_count, 1)
+
+    async def test_only_real_failures_count_toward_the_cap(self):
+        counted = lambda: self.conn.statuses[-1][3]  # media_result(conn, id, status, delay, counted, cap)
+        self.connector.download_media.side_effect = httpx.ReadTimeout('late')
+        await media_recovery.recover_batch(self.pool, self.connector, 'personal')
+        self.assertTrue(counted())
+        for code in (429, 503):  # flood wait, connector not connected: not the message's fault
+            self.conn.cooldown = False
+            response = httpx.Response(code, request=httpx.Request('GET', 'http://connector'))
+            self.connector.download_media.side_effect = httpx.HTTPStatusError('wait', request=response.request, response=response)
+            await media_recovery.recover_batch(self.pool, self.connector, 'personal')
+            self.assertFalse(counted(), code)
+        self.conn.cooldown = False
+        response = httpx.Response(502, request=httpx.Request('GET', 'http://connector'))
+        self.connector.download_media.side_effect = httpx.HTTPStatusError('bad', request=response.request, response=response)
+        await media_recovery.recover_batch(self.pool, self.connector, 'personal')
+        self.assertTrue(counted())
+        self.assertEqual(self.conn.statuses[-1][4], db.MEDIA_MAX_ATTEMPTS)
 
 
 class ConnectorTests(unittest.IsolatedAsyncioTestCase):

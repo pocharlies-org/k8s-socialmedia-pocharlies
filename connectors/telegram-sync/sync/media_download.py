@@ -16,7 +16,7 @@ import httpx
 import asyncpg
 
 from sync import db, media_storage, mapping
-from sync.connector_client import ConnectorClient, retry_after
+from sync.connector_client import ConnectorClient, is_throttled, retry_after
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +82,13 @@ async def _download_and_store_media(
                 # bookkeeping before recording the retry on a fresh transaction.
                 logger.warning("media attempt failed for msg %s: %s", message_id, type(error).__name__)
                 delay = retry_after(error.response) if isinstance(error, httpx.HTTPStatusError) else 0
-                raise MediaAttemptFailed(delay) from error
+                raise MediaAttemptFailed(delay, is_throttled(error)) from error
 
 
 class MediaAttemptFailed(Exception):
-    def __init__(self, delay: float):
+    def __init__(self, delay: float, throttled: bool = False):
         self.delay = delay
+        self.throttled = throttled
 
 
 async def download_and_store_media(
@@ -97,5 +98,5 @@ async def download_and_store_media(
     try:
         return await _download_and_store_media(connector, pool, msg, message_id, message_type)
     except MediaAttemptFailed as error:
-        await db.record_media_result(pool, message_id, "retry", error.delay)
+        await db.record_media_result(pool, message_id, "retry", error.delay, counted=not error.throttled)
         return False

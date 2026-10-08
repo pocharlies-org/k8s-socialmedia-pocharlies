@@ -96,7 +96,9 @@ def test_pending_media_is_ordered_by_due_time_and_limited():
 
 
 @needs_db
-def test_rate_limit_and_backoff_schedule_the_next_retry():
+def test_rate_limit_and_backoff_schedule_the_next_retry(monkeypatch):
+    monkeypatch.setattr(db, 'MEDIA_MAX_ATTEMPTS', 99)  # the cap is tested below; here only the schedule
+
     async def check(conn, pool):
         async def next_retry_in(message_id):
             value = await conn.fetchval("SELECT (metadata->>'media_next_retry')::double precision FROM messages WHERE id = $1", message_id)
@@ -121,5 +123,55 @@ def test_rate_limit_and_backoff_schedule_the_next_retry():
         meta = json.loads(await conn.fetchval('SELECT metadata FROM messages WHERE id = $1', plain))
         assert (meta['media_status'], meta['media_attempts']) == ('retry', 10)
         assert meta['telegram_chat_id'] == 7, 'the original metadata is kept'
+
+    asyncio.run(_with_tables(check))
+
+
+@needs_db
+def test_eighth_failure_makes_the_message_unavailable_and_it_is_not_chosen_again():
+    async def check(conn, pool):
+        message_id = await _message(conn, 'personal', 'PHOTO', META)
+        for attempt in range(1, 9):
+            await db.record_media_result(pool, message_id, 'retry')
+            meta = json.loads(await conn.fetchval('SELECT metadata FROM messages WHERE id = $1', message_id))
+            assert meta['media_attempts'] == attempt
+            assert meta['media_status'] == ('unavailable' if attempt == 8 else 'retry')
+            # Let the wait of a still-retryable failure elapse, then ask who is next.
+            await conn.execute("UPDATE messages SET metadata = metadata || '{\"media_next_retry\": 0}'::jsonb WHERE id = $1", message_id)
+            chosen = [row['id'] for row in await db.pending_media(pool, 'personal')]
+            assert (message_id in chosen) == (attempt < 8)
+        # Still missing (it is counted), never eligible again.
+        assert await db.media_backlog(pool, 'personal') == {'total_missing': 1, 'eligible_now': 0}
+        assert db.MEDIA_MAX_ATTEMPTS == 8, 'the default of MEDIA_RECOVERY_MAX_ATTEMPTS'
+
+    asyncio.run(_with_tables(check))
+
+
+@needs_db
+def test_the_cap_is_configurable(monkeypatch):
+    monkeypatch.setattr(db, 'MEDIA_MAX_ATTEMPTS', 2)
+
+    async def check(conn, pool):
+        message_id = await _message(conn, 'personal', 'PHOTO', META)
+        await db.record_media_result(pool, message_id, 'retry')
+        await db.record_media_result(pool, message_id, 'retry')
+        meta = json.loads(await conn.fetchval('SELECT metadata FROM messages WHERE id = $1', message_id))
+        assert (meta['media_status'], meta['media_attempts']) == ('unavailable', 2)
+
+    asyncio.run(_with_tables(check))
+
+
+@needs_db
+def test_throttled_attempts_wait_but_do_not_count():
+    async def check(conn, pool):
+        message_id = await _message(conn, 'personal', 'PHOTO', META)
+        for _ in range(12):  # more than the cap: a flood wait is not the message's fault
+            await db.record_media_result(pool, message_id, 'retry', 60.0, counted=False)
+        meta = json.loads(await conn.fetchval('SELECT metadata FROM messages WHERE id = $1', message_id))
+        assert (meta['media_status'], meta['media_attempts']) == ('retry', 0)
+        assert meta['media_next_retry'] - time.time() >= 59
+        await db.record_media_result(pool, message_id, 'retry')  # a real failure does count
+        meta = json.loads(await conn.fetchval('SELECT metadata FROM messages WHERE id = $1', message_id))
+        assert meta['media_attempts'] == 1
 
     asyncio.run(_with_tables(check))

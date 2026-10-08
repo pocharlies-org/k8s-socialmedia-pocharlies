@@ -9,7 +9,7 @@ import time
 import httpx
 
 from sync import db, mapping, media_download
-from sync.connector_client import retry_after
+from sync.connector_client import is_throttled, retry_after
 
 logger = logging.getLogger(__name__)
 BATCH_SIZE = 5
@@ -35,9 +35,10 @@ async def recover_batch(pool, connector, account: str) -> int:
                 ))
         except Exception as error:
             delay = retry_after(error.response) if isinstance(error, httpx.HTTPStatusError) else 0
-            await db.record_media_result(pool, row['id'], 'retry', delay)
+            throttled = is_throttled(error)
+            await db.record_media_result(pool, row['id'], 'retry', delay, counted=not throttled)
             logger.warning('media recovery failed: %s', type(error).__name__)
-            if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (429, 503):
+            if throttled:
                 break
         await asyncio.sleep(1)
     return stored

@@ -78,3 +78,26 @@ pnpm --filter ./connectors/telegram test -> 77/77, 0 skipped · download-deadlin
 Mutación repetida sobre el HEAD: sin `FOR UPDATE` en `media_transaction`, `test_realtime_and_recovery_race_stores_one_attachment` falla (1 failed, 12 deselected); con él pasa.
 
 Cambios de la ronda: `history.py` y `nats_consumer.py` idénticos a `origin/deploy/prod`; `getHistory` y `/messages/:chatId` como en prod; notas de `messages-media-download.v1` (120 s) y `peers-photo.v1` (20 s, fallo de `getPeer` 404 -> 502) con `Contract-Change: migrate` en las dos; `ARCHITECTURE.md` sin las correcciones G-5 (las pone #228).
+
+## Ronda 3 (CTO tras `nota-sre-media-backlog.md`: tope de intentos por mensaje)
+
+Rojo (tests nuevos con PostgreSQL real y el fixture de `attachments` de prod, sobre el código de la ronda 2):
+
+```
+pytest tests/test_media_backlog_postgres.py
+  FAILED test_eighth_failure_makes_the_message_unavailable_and_it_is_not_chosen_again
+         AssertionError: assert 'retry' == 'unavailable'      (la 8.ª falla no lo retira)
+  FAILED test_the_cap_is_configurable          (no hay MEDIA_MAX_ATTEMPTS)
+  FAILED test_throttled_attempts_wait_but_do_not_count   (TypeError: unexpected keyword argument 'counted')
+  3 failed, 3 passed
+```
+
+Verde (HEAD de la rama, PostgreSQL 16 desechable, variable puesta):
+
+```
+python -m pytest -p no:cacheprovider -rs -v tests   -> 36 passed, 0 skipped
+  test_edits 4 · test_insert_message 2 · test_media_backlog_postgres 6 · test_media_recovery 14 · test_voice_unwrap 10
+```
+
+Diseño: a la 8.ª falla contada (`MEDIA_RECOVERY_MAX_ATTEMPTS`, 8 por defecto) el mensaje queda `media_status = 'unavailable'`; `pending_media` y `eligible_now` ya no lo eligen (sigue en `total_missing`). Un 429 o un 503 del conector espera (`Retry-After` o backoff) pero no cuenta: no dice nada del mensaje, y ocho flood waits seguidos no deben retirar medios válidos. Cuentan los demás fallos (timeout, 502, 504, fallo al guardar).
+Suite completa de la ronda 2 (head 578c14a), terminada: `pnpm -r test` exit 0 (whatsapp-web 537 pass + 1 skipped previo, mcp-server 634 pass + 8 skipped previos, telegram 77, instagram 41, bridge 40).

@@ -304,8 +304,12 @@ async def attachment_exists_for_message(pool: asyncpg.Pool, message_id: int) -> 
 # --- Media recovery ----------------------------------------------------------
 # The retry state lives in messages.metadata (no table, no column):
 #   media_status      'retry' | 'stored' | 'unavailable' | 'deleted'
-#   media_attempts    failed + stored attempts so far
+#   media_attempts    counted attempts so far (failures and the final store)
 #   media_next_retry  epoch seconds; nothing is tried before it
+# The MEDIA_MAX_ATTEMPTS-th counted failure leaves the message 'unavailable', which
+# pending_media and the backlog's eligible count no longer choose.
+
+MEDIA_MAX_ATTEMPTS = int(os.environ.get('MEDIA_RECOVERY_MAX_ATTEMPTS', '8'))
 
 PENDING_MEDIA_SQL = """
 SELECT m.id, m.message_type, m.metadata
@@ -368,22 +372,28 @@ async def media_transaction(pool: asyncpg.Pool, message_id: int):
             yield conn
 
 
-async def media_result(conn, message_id: int, status: str, delay: float = 0) -> None:
+async def media_result(conn, message_id: int, status: str, delay: float = 0, counted: bool = True) -> None:
     """Record an attempt: the next one waits `delay` seconds (a Retry-After) or
-    the backoff, 30 s doubling per attempt up to 3600 s, whichever is longer."""
+    the backoff, 30 s doubling per attempt up to 3600 s, whichever is longer.
+    A 'retry' that is the MEDIA_MAX_ATTEMPTS-th counted failure becomes
+    'unavailable'. `counted=False` (Telegram or the connector said "wait", which
+    says nothing about this message) waits but neither counts nor reaches the cap."""
     await conn.execute(
         "UPDATE messages SET metadata = metadata || jsonb_build_object("
-        "'media_status', $2::text, "
-        "'media_attempts', COALESCE((metadata->>'media_attempts')::int, 0) + 1, "
+        "'media_status', (CASE WHEN $2::text = 'retry' AND $4::boolean "
+        "AND COALESCE((metadata->>'media_attempts')::int, 0) + 1 >= $5::int "
+        "THEN 'unavailable' ELSE $2::text END)::text, "
+        "'media_attempts', COALESCE((metadata->>'media_attempts')::int, 0) + (CASE WHEN $4::boolean THEN 1 ELSE 0 END), "
         "'media_next_retry', EXTRACT(EPOCH FROM NOW()) + GREATEST($3::double precision, "
         "LEAST(3600, 30 * power(2, LEAST(7, COALESCE((metadata->>'media_attempts')::int, 0)))))) "
-        "WHERE id = $1", message_id, status, delay,
+        "WHERE id = $1", message_id, status, delay, counted, MEDIA_MAX_ATTEMPTS,
     )
 
 
-async def record_media_result(pool: asyncpg.Pool, message_id: int, status: str, delay: float = 0) -> None:
+async def record_media_result(pool: asyncpg.Pool, message_id: int, status: str,
+                              delay: float = 0, counted: bool = True) -> None:
     async with pool.acquire() as conn:
-        await media_result(conn, message_id, status, delay)
+        await media_result(conn, message_id, status, delay, counted)
 
 
 # --- Transcription helpers ---------------------------------------------------

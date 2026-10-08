@@ -64,7 +64,7 @@ reconexión de WhatsApp acotado (`WA_RECONNECT_BACKFILL_*`, INFRA-112). `CLAUDE.
 ```sh
 python3 scripts/render-connectors.py --check && python3 -m unittest scripts/test_render_connectors.py
 pnpm -r test                                  # jest (mcp-server, conectores)
-python -m pytest connectors/telegram-sync/tests   # 32 casos (edits 4, insert_message 2, media_backlog_postgres 3, media_recovery 13, voice_unwrap 10)
+python -m pytest connectors/telegram-sync/tests   # 36 casos (edits 4, insert_message 2, media_backlog_postgres 6, media_recovery 14, voice_unwrap 10)
 pnpm --filter ./connectors/telegram test          # 77 casos, node:test con lista explícita de ficheros en package.json
 ```
 Los tests de telegram-sync con PostgreSQL (`test_edits`, `test_media_backlog_postgres`, la carrera de `test_media_recovery`) se saltan sin
@@ -89,7 +89,8 @@ Total de casos Jest: **pendiente de medir**.
 - Envío 1:1 sin tctoken (SKIRM-92): `outbound_history` cuenta cualquier OUTBOUND no fallido de la conversación canónica (enviado desde el móvil del dueño o por el conector tras el guard). Un envío que WhatsApp rechaza con 463 solo deja de contar si `setMessageStatus` (`'failed'`) llega después de que exista la fila; un ack muy temprano la deja contando.
 - Medios de Telegram (SKIRM-101): el estado de reintento vive en `messages.metadata` (`media_status` retry/stored/unavailable/deleted,
   `media_attempts`, `media_next_retry` en epoch), sin tabla ni columna. Cada fallo espera 30 s duplicando por intento hasta 3600 s, o el `Retry-After` de un
-  429 si es mayor. El recuperador corre cada `MEDIA_RECOVERY_INTERVAL_S` (60 s por defecto: sus dos consultas barren `messages` en `personal`, 0,3 a 0,8 s)
+  429 si es mayor. La 8.ª falla contada (`MEDIA_RECOVERY_MAX_ATTEMPTS`, 8 por defecto) deja el mensaje `unavailable` y `pending_media` y los elegibles del
+  atraso ya no lo eligen (siguen en `total_missing`); un 429 o un 503 del conector espera pero no cuenta. El recuperador corre cada `MEDIA_RECOVERY_INTERVAL_S` (60 s por defecto: sus dos consultas barren `messages` en `personal`, 0,3 a 0,8 s)
   y toma 5 mensajes por ciclo. Tiempo real e historia no cambian: solo el recuperador reintenta; comparten con él `db.media_transaction`
   (`SELECT … FOR UPDATE` del mensaje, que se mantiene durante la descarga y la subida a MinIO: `idle_in_transaction_session_timeout` debe ser 0 o
   mayor que `CONNECTOR_MEDIA_TIMEOUT`, 150 s). `attachments` de prod solo guarda la clave en `file_url` (no hay `storage_key`). El primer arranque lanza el
