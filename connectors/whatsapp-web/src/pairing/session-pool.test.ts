@@ -19,7 +19,10 @@ import { Clock, FakeFactory, MemoryStore } from './test-fakes';
 const A = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
 const INVENTED = 'ffffffff-9999-4999-8999-ffffffffffff';
-const settle = () => new Promise(resolve => setTimeout(resolve, 25));
+// SKIRM-114: the write-back does real file I/O after a debounce timer, so no
+// fixed sleep is long enough on a loaded runner. Tests wait for the store to
+// reach the state they assert (`store.until`), never for a duration.
+const rowsOf = (store: MemoryStore, key: string, n: number) => () => store.rowsFor(key) === n;
 
 async function makePool(
   store = new MemoryStore(),
@@ -164,11 +167,12 @@ test('criterio 1d: tras connection open simulado hay exactamente 1 fila para A y
   const sock = factory.last(A);
   sock.emitQr('2@ref');
   await sock.saveCredsBeforeOpen();
-  await settle();
+  // Nothing is scheduled before the first `connected` (writeAfterFirstOpen), so
+  // there is no write to wait for: a row here would be a regression.
   assert.equal(store.rowsFor(A), 0, 'no row before the first open');
 
   await sock.open('34600111222:7@s.whatsapp.net', 'Ana');
-  await settle();
+  await store.until(rowsOf(store, A, 1), 'the row of A after the first open');
   assert.equal(store.rowsFor(A), 1);
   assert.equal(store.rowsFor(INVENTED), 0);
   assert.equal(store.rows.size, 1);
@@ -184,7 +188,7 @@ test('criterio 1e: reinicio del pool (instancia nueva) → me de A sale de la fi
   const first = await makePool(store);
   await first.pool.start(A);
   await first.factory.last(A).open('34600111222:7@s.whatsapp.net', 'Ana');
-  await settle();
+  await store.until(rowsOf(store, A, 1), 'the row of A before the pool restarts');
   await first.pool.close();
 
   const second = await makePool(store); // fresh process: empty memory, same store
@@ -206,11 +210,11 @@ test('criterio 1f: loggedOut → fila borrada, estado expired', async () => {
   await pool.start(A);
   const sock = factory.last(A);
   await sock.open('34600111222:7@s.whatsapp.net');
-  await settle();
+  await store.until(rowsOf(store, A, 1), 'the row of A after open');
   assert.equal(store.rowsFor(A), 1);
 
   await sock.loggedOut();
-  await settle();
+  await store.until(rowsOf(store, A, 0), 'the row of A to be deleted after loggedOut');
   assert.equal(store.rowsFor(A), 0);
   const st = await pool.status(A);
   assert.equal(st.state, 'expired');
@@ -226,15 +230,14 @@ test('arranque con fila existente: la sesión se carga en el auth dir antes de c
   const first = await makePool(store);
   await first.pool.start(A);
   await first.factory.last(A).open('34600111222:7@s.whatsapp.net');
-  await settle();
+  await store.until(rowsOf(store, A, 1), 'the row of A before the pool restarts');
   await first.pool.close();
 
   const second = await makePool(store);
   await second.pool.start(A);
   const sock = second.factory.last(A);
   await sock.open('34600111222:7@s.whatsapp.net'); // reconnect with stored creds, no QR
-  await settle();
-  assert.equal((await second.pool.status(A)).state, 'paired');
+  assert.equal((await second.pool.status(A)).state, 'paired'); // 'connected' flips it synchronously
   assert.equal(store.rowsFor(A), 1);
 });
 

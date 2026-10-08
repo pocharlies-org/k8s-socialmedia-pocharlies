@@ -13,6 +13,36 @@ import type { PairingClient } from './session-pool';
 export class MemoryStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();
   gets = 0;
+  private watchers = new Set<() => void>();
+
+  /**
+   * SKIRM-114: wait for the store to reach a state instead of sleeping and
+   * hoping. `check` is evaluated now and again after every put/delete, so it
+   * resolves the moment the write-back lands, however slow the machine is.
+   * The deadline only bites when the state is never reached (a real failure),
+   * and then names what was missing.
+   */
+  until(check: () => boolean, what: string, deadlineMs = 15_000): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (check()) return resolve();
+      const watcher = (): void => {
+        if (!check()) return;
+        clearTimeout(timer);
+        this.watchers.delete(watcher);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        this.watchers.delete(watcher);
+        reject(new Error(`timed out after ${deadlineMs}ms waiting for ${what}`));
+      }, deadlineMs);
+      this.watchers.add(watcher);
+    });
+  }
+
+  private changed(): void {
+    for (const watcher of [...this.watchers]) watcher();
+  }
+
   async get(sessionKey: string, channel: CredentialChannel): Promise<StoredCredential | null> {
     this.gets += 1;
     return this.rows.get(`${sessionKey}/${channel}`) ?? null;
@@ -28,9 +58,11 @@ export class MemoryStore implements CredentialStore {
       payload: JSON.parse(JSON.stringify(payload)),
       updatedAt: new Date(),
     });
+    this.changed();
   }
   async delete(sessionKey: string, channel: CredentialChannel): Promise<void> {
     this.rows.delete(`${sessionKey}/${channel}`);
+    this.changed();
   }
   rowsFor(sessionKey: string): number {
     return [...this.rows.values()].filter(r => r.sessionKey === sessionKey).length;

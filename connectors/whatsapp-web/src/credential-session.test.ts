@@ -27,6 +27,33 @@ class FakeStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();
   puts: { key: string; channel: CredentialChannel; payload: Record<string, unknown> }[] = [];
   putError: Error | null = null;
+  private gate: { entered: () => void; released: Promise<void> } | null = null;
+
+  /**
+   * SKIRM-114: hold the NEXT put() open until `release()`. `entered` resolves
+   * once that put is in flight, so a test can act "while a put is running"
+   * without guessing how long the first put takes on a loaded machine.
+   */
+  holdNextPut(): { entered: Promise<void>; release: () => void } {
+    let entered!: () => void;
+    let release!: () => void;
+    // The write-back's debounce timer is unref()'d, so while a test awaits the
+    // put nothing else keeps the event loop alive: this ref'd deadline does,
+    // and it names the failure if the put never starts.
+    const enteredP = new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error('timed out after 15000ms waiting for the held put to start')),
+        15_000
+      );
+      entered = () => {
+        clearTimeout(deadline);
+        resolve();
+      };
+    });
+    const released = new Promise<void>(resolve => (release = resolve));
+    this.gate = { entered, released };
+    return { entered: enteredP, release };
+  }
 
   async get(sessionKey: string, channel: CredentialChannel): Promise<StoredCredential | null> {
     return this.rows.get(`${sessionKey}/${channel}`) ?? null;
@@ -36,6 +63,12 @@ class FakeStore implements CredentialStore {
     channel: CredentialChannel,
     payload: Record<string, unknown>
   ): Promise<void> {
+    const gate = this.gate;
+    this.gate = null;
+    if (gate) {
+      gate.entered();
+      await gate.released;
+    }
     if (this.putError) throw this.putError;
     this.puts.push({ key: sessionKey, channel, payload });
     this.rows.set(`${sessionKey}/${channel}`, {
@@ -49,8 +82,6 @@ class FakeStore implements CredentialStore {
     this.rows.delete(`${sessionKey}/${channel}`);
   }
 }
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 test('credentialSessionKeyFromEnv: flag off or key unset → null (legacy path)', () => {
   assert.equal(credentialSessionKeyFromEnv({}), null);
@@ -111,10 +142,13 @@ test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir
   const store = new FakeStore();
   const authDir = await mkdtemp(join(tmpdir(), 'cred-wb-'));
   await writeFile(join(authDir, 'creds.json'), 'first');
+  await writeFile(join(authDir, 'session-1'), 'second');
 
+  // SKIRM-114: both schedule() calls run in the same tick, so the burst is a
+  // burst whatever the machine load (an `await` between them let the 10 ms
+  // debounce fire on a slow runner and split it into two puts).
   const wb = createCredentialWriteBack(store, 'sub-1', authDir, () => {}, 10);
   wb.schedule();
-  await writeFile(join(authDir, 'session-1'), 'second');
   wb.schedule(); // burst: only the trailing run must hit the store
   await wb.flush();
 
@@ -132,15 +166,16 @@ test('write-back: a put scheduled mid-flight runs a trailing put (last saveCreds
   await writeFile(join(authDir, 'creds.json'), 'v1');
 
   const wb = createCredentialWriteBack(store, 'sub-1', authDir, () => {}, 0);
+  const firstPut = store.holdNextPut();
   wb.schedule();
-  await sleep(1); // fire the first put
+  await firstPut.entered; // the first put (v1) is in flight, and stays there
   await writeFile(join(authDir, 'creds.json'), 'v2');
-  wb.schedule(); // lands while the first put is still in flight
+  wb.schedule(); // lands while the first put is in flight
+  firstPut.release();
   await wb.flush();
 
-  assert.equal(store.puts.length >= 2, true);
-  const last = store.puts[store.puts.length - 1];
-  const files = (last.payload as { files: Record<string, string> }).files;
+  assert.equal(store.puts.length, 2, 'the first put and exactly one trailing put');
+  const files = (store.puts[1].payload as { files: Record<string, string> }).files;
   assert.equal(Buffer.from(files['creds.json'], 'base64').toString(), 'v2');
 });
 

@@ -239,8 +239,14 @@ test('publisher: 100 events at a constant rate survive a NATS outage with zero l
       await new Promise(resolve => setTimeout(resolve, 3));
     }
 
+    // SKIRM-114: the stub sees the PUBs, and the retainer's queue empties, before
+    // the publisher's flush is confirmed and `republished` is counted. Wait for
+    // the counters the assertions below read, not for the stub's side of it.
     await waitFor(
-      () => stub.messages.length === TOTAL && publisher.pendingRetention() === 0,
+      () =>
+        stub.messages.length === TOTAL &&
+        publisher.pendingRetention() === 0 &&
+        publisher.retentionStats().published + publisher.retentionStats().republished === TOTAL,
       20_000,
       `all ${TOTAL} events republished (got ${stub.messages.length}, pending ${publisher.pendingRetention()})`
     );
@@ -381,6 +387,13 @@ test('publisher: MessageUpdated and ChatUpdated are retained too', async () => {
     });
     await stub.listen();
     await waitFor(() => stub.messages.length === 2, 10_000, 'both retained events');
+    // SKIRM-114: `republished` is counted after the flush is confirmed, which is
+    // after the stub has already received both PUBs.
+    await waitFor(
+      () => publisher.retentionStats().republished === 2,
+      10_000,
+      'the publisher to count both republished events'
+    );
 
     const subjects = stub.messages.map(m => m.subject).sort();
     assert.deepEqual(subjects, ['whatsapp.ChatUpdated', 'whatsapp.MessageUpdated']);
