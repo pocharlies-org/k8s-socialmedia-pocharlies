@@ -31,7 +31,8 @@ pnpm contract:check                    # Socialmedia contract OK (73 tools)
 python3 scripts/render-connectors.py --check   # exit 0
 tsc --noEmit (connectors/whatsapp-web) # exit 0
 eslint (pnpm run lint)                 # 0 errores
-check-contracts.py --range origin/deploy/prod..HEAD  # ver «Contratos»
+check-contracts.py --range origin/deploy/prod..HEAD  # contracts: OK (101 entries)
+company-duplicados --base origin/deploy/prod           # sin duplicación nueva
 ```
 
 ## Criterios de la spec
@@ -73,4 +74,4 @@ Ningún commit copia código del fork: las pruebas de `polls-events.test.ts` ada
 | `d7a5e54` | deja el origen en el comentario de cada prueba | `Co-authored-by: Jordi Ibáñez <staticduo@gmail.com>` |
 | el commit de esta evidencia y de la nota del contrato | documenta la adopción | `Co-authored-by: Jordi Ibáñez <staticduo@gmail.com>` |
 
-`b1907cf` (parte 0, `markAsRead`) es trabajo propio: no adopta nada del fork.
+`b1907cf` (parte 0, `markAsRead`) y el commit de refactor (`rememberChatSnapshot` y la tabla de intentos simulada compartida) son trabajo propio: no adoptan nada del fork.
