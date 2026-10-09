@@ -307,38 +307,32 @@ export async function writeChatState(
   }
 }
 
-/**
- * A pin / mute the phone did (chats.update / chats.upsert / history): resolve
- * the canonical conversation of `jid` and record it there. Never throws;
- * returns whether a row was written.
- */
-export async function recordInboundChatState(jid: string, patch: ChatStatePatch): Promise<boolean> {
-  // Archive / unread of inbound events: recordInboundConversationState.
-  if (!touchesNewColumns(patch) || chatStateColumnsKnownMissing()) return false;
-  try {
-    const conversation = await resolveCanonicalConversation(jid);
-    if (!conversation) return false;
-    return !!(await writeChatState(conversation.id, patch));
-  } catch (error) {
-    console.warn(`chat state persist failed for ${jid}: ${describeError(error)}`);
-    return false;
-  }
+/** What one chat event or read says; an absent field is left as it is. */
+export interface CanonicalChatState extends Pick<ChatStatePatch, 'archived' | 'pinnedAt' | 'mute'> {
+  /** Absolute badge; negative = WhatsApp's "marked as unread" (at least 1). */
+  unreadCount?: number;
 }
 
 /**
- * The archive / unread the phone reports (chats.update / chats.upsert / history),
- * on the canonical conversation like a pin or mute: the UPDATE on the jid's own
- * id would land on a tombstone, which no listing shows. With no conversation
- * for the jid yet it stays the plain UPDATE on its own id (no row, no write).
+ * Archive, unread, pin and mute of a chat — reported by the phone (chats.update /
+ * chats.upsert / history) or caused by the owner reading it — recorded on the
+ * canonical conversation of `jid`, resolved once: an UPDATE on the jid's own id
+ * would land on a tombstone, which no listing shows. A chat with no conversation
+ * writes nothing. Pin and mute wait while migration 012 is missing. Never throws.
  */
-export async function recordInboundConversationState(
-  jid: string,
-  unreadCount: number | undefined,
-  archived?: boolean
-): Promise<void> {
-  if (unreadCount === undefined && archived === undefined) return;
-  const conversation = await resolveCanonicalConversation(jid);
-  await setConversationState(conversation?.id ?? jid, unreadCount, archived);
+export async function setCanonicalChatState(jid: string, state: CanonicalChatState): Promise<void> {
+  const { unreadCount, archived, ...pinMute } = state;
+  const legacy = unreadCount !== undefined || archived !== undefined;
+  const pinOrMute = touchesNewColumns(pinMute) && !chatStateColumnsKnownMissing();
+  if (!legacy && !pinOrMute) return;
+  try {
+    const conversation = await resolveCanonicalConversation(jid);
+    if (!conversation) return;
+    if (legacy) await setConversationState(conversation.id, unreadCount, archived);
+    if (pinOrMute) await writeChatState(conversation.id, pinMute);
+  } catch (error) {
+    console.warn(`chat state persist failed for ${jid}: ${describeError(error)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

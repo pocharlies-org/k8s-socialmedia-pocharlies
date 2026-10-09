@@ -656,7 +656,7 @@ test('history / chats.upsert snapshots record only the pins and mutes they carry
   }
 });
 
-test('chats.upsert archive / unread: canonical row; a chat with no conversation keeps its own id', async () => {
+test('chats.upsert archive / unread: canonical row; a chat with no conversation writes nothing', async () => {
   useAccount('professional');
   const known = stubPool(canonicalDb());
   try {
@@ -672,16 +672,73 @@ test('chats.upsert archive / unread: canonical row; a chat with no conversation 
   } finally {
     known.restore();
   }
-  // No row for this chat in the account yet: the old UPDATE on its own id (a no-op in SQL).
+  // No conversation for this chat in the account yet: nothing to write, not even on its own id
+  // (which could be a tombstone the resolution missed).
   const unknown = stubPool();
   try {
     const { client, handlers } = makeClient();
     priv(client).bindSocketEvents(async () => {});
     await handlers['chats.upsert']([{ id: '34611@s.whatsapp.net', archived: true }]);
     await settle();
-    assert.deepEqual(legacyStateWrites(unknown.calls).map(c => c.params[0]), [
-      'professional:34611@c.us',
+    assert.deepEqual(legacyStateWrites(unknown.calls), []);
+  } finally {
+    unknown.restore();
+  }
+});
+
+test('one chat event resolves the canonical conversation once and writes archive, unread, pin and mute there', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool(canonicalDb());
+  try {
+    const { client, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['chats.update']([
+      {
+        id: '34600@s.whatsapp.net',
+        archived: true,
+        unreadCount: 3,
+        pinned: 1727510400000,
+        muteEndTime: 0,
+      },
     ]);
+    await settle();
+    assert.equal(calls.filter(c => isResolve(c.sql)).length, 1);
+    const [legacy] = legacyStateWrites(calls);
+    assert.deepEqual(legacy.params, ['professional:111@lid', 3, true]);
+    const [write] = chatStateWrites(calls);
+    assert.equal(write.params[0], 'professional:111@lid');
+    assert.match(write.sql, /pinned_at = \$3::timestamptz, muted = \$4, mute_until = \$5/);
+  } finally {
+    restore();
+  }
+});
+
+test('markAsRead clears the badge on the canonical conversation, never on the jid’s own tombstone', async () => {
+  useAccount('professional');
+  const unreadKey = (sql: string): Rows | undefined =>
+    /WITH conv AS/.test(sql)
+      ? [{ wa_message_id: 'professional:LAST1', remote_jid: '111@lid', from_me: false, participant_jid: null }]
+      : undefined;
+  const known = stubPool(canonicalDb(unreadKey));
+  try {
+    const { client, calls: sock } = makeClient();
+    await client.markAsRead('34600@c.us');
+    assert.equal(sock.read.length, 1);
+    const writes = legacyStateWrites(known.calls);
+    assert.equal(writes.length, 1);
+    assert.match(writes[0].sql, /unread_count = \$2/);
+    assert.deepEqual(writes[0].params, ['professional:111@lid', 0]);
+    assert.equal(known.calls.filter(c => isResolve(c.sql)).length, 1);
+  } finally {
+    known.restore();
+  }
+  // A chat the account has no conversation for: receipts go out, no row is touched.
+  const unknown = stubPool(sql => unreadKey(sql) ?? []);
+  try {
+    const { client, calls: sock } = makeClient();
+    await client.markAsRead('34611@c.us');
+    assert.equal(sock.read.length, 1);
+    assert.deepEqual(legacyStateWrites(unknown.calls), []);
   } finally {
     unknown.restore();
   }

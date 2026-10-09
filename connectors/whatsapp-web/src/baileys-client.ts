@@ -70,7 +70,6 @@ import {
   getParticipantAvatar,
   setConversationAvatar,
   setParticipantAvatar,
-  setConversationState,
   setMessageStatus,
   setConversationWaChatId,
   getUnreadMessageKeysForChat,
@@ -185,9 +184,8 @@ import {
   hasInboundHistory,
   hasOutboundHistory,
   pinFromBaileys,
-  recordInboundChatState,
-  recordInboundConversationState,
   resolveCanonicalConversation,
+  setCanonicalChatState,
   writeChatState,
 } from './chat-state';
 import {
@@ -1703,12 +1701,11 @@ export class BaileysClient extends EventEmitter {
           unreadCount: c.unreadCount || 0,
           timestamp: Number(c.conversationTimestamp || 0),
         });
-        // Persist real unread + archived from the history snapshot.
-        void recordInboundConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(
-          () => {}
-        );
-        // Pin / mute (fase 3 / PR-5): only what the snapshot says.
-        void recordInboundChatState(norm, {
+        // Persist real unread + archived from the history snapshot, and the pin / mute
+        // it carries (fase 3 / PR-5): only what the snapshot says.
+        void setCanonicalChatState(norm, {
+          unreadCount: c.unreadCount || 0,
+          archived: !!(c as any).archived,
           pinnedAt: pinFromBaileys(c),
           mute: muteFromBaileys(c, 'snapshot'),
         });
@@ -1779,10 +1776,11 @@ export class BaileysClient extends EventEmitter {
         // badge alone instead of zeroing it).
         const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount;
         const arch = typeof (u as any).archived === 'boolean' ? (u as any).archived : undefined;
-        void recordInboundConversationState(norm, uc, arch).catch(() => {});
         // Pin / mute from app-state sync (the phone, or the echo of our own
-        // POST /chats/modify — same values), on the canonical conversation.
-        void recordInboundChatState(norm, {
+        // POST /chats/modify — same values), with the rest, on the canonical conversation.
+        void setCanonicalChatState(norm, {
+          unreadCount: uc,
+          archived: arch,
           pinnedAt: pinFromBaileys(u),
           mute: muteFromBaileys(u, 'sync-action'),
         });
@@ -1804,11 +1802,10 @@ export class BaileysClient extends EventEmitter {
           unreadCount: c.unreadCount || 0,
           timestamp: Number(c.conversationTimestamp || 0),
         });
-        // Persist real unread badge + archived flag (fire-and-forget).
-        void recordInboundConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(
-          () => {}
-        );
-        void recordInboundChatState(norm, {
+        // Persist real unread badge + archived flag + pin / mute (fire-and-forget).
+        void setCanonicalChatState(norm, {
+          unreadCount: c.unreadCount || 0,
+          archived: !!(c as any).archived,
           pinnedAt: pinFromBaileys(c),
           mute: muteFromBaileys(c, 'snapshot'),
         });
@@ -4970,7 +4967,7 @@ export class BaileysClient extends EventEmitter {
     const norm = this.normalizeJid(raw);
     const chat = this.chatStore.get(norm);
     if (chat) chat.unreadCount = 0;
-    await setConversationState(norm, 0);
+    await setCanonicalChatState(norm, { unreadCount: 0 });
   }
 
   // ---------------------------------------------------------------------------
