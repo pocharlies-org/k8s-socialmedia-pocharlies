@@ -33,6 +33,7 @@ import { buildPollVoteContent, optionHash, PollEventInputError } from './poll-vo
 import { buildEventResponseContent } from './event-responses';
 import { MessageMutationError } from './message-mutations';
 import { createRouter } from './api/controller';
+import { sendAttemptsRoute } from './test-support/send-attempts-route';
 import { generateHMACSignature } from './api/auth';
 
 interface QueryCall {
@@ -1141,33 +1142,9 @@ test('HTTP: 400 invalid requests (option counts, shapes), 503 disconnected, clie
   assert.deepEqual(seen, []);
 });
 
-/** whatsapp_send_attempts as the connector drives it (migration 010): prepared → pending → sent. */
-function stubSendAttempts(): ReturnType<typeof stubPool> {
-  const attempts = new Map<string, { request_hash: string; message_id: string; status: string }>();
-  return stubPool((sql, params) => {
-    const key = `${params[0]}:${params[1]}`;
-    if (/INSERT INTO whatsapp_send_attempts/.test(sql)) {
-      if (attempts.has(key)) return [];
-      attempts.set(key, { request_hash: String(params[2]), message_id: String(params[3]), status: 'prepared' });
-      return [{ message_id: params[3] }];
-    }
-    const row = attempts.get(key);
-    if (/SELECT request_hash/.test(sql)) return row ? [{ ...row, updated_at: new Date(5) }] : [];
-    if (/SET status = 'pending'/.test(sql) && row?.status === 'prepared') {
-      row.status = 'pending';
-      return [{ message_id: row.message_id }];
-    }
-    if (/SET status = 'sent'/.test(sql) && row?.status === 'pending') {
-      row.status = 'sent';
-      return [{ updated_at: new Date(5) }];
-    }
-    return [];
-  });
-}
-
 test('HTTP: opt-in Idempotency-Key on a poll: derived id, claim before the send, replay deduplicated', async () => {
   useAccount('personal');
-  const { restore } = stubSendAttempts();
+  const { restore } = stubPool(sendAttemptsRoute());
   const { client, seen } = recordingClient();
   Object.assign(client, { isIngestEnabled: () => true });
   try {
@@ -1222,7 +1199,7 @@ const OTHER_BODY: Record<string, Record<string, unknown>> = {
 
 test('HTTP: a retry with the same Idempotency-Key of poll, vote, event or response sends nothing twice', async () => {
   useAccount('personal');
-  const { restore } = stubSendAttempts();
+  const { restore } = stubPool(sendAttemptsRoute());
   const { client, sent, failAfterClaim } = claimingClient();
   try {
     await withRouter(client, ON, async call => {
@@ -1280,7 +1257,7 @@ test('HTTP: without an Idempotency-Key the four sends are as before; a constant 
     restore();
   }
   // A client that reuses the token with a different key each time gets its own send, never a 409 or another result.
-  const keyed = stubSendAttempts();
+  const keyed = stubPool(sendAttemptsRoute());
   const second = claimingClient();
   try {
     await withRouter(second.client, ON, async call => {

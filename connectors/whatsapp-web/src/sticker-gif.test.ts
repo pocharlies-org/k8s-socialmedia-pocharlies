@@ -31,6 +31,7 @@ import { MessageMutationError } from './message-mutations';
 import { resetChatStateForTests } from './chat-state';
 import { resetDurableStoreStateForTests } from './durable-message-store';
 import { createRouter } from './api/controller';
+import { sendAttemptsRoute } from './test-support/send-attempts-route';
 import { generateHMACSignature } from './api/auth';
 
 function stubPool(route: (sql: string, params: unknown[]) => Record<string, unknown>[] = () => []): {
@@ -366,26 +367,7 @@ test('HTTP: a raw GIF is refused 400 before Baileys (fork gif-send.test), the ga
 
 test('HTTP: opt-in Idempotency-Key on a sticker: claimed before the send, replay deduplicated', async () => {
   useAccount('personal');
-  const attempts = new Map<string, { request_hash: string; message_id: string; status: string }>();
-  const { restore } = stubPool((sql, params) => {
-    const key = `${params[0]}:${params[1]}`;
-    if (/INSERT INTO whatsapp_send_attempts/.test(sql)) {
-      if (attempts.has(key)) return [];
-      attempts.set(key, { request_hash: String(params[2]), message_id: String(params[3]), status: 'prepared' });
-      return [{ message_id: params[3] }];
-    }
-    const row = attempts.get(key);
-    if (/SELECT request_hash/.test(sql)) return row ? [{ ...row, updated_at: new Date(5) }] : [];
-    if (/SET status = 'pending'/.test(sql) && row?.status === 'prepared') {
-      row.status = 'pending';
-      return [{ message_id: row.message_id }];
-    }
-    if (/SET status = 'sent'/.test(sql) && row?.status === 'pending') {
-      row.status = 'sent';
-      return [{ updated_at: new Date(5) }];
-    }
-    return [];
-  });
+  const { restore } = stubPool(sendAttemptsRoute());
   const { client, sent } = makeClient();
   // The fake sock echoes the reserved id, like Baileys with `messageId`.
   const internals = client as unknown as { sock: { sendMessage: unknown } };
