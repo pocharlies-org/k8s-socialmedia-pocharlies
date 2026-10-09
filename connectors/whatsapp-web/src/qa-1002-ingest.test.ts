@@ -170,8 +170,10 @@ test('documentFileName: explicit name wins; URL path without the presigned query
   assert.equal(documentFileName('https://x/Informe%20final.pdf'), 'Informe final.pdf');
   assert.equal(documentFileName('https://x/'), 'attachment');
   assert.equal(documentFileName('https://x/a.pdf', '  '), 'a.pdf');
-  assert.equal(cleanFileName('../etc/passwd\u0000'), '..etcpasswd');
+  assert.equal(cleanFileName('../etc/passwd\u0000'), 'passwd');
   assert.equal(cleanFileName('a'.repeat(300)).length, 200);
+  assert.equal(documentFileName('https://x/..%2Freport.pdf'), 'report.pdf');
+  assert.equal(documentFileName('data:application/pdf;base64,YQ=='), 'attachment');
 });
 
 test('quotedReply: any message kind, text or a label, author; never for a reaction', () => {
@@ -522,6 +524,75 @@ test('POST /messages/media/send: fileName names the document; a non-string is 40
     else process.env.ENABLE_SENDING = saved.send;
     restore();
   }
+});
+
+// SKIRM-129 (F4d). Scenarios adapted from the NAS fork's media-send.test.ts (Jordi Ibáñez); the fork
+// drives BaileysClient.sendFile, these go through the route. `data:` URLs need no fetch stub.
+async function postMedia(body: Record<string, unknown>) {
+  const saved = process.env.ENABLE_SENDING;
+  process.env.ENABLE_SENDING = 'true';
+  const { restore } = stubPool(route);
+  try {
+    const { client, sent } = makeClient();
+    let status = 0;
+    let json: any;
+    await withServer(client, async base => {
+      const res = await fetch(`${base}/messages/media/send`, {
+        method: 'POST',
+        headers: signed(body),
+        body: JSON.stringify(body),
+      });
+      status = res.status;
+      json = await res.json();
+    });
+    return { status, json, sent };
+  } finally {
+    if (saved === undefined) delete process.env.ENABLE_SENDING;
+    else process.env.ENABLE_SENDING = saved;
+    restore();
+  }
+}
+
+test('POST /messages/media/send: an image, video, audio and document keep their payload and answer {sent, sentAt}', async () => {
+  const cases: Array<[string, string, string]> = [
+    ['data:image/png;base64,YQ==', 'image', 'photo'],
+    ['data:video/mp4;base64,YQ==', 'video', 'clip'],
+    ['data:audio/ogg;base64,YQ==', 'audio', ''],
+    ['data:application/pdf;base64,YQ==', 'document', 'doc'],
+  ];
+  for (const [fileUrl, key, caption] of cases) {
+    const { status, json, sent } = await postMedia({
+      conversationId: '2222@lid',
+      fileUrl,
+      caption,
+    });
+    assert.equal(status, 200, key);
+    assert.deepEqual(
+      Object.keys(json).sort(),
+      ['sent', 'sentAt'],
+      `${key}: no messageId without an Idempotency-Key`
+    );
+    assert.equal(json.sent, true);
+    assert.ok(key in sent[0].content, `${key} payload`);
+  }
+});
+
+test('POST /messages/media/send: a document name is its last path segment, never glued across directories', async () => {
+  const named = await postMedia({
+    conversationId: '2222@lid',
+    fileUrl: 'data:application/pdf;base64,YQ==',
+    fileName: '../report\n.pdf',
+  });
+  assert.equal(named.sent[0].content.fileName, 'report.pdf');
+  const unnamed = await postMedia({
+    conversationId: '2222@lid',
+    fileUrl: 'data:application/pdf;base64,YQ==',
+  });
+  assert.equal(
+    unnamed.sent[0].content.fileName,
+    'attachment',
+    'a data: URL has no name of its own'
+  );
 });
 
 test('GET /chats/:jid/photo: a picture hidden by privacy (not-authorized) is 404 No photo', async () => {
