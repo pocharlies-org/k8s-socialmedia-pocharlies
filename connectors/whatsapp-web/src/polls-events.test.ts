@@ -389,7 +389,8 @@ test('a LID voter whose key also carries the phone number: one row under the LID
     const { client } = makeClient();
     await priv(client).ingestMessage(pollMessage(), { source: 'live', publishEvent: false });
     calls.length = 0;
-    // The fixture of the fork's poll-votes.fork.test.ts: a voter signing as a LID, its number on the key.
+    // Fixture of the fork's poll-votes.fork.test.ts ('captured group votes use the encrypted LID even when a
+    // PN alias is present', PR #74): a voter signing as a LID, its number on the key.
     const voter = { participant: '123456789@lid', participantAlt: '346000000001@s.whatsapp.net' };
     for (const [id, option, ms] of [
       ['VOTE_A', 'Sí', 1727000001000],
@@ -758,7 +759,12 @@ test('our event response: phone identities (from the key alternate), cancelled /
   }
 });
 
-/** The socket has not told us who we are yet: only meJid, and it is a LID. */
+/**
+ * The socket has not told us who we are yet: only meJid, and it is a LID. The two tests below adapt the
+ * fork's event-client.test.ts ('RSVP resolves LID identities to phone numbers before encrypting the response'
+ * and 'unresolvable own or creator identity raises a typed 409 before the send token is claimed', PR #74)
+ * to respondToEvent and to the trunk's 422 identity_unavailable.
+ */
 function onlyOurLid(client: BaileysClient): void {
   priv(client).sock.user = undefined;
   priv(client).meJid = '10000:1@lid';

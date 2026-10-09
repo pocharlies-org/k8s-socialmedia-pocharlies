@@ -136,6 +136,7 @@ Total de casos Jest: **pendiente de medir**.
   sin conversación para el jid no se escribe nada. El helper no lanza: un fallo de la base queda en un `warn` (también en `markAsRead`, cuyos acuses de lectura ya salieron). El id lleva el prefijo de la cuenta del conector y la resolución filtra por `account_id`, así que una cuenta no escribe sobre la fila de otra. Al reconectar,
   `resyncChatState` pide los parches desde la versión guardada del app-state; no se lee el snapshot completo del app-state (más memoria y más consultas a WhatsApp, SKIRM-88).
   `POST /messages/pins` solo acepta un `conversationId` o `chatId` de tipo string.
+- Respuesta a un evento y votos de encuesta (SKIRM-105): la respuesta a un evento se firma con teléfonos, que es como Baileys la descifra. Nuestro número sale de `sock.user`, de `meJid` o, si solo se conoce el LID, de la correspondencia LID a número de Baileys (`ownIdentity` + `withAliases`); sin número propio o sin el del creador, 422 `identity_unavailable` antes de reclamar la `Idempotency-Key` y antes de retransmitir. Los votos y respuestas entrantes se guardan por el remitente de la clave (`participant` o `remoteJid`); que un mismo votante por número y por LID cuente una vez lo pliega la base (013: disparador y vistas `*_current`) y solo cuando `social_contact_aliases` conoce el par.
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
-Última verificación contra el código: 2026-10-08 · 8cf1f6c (origin/deploy/prod)
+Última verificación contra el código: 2026-10-09 · 7c3103c (origin/deploy/prod)
