@@ -20,12 +20,14 @@
  *    "subscribed newsletters" query is not in rc13's QueryIds), no directory
  *    and no search. So the list is built from the channels this connector has
  *    seen — chats of the history sync, conversations with channel posts,
- *    lookups and follows of this process — each confirmed by its own metadata
- *    (viewer role): it may miss channels, never lists one not followed.
+ *    lookups and follows of this process and the followed channels it
+ *    remembered (whatsapp_novedades_channels, migration 021) — each confirmed
+ *    by its own metadata (viewer role): it may miss channels, never lists one
+ *    not followed.
  *
- * Nothing is persisted.
+ * Only that memory of followed channels is persisted.
  */
-import { getPool, stripAccountKey } from './db-writer';
+import { connectorAccount, getPool, stripAccountKey } from './db-writer';
 import { MessageMutationError, whatsappAccountId } from './message-mutations';
 
 export type ChannelSubscriptionAction = 'follow' | 'unfollow' | 'mute' | 'unmute';
@@ -249,6 +251,93 @@ export async function knownChannelConversations(): Promise<string[]> {
   return result.rows
     .map(row => normalizeChannelJid(String(row.jid ?? '')))
     .filter((jid): jid is string => !!jid);
+}
+
+// ---------------------------------------------------------------------------
+// The followed channels this connector remembers (mcp-server migration 021)
+// ---------------------------------------------------------------------------
+
+const UNDEFINED_TABLE = '42P01';
+const DIRECTORY_RECHECK_MS = 5 * 60 * 1000;
+let directoryMissingUntil = 0;
+let directoryMissingLogged = false;
+
+/** Test hook: forget the "table missing" state between cases. */
+export function resetChannelDirectoryStateForTests(): void {
+  directoryMissingUntil = 0;
+  directoryMissingLogged = false;
+}
+
+/**
+ * One statement of the directory. Never throws: null while the table is
+ * missing (021 not applied: one warning, asked again every few minutes, no
+ * restart needed, so the order connector / migration does not matter) or when
+ * the database fails. It is a memory of candidates only: the list still
+ * confirms each channel with WhatsApp, so a stale row never lists a channel
+ * that is not followed.
+ */
+async function directoryQuery(
+  sql: string,
+  params: unknown[]
+): Promise<Record<string, unknown>[] | null> {
+  if (directoryMissingUntil > Date.now()) return null;
+  try {
+    const result = await getPool().query(sql, params);
+    if (directoryMissingLogged) {
+      directoryMissingLogged = false;
+      console.info('whatsapp_novedades_channels is available: followed channels are remembered');
+    }
+    directoryMissingUntil = 0;
+    return result.rows;
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === UNDEFINED_TABLE) {
+      directoryMissingUntil = Date.now() + DIRECTORY_RECHECK_MS;
+      if (!directoryMissingLogged) {
+        directoryMissingLogged = true;
+        console.warn(
+          'whatsapp_novedades_channels does not exist yet (mcp-server migration 021 not applied): ' +
+            'followed channels are not remembered across restarts'
+        );
+      }
+    } else {
+      console.warn(
+        `channel directory failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    return null;
+  }
+}
+
+/** Channel jids this account's connector saw it follow: candidates of the followed list. */
+export async function rememberedChannels(): Promise<string[]> {
+  const rows = await directoryQuery(
+    `SELECT channel_jid FROM whatsapp_novedades_channels
+      WHERE account = $1
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [connectorAccount(), CHANNELS_LIST_MAX]
+  );
+  return (rows ?? [])
+    .map(row => normalizeChannelJid(String(row.channel_jid ?? '')))
+    .filter((jid): jid is string => !!jid);
+}
+
+/** A channel the account was confirmed to follow. */
+export async function rememberChannel(jid: string): Promise<void> {
+  await directoryQuery(
+    `INSERT INTO whatsapp_novedades_channels (account, channel_jid)
+     VALUES ($1, $2)
+     ON CONFLICT (account, channel_jid) DO NOTHING`,
+    [connectorAccount(), jid]
+  );
+}
+
+/** A channel the account was confirmed to no longer follow. */
+export async function forgetChannel(jid: string): Promise<void> {
+  await directoryQuery(
+    `DELETE FROM whatsapp_novedades_channels WHERE account = $1 AND channel_jid = $2`,
+    [connectorAccount(), jid]
+  );
 }
 
 // ---------------------------------------------------------------------------

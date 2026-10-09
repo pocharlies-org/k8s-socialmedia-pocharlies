@@ -185,8 +185,10 @@ invite_link_unavailable`; nobody invited → `invite_not_sent`.
   channel search exists.
 - `social_list_channels` (read, `meta.source.completeness: partial`): the
   followed channels among those the connector has seen (history-sync chats,
-  channels whose posts it received, look-ups and follows); WhatsApp's own
-  followed list is not readable with Baileys rc13 (`data.coverage`).
+  channels whose posts it received, look-ups and follows, and the followed
+  channels it remembered in `whatsapp_novedades_channels`, migration 021, so a
+  followed channel without posts survives a restart); WhatsApp's own followed
+  list is not readable with Baileys rc13 (`data.coverage`).
 - `social_manage_channel_subscription` (`target` = `…@newsletter`, `action`
   `follow | unfollow | mute | unmute`; muting needs a followed channel): proven
   by the channel's own metadata, `changed: false` when already so.

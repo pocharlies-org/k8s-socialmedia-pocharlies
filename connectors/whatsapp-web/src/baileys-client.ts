@@ -246,12 +246,15 @@ import {
   ChannelSubscriptionAction,
   channelView,
   ChannelView,
+  forgetChannel,
   KeyedSerializer,
   knownChannelConversations,
   normalizeChannelJid,
   parseChannelJid,
   parseChannelQuery,
   parseChannelSubscriptionAction,
+  rememberChannel,
+  rememberedChannels,
 } from './channels';
 import { maybeRunRetention } from './retention';
 import {
@@ -6084,7 +6087,7 @@ export class BaileysClient extends EventEmitter {
     const query = parseChannelQuery(channel);
     if (query.type === 'jid') {
       const view = await this.readChannel(query.key);
-      if (view.following) this.seenChannels.add(view.channelId);
+      if (view.following) await this.noteFollowed(view.channelId);
       return view;
     }
     const sock = this.connectedSocket();
@@ -6099,16 +6102,23 @@ export class BaileysClient extends EventEmitter {
       );
     }
     const view = channelView(answer);
-    if (view.following) this.seenChannels.add(view.channelId);
+    if (view.following) await this.noteFollowed(view.channelId);
     return view;
+  }
+
+  /** A channel confirmed as followed: this process remembers it and, with ingest, so does the directory. */
+  private async noteFollowed(jid: string): Promise<void> {
+    this.seenChannels.add(jid);
+    if (this.ingest) await rememberChannel(jid);
   }
 
   /**
    * GET /channels: the channels this account follows among those this
    * connector has seen — chats of the history sync, conversations with
-   * ingested posts (ingest only), lookups and follows of this process — each
-   * confirmed by its own metadata. rc13 cannot ask WhatsApp for the followed
-   * list, so coverage.complete is always false.
+   * ingested posts (ingest only), lookups and follows of this process and the
+   * followed channels it remembered (ingest only) — each confirmed by its own
+   * metadata. rc13 cannot ask WhatsApp for the followed list, so
+   * coverage.complete is always false.
    */
   async listChannels(): Promise<ChannelListResult> {
     this.connectedSocket();
@@ -6118,11 +6128,16 @@ export class BaileysClient extends EventEmitter {
       if (jid) candidates.add(jid);
     }
     for (const jid of this.seenChannels) candidates.add(jid);
+    const remembered = new Set<string>();
     if (this.ingest) {
       for (const jid of await knownChannelConversations().catch((e: any) => {
         this.logger.warn(`known channel conversations unavailable: ${e?.message || e}`);
         return [] as string[];
       })) {
+        candidates.add(jid);
+      }
+      for (const jid of await rememberedChannels()) {
+        remembered.add(jid);
         candidates.add(jid);
       }
     }
@@ -6145,6 +6160,10 @@ export class BaileysClient extends EventEmitter {
           channels.push(view);
         } else {
           this.seenChannels.delete(view.channelId);
+          // Only a row that exists is deleted: a channel seen but never followed has none.
+          if (view.following === false && remembered.has(view.channelId)) {
+            await forgetChannel(view.channelId);
+          }
         }
       }
     }
@@ -6184,9 +6203,15 @@ export class BaileysClient extends EventEmitter {
           'not_following'
         );
       }
-      const result = (changed: boolean, channel: ChannelView): ChannelSubscriptionResult => {
-        if (channel.following) this.seenChannels.add(jid);
-        else if (channel.following === false) this.seenChannels.delete(jid);
+      const result = async (
+        changed: boolean,
+        channel: ChannelView
+      ): Promise<ChannelSubscriptionResult> => {
+        if (channel.following) await this.noteFollowed(jid);
+        else if (channel.following === false) {
+          this.seenChannels.delete(jid);
+          if (this.ingest) await forgetChannel(jid);
+        }
         this.logger.info(
           `Channel ${jid} ${verb}${changed ? '' : ' (already)'}${request.actor ? ` by ${request.actor}` : ''}`
         );
