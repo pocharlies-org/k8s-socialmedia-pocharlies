@@ -186,6 +186,7 @@ import {
   hasOutboundHistory,
   pinFromBaileys,
   recordInboundChatState,
+  recordInboundConversationState,
   resolveCanonicalConversation,
   writeChatState,
 } from './chat-state';
@@ -1703,7 +1704,9 @@ export class BaileysClient extends EventEmitter {
           timestamp: Number(c.conversationTimestamp || 0),
         });
         // Persist real unread + archived from the history snapshot.
-        void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
+        void recordInboundConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(
+          () => {}
+        );
         // Pin / mute (fase 3 / PR-5): only what the snapshot says.
         void recordInboundChatState(norm, {
           pinnedAt: pinFromBaileys(c),
@@ -1776,7 +1779,7 @@ export class BaileysClient extends EventEmitter {
         // badge alone instead of zeroing it).
         const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount;
         const arch = typeof (u as any).archived === 'boolean' ? (u as any).archived : undefined;
-        void setConversationState(norm, uc, arch).catch(() => {});
+        void recordInboundConversationState(norm, uc, arch).catch(() => {});
         // Pin / mute from app-state sync (the phone, or the echo of our own
         // POST /chats/modify — same values), on the canonical conversation.
         void recordInboundChatState(norm, {
@@ -1802,7 +1805,9 @@ export class BaileysClient extends EventEmitter {
           timestamp: Number(c.conversationTimestamp || 0),
         });
         // Persist real unread badge + archived flag (fire-and-forget).
-        void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
+        void recordInboundConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(
+          () => {}
+        );
         void recordInboundChatState(norm, {
           pinnedAt: pinFromBaileys(c),
           mute: muteFromBaileys(c, 'snapshot'),
