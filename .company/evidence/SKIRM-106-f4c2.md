@@ -30,7 +30,7 @@ con el código de la rama                                                    # t
 ## La migración sobre el esquema del tronco
 
 ```
-scripts/qa-schema-sandbox.sh up                 # Running migration 021_whatsapp_novedades_channels.sql...  (tablas en public 40, filas en _migrations 21)
+scripts/qa-schema-sandbox.sh up                 # Running migration 021_whatsapp_novedades_channels.sql...  (el esquema restaurado aplica la 021)
 scripts/qa-schema-sandbox.sh up (otra vez)      # Skipping 021_whatsapp_novedades_channels.sql (recorded in _migrations)
 psql -f 021_… (dos veces a mano, ON_ERROR_STOP)  # exit 0 y 0, «relation … already exists, skipping»
 borrar la fila 021 del ledger y volver a correr  # Baselining 021_whatsapp_novedades_channels.sql: table "whatsapp_novedades_channels" predates the ledger
