@@ -561,9 +561,17 @@ test('POST /messages/media/send: an image, video, audio and document keep their 
     ['data:application/pdf;base64,YQ==', 'document', 'doc'],
   ];
   for (const [fileUrl, key, caption] of cases) {
-    const { status, json, sent } = await postMedia({ conversationId: '2222@lid', fileUrl, caption });
+    const { status, json, sent } = await postMedia({
+      conversationId: '2222@lid',
+      fileUrl,
+      caption,
+    });
     assert.equal(status, 200, key);
-    assert.deepEqual(Object.keys(json).sort(), ['sent', 'sentAt'], `${key}: no messageId without an Idempotency-Key`);
+    assert.deepEqual(
+      Object.keys(json).sort(),
+      ['sent', 'sentAt'],
+      `${key}: no messageId without an Idempotency-Key`
+    );
     assert.equal(json.sent, true);
     assert.ok(key in sent[0].content, `${key} payload`);
   }
@@ -580,7 +588,11 @@ test('POST /messages/media/send: a document name is its last path segment, never
     conversationId: '2222@lid',
     fileUrl: 'data:application/pdf;base64,YQ==',
   });
-  assert.equal(unnamed.sent[0].content.fileName, 'attachment', 'a data: URL has no name of its own');
+  assert.equal(
+    unnamed.sent[0].content.fileName,
+    'attachment',
+    'a data: URL has no name of its own'
+  );
 });
 
 test('GET /chats/:jid/photo: a picture hidden by privacy (not-authorized) is 404 No photo', async () => {
