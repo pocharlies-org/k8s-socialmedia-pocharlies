@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 import { syncSocialAccountsBestEffort } from '../infrastructure/database/social-accounts';
-import Redis, { RedisOptions } from 'ioredis';
+import { RedisOptions } from 'ioredis';
 import * as fs from 'fs';
+import { createRedisClient } from '../infrastructure/redis-client';
 import { MCPServer } from './server';
 import { requireConnectorSecret } from '@mcp-socialmedia/shared';
 
@@ -48,7 +49,7 @@ async function main() {
       };
     }
 
-    const redisClient = new Redis(REDIS_URL, redisOptions);
+    const redisClient = createRedisClient(REDIS_URL, redisOptions);
     console.log('Connected to Redis' + (REDIS_TLS_CA ? ' with TLS' : ''));
 
     await syncSocialAccountsBestEffort(dbPool);

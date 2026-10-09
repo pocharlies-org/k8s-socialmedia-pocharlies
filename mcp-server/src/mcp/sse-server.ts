@@ -9,8 +9,9 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { Client, Pool } from 'pg';
 import { ensureSearchIndexes } from '../application/search.service';
 import { syncSocialAccountsBestEffort } from '../infrastructure/database/social-accounts';
-import Redis, { RedisOptions } from 'ioredis';
+import { RedisOptions } from 'ioredis';
 import * as fs from 'fs';
+import { createRedisClient } from '../infrastructure/redis-client';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -171,7 +172,7 @@ async function main() {
     const ca = fs.readFileSync(REDIS_TLS_CA, 'utf-8');
     redisOptions = { tls: { ca, rejectUnauthorized: true } };
   }
-  const redisClient = new Redis(REDIS_URL, redisOptions);
+  const redisClient = createRedisClient(REDIS_URL, redisOptions);
   console.log('[SSE] Connected to Redis');
 
   const mcpServer = new MCPServer(

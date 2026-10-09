@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import Redis from 'ioredis';
+import { createRedisClient } from '../infrastructure/redis-client';
 import pino from 'pino';
 
 export interface OllamaConfig {
@@ -42,7 +43,7 @@ export class LlamaService {
     this.model = config.model;
     this.embeddingModel = config.embeddingModel || 'nomic-embed-text';
     this.dbClient = dbClient;
-    this.redis = new Redis(redisUrl);
+    this.redis = createRedisClient(redisUrl);
     this.encryptionKey = Buffer.from(encryptionKey, 'utf-8');
     this.logger = pino({
       transport: {
