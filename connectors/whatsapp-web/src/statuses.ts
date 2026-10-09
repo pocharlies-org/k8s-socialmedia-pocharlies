@@ -597,6 +597,32 @@ async function channelConversationIds(channelId?: string): Promise<string[]> {
 }
 
 /**
+ * The id a channel post lives under in `messages`. A channel's message ids
+ * are only unique inside the channel, while `messages.wa_message_id` is one
+ * key per account and the insert is ON CONFLICT DO NOTHING: the post of a
+ * second channel whose id another channel already holds would vanish without
+ * a trace, and its message key would overwrite the first post's. The first
+ * channel keeps the bare id (every stored row, key and revoke stays as it is);
+ * a clash with another channel's row gets `<channel jid>:<id>`. The ingest and
+ * the revoke / edit that names the post ask with the same (channel, id), so
+ * both reach the same row. A failed lookup answers the bare id: it never
+ * stops the ingest.
+ */
+export async function channelPostMessageId(channelJid: string, id: string): Promise<string> {
+  // The account prefix is not added here: accountKey does it on the way in (storeMessage, markMessageRevoked, markMessageEdited).
+  try {
+    const result = await getPool().query(
+      `SELECT conversation_id FROM messages WHERE wa_message_id = $1`,
+      [accountKey(id)]
+    );
+    const holder = result.rows[0]?.conversation_id;
+    return holder && holder !== accountKey(channelJid) ? `${channelJid}:${id}` : id;
+  } catch {
+    return id;
+  }
+}
+
+/**
  * Posts of the channels this account receives (or of one), newest first,
  * from `messages`: the conversations of `<id>@newsletter`. A deleted post is
  * left out. Media: GET /messages/media/:channelId/:messageId.

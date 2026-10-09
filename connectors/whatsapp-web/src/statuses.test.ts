@@ -623,6 +623,135 @@ test('channel posts: channels from conversations, posts from messages, names onl
 });
 
 // ---------------------------------------------------------------------------
+// Channel post identity: an id is only unique inside its channel
+// ---------------------------------------------------------------------------
+
+const CHANNEL_A = '111@newsletter';
+const CHANNEL_B = '222@newsletter';
+const isHolderLookup = (sql: string): boolean =>
+  /SELECT conversation_id FROM messages WHERE wa_message_id/i.test(sql);
+const isKeyInsert = (sql: string): boolean => /INSERT INTO whatsapp_message_keys/i.test(sql);
+
+function channelPost(channel: string, id: string): WAMessage {
+  return statusMessage({
+    key: { remoteJid: channel, id, fromMe: false },
+    message: { conversation: `post ${id}` },
+  });
+}
+
+/** The channel conversation (as messages stores it) that already holds the bare id, if any. */
+function holderOf(conversation?: string) {
+  return (sql: string): Rows =>
+    isHolderLookup(sql) && conversation ? [{ conversation_id: conversation }] : [];
+}
+
+test('a channel post whose id another channel holds is stored under <channel>:<id>, not dropped', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool(holderOf(`professional:${CHANNEL_A}`));
+  try {
+    const { client } = makeClient();
+    const result = await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
+      source: 'live',
+      publishEvent: false,
+    });
+    assert.equal(
+      calls.find(c => isMessageInsert(c.sql))!.params[0],
+      `professional:${CHANNEL_B}:SAME`
+    );
+    assert.equal(calls.find(c => isKeyInsert(c.sql))!.params[0], `professional:${CHANNEL_B}:SAME`);
+    assert.equal(result.waMessage.waMessageId, `${CHANNEL_B}:SAME`);
+  } finally {
+    restore();
+  }
+});
+
+test('a channel post keeps its bare id when nobody holds it or its own channel does (a replay)', async () => {
+  for (const [account, holder, expected] of [
+    ['professional', undefined, 'professional:SAME'],
+    ['professional', `professional:${CHANNEL_B}`, 'professional:SAME'],
+    ['personal', undefined, 'SAME'],
+    ['personal', CHANNEL_B, 'SAME'],
+  ] as const) {
+    useAccount(account);
+    const { calls, restore } = stubPool(holderOf(holder));
+    try {
+      const { client } = makeClient();
+      await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
+        source: 'live',
+        publishEvent: false,
+      });
+      assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], expected);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test('a clash on the personal account composes the id without a prefix; chats pay no lookup', async () => {
+  useAccount('personal');
+  const { calls, restore } = stubPool(holderOf(CHANNEL_A));
+  try {
+    const { client } = makeClient();
+    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
+      source: 'live',
+      publishEvent: false,
+    });
+    assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], `${CHANNEL_B}:SAME`);
+    calls.length = 0;
+    await priv(client).ingestMessage(channelPost('34600@s.whatsapp.net', 'SAME'), {
+      source: 'live',
+      publishEvent: false,
+    });
+    assert.equal(calls.filter(c => isHolderLookup(c.sql)).length, 0);
+    assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], 'SAME');
+  } finally {
+    restore();
+  }
+});
+
+test('an unreadable holder lookup never stops the ingest: the bare id, as before', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool(sql => (isHolderLookup(sql) ? new Error('db down') : []));
+  try {
+    const { client } = makeClient();
+    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
+      source: 'live',
+      publishEvent: false,
+    });
+    assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], 'professional:SAME');
+  } finally {
+    restore();
+  }
+});
+
+test('a revoke or an edit of a channel post reaches the row of ITS channel, not the other one', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool(sql =>
+    isHolderLookup(sql)
+      ? [{ conversation_id: `professional:${CHANNEL_A}` }]
+      : /UPDATE messages/i.test(sql)
+        ? [{ id: 1 }]
+        : []
+  );
+  try {
+    const { client } = makeClient();
+    await priv(client).handleInboundMutation({
+      key: { remoteJid: CHANNEL_B, id: 'SAME' },
+      update: { message: null },
+    });
+    await priv(client).handleInboundMutation({
+      key: { remoteJid: CHANNEL_B, id: 'SAME' },
+      update: { message: { editedMessage: { message: { conversation: 'edited' } } } },
+    });
+    const updates = calls.filter(c => /UPDATE messages/i.test(c.sql));
+    assert.equal(updates.length, 2);
+    for (const update of updates) assert.equal(update.params[0], `professional:${CHANNEL_B}:SAME`);
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Publish
 // ---------------------------------------------------------------------------
 

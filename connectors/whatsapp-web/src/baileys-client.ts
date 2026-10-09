@@ -119,9 +119,11 @@ import {
   starPatch,
 } from './message-stars-pins';
 import {
+  channelPostMessageId,
   contactAuthorIds,
   ChannelPostList,
   ChannelPostsQuery,
+  isChannelJid,
   isStatusJid,
   listChannelPosts,
   listStatuses,
@@ -2058,6 +2060,12 @@ export class BaileysClient extends EventEmitter {
 
     const waMessage = this.convertMessage(msg);
     if (!waMessage) return { inserted: false };
+    if (isChannelJid(msg.key.remoteJid)) {
+      waMessage.waMessageId = await channelPostMessageId(
+        waMessage.conversationId,
+        waMessage.waMessageId
+      );
+    }
 
     this.rememberKey(waMessage.waMessageId, msg.key, msg.key.remoteJid || '');
 
@@ -4786,14 +4794,19 @@ export class BaileysClient extends EventEmitter {
     if (!this.ingest || !waMessageId) return;
     const stub = u.update?.messageStubType;
     const isRevoke = stub === proto.WebMessageInfo.StubType.REVOKE || u.update?.message === null;
-    if (isRevoke && !this.isOwnMutation('revoke', waMessageId)) {
-      await this.recordInboundRevoke(waMessageId);
-    }
     // Baileys unwraps MESSAGE_EDIT protocol messages into this shape.
     const editedPayload = (u.update as any)?.message?.editedMessage?.message as
       proto.IMessage | undefined;
+    if (!isRevoke && !editedPayload) return;
+    // A channel's ids are only unique inside it: the row is the one of THIS channel's post.
+    const rowId = isChannelJid(u.key.remoteJid)
+      ? await channelPostMessageId(this.normalizeJid(String(u.key.remoteJid)), waMessageId)
+      : waMessageId;
+    if (isRevoke && !this.isOwnMutation('revoke', waMessageId)) {
+      await this.recordInboundRevoke(rowId);
+    }
     if (editedPayload && !this.isOwnMutation('edit', waMessageId)) {
-      await this.recordInboundEdit(u.key, editedPayload);
+      await this.recordInboundEdit({ ...u.key, id: rowId }, editedPayload);
     }
   }
 

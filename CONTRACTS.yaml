@@ -2145,7 +2145,9 @@ contracts:
       channelName (null while the conversation is named by its jid),
       messageType, text, hasMedia, mimeType, postedAt, structured?}],
       nextCursor, channels (how many channel conversations were read)}; []
-      with ingest off. Ids bare. Path, body and 200 shape are contract:
+      with ingest off. Ids bare, except a post whose id another channel
+      already holds: its messageId is `<channelId>:<id>` (opaque, the same
+      one the message keys carry). Path, body and 200 shape are contract:
       changing any is breaking — a new `.v2` entry beside this one.
   - id: http.whatsapp-connector.statuses-publish.v1
     kind: http-route
