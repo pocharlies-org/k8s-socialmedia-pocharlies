@@ -3456,12 +3456,12 @@ export class BaileysClient extends EventEmitter {
   // Polls and events (fase 3 / PR-7)
   // ---------------------------------------------------------------------------
 
-  /** Our own user jids for the vote / response crypto (PN from meJid when the socket has no user). */
+  /** Our own user jids for the vote / response crypto (meJid when the socket has no user: a PN or a LID). */
   private async ownIdentity(): Promise<OwnIdentity> {
-    const ids = await this.ownIds();
+    const ids = [...(await this.ownIds()), cryptoUserJid(this.meJid)];
     return {
-      pn: ids.find(id => id.endsWith('@s.whatsapp.net')) || cryptoUserJid(this.meJid),
-      lid: ids.find(id => id.endsWith('@lid')) || null,
+      pn: ids.find(id => id?.endsWith('@s.whatsapp.net')) ?? null,
+      lid: ids.find(id => id?.endsWith('@lid')) ?? null,
     };
   }
 
@@ -3826,7 +3826,11 @@ export class BaileysClient extends EventEmitter {
       });
     }
     const own = await this.ownIdentity();
-    const ownPn = own.pn;
+    // An event response is signed with phone numbers: ours comes from the LID when that is all we know.
+    const ownPn =
+      (await this.withAliases([own.pn, own.lid].filter((jid): jid is string => !!jid))).find(jid =>
+        jid.endsWith('@s.whatsapp.net')
+      ) ?? null;
     const creator = target.key.fromMe
       ? ownPn
       : (await this.withAliases(keyAuthorCandidates(target.key, own))).find(jid =>
