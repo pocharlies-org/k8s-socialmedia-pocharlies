@@ -127,6 +127,7 @@ import {
   isStatusJid,
   listChannelPosts,
   listStatuses,
+  noteRevokeBeforePost,
   recordStatus,
   STATUS_IMAGE_MAX_BYTES,
   STATUS_IMAGE_MIME_TYPES,
@@ -138,6 +139,7 @@ import {
   StatusPublishRequest,
   statusRecipientJid,
   STATUS_TTL_MS,
+  takeRevokeBeforePost,
 } from './statuses';
 import {
   buildPollContent,
@@ -248,12 +250,15 @@ import {
   ChannelSubscriptionAction,
   channelView,
   ChannelView,
+  forgetChannel,
   KeyedSerializer,
   knownChannelConversations,
   normalizeChannelJid,
   parseChannelJid,
   parseChannelQuery,
   parseChannelSubscriptionAction,
+  rememberChannel,
+  rememberedChannels,
 } from './channels';
 import { maybeRunRetention } from './retention';
 import {
@@ -2184,6 +2189,19 @@ export class BaileysClient extends EventEmitter {
       },
     };
     const msgId = await storeMessage(data);
+    // A revoke of this channel post or status arrived before it: the row is stored
+    // (the content stays, like any revoke) and marked deleted at once.
+    if (
+      msgId &&
+      msg.key.id &&
+      (isChannelJid(rawChatJid) || isStatusJid(rawChatJid)) &&
+      takeRevokeBeforePost(waMessage.conversationId, msg.key.id)
+    ) {
+      this.logger.info(
+        `Revoke of ${waMessage.conversationId} ${msg.key.id} arrived before its post: applied`
+      );
+      await this.recordInboundRevoke(waMessage.waMessageId);
+    }
     // Not for a REACTION: prod folds it into the target's messages.reactions
     // and never writes its row, so the key's FK to messages.wa_message_id can
     // only fail (a warning per reaction). Nothing reads a reaction's key: it
@@ -2205,11 +2223,15 @@ export class BaileysClient extends EventEmitter {
     // Also for an already-stored row (msgId null): a history replay after a
     // relink backfills the payloads of the recent window. A poll / event is
     // kept whatever its age: its secret is what decrypts the votes / responses.
-    await this.persistDurablePayload(
-      msg,
-      waMessage.conversationId,
-      options.source === 'baileys_history_sync' && !waMessage.structured ? 'history' : 'live'
-    );
+    // Not a channel post stored under a composed id: the copy is one per id and
+    // would replace the first channel's, and its key.id is not the composed one.
+    if (waMessage.waMessageId === msg.key.id) {
+      await this.persistDurablePayload(
+        msg,
+        waMessage.conversationId,
+        options.source === 'baileys_history_sync' && !waMessage.structured ? 'history' : 'live'
+      );
+    }
     // Before the msgId check: prod folds REACTION inserts into the target's
     // messages.reactions and skips the row, so msgId is always null for them.
     if (waMessage.messageType === 'REACTION') await this.persistReaction(msg, waMessage);
@@ -4803,7 +4825,13 @@ export class BaileysClient extends EventEmitter {
       ? await channelPostMessageId(this.normalizeJid(String(u.key.remoteJid)), waMessageId)
       : waMessageId;
     if (isRevoke && !this.isOwnMutation('revoke', waMessageId)) {
-      await this.recordInboundRevoke(rowId);
+      const flagged = await this.recordInboundRevoke(rowId);
+      // No row to flag: for a channel post or a status its post may still be on its way.
+      if (!flagged && (isChannelJid(u.key.remoteJid) || isStatusJid(u.key.remoteJid))) {
+        const chat = this.normalizeJid(String(u.key.remoteJid));
+        noteRevokeBeforePost(chat, waMessageId);
+        this.logger.info(`Revoke of ${chat} ${waMessageId} found no post: remembered`);
+      }
     }
     if (editedPayload && !this.isOwnMutation('edit', waMessageId)) {
       await this.recordInboundEdit({ ...u.key, id: rowId }, editedPayload);
@@ -4876,11 +4904,12 @@ export class BaileysClient extends EventEmitter {
   }
 
   /** A contact (or our phone) revoked a message: flag the row, keep its content. */
-  private async recordInboundRevoke(waMessageId: string): Promise<void> {
-    await markMessageRevoked(waMessageId, { source: 'whatsapp' }).catch(e =>
+  private async recordInboundRevoke(waMessageId: string): Promise<boolean> {
+    const flagged = await markMessageRevoked(waMessageId, { source: 'whatsapp' }).catch(e =>
       this.logger.warn(`revoke persist failed for ${waMessageId}: ${e?.message || e}`)
     );
     this.emit('message-update', { waMessageId, updateType: 'DELETED' });
+    return flagged === true;
   }
 
   /** A contact (or our phone) edited a message: new text, the old one to edit_history. */
@@ -6097,7 +6126,7 @@ export class BaileysClient extends EventEmitter {
     const query = parseChannelQuery(channel);
     if (query.type === 'jid') {
       const view = await this.readChannel(query.key);
-      if (view.following) this.seenChannels.add(view.channelId);
+      if (view.following) await this.noteFollowed(view.channelId);
       return view;
     }
     const sock = this.connectedSocket();
@@ -6112,16 +6141,23 @@ export class BaileysClient extends EventEmitter {
       );
     }
     const view = channelView(answer);
-    if (view.following) this.seenChannels.add(view.channelId);
+    if (view.following) await this.noteFollowed(view.channelId);
     return view;
+  }
+
+  /** A channel confirmed as followed: this process remembers it and, with ingest, so does the directory. */
+  private async noteFollowed(jid: string): Promise<void> {
+    this.seenChannels.add(jid);
+    if (this.ingest) await rememberChannel(jid);
   }
 
   /**
    * GET /channels: the channels this account follows among those this
    * connector has seen — chats of the history sync, conversations with
-   * ingested posts (ingest only), lookups and follows of this process — each
-   * confirmed by its own metadata. rc13 cannot ask WhatsApp for the followed
-   * list, so coverage.complete is always false.
+   * ingested posts (ingest only), lookups and follows of this process and the
+   * followed channels it remembered (ingest only) — each confirmed by its own
+   * metadata. rc13 cannot ask WhatsApp for the followed list, so
+   * coverage.complete is always false.
    */
   async listChannels(): Promise<ChannelListResult> {
     this.connectedSocket();
@@ -6131,11 +6167,16 @@ export class BaileysClient extends EventEmitter {
       if (jid) candidates.add(jid);
     }
     for (const jid of this.seenChannels) candidates.add(jid);
+    const remembered = new Set<string>();
     if (this.ingest) {
       for (const jid of await knownChannelConversations().catch((e: any) => {
         this.logger.warn(`known channel conversations unavailable: ${e?.message || e}`);
         return [] as string[];
       })) {
+        candidates.add(jid);
+      }
+      for (const jid of await rememberedChannels()) {
+        remembered.add(jid);
         candidates.add(jid);
       }
     }
@@ -6158,6 +6199,10 @@ export class BaileysClient extends EventEmitter {
           channels.push(view);
         } else {
           this.seenChannels.delete(view.channelId);
+          // Only a row that exists is deleted: a channel seen but never followed has none.
+          if (view.following === false && remembered.has(view.channelId)) {
+            await forgetChannel(view.channelId);
+          }
         }
       }
     }
@@ -6197,9 +6242,15 @@ export class BaileysClient extends EventEmitter {
           'not_following'
         );
       }
-      const result = (changed: boolean, channel: ChannelView): ChannelSubscriptionResult => {
-        if (channel.following) this.seenChannels.add(jid);
-        else if (channel.following === false) this.seenChannels.delete(jid);
+      const result = async (
+        changed: boolean,
+        channel: ChannelView
+      ): Promise<ChannelSubscriptionResult> => {
+        if (channel.following) await this.noteFollowed(jid);
+        else if (channel.following === false) {
+          this.seenChannels.delete(jid);
+          if (this.ingest) await forgetChannel(jid);
+        }
         this.logger.info(
           `Channel ${jid} ${verb}${changed ? '' : ' (already)'}${request.actor ? ` by ${request.actor}` : ''}`
         );

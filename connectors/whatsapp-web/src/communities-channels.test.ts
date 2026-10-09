@@ -36,6 +36,7 @@ import {
   parseChannelJid,
   parseChannelQuery,
   parseChannelSubscriptionAction,
+  resetChannelDirectoryStateForTests,
 } from './channels';
 import { MessageMutationError } from './message-mutations';
 import { resetChatStateForTests } from './chat-state';
@@ -45,7 +46,7 @@ import { generateHMACSignature } from './api/auth';
 
 type Rows = Record<string, unknown>[];
 
-function stubPool(route: (sql: string, params: unknown[]) => Rows = () => []): {
+function stubPool(route: (sql: string, params: unknown[]) => Rows | Error = () => []): {
   calls: Array<{ sql: string; params: unknown[] }>;
   restore: () => void;
 } {
@@ -55,7 +56,9 @@ function stubPool(route: (sql: string, params: unknown[]) => Rows = () => []): {
   (pg.Pool.prototype as any).query = function (sql: string, params: unknown[] = []) {
     calls.push({ sql, params });
     const rows = route(sql, params);
-    return Promise.resolve({ rows, rowCount: rows.length });
+    return rows instanceof Error
+      ? Promise.reject(rows)
+      : Promise.resolve({ rows, rowCount: rows.length });
   };
   return {
     calls,
@@ -70,7 +73,12 @@ function useAccount(account: string): void {
   process.env.CONNECTOR_ACCOUNT = account;
   resetDurableStoreStateForTests();
   resetChatStateForTests();
+  resetChannelDirectoryStateForTests();
 }
+
+// No test here has a database: what a client with ingest writes (the followed-channel
+// directory) goes to this stub unless a test installs its own.
+stubPool();
 
 const isWrite = (sql: string): boolean => /\b(INSERT|UPDATE|DELETE)\b/i.test(sql);
 
@@ -151,7 +159,10 @@ interface Provider {
   createAnswer?: 'null' | 'meta';
 }
 
-function newsletterAnswer(jid: string, state: Provider['channels'] extends Map<string, infer V> ? V : never): any {
+function newsletterAnswer(
+  jid: string,
+  state: Provider['channels'] extends Map<string, infer V> ? V : never
+): any {
   return {
     id: jid,
     state: { type: 'ACTIVE' },
@@ -224,7 +235,9 @@ function makeClient(
   const sock = {
     ev: { on: () => {} },
     user: { id: '34600111222:5@s.whatsapp.net', lid: '900:5@lid' },
-    signalRepository: { lidMapping: { getLIDForPN: async () => null, getPNForLID: async () => null } },
+    signalRepository: {
+      lidMapping: { getLIDForPN: async () => null, getPNForLID: async () => null },
+    },
     groupFetchAllParticipating: async () => {
       calls.push('participating');
       failing('participating');
@@ -257,7 +270,9 @@ function makeClient(
         });
       });
       failing('create');
-      return state.createAnswer === 'null' ? null : structuredClone(state.groups.get(OTHER_COMMUNITY));
+      return state.createAnswer === 'null'
+        ? null
+        : structuredClone(state.groups.get(OTHER_COMMUNITY));
     },
     communityLinkGroup: async (groupJid: string, parent: string) => {
       write(`link:${groupJid}:${parent}`, () => {
@@ -363,7 +378,10 @@ test('channel inputs: jid, its digits, a share link (with or without https) or t
     type: 'invite',
     key: '0029VaClubAbc123',
   });
-  assert.deepEqual(parseChannelQuery('0029VaClubAbc123'), { type: 'invite', key: '0029VaClubAbc123' });
+  assert.deepEqual(parseChannelQuery('0029VaClubAbc123'), {
+    type: 'invite',
+    key: '0029VaClubAbc123',
+  });
   for (const bad of ['', 'https://example.com/channel/abc123', 'hola que tal', COMMUNITY, 7]) {
     assert.throws(() => parseChannelQuery(bad), fails(400, 'invalid_request'), String(bad));
   }
@@ -379,7 +397,12 @@ test('channel inputs: jid, its digits, a share link (with or without https) or t
 
 test("channel view: rc13's raw WMex answer, only public fields (no picture handles)", () => {
   const view = channelView(
-    newsletterAnswer(CHANNEL, { role: 'SUBSCRIBER', mute: 'ON', invite: '0029VaClubAbc123', name: 'Club' })
+    newsletterAnswer(CHANNEL, {
+      role: 'SUBSCRIBER',
+      mute: 'ON',
+      invite: '0029VaClubAbc123',
+      name: 'Club',
+    })
   );
   assert.deepEqual(view, {
     channelId: CHANNEL,
@@ -395,7 +418,12 @@ test("channel view: rc13's raw WMex answer, only public fields (no picture handl
   });
   assert.doesNotMatch(JSON.stringify(view), /secret|direct_path/);
   // The flat NewsletterMetadata of rc13's types, a guest without viewer mute.
-  const flat = channelView({ id: CHANNEL, name: 'Club', subscribers: 7, viewer_metadata: { role: 'GUEST' } });
+  const flat = channelView({
+    id: CHANNEL,
+    name: 'Club',
+    subscribers: 7,
+    viewer_metadata: { role: 'GUEST' },
+  });
   assert.equal(flat.following, false);
   assert.equal(flat.muted, null);
   assert.equal(flat.subscribers, 7);
@@ -470,7 +498,10 @@ test('one write per key at a time; other keys do not wait', async () => {
   await Promise.all([first, second]);
   assert.deepEqual(order, ['a1 start', 'b', 'a1 end', 'a2']);
   // A failure does not block the next one.
-  await assert.rejects(serializer.run('a', async () => Promise.reject(new Error('x'))), /x/);
+  await assert.rejects(
+    serializer.run('a', async () => Promise.reject(new Error('x'))),
+    /x/
+  );
   assert.equal(await serializer.run('a', async () => 'next'), 'next');
 });
 
@@ -498,7 +529,12 @@ test('list: communities from the group parser, their groups from <sub_groups>, a
     jid === OTHER_COMMUNITY ? structuredClone(state.groups.get(jid)) : original(jid);
   const { communities } = await client.listCommunities();
   assert.deepEqual(
-    communities.map(c => [c.communityId, c.subject, c.capabilities.isMember, c.linkedGroups.length]),
+    communities.map(c => [
+      c.communityId,
+      c.subject,
+      c.capabilities.isMember,
+      c.linkedGroups.length,
+    ]),
     [
       [OTHER_COMMUNITY, 'Asociación', false, 1],
       [COMMUNITY, 'Club', true, 2],
@@ -565,7 +601,10 @@ test('create: the new community; a null answer is found by reading back, never c
     fails(422, 'rejected_by_whatsapp')
   );
   for (const bad of ['', 'x'.repeat(101)]) {
-    await assert.rejects(makeClient(provider()).client.createCommunity(bad, ''), fails(400, 'invalid_request'));
+    await assert.rejects(
+      makeClient(provider()).client.createCommunity(bad, ''),
+      fails(400, 'invalid_request')
+    );
   }
 });
 
@@ -584,7 +623,12 @@ test('link: community admin and group admin, ordinary group, read back; already 
 
   // Refusals before anything is sent.
   const cases: Array<[(s: Provider) => void, string, number, string]> = [
-    [s => (s.groups.get(COMMUNITY).participants[0].admin = null), PLAIN, 403, 'not_community_admin'],
+    [
+      s => (s.groups.get(COMMUNITY).participants[0].admin = null),
+      PLAIN,
+      403,
+      'not_community_admin',
+    ],
     [s => (s.groups.get(PLAIN).participants[0].admin = null), PLAIN, 403, 'not_group_admin'],
     [s => (s.groups.get(PLAIN).participants = []), PLAIN, 403, 'not_group_member'],
     [() => {}, ANNOUNCE, 422, 'not_linkable_group'],
@@ -748,7 +792,10 @@ test('subscription: follow / unfollow / mute / unmute proven by the viewer metad
   assert.equal(muted.channel.muted, true);
   assert.equal((await client.setChannelSubscription(CHANNEL_2, 'mute')).changed, false);
   assert.equal((await client.setChannelSubscription(CHANNEL_2, 'unmute')).channel.muted, false);
-  assert.equal((await client.setChannelSubscription(CHANNEL_2, 'unfollow')).channel.following, false);
+  assert.equal(
+    (await client.setChannelSubscription(CHANNEL_2, 'unfollow')).channel.following,
+    false
+  );
   assert.equal((await client.setChannelSubscription(CHANNEL_2, 'unfollow')).changed, false);
   assert.deepEqual(state.writes, [
     `follow:${CHANNEL_2}`,
@@ -756,7 +803,10 @@ test('subscription: follow / unfollow / mute / unmute proven by the viewer metad
     `unmute:${CHANNEL_2}`,
     `unfollow:${CHANNEL_2}`,
   ]);
-  await assert.rejects(client.setChannelSubscription(CHANNEL_2, 'mute'), fails(422, 'not_following'));
+  await assert.rejects(
+    client.setChannelSubscription(CHANNEL_2, 'mute'),
+    fails(422, 'not_following')
+  );
   await assert.rejects(
     client.setChannelSubscription('120363499999999999@newsletter', 'follow'),
     fails(404, 'channel_unavailable')
@@ -872,6 +922,167 @@ test('followed list: known chats, ingested channel conversations and this proces
   }
 });
 
+/** The followed-channel directory as a table of (account, jid) rows: the three statements of channels.ts. */
+function directoryRoute(table: Map<string, Set<string>>): (sql: string, params: unknown[]) => Rows {
+  return (sql, params) => {
+    const account = String(params[0]);
+    if (/INSERT INTO whatsapp_novedades_channels/.test(sql)) {
+      table.set(account, (table.get(account) ?? new Set()).add(String(params[1])));
+      return [];
+    }
+    if (/DELETE FROM whatsapp_novedades_channels/.test(sql)) {
+      table.get(account)?.delete(String(params[1]));
+      return [];
+    }
+    if (/FROM whatsapp_novedades_channels/.test(sql)) {
+      return [...(table.get(account) ?? [])].map(channel_jid => ({ channel_jid }));
+    }
+    return [];
+  };
+}
+
+test('followed list: a followed channel with no post survives a restart; one no longer followed is forgotten', async () => {
+  useAccount('professional');
+  const table = new Map<string, Set<string>>();
+  const { restore } = stubPool(directoryRoute(table));
+  try {
+    await makeClient(provider()).client.lookupChannel(CHANNEL);
+    assert.deepEqual([...(table.get('professional') ?? [])], [CHANNEL]);
+    // A restart: a new client with an empty memory, and no conversation holds a post of it.
+    const state = provider();
+    const restarted = makeClient(state).client;
+    assert.deepEqual(
+      (await restarted.listChannels()).channels.map(c => c.channelId),
+      [CHANNEL]
+    );
+    // WhatsApp says the account no longer follows it: not listed, and its row goes.
+    state.channels.get(CHANNEL)!.role = 'GUEST';
+    assert.deepEqual((await restarted.listChannels()).channels, []);
+    assert.deepEqual([...(table.get('professional') ?? [])], []);
+    // An explicit follow is remembered, an explicit unfollow forgets.
+    await restarted.setChannelSubscription(CHANNEL_2, 'follow');
+    assert.deepEqual([...(table.get('professional') ?? [])], [CHANNEL_2]);
+    await restarted.setChannelSubscription(CHANNEL_2, 'unfollow');
+    assert.deepEqual([...(table.get('professional') ?? [])], []);
+  } finally {
+    restore();
+  }
+});
+
+test('followed list: the directory never lists a channel on its own say: a row WhatsApp does not confirm is not listed', async () => {
+  useAccount('personal');
+  const table = new Map([['personal', new Set([CHANNEL_2, '120363499999999999@newsletter'])]]);
+  const { restore } = stubPool(directoryRoute(table));
+  try {
+    const { client } = makeClient(provider());
+    const result = await client.listChannels();
+    // CHANNEL_2 is a guest, the other does not exist: neither is listed, one row is forgotten.
+    assert.deepEqual(result.channels, []);
+    assert.deepEqual(result.coverage.candidates, 2);
+    assert.deepEqual(result.coverage.unreadable, 1);
+    assert.deepEqual([...(table.get('personal') ?? [])], ['120363499999999999@newsletter']);
+  } finally {
+    restore();
+  }
+});
+
+test('followed list: three accounts share the table and never see each other', async () => {
+  const third = '120363400000000003@newsletter';
+  const table = new Map<string, Set<string>>();
+  const { calls, restore } = stubPool(directoryRoute(table));
+  const followedByWhatsApp = (): Provider => {
+    const state = provider();
+    state.channels.get(CHANNEL_2)!.role = 'SUBSCRIBER';
+    state.channels.set(third, {
+      role: 'SUBSCRIBER',
+      mute: 'OFF',
+      invite: '0029VaThird',
+      name: 'Tres',
+    });
+    return state;
+  };
+  const own: Array<[string, string]> = [
+    ['personal', CHANNEL],
+    ['professional', CHANNEL_2],
+    ['leila', third],
+  ];
+  try {
+    for (const [account, channel] of own) {
+      useAccount(account);
+      await makeClient(followedByWhatsApp()).client.lookupChannel(channel);
+    }
+    assert.deepEqual(
+      [...table].map(([account, jids]) => [account, [...jids]]),
+      own.map(([account, channel]) => [account, [channel]])
+    );
+    // Each account lists only what it remembered, though WhatsApp confirms all three.
+    for (const [account, channel] of own) {
+      useAccount(account);
+      const list = await makeClient(followedByWhatsApp()).client.listChannels();
+      assert.deepEqual(
+        list.channels.map(c => c.channelId),
+        [channel]
+      );
+    }
+    // One account unfollowing leaves the others' rows alone.
+    useAccount('professional');
+    await makeClient(followedByWhatsApp()).client.setChannelSubscription(CHANNEL_2, 'unfollow');
+    assert.deepEqual(
+      [...table].map(([account, jids]) => [account, [...jids]]),
+      [
+        ['personal', [CHANNEL]],
+        ['professional', []],
+        ['leila', [third]],
+      ]
+    );
+    const accounts = new Set(own.map(([account]) => account));
+    for (const call of calls.filter(c => /whatsapp_novedades_channels/.test(c.sql))) {
+      assert.ok(accounts.has(String(call.params[0])), 'every statement names its own account');
+    }
+  } finally {
+    restore();
+  }
+});
+
+test('followed list: the table missing (42P01) is one warning and a list as before; asked again after a while', async () => {
+  useAccount('personal');
+  const missing = Object.assign(
+    new Error('relation "whatsapp_novedades_channels" does not exist'),
+    {
+      code: '42P01',
+    }
+  );
+  const warned: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message?: unknown) => void warned.push(String(message));
+  const { calls, restore } = stubPool(sql =>
+    /whatsapp_novedades_channels/.test(sql)
+      ? missing
+      : /FROM conversations/.test(sql)
+        ? [{ jid: CHANNEL }]
+        : []
+  );
+  const asked = (): number => calls.filter(c => /whatsapp_novedades_channels/.test(c.sql)).length;
+  try {
+    const { client } = makeClient(provider());
+    await client.lookupChannel(CHANNEL);
+    const list = await client.listChannels();
+    assert.deepEqual(
+      list.channels.map(c => c.channelId),
+      [CHANNEL]
+    );
+    await client.setChannelSubscription(CHANNEL_2, 'follow');
+    assert.equal(asked(), 1, 'the table is not asked again while it is known to be missing');
+    assert.equal(warned.filter(message => /migration 021/.test(message)).length, 1);
+    resetChannelDirectoryStateForTests();
+    await client.listChannels();
+    assert.equal(asked(), 2, 'asked again once the wait is over');
+  } finally {
+    console.warn = originalWarn;
+    restore();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -942,9 +1153,21 @@ function recordingClient(connected = true): { client: Partial<BaileysClient>; se
       seen.push({ create: [subject, description, options] });
       return { communityId: OTHER_COMMUNITY, community } as never;
     },
-    updateCommunityGroup: async (id: unknown, groupId: unknown, action: unknown, options?: unknown) => {
+    updateCommunityGroup: async (
+      id: unknown,
+      groupId: unknown,
+      action: unknown,
+      options?: unknown
+    ) => {
       seen.push({ groups: [id, groupId, action, options] });
-      return { action, communityId: id, groupId, changed: true, confirmed: true, community } as never;
+      return {
+        action,
+        communityId: id,
+        groupId,
+        changed: true,
+        confirmed: true,
+        community,
+      } as never;
     },
     leaveCommunity: async (id: unknown, options?: unknown) => {
       seen.push({ leave: [id, options] });
@@ -995,19 +1218,31 @@ test('HTTP: 400s first, then the sending gate on the four writes; reads are not 
       for (const [path, body] of BAD_WRITES) {
         const res = await call('POST', path, body);
         assert.equal(res.status, 400, `${path} ${JSON.stringify(body)}`);
-        assert.equal(((await res.json()) as { failureClass: string }).failureClass, 'invalid_request');
+        assert.equal(
+          ((await res.json()) as { failureClass: string }).failureClass,
+          'invalid_request'
+        );
       }
       for (const [path, body] of WRITES) {
         const res = await call('POST', path, body);
         assert.equal(res.status, 403, path);
-        assert.equal(((await res.json()) as { failureClass: string }).failureClass, 'disabled_sending');
+        assert.equal(
+          ((await res.json()) as { failureClass: string }).failureClass,
+          'disabled_sending'
+        );
       }
       for (const body of [{ communityId: CHANNEL }, {}]) {
         assert.equal((await call('POST', '/communities/state', body)).status, 400);
       }
-      assert.equal((await call('POST', '/channels/lookup', { channel: 'hola que tal' })).status, 400);
+      assert.equal(
+        (await call('POST', '/channels/lookup', { channel: 'hola que tal' })).status,
+        400
+      );
       assert.equal((await call('GET', '/communities')).status, 200);
-      assert.equal((await call('POST', '/communities/state', { communityId: COMMUNITY })).status, 200);
+      assert.equal(
+        (await call('POST', '/communities/state', { communityId: COMMUNITY })).status,
+        200
+      );
       assert.equal((await call('POST', '/channels/lookup', { channel: CHANNEL })).status, 200);
       assert.equal((await call('GET', '/channels')).status, 200);
     });
@@ -1049,7 +1284,10 @@ test('HTTP: answers with the actor recorded; 503 offline; unsigned 401', async (
     });
     assert.equal(groups.status, 200);
     assert.equal(((await groups.json()) as { updated: boolean }).updated, true);
-    const left = await call('POST', '/communities/leave', { communityId: COMMUNITY, confirm: true });
+    const left = await call('POST', '/communities/leave', {
+      communityId: COMMUNITY,
+      confirm: true,
+    });
     assert.deepEqual(await left.json(), {
       left: true,
       communityId: COMMUNITY,
@@ -1091,7 +1329,14 @@ test('HTTP: answers with the actor recorded; 503 offline; unsigned 401', async (
 
 test('HTTP: client errors keep their status, failureClass and details', async () => {
   for (const [error, status, failureClass, extra] of [
-    [new CommunityActionError('x', 409, 'linked_elsewhere', { details: { linkedTo: OTHER_COMMUNITY } }), 409, 'linked_elsewhere', { linkedTo: OTHER_COMMUNITY }],
+    [
+      new CommunityActionError('x', 409, 'linked_elsewhere', {
+        details: { linkedTo: OTHER_COMMUNITY },
+      }),
+      409,
+      'linked_elsewhere',
+      { linkedTo: OTHER_COMMUNITY },
+    ],
     [new MessageMutationError('x', 409, 'change_not_confirmed'), 409, 'change_not_confirmed', {}],
     [new CommunityActionError('x', 422, 'not_a_community'), 422, 'not_a_community', {}],
   ] as const) {

@@ -622,6 +622,45 @@ export async function channelPostMessageId(channelJid: string, id: string): Prom
   }
 }
 
+/** How many revokes that arrived before their post are remembered, and for how long. */
+const REVOKE_TOMBS_MAX = 2000;
+const REVOKE_TOMB_TTL_MS = 24 * 60 * 60 * 1000;
+const revokeTombs = new Map<string, number>();
+
+/** Test hook: forget every remembered revoke. */
+export function resetRevokeTombsForTests(): void {
+  revokeTombs.clear();
+}
+
+const tombKey = (chatJid: string, id: string): string => `${chatJid}|${id}`;
+
+/**
+ * A revoke of a channel post or a status found no row: its post has not been
+ * stored yet. Remembered in this process (never in the database: it does not
+ * survive a restart) so the post is marked deleted when it arrives instead of
+ * coming back. The key is the chat and the WhatsApp id exactly as they arrive,
+ * before any composition and without the account prefix, so neither the order
+ * of arrival nor `channelPostMessageId` can give the tomb to another channel.
+ * At most REVOKE_TOMBS_MAX; the oldest goes first.
+ */
+export function noteRevokeBeforePost(chatJid: string, id: string): void {
+  const key = tombKey(chatJid, id);
+  revokeTombs.delete(key);
+  revokeTombs.set(key, Date.now());
+  if (revokeTombs.size > REVOKE_TOMBS_MAX) {
+    revokeTombs.delete(revokeTombs.keys().next().value as string);
+  }
+}
+
+/** Whether a revoke of this post arrived first (and is not older than 24 h); it is used up. */
+export function takeRevokeBeforePost(chatJid: string, id: string): boolean {
+  const key = tombKey(chatJid, id);
+  const notedAt = revokeTombs.get(key);
+  if (notedAt === undefined) return false;
+  revokeTombs.delete(key);
+  return Date.now() - notedAt <= REVOKE_TOMB_TTL_MS;
+}
+
 /**
  * Posts of the channels this account receives (or of one), newest first,
  * from `messages`: the conversations of `<id>@newsletter`. A deleted post is

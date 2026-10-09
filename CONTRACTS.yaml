@@ -2070,7 +2070,10 @@ contracts:
       the followed list, so candidates are the channels this connector has
       seen — @newsletter chats of the history sync, conversations with
       ingested channel posts (ingest only), look-ups and follows of this
-      process — at most 100, each confirmed by its own newsletterMetadata
+      process, and the followed channels it remembered
+      (whatsapp_novedades_channels, migration 021; ingest only, a candidate
+      like the rest, never the answer) — at most 100, each confirmed by its
+      own newsletterMetadata
       (role owner|admin|subscriber). 200 {channels [channels-lookup.v1
       channel], count, coverage {complete: false, source: known-channels,
       candidates, checked, unreadable}}. The path and the 200 shape are
