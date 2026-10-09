@@ -43,6 +43,10 @@ overrides:
   # ask for. `pnpm update proxy-addr` will not move a transitive, so the resolver
   # is pointed at it here. Drop this entry when express ships a lock on 2.0.8.
   proxy-addr: ^2.0.8
+  # CVE-2026-106445 and CVE-2026-106446 are fixed in 4.7.10. handlebars is transitive:
+  # ts-jest (devDependency of the test packages) pins `^4.7.9`, so 4.7.10 is inside the
+  # range its parent already asks for. Drop this entry when ts-jest ships a lock on 4.7.10.
+  handlebars: ^4.7.10
 
 # pnpm >=10 blocks postinstall scripts unless listed here. Only the ones that
 # genuinely need to run are enabled, so the runtime images stay free of a native
