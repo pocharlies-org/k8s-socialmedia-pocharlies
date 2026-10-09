@@ -609,6 +609,7 @@ async function channelConversationIds(channelId?: string): Promise<string[]> {
  * stops the ingest.
  */
 export async function channelPostMessageId(channelJid: string, id: string): Promise<string> {
+  // The account prefix is not added here: accountKey does it on the way in (storeMessage, markMessageRevoked, markMessageEdited).
   try {
     const result = await getPool().query(
       `SELECT conversation_id FROM messages WHERE wa_message_id = $1`,

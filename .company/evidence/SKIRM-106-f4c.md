@@ -14,6 +14,8 @@ tsx --test src/statuses.test.ts   # tests 19, pass 16, fail 3
       expected: 'professional:222@newsletter:SAME'   actual: 'professional:SAME'
 ```
 
+El prefijo de cuenta lo pone `accountKey` al escribir (`storeMessage`) y al mutar (`markMessageRevoked`, `markMessageEdited`), no `channelPostMessageId`: la prueba 10 espera `'professional:222@newsletter:SAME'` y la 12, en la cuenta personal, `'222@newsletter:SAME'` sin prefijo.
+
 Con el id en la misma clave, `INSERT INTO messages ... ON CONFLICT (wa_message_id) DO NOTHING` descarta el segundo post sin dejar rastro.
 
 ## Verde tras el cambio
@@ -45,7 +47,7 @@ Mismo escenario con el código del tronco y con el de la rama, cuenta `professio
 - C2: pruebas 10, 12 y 14 de `statuses.test.ts`, rojas sobre el tronco y verdes tras el cambio; el escenario sobre el esquema del tronco (tabla de arriba).
 - C3, C4 y C5: **no están en esta PR**. Las pruebas propias P2 y P3 del cuadro fallan sobre el tronco y su arreglo pide una tabla nueva (migración `021_…`, aditiva), que no se escribe aquí: depende del sandbox de SKIRM-89 fusionado. Quedan para la siguiente PR de la historia.
 - C6: las pruebas 1 a 9 de `statuses.test.ts` (ingest del estado, lectura por autor, índice ausente `42P01`, lectura de posts de canal) pasan antes y después sin tocarlas; las pruebas 11 y 13 (id desnudo sin choque o con consulta fallida) también.
-- C7: ninguna tool cambia; suite de whatsapp-web verde; `ARCHITECTURE.md` §8 actualizada (§4 no cambia: esta PR no añade tabla); sin cambio de `CONTRACTS.yaml` (`http.whatsapp-connector.channels-posts.v1` mantiene ruta, cuerpo y forma del 200; el `messageId` de un post con choque es la cadena compuesta); trailers en «Autoría adoptada».
+- C7: ninguna tool cambia; suite de whatsapp-web verde; `ARCHITECTURE.md` §8 actualizada (§4 no cambia: esta PR no añade tabla); `CONTRACTS.yaml`: solo la nota de `http.whatsapp-connector.channels-posts.v1` (antes «Ids bare.», ahora «Ids bare, except a post whose id another channel already holds: its messageId is `<channelId>:<id>`»; ruta, cuerpo y forma del 200 no cambian, sin `.v2`; commit con `Contract-Change: migrate http.whatsapp-connector.channels-posts.v1`); trailers en «Autoría adoptada».
 
 ## Cuadro del paso 0 (copia de 50-entrega.md)
 
