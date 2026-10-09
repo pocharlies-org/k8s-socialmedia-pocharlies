@@ -2299,10 +2299,13 @@ contracts:
     note: >-
       Additive to http.whatsapp-connector.messages-media-send.v1 (QA
       02-10-2026): optional body `fileName` (string) = the name a document
-      carries on WhatsApp; path separators and control characters dropped,
-      ≤ 200 chars. Absent → the last path segment of fileUrl WITHOUT its
-      query string (before, a presigned URL's `…/x.pdf?X-Amz-…` became the
-      name). Not a string → 400 failureClass invalid_file_name, before the
+      carries on WhatsApp; only its last path segment is kept (`../a.pdf` →
+      `a.pdf`; SKIRM-129, before the separators were dropped and the
+      segments glued: `..a.pdf`), control characters dropped, ≤ 200 chars.
+      Absent → the last path segment of fileUrl WITHOUT its query string
+      (before, a presigned URL's `…/x.pdf?X-Amz-…` became the name), or
+      `attachment` for a data: URL, which has no path. Not a string → 400
+      failureClass invalid_file_name, before the
       gate. It enters the Idempotency-Key hash only when set, so a key
       recorded without it replays the same send. Consumers: the MCP
       social_send_message (attachment `name`) and dgx-messages send-media

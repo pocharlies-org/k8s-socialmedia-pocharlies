@@ -48,15 +48,13 @@ export function appendMediaEligible(
 
 const MAX_FILE_NAME = 200;
 
-/** A file name without path separators nor control characters, ≤ 200 chars. */
+/** A file name: the last path segment, no control characters, ≤ 200 chars. */
 export function cleanFileName(value: string): string {
-  return (
-    value
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\u0000-\u001f\u007f/\\]/g, '')
-      .trim()
-      .slice(0, MAX_FILE_NAME)
-  );
+  const segments = value
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .split(/[\\/]/);
+  return (segments.filter(segment => segment.trim()).pop() ?? '').trim().slice(0, MAX_FILE_NAME);
 }
 
 /**
@@ -67,6 +65,8 @@ export function cleanFileName(value: string): string {
 export function documentFileName(fileUrl: string, explicit?: string): string {
   const given = explicit ? cleanFileName(explicit) : '';
   if (given) return given;
+  // A data: URL has no path: what follows its type is the payload, not a name.
+  if (/^data:/i.test(fileUrl)) return 'attachment';
   let segment = '';
   try {
     segment = new URL(fileUrl).pathname.split('/').pop() || '';
