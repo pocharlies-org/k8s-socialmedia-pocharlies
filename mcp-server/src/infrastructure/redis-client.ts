@@ -13,7 +13,9 @@ export function createRedisClient(url: string, options: RedisOptions = {}): Redi
     return new Redis(url, options);
   }
   // Sentinel mode ignores the URL, so carry its credentials and db over.
-  const parsed = new URL(url);
+  // Parsed with a regex, not `new URL()`: redis:// is a non-special scheme and
+  // the parse must not depend on WHATWG URL behaviour for it.
+  const parsed = /^rediss?:\/\/(?:([^:@/]+)(?::([^@/]*))?@)?[^/]+(?:\/(\d+))?\/?$/.exec(url);
   const sentinels = sentinelsRaw.split(',').map(entry => {
     const [host, port] = entry.trim().split(':');
     return { host, port: Number(port) || 26379 };
@@ -21,9 +23,9 @@ export function createRedisClient(url: string, options: RedisOptions = {}): Redi
   return new Redis({
     sentinels,
     name: masterName,
-    username: decodeURIComponent(parsed.username) || undefined,
-    password: decodeURIComponent(parsed.password) || undefined,
-    db: Number(parsed.pathname.replace('/', '')) || 0,
+    username: parsed?.[1] ? decodeURIComponent(parsed[1]) : undefined,
+    password: parsed?.[2] ? decodeURIComponent(parsed[2]) : undefined,
+    db: parsed?.[3] ? Number(parsed[3]) : 0,
     ...options,
   });
 }
