@@ -369,7 +369,7 @@ test('with ingest off nothing is written or read from whatsapp_message_payloads'
 test('markAsRead sends receipts for every unread key and records them as read', async () => {
   useAccount('professional');
   const { calls, restore } = stubPool(sql =>
-    /FROM conv/i.test(sql)
+    /WITH conv AS/.test(sql)
       ? [
           {
             wa_message_id: 'professional:U2',
@@ -384,12 +384,14 @@ test('markAsRead sends receipts for every unread key and records them as read', 
             participant_jid: '34611@s.whatsapp.net',
           },
         ]
-      : []
+      : /WITH RECURSIVE hop/.test(sql)
+        ? [{ id: 'professional:120363@g.us', external_id: '120363@g.us' }]
+        : []
   );
   try {
     const { client, reads } = makeClient();
     await client.markAsRead('120363@g.us');
-    const unreadQuery = calls.find(c => /FROM conv/i.test(c.sql))!;
+    const unreadQuery = calls.find(c => /WITH conv AS/.test(c.sql))!;
     assert.equal(unreadQuery.params[0], 'professional:120363@g.us');
     assert.equal(unreadQuery.params[1], 'professional');
     assert.match(unreadQuery.sql, /m\.direction = 'INBOUND'/);
@@ -404,7 +406,8 @@ test('markAsRead sends receipts for every unread key and records them as read', 
     );
     const update = calls.find(c => /UPDATE messages SET status = 'read'/i.test(c.sql))!;
     assert.deepEqual(update.params[0], ['professional:U2', 'professional:U1']);
-    assert.ok(calls.some(c => /UPDATE conversations SET unread_count/i.test(c.sql)));
+    const badge = calls.find(c => /UPDATE conversations SET unread_count/i.test(c.sql))!;
+    assert.deepEqual(badge.params, ['professional:120363@g.us', 0]);
   } finally {
     restore();
   }

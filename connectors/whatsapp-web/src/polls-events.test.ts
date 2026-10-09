@@ -33,6 +33,7 @@ import { buildPollVoteContent, optionHash, PollEventInputError } from './poll-vo
 import { buildEventResponseContent } from './event-responses';
 import { MessageMutationError } from './message-mutations';
 import { createRouter } from './api/controller';
+import { sendAttemptsRoute } from './test-support/send-attempts-route';
 import { generateHMACSignature } from './api/auth';
 
 interface QueryCall {
@@ -382,6 +383,41 @@ test('PN-signed votes of a LID participant decrypt (alt jid or Baileys mapping);
   }
 });
 
+test('a LID voter whose key also carries the phone number: one row under the LID, the later vote replaces it', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool();
+  try {
+    const { client } = makeClient();
+    await priv(client).ingestMessage(pollMessage(), { source: 'live', publishEvent: false });
+    calls.length = 0;
+    // Fixture of the fork's poll-votes.fork.test.ts ('captured group votes use the encrypted LID even when a
+    // PN alias is present', PR #74): a voter signing as a LID, its number on the key.
+    const voter = { participant: '123456789@lid', participantAlt: '346000000001@s.whatsapp.net' };
+    for (const [id, option, ms] of [
+      ['VOTE_A', 'Sí', 1727000001000],
+      ['VOTE_B', 'No', 1727000002000],
+    ] as const) {
+      await priv(client).ingestMessage(
+        voteMessage({ id, options: [option], creator: '2222@lid', voter: voter.participant, key: voter, ms }),
+        { source: 'live', publishEvent: false }
+      );
+    }
+    const rows = calls.filter(c => isVoteInsert(c.sql));
+    assert.deepEqual(
+      rows.map(r => [r.params[2], r.params[5], r.params[9]]),
+      [
+        ['professional:123456789@lid', ['Sí'], new Date(1727000001000)],
+        ['professional:123456789@lid', ['No'], new Date(1727000002000)],
+      ],
+      'both votes are filed under the LID, never under the phone alias: one voter, the newer vote'
+    );
+    assert.match(rows[1].sql, /ON CONFLICT \(account, poll_wa_message_id, voter_jid\)/);
+    assert.match(rows[1].sql, /EXCLUDED\.voted_at >= whatsapp_poll_votes\.voted_at/);
+  } finally {
+    restore();
+  }
+});
+
 test('a vote from our phone is ours; an unknown poll or a bad ciphertext is skipped, never a crash', async () => {
   useAccount('personal');
   const { calls, restore } = stubPool();
@@ -724,6 +760,73 @@ test('our event response: phone identities (from the key alternate), cancelled /
   }
 });
 
+/**
+ * The socket has not told us who we are yet: only meJid, and it is a LID. The two tests below adapt the
+ * fork's event-client.test.ts ('RSVP resolves LID identities to phone numbers before encrypting the response'
+ * and 'unresolvable own or creator identity raises a typed 409 before the send token is claimed', PR #74)
+ * to respondToEvent and to the trunk's 422 identity_unavailable.
+ */
+function onlyOurLid(client: BaileysClient): void {
+  priv(client).sock.user = undefined;
+  priv(client).meJid = '10000:1@lid';
+}
+
+test('our event response when we are only known as a LID: signed with the phone number Baileys maps it to', async () => {
+  useAccount('personal');
+  const { restore } = stubPool();
+  try {
+    const { client, relayed } = makeClient({}, { pnForLid: { '10000@lid': '10000@s.whatsapp.net' } });
+    onlyOurLid(client);
+    const event = eventMessage();
+    priv(client).rememberKey('EV1', event.key, GROUP);
+    priv(client).rememberMessageForRetry(event.key, event.message);
+    await client.respondToEvent(GROUP, 'EV1', { response: 'going', extraGuestCount: 0 });
+    const enc = relayed[0].message.encEventResponseMessage;
+    const decoded = decryptEventResponse(
+      { encPayload: enc.encPayload, encIv: enc.encIv },
+      {
+        eventCreatorJid: '34600@s.whatsapp.net',
+        eventMsgId: 'EV1',
+        eventEncKey: SECRET,
+        responderJid: '10000@s.whatsapp.net',
+      }
+    );
+    assert.equal(decoded.response, 1);
+  } finally {
+    restore();
+  }
+});
+
+test('our event response with no phone number of our own: refused before the claim and before WhatsApp', async () => {
+  useAccount('personal');
+  const { restore } = stubPool();
+  try {
+    const { client, relayed } = makeClient();
+    onlyOurLid(client);
+    const event = eventMessage();
+    priv(client).rememberKey('EV1', event.key, GROUP);
+    priv(client).rememberMessageForRetry(event.key, event.message);
+    let claimed = false;
+    await assert.rejects(
+      client.respondToEvent(
+        GROUP,
+        'EV1',
+        { response: 'going', extraGuestCount: 0 },
+        {
+          beforeSend: async () => {
+            claimed = true;
+          },
+        }
+      ),
+      (e: any) => e.status === 422 && e.failureClass === 'identity_unavailable'
+    );
+    assert.equal(claimed, false, 'an Idempotency-Key attempt is not spent on a response nobody can read');
+    assert.equal(relayed.length, 0);
+  } finally {
+    restore();
+  }
+});
+
 test('sending a poll / an event: canonical chat, payload kept, only chat jids', async () => {
   useAccount('professional');
   const { calls, restore } = stubPool((sql, params) =>
@@ -1041,26 +1144,7 @@ test('HTTP: 400 invalid requests (option counts, shapes), 503 disconnected, clie
 
 test('HTTP: opt-in Idempotency-Key on a poll: derived id, claim before the send, replay deduplicated', async () => {
   useAccount('personal');
-  const attempts = new Map<string, { request_hash: string; message_id: string; status: string }>();
-  const { restore } = stubPool((sql, params) => {
-    const key = `${params[0]}:${params[1]}`;
-    if (/INSERT INTO whatsapp_send_attempts/.test(sql)) {
-      if (attempts.has(key)) return [];
-      attempts.set(key, { request_hash: String(params[2]), message_id: String(params[3]), status: 'prepared' });
-      return [{ message_id: params[3] }];
-    }
-    const row = attempts.get(key);
-    if (/SELECT request_hash/.test(sql)) return row ? [{ ...row, updated_at: new Date(5) }] : [];
-    if (/SET status = 'pending'/.test(sql) && row?.status === 'prepared') {
-      row.status = 'pending';
-      return [{ message_id: row.message_id }];
-    }
-    if (/SET status = 'sent'/.test(sql) && row?.status === 'pending') {
-      row.status = 'sent';
-      return [{ updated_at: new Date(5) }];
-    }
-    return [];
-  });
+  const { restore } = stubPool(sendAttemptsRoute());
   const { client, seen } = recordingClient();
   Object.assign(client, { isIngestEnabled: () => true });
   try {
@@ -1079,5 +1163,120 @@ test('HTTP: opt-in Idempotency-Key on a poll: derived id, claim before the send,
     assert.equal(seen.length, 1, 'one poll reached the client');
   } finally {
     restore();
+  }
+});
+
+/** A client whose four sends claim right before the network, like the real ones, and can fail after it. */
+function claimingClient(): { client: Partial<BaileysClient>; sent: string[]; failAfterClaim: { on: boolean } } {
+  const sent: string[] = [];
+  const failAfterClaim = { on: false };
+  const send = (kind: string) => async (...args: any[]) => {
+    const options = args[args.length - 1] as { messageId?: string; beforeSend?: () => Promise<void> };
+    await options?.beforeSend?.();
+    if (failAfterClaim.on) throw new Error('timeout after the network send');
+    sent.push(kind);
+    return { messageId: options?.messageId || `${kind}-${sent.length}`, conversationId: GROUP, sentAt: 't' };
+  };
+  const client = {
+    isConnected: () => true,
+    getCachedState: () => 'CONNECTED',
+    isIngestEnabled: () => true,
+    sendPoll: send('poll'),
+    sendPollVote: send('vote'),
+    sendEvent: send('event'),
+    respondToEvent: send('respond'),
+  };
+  return { client: client as unknown as Partial<BaileysClient>, sent, failAfterClaim };
+}
+
+/** The same request with one field changed: the body a key must not be reused for. */
+const OTHER_BODY: Record<string, Record<string, unknown>> = {
+  '/messages/poll': { name: 'Otra' },
+  '/messages/poll/vote': { options: ['No'] },
+  '/messages/event': { name: 'Otra' },
+  '/messages/event/respond': { response: 'maybe' },
+};
+
+test('HTTP: a retry with the same Idempotency-Key of poll, vote, event or response sends nothing twice', async () => {
+  useAccount('personal');
+  const { restore } = stubPool(sendAttemptsRoute());
+  const { client, sent, failAfterClaim } = claimingClient();
+  try {
+    await withRouter(client, ON, async call => {
+      for (const [path, body] of VALID) {
+        const before = sent.length;
+        const headers = { 'idempotency-key': `key-${path}` };
+        const first = await call(path, body, headers);
+        assert.equal(first.status, 200, path);
+        const firstBody = (await first.json()) as Record<string, unknown>;
+        assert.match(String(firstBody.messageId), /^3EB0[0-9A-F]{18}$/, path);
+        const replay = await call(path, body, headers);
+        assert.equal(replay.status, 200, path);
+        const replayBody = (await replay.json()) as Record<string, unknown>;
+        assert.equal(replayBody.deduplicated, true, path);
+        assert.equal(replayBody.messageId, firstBody.messageId, path);
+        const reused = await call(path, { ...body, ...OTHER_BODY[path] }, headers);
+        assert.equal(reused.status, 409, path);
+        assert.equal(((await reused.json()) as { failureClass: string }).failureClass, 'idempotency_key_reused');
+        assert.equal(sent.length, before + 1, `${path}: one send for three requests`);
+
+        // The outcome is lost after the network send: the retry is uncertain and is not sent again.
+        const uncertain = { 'idempotency-key': `lost-${path}` };
+        failAfterClaim.on = true;
+        assert.ok((await call(path, body, uncertain)).status >= 500, `${path}: the failed send is an error`);
+        failAfterClaim.on = false;
+        const retried = await call(path, body, uncertain);
+        assert.equal(retried.status, 409, path);
+        assert.equal(((await retried.json()) as { failureClass: string }).failureClass, 'send_outcome_uncertain');
+        assert.equal(sent.length, before + 1, `${path}: the lost send is not repeated`);
+      }
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('HTTP: without an Idempotency-Key the four sends are as before; a constant sendToken never deduplicates', async () => {
+  useAccount('personal');
+  const { calls, restore } = stubPool();
+  const { client, sent } = claimingClient();
+  try {
+    await withRouter(client, ON, async call => {
+      for (const [path, body] of VALID) {
+        const withToken = { ...body, sendToken: 'one-token-for-everything' };
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const res = await call(path, withToken);
+          assert.equal(res.status, 200, path);
+          assert.equal(((await res.json()) as { deduplicated?: boolean }).deduplicated, undefined, path);
+        }
+      }
+    });
+    assert.equal(sent.length, 8, 'every request sent');
+    assert.equal(calls.filter(c => /whatsapp_send_attempts/.test(c.sql)).length, 0, 'no key, no table');
+  } finally {
+    restore();
+  }
+  // A client that reuses the token with a different key each time gets its own send, never a 409 or another result.
+  const keyed = stubPool(sendAttemptsRoute());
+  const second = claimingClient();
+  try {
+    await withRouter(second.client, ON, async call => {
+      for (const [path, body] of VALID) {
+        const ids = new Set<unknown>();
+        for (const key of ['a', 'b']) {
+          const res = await call(
+            path,
+            { ...body, sendToken: 'one-token-for-everything', ...(key === 'b' ? OTHER_BODY[path] : {}) },
+            { 'idempotency-key': `${key}-${path}` }
+          );
+          assert.equal(res.status, 200, path);
+          ids.add(((await res.json()) as { messageId: string }).messageId);
+        }
+        assert.equal(ids.size, 2, `${path}: two keys, two sends`);
+      }
+    });
+    assert.equal(second.sent.length, 8);
+  } finally {
+    keyed.restore();
   }
 });

@@ -28,6 +28,7 @@ import {
   AnyMessageContent,
   CacheStore,
   MiscMessageGenerationOptions,
+  Chat,
   ChatModification,
   WAPatchCreate,
   GroupMetadata,
@@ -70,7 +71,6 @@ import {
   getParticipantAvatar,
   setConversationAvatar,
   setParticipantAvatar,
-  setConversationState,
   setMessageStatus,
   setConversationWaChatId,
   getUnreadMessageKeysForChat,
@@ -185,9 +185,8 @@ import {
   hasInboundHistory,
   hasOutboundHistory,
   pinFromBaileys,
-  recordInboundChatState,
-  recordInboundConversationState,
   resolveCanonicalConversation,
+  setCanonicalChatState,
   writeChatState,
 } from './chat-state';
 import {
@@ -1693,27 +1692,7 @@ export class BaileysClient extends EventEmitter {
       // chats: Chat[] (Baileys type). Refresh in-memory chat store.
       for (const c of chats) {
         if (!c.id) continue;
-        const isGroup = !!isJidGroup(c.id);
-        const norm = this.normalizeJid(c.id);
-        this.chatStore.set(norm, {
-          id: norm,
-          rawJid: c.id,
-          name: c.name || c.id,
-          isGroup,
-          unreadCount: c.unreadCount || 0,
-          timestamp: Number(c.conversationTimestamp || 0),
-        });
-        // Persist real unread + archived from the history snapshot.
-        void recordInboundConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(
-          () => {}
-        );
-        // Pin / mute (fase 3 / PR-5): only what the snapshot says.
-        void recordInboundChatState(norm, {
-          pinnedAt: pinFromBaileys(c),
-          mute: muteFromBaileys(c, 'snapshot'),
-        });
-        // Disappearing timer (fase 3 / PR-8): never over a newer one.
-        void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
+        this.rememberChatSnapshot(c);
       }
       if (!this.historySyncOnLogin && Date.now() > this.historyBackfillRequestedUntil) return;
       this.logger.info(
@@ -1779,10 +1758,11 @@ export class BaileysClient extends EventEmitter {
         // badge alone instead of zeroing it).
         const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount;
         const arch = typeof (u as any).archived === 'boolean' ? (u as any).archived : undefined;
-        void recordInboundConversationState(norm, uc, arch).catch(() => {});
         // Pin / mute from app-state sync (the phone, or the echo of our own
-        // POST /chats/modify — same values), on the canonical conversation.
-        void recordInboundChatState(norm, {
+        // POST /chats/modify — same values), with the rest, on the canonical conversation.
+        void setCanonicalChatState(norm, {
+          unreadCount: uc,
+          archived: arch,
           pinnedAt: pinFromBaileys(u),
           mute: muteFromBaileys(u, 'sync-action'),
         });
@@ -1795,24 +1775,7 @@ export class BaileysClient extends EventEmitter {
     sock.ev.on('chats.upsert', upserts => {
       for (const c of upserts) {
         if (!c.id) continue;
-        const norm = this.normalizeJid(c.id);
-        this.chatStore.set(norm, {
-          id: norm,
-          rawJid: c.id,
-          name: c.name || c.id,
-          isGroup: !!isJidGroup(c.id),
-          unreadCount: c.unreadCount || 0,
-          timestamp: Number(c.conversationTimestamp || 0),
-        });
-        // Persist real unread badge + archived flag (fire-and-forget).
-        void recordInboundConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(
-          () => {}
-        );
-        void recordInboundChatState(norm, {
-          pinnedAt: pinFromBaileys(c),
-          mute: muteFromBaileys(c, 'snapshot'),
-        });
-        void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
+        this.rememberChatSnapshot(c);
         // Subscribe to presence so we get typing updates for this chat.
         void this.presenceSubscribeSilent(c.id);
       }
@@ -3459,12 +3422,12 @@ export class BaileysClient extends EventEmitter {
   // Polls and events (fase 3 / PR-7)
   // ---------------------------------------------------------------------------
 
-  /** Our own user jids for the vote / response crypto (PN from meJid when the socket has no user). */
+  /** Our own user jids for the vote / response crypto (meJid when the socket has no user: a PN or a LID). */
   private async ownIdentity(): Promise<OwnIdentity> {
-    const ids = await this.ownIds();
+    const ids = [...(await this.ownIds()), cryptoUserJid(this.meJid)];
     return {
-      pn: ids.find(id => id.endsWith('@s.whatsapp.net')) || cryptoUserJid(this.meJid),
-      lid: ids.find(id => id.endsWith('@lid')) || null,
+      pn: ids.find(id => id?.endsWith('@s.whatsapp.net')) ?? null,
+      lid: ids.find(id => id?.endsWith('@lid')) ?? null,
     };
   }
 
@@ -3829,7 +3792,11 @@ export class BaileysClient extends EventEmitter {
       });
     }
     const own = await this.ownIdentity();
-    const ownPn = own.pn;
+    // An event response is signed with phone numbers: ours comes from the LID when that is all we know.
+    const ownPn =
+      (await this.withAliases([own.pn, own.lid].filter((jid): jid is string => !!jid))).find(jid =>
+        jid.endsWith('@s.whatsapp.net')
+      ) ?? null;
     const creator = target.key.fromMe
       ? ownPn
       : (await this.withAliases(keyAuthorCandidates(target.key, own))).find(jid =>
@@ -4970,7 +4937,7 @@ export class BaileysClient extends EventEmitter {
     const norm = this.normalizeJid(raw);
     const chat = this.chatStore.get(norm);
     if (chat) chat.unreadCount = 0;
-    await setConversationState(norm, 0);
+    await setCanonicalChatState(norm, { unreadCount: 0 });
   }
 
   // ---------------------------------------------------------------------------
@@ -6629,6 +6596,30 @@ export class BaileysClient extends EventEmitter {
       `Disappearing ${target.raw} ${String(previous)} -> ${seconds}${request.actor ? ` by ${request.actor}` : ''}`
     );
     return { ...base, changed: true, persisted };
+  }
+
+  /**
+   * A chat as WhatsApp reports it whole (history snapshot, chats.upsert): the in-memory store, and
+   * the real unread badge, archive flag, pin / mute (fase 3 / PR-5: only what the snapshot says) and
+   * disappearing timer (PR-8: never over a newer one) on its canonical conversation. Fire-and-forget.
+   */
+  private rememberChatSnapshot(c: Chat): void {
+    const norm = this.normalizeJid(c.id as string);
+    this.chatStore.set(norm, {
+      id: norm,
+      rawJid: c.id as string,
+      name: c.name || (c.id as string),
+      isGroup: !!isJidGroup(c.id as string),
+      unreadCount: c.unreadCount || 0,
+      timestamp: Number(c.conversationTimestamp || 0),
+    });
+    void setCanonicalChatState(norm, {
+      unreadCount: c.unreadCount || 0,
+      archived: !!(c as any).archived,
+      pinnedAt: pinFromBaileys(c),
+      mute: muteFromBaileys(c, 'snapshot'),
+    });
+    void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
   }
 
   /**
