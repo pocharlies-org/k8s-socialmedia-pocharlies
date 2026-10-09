@@ -14,7 +14,7 @@ export function createRedisClient(url: string, options: RedisOptions = {}): Redi
   }
   // Sentinel mode ignores the URL, so carry its credentials and db over.
   const parsed = new URL(url);
-  const sentinels = sentinelsRaw.split(',').map((entry) => {
+  const sentinels = sentinelsRaw.split(',').map(entry => {
     const [host, port] = entry.trim().split(':');
     return { host, port: Number(port) || 26379 };
   });
