@@ -555,6 +555,12 @@ spec:
             - name: SHARED_VALKEY_SOCIALMEDIA_PASSWORD
               valueFrom: { secretKeyRef: { name: socialmedia-shared-valkey, key: password } }
             - { name: REDIS_URL, value: "redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0" }
+            # SC-2185: tras un failover de valkey, la URL estatica deja al cliente
+            # clavado en la IP del ex-master (ahora replica) y toda escritura da
+            # READONLY. Con estas dos variables el cliente (redis-client.ts)
+            # descubre el master por sentinel y lo sigue.
+            - { name: REDIS_SENTINELS, value: "shared-valkey-sentinel.databases.svc.cluster.local:26379" }
+            - { name: REDIS_MASTER_NAME, value: "shared-cache-master" }
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_LEILA_URL, value: "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001" }

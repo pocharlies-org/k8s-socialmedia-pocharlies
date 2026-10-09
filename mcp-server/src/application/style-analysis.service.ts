@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import Redis from 'ioredis';
+import { createRedisClient } from '../infrastructure/redis-client';
 import { decryptString } from '@mcp-socialmedia/shared';
 import { LlamaService } from './llama.service';
 import pino from 'pino';
@@ -62,7 +63,7 @@ export class StyleAnalysisService {
 
   constructor(dbClient: Pool, redisUrl: string, encryptionKey: string, llamaService: LlamaService) {
     this.dbClient = dbClient;
-    this.redis = new Redis(redisUrl);
+    this.redis = createRedisClient(redisUrl);
     this.encryptionKey = Buffer.from(encryptionKey, 'utf-8');
     this.llamaService = llamaService;
     this.logger = pino({

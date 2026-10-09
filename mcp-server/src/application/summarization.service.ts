@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
+import { createRedisClient } from '../infrastructure/redis-client';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
 import type { Account } from '../domain/account';
@@ -44,7 +45,7 @@ export class SummarizationService {
     });
     this.llmModel = llmModel || 'gpt-4o-mini';
     this.dbClient = dbClient;
-    this.redis = new Redis(redisUrl);
+    this.redis = createRedisClient(redisUrl);
     this.logger = pino({
       transport: {
         target: 'pino-pretty',
