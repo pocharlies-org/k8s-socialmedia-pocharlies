@@ -690,8 +690,10 @@ contracts:
       and only when the event allows them). 400 invalid_request, 403
       disabled_sending, 503 disconnected, 404 message_unavailable, 422
       not_an_event, 422 event_cancelled, 422 event_secret_unavailable, 422
-      identity_unavailable (the creator's phone jid is unknown: responses are
-      signed with phone jids, as Baileys decrypts them). Opt-in
+      identity_unavailable (the creator's phone jid, or our own, is unknown:
+      responses are signed with phone jids, as Baileys decrypts them; our own
+      comes from the socket, or from the LID → phone mapping when only the
+      LID is known; refused before the Idempotency-Key is claimed). Opt-in
       Idempotency-Key as messages-poll.v1. Answers 200 {responded: true,
       messageId, eventMessageId, conversationId, response, extraGuestCount,
       respondedAt, persisted} (persisted = recorded in
