@@ -38,7 +38,7 @@ Rojo → verde en `.company/evidence/SKIRM-112.md`. Firma a mano: receta de `ARC
 - [x] C5. `x-user-sub` y el almacén no cambian: `credential-resolution` y `oauth-pairing` sin modificar y en verde.
 - [ ] C6. Orden de despliegue: no es de esta PR; `sre` evidencia que no queda un llamante sin firma antes de que el conector exija.
 - [ ] C7. Prueba de `qa` tras la rotación SC-2092: no es de esta PR.
-- [x] C8. `CONTRACTS.yaml` sin tocar; `pnpm contract:check` OK, 73 tools sin cambio; la entrada para `/api/v1` (si alguna) la decide el architect.
+- [x] C8. Ninguna entrada existente cambia; `main.ts`, `public-routes.ts` y `server.ts` son superficie de contrato y el checker exige registro y trailer en el mismo push, así que se añade `http.instagram-connector.api-v1.v1` (el id que propone el spec; marcador en `main.ts`, `Contract-Change: add`). El architect puede ajustar su texto; un cambio de la superficie sería un `.v2`. `pnpm contract:check` OK, 73 tools sin cambio.
 - [x] C9. `ARCHITECTURE.md` §2, §4 y §8 actualizada. Sin `Co-authored-by` de fork: no se aprovechó código del fork.
 
 ## Reutilizado

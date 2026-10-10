@@ -33,6 +33,6 @@ Los tests se escribieron antes de tocar `main.ts` / `server.ts` y se ejecutaron 
 - C3 `instagramCall` firma GET, POST y DELETE; `instagram-backfill.ts` firma sus GET; una llamada firmada a un conector sin puerta funciona; las specs de `instagram-pairing` y de las tools de Instagram siguen verdes sin tocarlas.
 - C4 sin clave, vacía, o el valor del repositorio con `CONNECTOR_SECRET_STRICT=true`: 503 en `/api/v1` (con y sin firma) y `warn` al arrancar, `/health` sigue 200; clave propia: funciona y no avisa; valor del repositorio sin el interruptor: aviso y acepta (decisión: ver `50-entrega.md`).
 - C5 `credential-resolution.test.ts` y `oauth-pairing.test.ts` sin modificar y en verde; `boot-accounts.test.ts` (ruta por `x-user-sub` contra el almacén) firma sus dos peticiones, que es lo único que cambia.
-- C8 `CONTRACTS.yaml` sin tocar; `pnpm contract:check` OK, 73 tools sin cambio.
+- C8 `CONTRACTS.yaml`: una entrada nueva, `http.instagram-connector.api-v1.v1` (marcador en `main.ts`, trailer `Contract-Change: add`), sin tocar ninguna existente; `pnpm contract:check` OK, 73 tools sin cambio; el checker de contratos sobre el rango OK (102 entradas).
 - C9 `ARCHITECTURE.md` §2, §4 y §8; nota en `.company/changes/skirm-112-instagram-api-hmac.md`.
 - C6 y C7 no son de esta PR: orden de despliegue (`sre`) y prueba de `qa` tras la rotación.
