@@ -13,9 +13,9 @@ Rama `SKIRM-112-hmac` contra `deploy/prod`. Pull request: https://github.com/poc
 - **Tests**: `connectors/instagram/src/v1-auth.test.ts` (7, en `scripts.test`) y `mcp-server/src/mcp/server.instagram-signing.spec.ts` (6); el conector de mentira de `server.connector-signing.spec.ts` pasa a `mcp/test-connector.ts` y lo usan los dos. `boot-accounts.test.ts` firma sus dos peticiones.
 - **Docs**: `ARCHITECTURE.md` §2, §4 y §8; nota de cambio `.company/changes/skirm-112-instagram-api-hmac.md`. Evidencia: `.company/evidence/SKIRM-112.md`.
 
-## DECISIÓN TOMADA
+## Regla de C4
 
-El criterio C4 dice «con el placeholder: 503 y `warn`». La instrucción de la sesión y el helper de SKIRM-103 dicen modo aviso salvo `CONNECTOR_SECRET_STRICT=true`. Se siguió lo segundo: el valor del repositorio avisa y acepta, y con el interruptor responde 503. Así el pin de la imagen no depende del orden de la rotación (SC-2092); con el valor público la puerta no protege hasta que la clave propia esté puesta y el interruptor activado.
+C4 sigue la regla común `requireConnectorSecret` de SKIRM-103 (la spec se reescribió el 10-10 y el architect lo aceptó en `nota-architect-pr249.md`, punto 3): modo aviso salvo `CONNECTOR_SECRET_STRICT=true`. El valor del repositorio avisa y acepta; con el interruptor, y sin clave o con la clave vacía, `/api/v1` responde 503 y el proceso no cae. Así el pin de la imagen no depende del orden de la rotación (SC-2092); con el valor público la puerta no protege hasta que la clave propia esté puesta y el interruptor activado.
 
 ## Cómo verificarlo
 
@@ -34,7 +34,7 @@ Rojo → verde en `.company/evidence/SKIRM-112.md`. Firma a mano: receta de `ARC
 - [x] C1. Sin firma 401; firmada como hoy; otro cuerpo o fuera de ventana 401; `/health`, `/webhook` y el callback sin la puerta; test con `fetch` sobre `createInstagramApp`, en `scripts.test`.
 - [x] C2. La firma de un GET es `HMAC(ts:{})`, con el mismo firmador que usa `mcp-server`.
 - [x] C3. `mcp-server` firma todas sus llamadas al conector de Instagram; una llamada firmada a un conector sin la puerta funciona.
-- [x] C4. Sin clave o bajo el interruptor estricto con el valor del repositorio: 503 y `warn`; con clave propia, funciona (ver DECISIÓN TOMADA para el valor del repositorio sin el interruptor).
+- [x] C4. Sin clave, con la clave vacía o con el valor del repositorio bajo `CONNECTOR_SECRET_STRICT=true`: 503 y `warn`, el proceso sigue; con el valor del repositorio sin el interruptor: `warn` y acepta; con clave propia, funciona. Tests «C4: sin clave, con la clave vacía o con el valor del repositorio bajo el interruptor estricto → 503 y aviso; el resto sigue» y «C4: con una clave propia funciona; el valor del repositorio sin el interruptor avisa y arranca» en `connectors/instagram/src/v1-auth.test.ts`.
 - [x] C5. `x-user-sub` y el almacén no cambian: `credential-resolution` y `oauth-pairing` sin modificar y en verde.
 - [ ] C6. Orden de despliegue: no es de esta PR; `sre` evidencia que no queda un llamante sin firma antes de que el conector exija.
 - [ ] C7. Prueba de `qa` tras la rotación SC-2092: no es de esta PR.
