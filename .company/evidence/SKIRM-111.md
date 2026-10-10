@@ -1,6 +1,6 @@
 # SKIRM-111 · evidencia
 
-Rama `SKIRM-111-hmac` sobre `origin/deploy/prod` = 3cdf251. Todo en el x86 (Node 22.23.3, pnpm 11.18.0, Python 3.12.3, PostgreSQL 16 en un contenedor efímero para `telegram-sync`).
+Rama `SKIRM-111-hmac` con `origin/deploy/prod` = 523a9e8 fusionado (SKIRM-112, #249; el rojo se midió antes, sobre 3cdf251). Todo en el x86 (Node 22.23.3, pnpm 11.18.0, Python 3.12.3, PostgreSQL 16 en un contenedor efímero para `telegram-sync`).
 
 ## Rojo → verde
 
