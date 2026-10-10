@@ -36,6 +36,12 @@
 # tope de 8 intentos; el conector sirve GET /messages/single y un plazo de descarga).
 # Digest checked against Harbor (crane). telegram-pairing stays on v1.3.57;
 # whatsapp-connector* stay on v1.3.103.
+#
+# SKIRM-103 10-10: the three house whatsapp-connector* advance v1.3.103 -> v1.3.109 (run
+# 38008072969, deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/*
+# doors), one PR each: leila (#252), professional (#253) and this one, whatsapp-connector
+# (personal), the last. No CONNECTOR_SECRET_STRICT here: the strict switch is a separate PR.
+# Digest checked against Harbor (crane). whatsapp-pairing stays on v1.3.91.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -46,7 +52,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.103@sha256:0d742e13875e958ce596d3e5e903edb2bb07c0c1bb386fa03b79dc244d5daf71
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.109@sha256:0c2d603ad95f050f2cdedec543d5c381f58d797fcb11ec8e17365e4d1f483d23
 ---
 apiVersion: apps/v1
 kind: Deployment
