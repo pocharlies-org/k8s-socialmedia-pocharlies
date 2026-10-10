@@ -36,7 +36,8 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
   sus llamadas al conector de WhatsApp, `providerGet` incluido (un GET no tiene cuerpo: firma `{}`); el conector exige la firma en
   `/api/public/*` (SKIRM-103), en `/api/v2/auth/qr` y en toda ruta de `/api/v1` salvo `/health`, `/manual-open/page` y `GET /auth/qr` (SKIRM-120: `src/api/v1-auth.test.ts` recorre
   la tabla de rutas de `controller.ts` y falla si una nueva queda sin `auth`). Sin firma y sin SSO a propósito: `/qr`, `/qr/page`, `/qr/renew`, `/status` (los hosts `.lan` los cubre `sso-chain`; dgx-infra
-  sondea `/status`) y `GET /api/v1/auth/qr` (v1, deprecated hasta 2027-01-31). El conector de Telegram queda fuera de SKIRM-103 (SKIRM-111).
+  sondea `/status`) y `GET /api/v1/auth/qr` (v1, deprecated hasta 2027-01-31). El conector de Telegram firma igual (SKIRM-111): `/api/v1` y `/api/public/{dialogs,messages/:chatId,send/:chatId}` (`createPublicRouter`).
+  Sus consumidores: `mcp-sse` (`providerGet`, dialogs y mensajes), `telegram-sync` (`ConnectorClient.send` firma el JSON compacto que envía, y lo que lee ya iba por `/api/v1` firmado), y desde el host `dgx-infra/services/monitoring/scripts/notify-synapse-monitor.sh` (otro repo; lee la clave de un fichero 0600, nunca del repo ni de `argv`).
 - **ArgoCD** `socialmedia`: repo `pocharlies-org/k8s-socialmedia-pocharlies`, path `k8s/overlays/prod`, tronco **`deploy/prod`**
   (`origin/deploy/prod` = 897435e), sync automático `prune: false`.
 
@@ -65,7 +66,9 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Búsqueda semántica de mensajes | `mcp-server/src/application/search.service.ts` `SearchService.semanticSearch` | `mcp-server/src/application/` | `MCPServer.handleSearchMessages`; una instancia caída sale como `meta.partialErrors` (`completeness: 'partial'`), no tumba las demás |
 | Verificación de `x-hub-signature-256` (firma de los webhooks de Meta) | `verifyMetaSignature(rawBody, header, secrets)` | `shared/src/crypto/meta-signature.ts` | `instagram-connector` (`webhookSignatureGuard`), `whatsapp-cloud`; no es `verifyHMACSignature` (esquema `ts:cuerpo` de los conectores) |
 | Puerta HMAC de un router de conector | `createHMACAuth(secret, onReject?)` (el esquema compartido es `verifyHMACSignature` en `shared`) | `connectors/whatsapp-web/src/api/auth.ts` | `/api/v1`, `/api/public` (`createPublicRouter`, que registra los rechazos), `/api/v2/auth/qr` |
-| Clave HMAC de los conectores: ¿es utilizable? | `requireConnectorSecret(env?, warn?)`: ausente o vacía lanza (el proceso no arranca); el valor por defecto del repositorio registra un error, una vez por proceso, y sigue, salvo con `CONNECTOR_SECRET_STRICT=true`, que lo rechaza (SKIRM-103) | `shared/src/crypto/connector-secret.ts` | `whatsapp-web` (`main.ts`, `dashboard-notifier.ts`) y `mcp-server` (`mcp/index.ts`, `mcp/sse-server.ts`); telegram, whatsapp-cloud y sus notifiers lo adoptan en SKIRM-111 |
+| Puerta HMAC de Telegram | `authMiddleware(secret, onReject?)` (mismo esquema `<ts>:<cuerpo>`, ventana de 5 min) | `connectors/telegram/src/api/controller.ts` | `/api/v1` (`createRouter`) y `/api/public` (`createPublicRouter` en `api/public-routes.ts`, que registra los rechazos) |
+| Registro de rechazos de una puerta `/api/public` (una línea por motivo cada 10 s, sin cabeceras, cuerpo, firma, query ni chatId) | `createRejectLogger(log?, now?)` | `shared/src/utils/reject-log.ts` | `createPublicRouter` de `whatsapp-web` y de `telegram` |
+| Clave HMAC de los conectores: ¿es utilizable? | `requireConnectorSecret(env?, warn?)`: ausente o vacía lanza (el proceso no arranca); el valor por defecto del repositorio registra un error, una vez por proceso, y sigue, salvo con `CONNECTOR_SECRET_STRICT=true`, que lo rechaza (SKIRM-103) | `shared/src/crypto/connector-secret.ts` | `whatsapp-web` (`main.ts`, `dashboard-notifier.ts`), `telegram` (`main.ts`, `dashboard-notifier.ts`), `whatsapp-cloud` (`main.ts`) y `mcp-server` (`mcp/index.ts`, `mcp/sse-server.ts`) |
 | Clave opaca por cuenta (`personal` sin prefijo, el resto namespaceadas — migración 002) | `mcp-server/src/domain/account.ts` (`accountKey` / `normalizeAccount`) — **la única con guard**: `accountKey` lanza `Cross-account identifier` si el id ya está namespaced a otra cuenta (SKIRM-107); sin `normalizeAccount` dentro, porque la búsqueda sin cuenta (`inEveryNamespace`, `brainScopes`) recorre también cuentas deshabilitadas | `mcp-server/src/domain/` | MCP y job de embeddings. Dos **espejos sin guard** de la misma regla (no pueden importar TS): `connectors/whatsapp-web/src/db-writer.ts` `accountKey` y `connectors/telegram-sync/sync/db.py` `account_key`. No llevan el guard porque cada proceso escribe solo su cuenta (`CONNECTOR_ACCOUNT`) y los ids vienen del proveedor (un JID nativo no lleva estos prefijos); cambiar la regla en una sin las otras deja mensajes sin embedding |
 | Recuperación de medios de Telegram (reintento con espera creciente, estado en `messages.metadata`) | `media_recovery.run` + `db.pending_media` / `db.media_transaction` / `db.media_result` | `connectors/telegram-sync/sync/` | `telegram-sync` (una tarea por cuenta, junto al consumidor NATS y la historia); pide el mensaje exacto a `GET /api/v1/messages/single/:chatId/:msgId` y los bytes a `.../messages/media/...` del conector |
 
@@ -80,8 +83,9 @@ reconexión de WhatsApp acotado (`WA_RECONNECT_BACKFILL_*`, INFRA-112). `CLAUDE.
 ```sh
 python3 scripts/render-connectors.py --check && python3 -m unittest scripts/test_render_connectors.py
 pnpm -r test                                  # jest (mcp-server, conectores)
-python -m pytest connectors/telegram-sync/tests   # 36 casos (edits 4, insert_message 2, media_backlog_postgres 6, media_recovery 14, voice_unwrap 10)
-pnpm --filter ./connectors/telegram test          # 77 casos, node:test con lista explícita de ficheros en package.json
+python -m pytest connectors/telegram-sync/tests   # 40 casos (connector_signing 4, edits 4, insert_message 2, media_backlog_postgres 6, media_recovery 14, voice_unwrap 10)
+pnpm --filter ./connectors/telegram test          # 87 casos, node:test con lista explícita de ficheros en package.json
+pnpm --filter ./connectors/whatsapp-cloud test    # 1 caso: el arranque con la clave HMAC (`startup-guard.test.ts`)
 ```
 Los tests de telegram-sync con PostgreSQL (`test_edits`, `test_media_backlog_postgres`, la carrera de `test_media_recovery`) se saltan sin
 `TELEGRAM_SYNC_TEST_DATABASE_URL`, y un «skipped» no es un pase. Los tests de los conectores TS no son jest ni `supertest`: `tsx --test` sobre una
@@ -132,6 +136,14 @@ Total de casos Jest: **pendiente de medir**.
   (2) comprobar por sha256, sin imprimirla, que ya no es el valor por defecto, (3) `mcp-sse`: pin de la imagen de `mcp-server` y el interruptor en el mismo commit, (4) un conector cada vez
   (leila, professional, personal) con su pin y su interruptor en el mismo commit, con `restartCount` estable y la sesión sin re-emparejar. El interruptor se retira cuando el estricto pase a
   ser el valor por defecto (SC-2149). Prueba de cierre: un GET firmado con el valor por defecto a `/api/public/chats` responde 401 en cada conector.
+- `/api/public/*` del conector de Telegram (SKIRM-111): `dialogs`, `messages/:chatId` y `send/:chatId` exigen la firma HMAC del conector (`createPublicRouter` en
+  `connectors/telegram/src/api/public-routes.ts`, con el `authMiddleware` de `/api/v1`; no hay ruta de Traefik hacia Telegram, llegan los pods del namespace, el dashboard y el host). Un GET firma `{}`;
+  `send` firma el cuerpo, `JSON.stringify` del JSON que el conector leyó (telegram-sync firma los mismos bytes que envía). La puerta va **antes** de la del envío: sin firma 401, nunca el 403 `disabled_sending`.
+  Cada rechazo deja una línea `[public-api] rejected <método> <ruta> ip=… reason=…` (como en WhatsApp, `createRejectLogger`), que es como se ve un consumidor no enumerado.
+  **Orden de despliegue** (fusionar no despliega nada: las imágenes van por `tag@digest`): (1) los consumidores con la firma: `mcp-sse` y `telegram-sync` (`send`), y el script del host de
+  `dgx-infra` con la clave en un fichero 0600 que provisiona `devops`; (2) `telegram-connector` y `telegram-connector-professional`, que ya exigen la firma, vigilando el registro de rechazos hasta que no
+  llegue ninguna llamada sin firma; (3) tras cargar la clave propia en el Secret, `CONNECTOR_SECRET_STRICT=true` por Deployment en `k8s/overlays/prod` (nunca en `base/`, mismo motivo que en WhatsApp).
+  Prueba de cierre: un GET firmado con el valor por defecto del repositorio a `/api/public/dialogs` responde 401. La firma cubre `ts:cuerpo`, no método, ruta ni query, y no hay caché de repetición (el esquema de `/api/v1`).
 - Estado de chat de WhatsApp (SKIRM-104, SKIRM-105): `archived` y `unread_count` de `chats.update`, `chats.upsert`, la historia y `markAsRead` (`POST /messages/read/:chatId`) se escriben en la
   conversación canónica (`setCanonicalChatState`, que también escribe el fijado y el silencio del mismo evento con una sola resolución), nunca en un tombstone (`merged_into`), que ninguna lista muestra;
   sin conversación para el jid no se escribe nada. El helper no lanza: un fallo de la base queda en un `warn` (también en `markAsRead`, cuyos acuses de lectura ya salieron). El id lleva el prefijo de la cuenta del conector y la resolución filtra por `account_id`, así que una cuenta no escribe sobre la fila de otra. Al reconectar,

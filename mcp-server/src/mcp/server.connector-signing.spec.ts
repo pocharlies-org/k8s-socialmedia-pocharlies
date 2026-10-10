@@ -111,6 +111,58 @@ describe('providerGet signs the GET', () => {
   });
 });
 
+describe('the Telegram reads of /api/public are signed too (SKIRM-111)', () => {
+  // Same providerGet as WhatsApp's; what is new is the connector gating these routes.
+  function telegramServer(url: string, secret = SECRET) {
+    useTestAccounts({ telegram: { personal: url } });
+    return serverWithSecret(url, secret);
+  }
+
+  it('the dialog list signs "{}" and the gate lets it through', async () => {
+    const tg = await connector('gated');
+    try {
+      const server = telegramServer(tg.url);
+      await server.listConversationsFor('telegram', 'personal', { readSource: 'provider' });
+      expect(tg.seen.map(s => [s.method, s.url, s.signatureOk])).toEqual([
+        ['GET', '/api/public/dialogs', true],
+      ]);
+    } finally {
+      await tg.close();
+    }
+  });
+
+  it('the history read signs with the limit in the query and an encoded chat id', async () => {
+    const tg = await connector('gated');
+    try {
+      await telegramServer(tg.url).canonicalListMessages({
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '-1001234567890',
+        readSource: 'provider',
+        limit: 20,
+      });
+      expect(tg.seen.map(s => [s.method, s.url, s.signatureOk])).toEqual([
+        ['GET', '/api/public/messages/-1001234567890?limit=20', true],
+      ]);
+    } finally {
+      await tg.close();
+    }
+  });
+
+  it('with another key the gate answers 401 and the read fails', async () => {
+    const tg = await connector('gated');
+    try {
+      await expect(
+        telegramServer(tg.url, 'some-other-key').listConversationsFor('telegram', 'personal', {
+          readSource: 'provider',
+        })
+      ).rejects.toThrow(/Provider query failed \(401\)/);
+    } finally {
+      await tg.close();
+    }
+  });
+});
+
 describe('the inline signers use the constructed secret, never an empty one from the environment', () => {
   const saved = { ...process.env };
   beforeEach(() => {

@@ -50,17 +50,22 @@ function downloadRoute(
   };
 }
 
+export type HMACRejectReason = 'missing_headers' | 'stale_timestamp' | 'invalid_signature';
+
 /**
- * Authentication middleware
+ * Authentication middleware: the connector HMAC over `<ts>:<JSON body>`, the
+ * gate of /api/v1 and of /api/public (SKIRM-111). `onReject` hears why.
  */
-function authMiddleware(
-  sharedSecret: string
+export function authMiddleware(
+  sharedSecret: string,
+  onReject?: (req: Request, reason: HMACRejectReason) => void
 ): (req: Request, res: Response, next: NextFunction) => void {
   return (req: Request, res: Response, next: NextFunction): void => {
     const signature = req.headers['x-connector-signature'] as string;
     const timestamp = req.headers['x-connector-timestamp'] as string;
 
     if (!signature || !timestamp) {
+      onReject?.(req, 'missing_headers');
       res.status(401).json({ error: 'Missing authentication headers' });
       return;
     }
@@ -68,12 +73,14 @@ function authMiddleware(
     const requestTime = parseInt(timestamp, 10);
     const now = Math.floor(Date.now() / 1000);
     if (!Number.isFinite(requestTime) || Math.abs(now - requestTime) > 300) {
+      onReject?.(req, 'stale_timestamp');
       res.status(401).json({ error: 'Request expired' });
       return;
     }
 
     const expectedSignature = generateHMACSignature(req.body || {}, requestTime, sharedSecret);
     if (signature !== expectedSignature) {
+      onReject?.(req, 'invalid_signature');
       res.status(401).json({ error: 'Invalid signature' });
       return;
     }
