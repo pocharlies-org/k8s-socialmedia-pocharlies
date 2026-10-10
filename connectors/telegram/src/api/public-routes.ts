@@ -17,7 +17,7 @@ type PublicClient = Pick<
 export function createPublicRouter(
   client: PublicClient,
   sharedSecret: string,
-  options: { log?: (line: string) => void; now?: () => number } = {}
+  options: Parameters<typeof createHMACRejectLog>[1] = {}
 ): express.Router {
   const router = express.Router();
 
