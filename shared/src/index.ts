@@ -1,4 +1,5 @@
 export * from './crypto/encryption';
+export * from './crypto/connector-auth';
 export * from './crypto/connector-secret';
 export * from './crypto/meta-signature';
 export * from './utils/log-redaction';

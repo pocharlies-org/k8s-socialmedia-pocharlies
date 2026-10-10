@@ -5918,10 +5918,14 @@ export class MCPServer {
 
   private async instagramCall(method: string, path: string, body?: any, timeoutMs = 30000) {
     const url = `${this.instagramUrl}${path}`;
+    const timestamp = Math.floor(Date.now() / 1000);
     const options: RequestInit = {
       method,
       headers: {
         'Content-Type': 'application/json',
+        // SKIRM-112: /api/v1 of the connector sits behind createHMACAuth; a call with no body signs "{}".
+        'X-Connector-Signature': generateHMACSignature(body || {}, timestamp, this.connectorSecret),
+        'X-Connector-Timestamp': timestamp.toString(),
         // SC-1194 P1 (criterion 3): forward the gateway-verified actor exactly
         // like the WhatsApp/Telegram routes (SC-705). With no actor the
         // headers are empty and the connector keeps its legacy env path.
