@@ -124,9 +124,14 @@ images:
   # tambien #234 (SKIRM-103: requireConnectorSecret en el arranque, providerGet firmado; sin
   # CONNECTOR_SECRET_STRICT no cambia el comportamiento con la clave actual). Sin migraciones
   # nuevas. Mueve mcp-server, mcp-sse, social-api, brain-windows y el Job de migracion.
+  # SKIRM-106 10-10: v1.3.107 -> v1.3.109 (run 38008072969, deploy/prod@3cdf251): migracion 021
+  # (canales de WhatsApp que sigue la cuenta; aditiva e idempotente, la aplica el Job PreSync) y
+  # SKIRM-130 (#248, handlebars actualizado por los CVE de la puerta Trivy). v1.3.108 quemado
+  # por esa puerta. Digest comprobado en Harbor (crane). Los conectores de WhatsApp no se
+  # pinan aqui: siguen con los digests de patch-image.yaml.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.107
-    digest: sha256:ffed0e735b62f0317e077ddfee2e7f3138c7124b0218cd9de58cb3e1ece8e06f
+    newTag: v1.3.109
+    digest: sha256:f2ef9945b78397ff1fadf43fc7bcdf2dbf7d6caab079e59a98b8e69b7e9c8980
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
