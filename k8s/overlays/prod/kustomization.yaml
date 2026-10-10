@@ -129,9 +129,14 @@ images:
   # SKIRM-130 (#248, handlebars actualizado por los CVE de la puerta Trivy). v1.3.108 quemado
   # por esa puerta. Digest comprobado en Harbor (crane). Los conectores de WhatsApp no se
   # pinan aqui: siguen con los digests de patch-image.yaml.
+  # SKIRM-112 10-10: v1.3.109 -> v1.3.110 (run 38021085868, deploy/prod@8c9ee62): #249, mcp-server
+  # (instagramCall) y el job de backfill de Instagram firman las llamadas a /api/v1 del conector.
+  # El conector de Instagram (v1.3.106) aun no exige la firma: un consumidor que firma no rompe
+  # nada. Digest comprobado en Harbor (crane). Mueve mcp-server, mcp-sse, social-api, los
+  # CronJobs de brain-windows y voz, y el Job de migracion.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.109
-    digest: sha256:f2ef9945b78397ff1fadf43fc7bcdf2dbf7d6caab079e59a98b8e69b7e9c8980
+    newTag: v1.3.110
+    digest: sha256:bd7ab2f8e1d2c9ebc2cfe5cc4faf734c795e54d09b3bf9ccf91ee24627b2003b
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
