@@ -2,7 +2,7 @@ Rol: developer · Fecha: 2026-10-10 · Sesión: 715ef7e4-8c79-4f49-a12d-59a7c433
 
 # SKIRM-112 · Instagram: HMAC en /api/v1/:account/* del conector
 
-Rama `SKIRM-112-hmac` contra `deploy/prod`. Pull request: la indica el pie de este fichero cuando se abre.
+Rama `SKIRM-112-hmac` contra `deploy/prod`. Pull request: https://github.com/pocharlies-org/k8s-socialmedia-pocharlies/pull/249
 
 ## Qué se hizo
 
