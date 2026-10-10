@@ -42,9 +42,13 @@ images:
   # recuperacion de medios de Telegram con tope de 8 intentos por mensaje; sin migraciones
   # SQL). Digest checked against Harbor (crane). Moves telegram-sync and
   # telegram-sync-professional (same image name); the connector side is in patch-image.yaml.
+  # SKIRM-111 10-10: v1.3.105 -> v1.3.110 (run 38021085868, deploy/prod@8c9ee62): #251,
+  # telegram-sync firma POST /api/public/send (y la lectura) con la firma HMAC del conector. El
+  # conector de Telegram (v1.3.105) aun no exige la firma: un consumidor que firma no rompe nada.
+  # Digest comprobado en Harbor (crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.105
-    digest: sha256:7a25fbf0e39d95145e1ca0602ca63135ed651599cc91e43246bbee1aefe288d0
+    newTag: v1.3.110
+    digest: sha256:d8f1e7bb12d930e6447d2270cf714275fa350e9899f1594c47f8c45c2a642b1e
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
