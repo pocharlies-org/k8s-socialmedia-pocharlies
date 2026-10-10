@@ -20,6 +20,7 @@ import {
   actorFromHeaders,
   credentialStoreEnabled,
 } from '@mcp-socialmedia/shared';
+import { connectorApiGate } from './api-gate';
 import { discoverFacebookInstagramAccount, InstagramAPI, InstagramConfig } from './instagram-api';
 import { WebhookEvent, WebhookLog, createWebhookRouter } from './webhook';
 import { InstagramEventPublisher } from './publisher';
@@ -331,6 +332,11 @@ export async function createInstagramApp(opts: InstagramAppOptions): Promise<Exp
     }
     res.json({ status: 'ok', platform: 'instagram', accounts: results });
   });
+
+  // SKIRM-112: everything under /api/v1 needs the connector signature. Mounted after /health, the
+  // webhook and before every route below; the pairing callback lives at /oauth/instagram/callback.
+  // CONTRACT: http.instagram-connector.api-v1.v1
+  app.use('/api/v1', connectorApiGate(env, opts.log ?? logger));
 
   // List available accounts
   app.get('/api/v1/accounts', (_req, res) => {

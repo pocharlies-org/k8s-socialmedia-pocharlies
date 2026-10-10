@@ -2582,3 +2582,37 @@ contracts:
       count, never the body or the signature). The route, the signature header
       and the 401/503 answers are contract: changing any is breaking — a new
       `.v2` entry beside this one.
+  - id: http.instagram-connector.api-v1.v1
+    kind: http-route
+    value: /api/v1
+    role: provider
+    files:
+      - connectors/instagram/src/main.ts
+      - connectors/instagram/src/api-gate.ts
+      - mcp-server/src/mcp/server.ts
+    status: active
+    note: >-
+      /api/v1 of the instagram-connector (:3003): GET
+      /accounts, GET /oauth/instagram/authorize-url and every /:account/* route
+      (profile, media, comments, conversations, send DM, publish, stories,
+      hide and delete comment, insights, hashtags, mentions). SKIRM-112:
+      everything under /api/v1, a path no route serves included, answers only
+      to a signed caller. Headers x-connector-timestamp + x-connector-signature
+      = sha256=HMAC(CONNECTOR_SHARED_SECRET, "<ts>:<JSON body>"), 5-minute
+      window, the scheme of the WhatsApp connectors; a request with no body
+      (GET, DELETE) signs "{}". 401 {error} without the headers, with another
+      key, another body or a timestamp outside the window; 503 {error} on every
+      request when no usable key is set (missing, blank, or the repository
+      default under CONNECTOR_SECRET_STRICT=true), while /health and /webhook
+      keep answering. Each rejection is logged without headers, body, signature
+      or query (one line per reason every 10 s). x-user-sub still selects the
+      per-user credential row: the signature identifies the calling service and
+      does not replace it. Outside the gate on purpose: GET /health
+      (http.instagram-connector.health.v1), /webhook
+      (http.instagram-connector.webhook.v1) and /oauth/instagram/callback.
+      Consumers: mcp-server (instagramCall, connectorCall, jobs/instagram-backfill.ts);
+      the Synapse messaging adapter (services/synapse-adapter-messaging,
+      channels/instagram.py) for POST /:account/messages/send and
+      /:account/comments/:id/reply.
+      The prefix, the signature scheme and the 401/503 answers are contract:
+      changing any is breaking — a new `.v2` entry beside this one.
