@@ -2528,7 +2528,7 @@ contracts:
       - mcp-server/src/mcp/server.ts
     status: active
     note: >-
-      /api/v1 of the instagram-connector (:3003, in-cluster only): GET
+      /api/v1 of the instagram-connector (:3003): GET
       /accounts, GET /oauth/instagram/authorize-url and every /:account/* route
       (profile, media, comments, conversations, send DM, publish, stories,
       hide and delete comment, insights, hashtags, mentions). SKIRM-112:
@@ -2546,6 +2546,9 @@ contracts:
       does not replace it. Outside the gate on purpose: GET /health
       (http.instagram-connector.health.v1), /webhook
       (http.instagram-connector.webhook.v1) and /oauth/instagram/callback.
-      Consumers: mcp-server (instagramCall, connectorCall, jobs/instagram-backfill.ts).
+      Consumers: mcp-server (instagramCall, connectorCall, jobs/instagram-backfill.ts);
+      the Synapse messaging adapter (services/synapse-adapter-messaging,
+      channels/instagram.py) for POST /:account/messages/send and
+      /:account/comments/:id/reply.
       The prefix, the signature scheme and the 401/503 answers are contract:
       changing any is breaking — a new `.v2` entry beside this one.
