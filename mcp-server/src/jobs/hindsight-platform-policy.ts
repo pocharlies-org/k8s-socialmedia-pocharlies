@@ -4,6 +4,7 @@ const platforms = ['whatsapp', 'telegram', 'instagram'] as const;
 type Platform = typeof platforms[number];
 
 export function excludedHindsightPlatforms(env: NodeJS.ProcessEnv): Set<Platform> {
+  // CONTRACT: env.hindsight-excluded-platforms.v1
   const value = env.HINDSIGHT_SYNC_EXCLUDED_PLATFORMS?.trim() || '';
   if (!value) return new Set();
   const excluded = value.split(',').map(platform => platform.trim());

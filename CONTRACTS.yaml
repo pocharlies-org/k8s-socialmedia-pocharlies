@@ -10,9 +10,6 @@ contracts:
   files:
   - mcp-server/src/infrastructure/database/migrations/036_hindsight_platform_policy.sql
   - mcp-server/src/jobs/hindsight-platform-policy.ts
-  - mcp-server/src/jobs/hindsight-conversation-sync.ts
-  - mcp-server/src/jobs/hindsight-sync.ts
-  - scripts/render-compose.py
   status: active
   note: 'HINDSIGHT_SYNC_EXCLUDED_PLATFORMS is a strict CSV of whatsapp, telegram,
     instagram; unset/empty indexes all. The worker applies the database-wide
@@ -22,6 +19,22 @@ contracts:
     pausing does not revoke already accepted provider operations. Resume requires
     bounded reseeding to capture changes made while paused. Historical migrations
     remain byte-identical; migration 036 installs the guards.'
+- id: env.hindsight-excluded-platforms.v1
+  kind: schema
+  value: HINDSIGHT_SYNC_EXCLUDED_PLATFORMS
+  role: consumer
+  files:
+  - mcp-server/src/jobs/hindsight-platform-policy.ts
+  - scripts/render-compose.py
+  - .env.example
+  - deploy/.env.example
+  - docker-compose.yml
+  status: active
+  note: 'Optional strict CSV of whatsapp, telegram, instagram, default empty.
+    Both Compose rendering and worker startup reject invalid names before
+    generation/database/provider actions. A platform is paused without deleting
+    existing source data or Hindsight documents. Database-wide policy must be
+    consistent across workers on the same source database.'
 - id: http.whatsapp-connector.history-recover.v1
   kind: http-route
   value: /history/recover
