@@ -101,6 +101,11 @@ spec:
         - name: instagram-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:v1.3.106@sha256:bbd49fd3a9bb60198d3e776b82dbfe0a899f761a249a0318df86ac40911e0fc0
 ---
+# SKIRM-111 10-10: the two house telegram-connector* advance v1.3.105 -> v1.3.110 (run 38021085868,
+# deploy/prod@8c9ee62: #251, /api/public/* exige la firma HMAC del conector). Ventana SC-2092: se
+# fusiona despues de la rotacion, con el script del host y el GET de dgx-messages ya firmando.
+# Carries no CONNECTOR_SECRET_STRICT: the strict switch is a separate PR. Digest checked against
+# Harbor (crane). telegram-pairing stays on v1.3.57.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -115,7 +120,7 @@ spec:
         # dead code); spelled out here now that the block dropped the name.
         # Same digest as the live pod — zero rollout.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.105@sha256:8b104e5bf672e735610ac32313b024710e6c166c34fbf6435240e3a8a5bc4cae
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.110@sha256:dfadd7054ff6a9925be03b41af37b663f1262a39343a8cb0b59242ef1d130f93
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -130,7 +135,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.105@sha256:8b104e5bf672e735610ac32313b024710e6c166c34fbf6435240e3a8a5bc4cae
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.110@sha256:dfadd7054ff6a9925be03b41af37b663f1262a39343a8cb0b59242ef1d130f93
 ---
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
