@@ -3,6 +3,18 @@ canonical_checkout: /home/dibanez/k8s/k8s-socialmedia-pocharlies
 registry_files:
 - CONTRACTS.yaml
 contracts:
+- id: db.hindsight-name-change.v1
+  kind: schema
+  value: hindsight_conversation_name_change
+  role: provider
+  files:
+  - mcp-server/src/infrastructure/database/migrations/037_hindsight_change_deduplication.sql
+  status: active
+  note: 'Name/identity invalidation retains migration036 platform policy. No-op
+    conversation updates do not scan history. OLD/NEW lookup identities are
+    deduplicated before scanning; overlapping scopes are enqueued once per
+    trigger invocation. Real changes still invalidate all affected provider,
+    account, conversation and topic scopes. Paused providers remain excluded.'
 - id: db.hindsight-platform-policy.v1
   kind: schema
   value: hindsight_sync_platform_policy

@@ -58,6 +58,10 @@ ON CONFLICT (id) DO UPDATE SET
   name = COALESCE(EXCLUDED.name, conversations.name),
   last_message_at = GREATEST(conversations.last_message_at, EXCLUDED.last_message_at),
   updated_at = NOW()
+WHERE conversations.name IS DISTINCT FROM
+        COALESCE(EXCLUDED.name, conversations.name)
+   OR conversations.last_message_at IS DISTINCT FROM
+        GREATEST(conversations.last_message_at, EXCLUDED.last_message_at)
 """
 
 ENSURE_PARTICIPANT_SQL = """
