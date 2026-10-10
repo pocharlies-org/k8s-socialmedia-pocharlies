@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
-import { createRejectLogger } from '@mcp-socialmedia/shared';
+import { createHMACAuth, createHMACRejectLog } from '@mcp-socialmedia/shared';
 import type { TelegramClientWrapper } from '../telegram-client';
-import { HMACRejectReason, authMiddleware, requireSending } from './controller';
+import { requireSending } from './controller';
 
 type PublicClient = Pick<
   TelegramClientWrapper,
@@ -19,10 +19,9 @@ export function createPublicRouter(
   sharedSecret: string,
   options: { log?: (line: string) => void; now?: () => number } = {}
 ): express.Router {
-  const { log = console.warn, now = Date.now } = options;
   const router = express.Router();
 
-  router.use(authMiddleware(sharedSecret, createRejectLogger<HMACRejectReason>(log, now)));
+  router.use(createHMACAuth(sharedSecret, createHMACRejectLog('public-api', options)));
 
   // CONTRACT: http.telegram-connector.public-dialogs.v1 — GET /api/public/dialogs, HMAC over "<ts>:{}", 200 {dialogs}
   router.get('/dialogs', async (_req: Request, res: Response) => {

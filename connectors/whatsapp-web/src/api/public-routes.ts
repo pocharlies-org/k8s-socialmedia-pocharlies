@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
-import { createRejectLogger } from '@mcp-socialmedia/shared';
 import type { BaileysClient } from '../baileys-client';
-import { createHMACAuth, HMACRejectReason } from './auth';
+import { createHMACAuth } from './auth';
+import { createHMACRejectLog } from '@mcp-socialmedia/shared';
 
 type PublicClient = Pick<BaileysClient, 'getChats' | 'fetchChatHistory' | 'backfillRecentMedia'>;
 
@@ -24,7 +24,9 @@ export function createPublicRouter(
   const { log = console.warn, now = Date.now } = options;
   const router = express.Router();
 
-  router.use(createHMACAuth(sharedSecret, createRejectLogger<HMACRejectReason>(log, now)));
+  // F3-4: every rejection leaves one line (method, route, origin IP, reason) so a
+  // consumer nobody listed shows up in minutes; the line carries nothing else of the request.
+  router.use(createHMACAuth(sharedSecret, createHMACRejectLog('public-api', { log, now })));
 
   // CONTRACT: http.whatsapp-connector.public-chats.v1 — GET /api/public/chats, HMAC over "<ts>:{}", 200 {chats}
   router.get('/chats', async (_req: Request, res: Response) => {
