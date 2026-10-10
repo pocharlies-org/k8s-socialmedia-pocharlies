@@ -361,7 +361,7 @@ import {
   presignExpirySeconds,
 } from './media-storage';
 import { buildAudioAttachmentsBeforeEmit, StoredMediaInfo } from './audio-attachments';
-import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
+import { notifyDashboard as dashboardNotify } from '@mcp-socialmedia/shared';
 
 // WhatsApp Web message status enum → human/dashboard strings.
 // proto.WebMessageInfo.Status: ERROR=0, PENDING=1, SERVER_ACK=2, DELIVERY_ACK=3, READ=4, PLAYED=5

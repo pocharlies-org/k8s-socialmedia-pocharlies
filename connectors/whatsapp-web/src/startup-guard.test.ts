@@ -20,7 +20,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import './test-env';
-import { notifyDashboard } from './dashboard-notifier';
+import { notifyDashboard } from '@mcp-socialmedia/shared';
 
 const run = promisify(execFile);
 const PLACEHOLDER = 'dev-secret-change-in-production';

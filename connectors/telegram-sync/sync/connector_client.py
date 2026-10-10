@@ -10,7 +10,7 @@ class of failures). All Telegram reads/writes go through the connector's HTTP AP
   - media bytes        -> GET  /api/v1/messages/media/:chatId/:msgId      (HMAC)
   - profile photos     -> GET  /api/v1/peers/:id/photo                    (HMAC)
   - identity           -> GET  /api/v1/me                                 (HMAC)
-  - outbound send      -> POST /api/public/send/:chatId                   (open, in-cluster)
+  - outbound send      -> POST /api/public/send/:chatId                   (HMAC, SKIRM-111)
   - liveness           -> GET  /health                                    (open)
 
 HMAC scheme mirrors connectors/telegram/src/api/controller.ts authMiddleware +
@@ -94,7 +94,7 @@ class ConnectorClient:
         )
         secret = os.environ.get("CONNECTOR_SHARED_SECRET", "")
         if not secret:
-            logger.warning("CONNECTOR_SHARED_SECRET is empty — HMAC /api/v1 calls will 401")
+            logger.warning("CONNECTOR_SHARED_SECRET is empty — HMAC calls will 401")
         return cls(base, secret, account,
                    media_timeout=float(os.environ.get("CONNECTOR_MEDIA_TIMEOUT", "150")))
 
@@ -185,11 +185,14 @@ class ConnectorClient:
     # --- Writes --------------------------------------------------------------
 
     async def send(self, chat_id: str, text: str, topic_id: Optional[int] = None) -> dict:
-        """Outbound send via the connector's open in-cluster public route."""
+        """Outbound send via the connector's public route, signed like /api/v1 (SKIRM-111)."""
         body: dict[str, Any] = {"text": text}
         if topic_id:
             body["topicId"] = topic_id
-        r = await self._client.post(f"{self.base_url}/api/public/send/{chat_id}", json=body)
+        # The bytes signed are the bytes sent: the connector signs what its JSON parser read back.
+        r = await self._client.post(f"{self.base_url}/api/public/send/{chat_id}",
+                                    content=_compact(body).encode(),
+                                    headers={**self._sign(body), "content-type": "application/json"})
         r.raise_for_status()
         return r.json()
 

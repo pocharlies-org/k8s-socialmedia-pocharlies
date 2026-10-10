@@ -940,6 +940,70 @@ contracts:
       hosts the local-index search of social_search_messages (Instagram rows
       and the mediaType filter, Postgres only — no connector route; added
       later, surface unchanged).
+  - id: http.telegram-connector.public-dialogs.v1
+    kind: http-route
+    value: /api/public/dialogs
+    anchor: "router.get('/dialogs'"
+    role: provider
+    files:
+      - connectors/telegram/src/api/public-routes.ts
+    status: active
+    note: >-
+      GET /api/public/dialogs of the house Telegram connectors (note:
+      /api/public, not /api/v1; the Telegram twin of
+      http.whatsapp-connector.public-chats.v1): the dialogs the account sees,
+      consumed by the MCP server's providerGet (mcp-server/src/mcp/server.ts
+      listConversationsFor and canonicalGetConversation). HMAC-signed
+      (x-connector-timestamp + x-connector-signature over "<ts>:{}", the same
+      scheme as /api/v1; a GET has no body): without them 401, with them 200
+      {dialogs [{id, name, type, unreadCount}]}, 503 {error} while Telegram is
+      not connected, 500 {error}. The path, the signature scheme and the 200
+      shape are contract: changing any is breaking — a new `.v2` entry beside
+      this one. Each rejection is logged without headers, body or signature,
+      one line per reason every 10 s.
+  - id: http.telegram-connector.public-messages.v1
+    kind: http-route
+    value: /api/public/messages/:chatId
+    anchor: "router.get('/messages/:chatId'"
+    role: provider
+    files:
+      - connectors/telegram/src/api/public-routes.ts
+    status: active
+    note: >-
+      GET /api/public/messages/:chatId?limit= of the house Telegram connectors
+      (limit default 50): the latest messages of one chat, consumed by the MCP
+      server's providerGet (mcp-server/src/mcp/server.ts canonicalListMessages:
+      social_list_messages with readSource provider). Signed like
+      http.telegram-connector.public-dialogs.v1 (over "<ts>:{}", the limit
+      travels in the query and is not signed): without it 401, with it 200
+      {messages}, 503 {error} while Telegram is not connected, 500 {error}.
+      dgx-infra services/dashboard/api/routes_history.py names it too and sends
+      no signature. The path, the signature scheme and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
+  - id: http.telegram-connector.public-send.v1
+    kind: http-route
+    value: /api/public/send/:chatId
+    anchor: "router.post('/send/:chatId'"
+    role: provider
+    files:
+      - connectors/telegram/src/api/public-routes.ts
+    status: active
+    note: >-
+      POST /api/public/send/:chatId {text, topicId?} of the house Telegram
+      connectors: sends a text AS the account's user (not as a bot), consumed
+      by telegram-sync (sync/connector_client.py ConnectorClient.send) and by
+      dgx-infra services/monitoring/scripts/notify-synapse-monitor.sh. Signed
+      like /api/v1: x-connector-timestamp + x-connector-signature over
+      "<ts>:<body>", where <body> is JSON.stringify of the body as the connector
+      parsed it, so a client signs the compact JSON it sends (telegram-sync
+      does). Without a valid signature 401, ahead of the sending gate: 403
+      disabled_sending (ENABLE_SENDING set to anything but "true", or
+      EMERGENCY_DISABLE_SENDING=true) is only
+      seen by a signed caller. Signed: 200 {success: true}, 400 {error} (no
+      text, topicId not a positive integer), 503 {error} while Telegram is not
+      connected, 500 {error}. The path, the body fields, the signature scheme
+      and the 200 shape are contract: changing any is breaking — a new `.v2`
+      entry beside this one.
   - id: nats.telegram-connector.message-edited.v1
     kind: routing-key
     value: telegram.MessageEdited
