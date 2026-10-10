@@ -19,6 +19,7 @@ HINDSIGHT_SYNC_INTERVAL_MS=30000
 HINDSIGHT_SYNC_RETRY_MS=30000
 HINDSIGHT_SYNC_SINCE=1970-01-01T00:00:00Z
 HINDSIGHT_SYNC_CHAT_IDS=
+HINDSIGHT_SYNC_EXCLUDED_PLATFORMS=
 ```
 
 Set `HINDSIGHT_API_KEY` privately if the endpoint requires Bearer authentication.
@@ -68,6 +69,28 @@ partial account failures keep successful results and report the unavailable scop
 The brain's `SEMANTIC_MIN_SCORE` is not applied to Hindsight scores.
 
 ## Resumable indexing
+
+### Temporary platform pause
+
+Apply migration `036_hindsight_platform_policy.sql`, then set
+`HINDSIGHT_SYNC_EXCLUDED_PLATFORMS=telegram` in the deployment `.env` and recreate
+only `hindsight-sync`. Empty/unset preserves indexing for all platforms. The
+accepted names are `whatsapp`, `telegram`, `instagram`; invalid values fail
+before changing the policy or making provider requests.
+
+The worker mirrors this database-wide policy into `hindsight_sync_platform_policy`
+under its destination lock. Run one consistent policy per source database.
+Triggers skip excluded providers before scanning historical messages, and the
+worker skips their queued documents and legacy pending operations. Provider
+message/media synchronization keeps running. Existing Hindsight documents,
+queue entries, revisions and pending operations are preserved; a pause does not
+purge indexed history or cancel operations already accepted by Hindsight.
+
+To resume, remove the platform from the exclusion list, recreate the worker and
+reset its destination seed cursor (`seeded=false, seed_last_id=NULL` in
+`hindsight_conversation_destinations`). This queues the history and changes made
+during the pause in bounded batches while retaining document IDs and ledgers.
+Already-indexed Telegram history remains searchable while new indexing is paused.
 
 Migration 034 adds a conversation change queue and a ledger independent of the
 legacy per-message ledger from migration 033. It does not rewrite history or

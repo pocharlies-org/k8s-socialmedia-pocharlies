@@ -4,6 +4,7 @@ import { getAccounts } from '../domain/account-registry';
 import { HindsightClient, hindsightConfigFromEnv, semanticProviderFromEnv } from '../infrastructure/hindsight-client';
 import { destinationKey, syncOptionsFromEnv } from './hindsight-sync-lib';
 import { runConversationSyncPass } from './hindsight-conversation-sync';
+import { configureHindsightPlatformPolicy, excludedHindsightPlatforms } from './hindsight-platform-policy';
 
 const logger = pino();
 
@@ -17,11 +18,11 @@ export async function main(env: NodeJS.ProcessEnv = process.env, args: string[] 
     throw new Error('Usage: hindsight-sync [--once | --loop]');
   }
   const options = syncOptionsFromEnv(env);
+  excludedHindsightPlatforms(env);
   if (args.includes('--loop')) options.loop = true;
   if (args.includes('--once')) options.loop = false;
   const config = hindsightConfigFromEnv(env);
   const destination = destinationKey(config.url,config.bankId);
-  const hindsight = new HindsightClient(config);
   const pool = new Pool({ connectionString: env.DATABASE_URL, max: 1 });
   const db = await pool.connect().catch(async error => { await pool.end(); throw error; });
   let stopped = false;
@@ -37,6 +38,8 @@ export async function main(env: NodeJS.ProcessEnv = process.env, args: string[] 
     const lock = await db.query('SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked', [`hindsight-sync:${destination}`]);
     locked = Boolean(lock.rows[0].locked);
     if (!locked) throw new Error('Another hindsight-sync job holds the destination lock');
+    await configureHindsightPlatformPolicy(db,env);
+    const hindsight = new HindsightClient(config);
     await hindsight.initializeBank();
     do {
       try {

@@ -26,7 +26,8 @@ export async function seedConversationHistory(db: PoolClient, destination: strin
     await db.query('INSERT INTO hindsight_conversation_destinations(destination) VALUES($1) ON CONFLICT DO NOTHING',[destination]);
     const {rows:[state]} = await db.query('SELECT * FROM hindsight_conversation_destinations WHERE destination=$1 FOR UPDATE',[destination]);
     if (!state.seeded) {
-      const {rows} = await db.query(`SELECT id FROM messages WHERE ($1::uuid IS NULL OR id>$1::uuid) ORDER BY id LIMIT $2`,[state.seed_last_id,batch]);
+      const {rows} = await db.query(`SELECT id FROM messages WHERE ($1::uuid IS NULL OR id>$1::uuid)
+        AND hindsight_platform_enabled(platform) ORDER BY id LIMIT $2`,[state.seed_last_id,batch]);
       if (rows.length) {
         // This is a separate cursor from legacy 033; queue changes are global, cursors per destination.
         await db.query(`SELECT hindsight_conversation_enqueue(s) FROM
@@ -43,6 +44,7 @@ export async function seedConversationHistory(db: PoolClient, destination: strin
 export async function drainLegacyPending(db: PoolClient, client: SyncClient, destination: string,
   options: SyncOptions): Promise<{remaining:boolean;result:SyncPassResult}> {
   const {rows} = await db.query(`SELECT * FROM hindsight_sync_ledger WHERE destination=$1 AND status<>'completed'
+    AND hindsight_platform_enabled(payload->'scope'->>'platform')
     AND retry_at<=now() ORDER BY retry_at LIMIT $2`,[destination,options.batch]);
   const result: SyncPassResult = {selected:rows.length,accepted:0,completed:0,failed:0};
   for (const row of rows) {
@@ -58,7 +60,8 @@ export async function drainLegacyPending(db: PoolClient, client: SyncClient, des
     } catch(error) { if(persistenceFailed) throw error; result.failed++; }
   }
   const {rows:[state]} = await db.query(`SELECT EXISTS(SELECT 1 FROM hindsight_sync_ledger
-    WHERE destination=$1 AND status<>'completed') AS remaining`,[destination]);
+    WHERE destination=$1 AND status<>'completed'
+      AND hindsight_platform_enabled(payload->'scope'->>'platform')) AS remaining`,[destination]);
   return {remaining:state.remaining,result};
 }
 
@@ -143,6 +146,7 @@ export async function runConversationSyncPass(db: PoolClient, client: SyncClient
     FROM hindsight_conversation_changes c
     LEFT JOIN hindsight_conversation_documents d ON d.destination=$1 AND d.scope_key=c.scope_key
     WHERE (d.document_id IS NULL OR d.pending IS NOT NULL OR d.source_revision<>c.revision OR d.selection_hash<>$2)
+      AND hindsight_platform_enabled(c.scope->>'platform')
       AND (d.pending IS NULL OR d.retry_at<=now())
       AND (d.document_id IS NOT NULL OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb)
         s(platform text,namespace text,provider_account text) WHERE c.scope->>'platform'=s.platform

@@ -153,6 +153,10 @@ def render(accounts, stack_dir, source_dir, output_dir, settings=None):
     semantic_provider = settings.get('SEMANTIC_PROVIDER', 'brain').strip() or 'brain'
     if semantic_provider not in ('brain', 'hindsight'):
         raise ValueError('SEMANTIC_PROVIDER must be brain or hindsight')
+    excluded_platforms = settings.get('HINDSIGHT_SYNC_EXCLUDED_PLATFORMS', '').strip()
+    if excluded_platforms and any(p.strip() not in ('whatsapp', 'telegram', 'instagram')
+                                  for p in excluded_platforms.split(',')):
+        raise ValueError('HINDSIGHT_SYNC_EXCLUDED_PLATFORMS must contain known platform names')
     public = url(expand(settings.get('PUBLIC_BASE_URL', 'https://localhost'), settings), 'PUBLIC_BASE_URL')
     wa_public = url(expand(settings.get('WHATSAPP_PUBLIC_BASE_URL', 'https://localhost'), settings), 'WHATSAPP_PUBLIC_BASE_URL')
     def configurable(name, default=''):
@@ -234,6 +238,7 @@ def render(accounts, stack_dir, source_dir, output_dir, settings=None):
         for key, default in (
             ('HINDSIGHT_SYNC_BATCH', '100'), ('HINDSIGHT_SYNC_INTERVAL_MS', '30000'),
             ('HINDSIGHT_SYNC_RETRY_MS', '30000'), ('HINDSIGHT_SYNC_LOOP', 'true'),
+            ('HINDSIGHT_SYNC_EXCLUDED_PLATFORMS', ''),
             ('HINDSIGHT_SYNC_SINCE', '1970-01-01T00:00:00Z'),
             ('HINDSIGHT_SYNC_CHAT_IDS', ''),
         ):

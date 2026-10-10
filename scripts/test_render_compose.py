@@ -23,6 +23,7 @@ class RenderTests(unittest.TestCase):
         worker = doc['services']['hindsight-sync']
         self.assertIn('hindsight-sync.ts', ' '.join(worker['command']))
         self.assertEqual(worker['environment']['HINDSIGHT_SYNC_LOOP'], '${HINDSIGHT_SYNC_LOOP:-true}')
+        self.assertEqual(worker['environment']['HINDSIGHT_SYNC_EXCLUDED_PLATFORMS'], '${HINDSIGHT_SYNC_EXCLUDED_PLATFORMS:-}')
         for name in ('mcp-server', 'mcp-sse', 'hindsight-sync'):
             env = doc['services'][name]['environment']
             self.assertEqual(env['HINDSIGHT_BANK_ID'], '${HINDSIGHT_BANK_ID:-socialmedia-staticduo}')
@@ -33,6 +34,12 @@ class RenderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'SEMANTIC_PROVIDER'):
             module.render(self.accounts, '/volume2/docker/social-media', module.ROOT,
                           '/tmp/generated', {'SEMANTIC_PROVIDER': 'typo'})
+
+    def test_invalid_hindsight_platform_policy_fails_before_rendering(self):
+        for value in ('telegarm', 'Telegram', 'telegram,'):
+            with self.assertRaisesRegex(ValueError, 'HINDSIGHT_SYNC_EXCLUDED_PLATFORMS'):
+                module.render(self.accounts, '/volume2/docker/social-media', module.ROOT,
+                              '/tmp/generated', {'HINDSIGHT_SYNC_EXCLUDED_PLATFORMS': value})
 
     def setUp(self):
         self.accounts = json.loads((module.ROOT / 'deploy/accounts.json').read_text())

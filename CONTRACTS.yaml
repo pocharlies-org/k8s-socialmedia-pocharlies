@@ -3,6 +3,25 @@ canonical_checkout: /home/dibanez/k8s/k8s-socialmedia-pocharlies
 registry_files:
 - CONTRACTS.yaml
 contracts:
+- id: db.hindsight-platform-policy.v1
+  kind: schema
+  value: hindsight_sync_platform_policy
+  role: provider
+  files:
+  - mcp-server/src/infrastructure/database/migrations/036_hindsight_platform_policy.sql
+  - mcp-server/src/jobs/hindsight-platform-policy.ts
+  - mcp-server/src/jobs/hindsight-conversation-sync.ts
+  - mcp-server/src/jobs/hindsight-sync.ts
+  - scripts/render-compose.py
+  status: active
+  note: 'HINDSIGHT_SYNC_EXCLUDED_PLATFORMS is a strict CSV of whatsapp, telegram,
+    instagram; unset/empty indexes all. The worker applies the database-wide
+    platform(enabled) policy under its destination lock before provider work.
+    Capture triggers and consumer candidates, including persisted pending operations,
+    skip excluded providers. Existing source data, documents and queues are preserved;
+    pausing does not revoke already accepted provider operations. Resume requires
+    bounded reseeding to capture changes made while paused. Historical migrations
+    remain byte-identical; migration 036 installs the guards.'
 - id: http.whatsapp-connector.history-recover.v1
   kind: http-route
   value: /history/recover
