@@ -32,9 +32,16 @@ export async function connector(mode: 'gated' | 'open', reply = '{"chats":[],"me
         String(req.headers['x-connector-signature'] ?? ''),
         TEST_CONNECTOR_SECRET
       );
-      seen.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, signatureOk });
+      seen.push({
+        method: req.method ?? '',
+        url: req.url ?? '',
+        headers: req.headers,
+        signatureOk,
+      });
       if (mode === 'gated' && !signatureOk) {
-        res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Invalid signature"}');
+        res
+          .writeHead(401, { 'content-type': 'application/json' })
+          .end('{"error":"Invalid signature"}');
         return;
       }
       res.writeHead(200, { 'content-type': 'application/json' }).end(reply);
