@@ -59,9 +59,12 @@ images:
   # SKIRM-102 08-10: instagram-e69969eb -> v1.3.106 (run 37744603591, deploy/prod@897435e):
   # #231, POST /webhook exige x-hub-signature-256 valido (401 sin firma o firma ajena, 503 si
   # no hay secreto de app). Es lo unico que cambia en connectors/instagram desde e69969eb.
+  # SKIRM-112 10-10: v1.3.106 -> v1.3.110 (run 38021085868, deploy/prod@8c9ee62): #249, /api/v1
+  # del conector exige la firma HMAC (401 sin firma; /health, /webhook y el callback OAuth siguen
+  # sin esa puerta). Ventana SC-2092: se fusiona despues de la rotacion. Sin CONNECTOR_SECRET_STRICT.
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.106
-    digest: sha256:bbd49fd3a9bb60198d3e776b82dbfe0a899f761a249a0318df86ac40911e0fc0
+    newTag: v1.3.110
+    digest: sha256:58a73ed32419297bfbbfeb7d7c7d90818f489bc5687abcd6af61a97919ad7d49
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
