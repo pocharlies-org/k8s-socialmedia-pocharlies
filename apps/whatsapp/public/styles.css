@@ -384,9 +384,38 @@ h1, h2, p { margin: 0; }
   text-transform: uppercase;
 }
 
-.chat-sidebar:has(.sidebar-message-search:not([hidden])) .chat-list {
-  flex: 0 1 auto;
-  max-height: min(34vh, 300px);
+.sidebar-search-selector {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 8px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sidebar-search-view {
+  flex: 1;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sidebar-search-view[aria-selected="true"] {
+  background: var(--surface-raised);
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.sidebar-search-view:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+
+.chat-sidebar:has(.sidebar-search-selector:not([hidden])) .chat-list {
+  flex: 1 1 0;
 }
 
 .sidebar-message-search {
@@ -397,7 +426,8 @@ h1, h2, p { margin: 0; }
   border-top: 1px solid var(--line);
 }
 
-.sidebar-message-search[hidden], .sidebar-search-heading[hidden] { display: none; }
+.sidebar-message-search[hidden], .sidebar-search-heading[hidden], .sidebar-search-selector[hidden],
+.chat-list[hidden], .sidebar-search-status[hidden] { display: none; }
 
 .sidebar-search-status {
   margin: 6px 16px;
@@ -407,7 +437,7 @@ h1, h2, p { margin: 0; }
 
 .sidebar-search-status:empty { display: none; }
 
-.sidebar-search-results { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.sidebar-search-results { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 
 .sidebar-message-result {
   display: flex;
@@ -1420,6 +1450,7 @@ body[data-theme="light"] .ai-panel-avatar { background: #d8e0e3; color: #34464f;
 .chat-sidebar[data-archive-view="true"] .chat-sidebar-header,
 .chat-sidebar[data-archive-view="true"] > .search,
 .chat-sidebar[data-archive-view="true"] > .sidebar-search-heading,
+.chat-sidebar[data-archive-view="true"] > .sidebar-search-selector,
 .chat-sidebar[data-archive-view="true"] > .sidebar-message-search,
 .chat-sidebar[data-archive-view="true"] .feature-view-nav,
 .chat-sidebar[data-archive-view="true"] .feature-archive-entry { display: none; }

@@ -98,6 +98,7 @@ class FakeElement {
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
   setAttribute(name, value) { this[name] = value; }
+  removeAttribute(name) { delete this[name]; }
   append(...children) { for (const child of children) { child.parent = this; this.children.push(child); } }
   replaceChildren(...children) {
     const focused = this.document.activeElement;
@@ -120,6 +121,52 @@ class FakeElement {
     return visit(this);
   }
 }
+
+test('search tabs count rendered conversations and preserve manual selection through async results', async () => {
+  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }};
+  const sidebar = document.createElement('aside'); sidebar.className = 'chat-sidebar';
+  document.querySelector = () => sidebar;
+  const input = document.createElement('input');
+  const chats = document.createElement('div'); chats.id = 'chats';
+  const row = document.createElement('button'); row.className = 'chat-item'; row.dataset.chatId = 'maria';
+  chats.append(row); sidebar.append(input, chats);
+  const response = deferred();
+  let account = 'personal';
+  let loaded = [{id: 'maria'}, {id: 'filtered-out'}];
+  const ui = installSidebarMessageSearch({documentRef: document, input, chatList: chats,
+    getAccount: () => account, getChats: () => loaded, delay: 0,
+    request: () => response.promise, openMessage: async () => {}, showError: assert.fail});
+  input.value = 'maria'; ui.changed();
+  const [conversations, messages] = sidebar.querySelectorAll('.sidebar-search-view');
+  const section = sidebar.querySelector('.sidebar-message-search');
+  assert.equal(conversations.textContent, 'Conversaciones (1)');
+  assert.equal(conversations['aria-selected'], 'true');
+  assert.equal(section.hidden, true);
+  messages.click();
+  await tick();
+  response.resolve({results: [{chatId: 'maria', messageId: 'first'}], nextCursor: 'page-2'});
+  await tick();
+  assert.equal(messages.textContent, 'Mensajes (1+)');
+  assert.equal(messages['aria-selected'], 'true');
+  assert.equal(chats.hidden, true);
+  conversations.click();
+  assert.equal(chats.hidden, false);
+  input.listeners.get('keydown')({key: 'ArrowDown', preventDefault() {}});
+  assert.equal(document.activeElement, row);
+  messages.click();
+  input.value = 'new query'; ui.changed();
+  assert.equal(conversations['aria-selected'], 'true');
+  messages.click();
+  account = 'work'; loaded = [];
+  ui.accountChanged();
+  assert.equal(conversations.textContent, 'Conversaciones (0)');
+  assert.equal(messages['aria-selected'], 'true');
+  assert.equal(messages.textContent, 'Mensajes (0)');
+  input.value = ''; ui.changed();
+  assert.equal(sidebar.querySelector('.sidebar-search-selector').hidden, true);
+  assert.equal(chats.hidden, false);
+  assert.equal(section.hidden, true);
+});
 
 test('sidebar UI shows message pages, opens a chat absent from the loaded list, and supports keyboard navigation', async () => {
   const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }};
