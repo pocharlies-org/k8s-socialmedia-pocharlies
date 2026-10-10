@@ -18,7 +18,7 @@ import type { ITelegramStorageProvider } from '@mtcute/node';
 import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
 import pino from 'pino';
-import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
+import { notifyDashboard as dashboardNotify } from '@mcp-socialmedia/shared';
 import { isSessionInvalidatedError } from './credential-session';
 import {
   EditDeduper,

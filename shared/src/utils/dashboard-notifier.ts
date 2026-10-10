@@ -2,7 +2,7 @@
 // HMAC scheme matches the dashboard's `/api/messages/_connector/*` endpoints.
 
 import { createHmac } from 'crypto';
-import { requireConnectorSecret } from '@mcp-socialmedia/shared';
+import { requireConnectorSecret } from '../crypto/connector-secret';
 
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://100.83.56.98:9002';
 

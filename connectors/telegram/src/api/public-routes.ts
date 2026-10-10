@@ -9,16 +9,10 @@ type PublicClient = Pick<
 >;
 
 /**
- * The read and send endpoints of the Telegram connector (telegram-sync's send,
- * mcp-server's providerGet), mounted at /api/public behind the connector HMAC
- * (SKIRM-111). A GET has no body, so its signature is over "{}" — express.json
- * leaves req.body = {} — and so is the one of a send, whose parameters are the
- * JSON body it signs.
- *
- * Manual call (the signature is HMAC-SHA256 of "<ts>:{}" with the connector key):
- *   ts=$(date +%s); sig=$(printf '%s:{}' "$ts" | openssl dgst -sha256 -hmac "$CONNECTOR_SHARED_SECRET" -hex | sed 's/^.* //')
- *   curl "http://localhost:3002/api/public/dialogs" \
- *     -H "x-connector-timestamp: $ts" -H "x-connector-signature: sha256=$sig"
+ * What mcp-server (providerGet) and telegram-sync (send) call on the Telegram
+ * connector, mounted at /api/public behind the same HMAC as /api/v1 (SKIRM-111).
+ * A GET signs "{}", because express.json leaves req.body = {}; a send signs its
+ * JSON body. The signing recipe by hand is in ARCHITECTURE.md §8.
  */
 export function createPublicRouter(
   client: PublicClient,

@@ -1,6 +1,7 @@
 export * from './crypto/encryption';
 export * from './crypto/connector-secret';
 export * from './crypto/meta-signature';
+export * from './utils/dashboard-notifier';
 export * from './utils/log-redaction';
 export * from './utils/reject-log';
 export * from './utils/with-timeout';
