@@ -977,11 +977,9 @@ contracts:
       http.telegram-connector.public-dialogs.v1 (over "<ts>:{}", the limit
       travels in the query and is not signed): without it 401, with it 200
       {messages}, 503 {error} while Telegram is not connected, 500 {error}.
-      dgx-infra services/dashboard/api/routes_history.py also names it, with a
-      localhost URL that is not the connector from the dashboard pod; it
-      carries no signature and is not migrated. The path, the signature scheme
-      and the 200 shape are contract: changing any is breaking — a new `.v2`
-      entry beside this one.
+      dgx-infra services/dashboard/api/routes_history.py names it too and sends
+      no signature. The path, the signature scheme and the 200 shape are
+      contract: changing any is breaking — a new `.v2` entry beside this one.
   - id: http.telegram-connector.public-send.v1
     kind: http-route
     value: /api/public/send/:chatId
