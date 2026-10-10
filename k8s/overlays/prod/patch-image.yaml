@@ -48,6 +48,11 @@ spec:
         - name: whatsapp-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.103@sha256:0d742e13875e958ce596d3e5e903edb2bb07c0c1bb386fa03b79dc244d5daf71
 ---
+# SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
+# deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
+# Moves only this Deployment, one connector per PR (leila, professional, personal), and
+# carries no CONNECTOR_SECRET_STRICT: the strict switch is a separate PR. Digest checked
+# against Harbor (crane). whatsapp-pairing stays on v1.3.91.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -58,7 +63,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.103@sha256:0d742e13875e958ce596d3e5e903edb2bb07c0c1bb386fa03b79dc244d5daf71
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.109@sha256:0c2d603ad95f050f2cdedec543d5c381f58d797fcb11ec8e17365e4d1f483d23
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 apiVersion: apps/v1
