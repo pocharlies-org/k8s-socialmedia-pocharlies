@@ -155,6 +155,11 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   template:
+    metadata:
+      annotations:
+        # SC-2092: subir el numero reinicia el pod y recoge la CONNECTOR_SHARED_SECRET rotada
+        # (secretKeyRef no se recarga y no hay Reloader).
+        pocharlies/connector-secret-generation: "2"
     spec:
       containers:
         - name: whatsapp-pairing
@@ -167,6 +172,9 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   template:
+    metadata:
+      annotations:
+        pocharlies/connector-secret-generation: "2"
     spec:
       containers:
         - name: telegram-pairing
@@ -191,10 +199,26 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   template:
+    metadata:
+      annotations:
+        pocharlies/connector-secret-generation: "2"
     spec:
       containers:
         - name: telegram-sync
           image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.78@sha256:01235fc3d4f58535f7f1fb8f8e51893351dbe9c1e49d71c348018302f238dffa
+---
+# SC-2092: telegram-sync-professional lleva su imagen por el bloque `images:` de kustomization.yaml;
+# aqui solo la anotacion de reinicio.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-sync-professional
+  namespace: whatsapp-mcp
+spec:
+  template:
+    metadata:
+      annotations:
+        pocharlies/connector-secret-generation: "2"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -203,6 +227,9 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   template:
+    metadata:
+      annotations:
+        pocharlies/connector-secret-generation: "2"
     spec:
       containers:
         - name: whatsapp-synapse-bridge
