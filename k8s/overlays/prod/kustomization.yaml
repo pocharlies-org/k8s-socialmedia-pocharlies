@@ -16,6 +16,9 @@ patches:
   # SC-1197 encendido: SOCIAL_PAIRING_API=on + replicas 1 + CREDENTIAL_STORE_ENABLED
   # en social-api y los dos pools. Rollback = revert de este fichero y su linea.
   - path: patch-social-pairing-on.yaml
+  # SKIRM-103 / SC-2092: CONNECTOR_SECRET_STRICT=true en mcp-sse y los tres conectores de
+  # WhatsApp. Solo en la ventana de rotacion de la clave; rollback = revert de este fichero y su linea.
+  - path: patch-connector-secret-strict.yaml
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
   # SC-1197 encendido: mcp-server advances v1.3.55 -> v1.3.57 (run
