@@ -85,7 +85,8 @@
       "syncName": "telegram-sync",
       "connectorAccountEnv": false,
       "sessionSecretKey": null,
-      "syncMemoryLimit": "4Gi"
+      "syncMemoryLimit": "4Gi",
+      "connectorMemoryLimit": "1Gi"
     },
     "brainInstance": "personal"
   },
