@@ -91,6 +91,12 @@ S3_ENV = [
     _env("MINIO_BUCKET", "socialmedia-media"),
 ]
 NATS_ENV = _env("NATS_URL", f"nats://whatsapp-mcp-nats.{SVC}:4222")
+# Control Nexus dashboard: the connectors POST ephemeral events (typing,
+# reaction-snapshot) to its /api/messages/_connector/* endpoints. The compiled
+# default in connectors/telegram/src/dashboard-notifier.ts points at the retired
+# x86 dashboard (100.83.56.98:9002, refused since the dashboard moved to
+# control-nexus), so every event was a failed fetch (INFRA-888).
+DASHBOARD_URL_ENV = _env("DASHBOARD_URL", "http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002")
 DB_ENV = _env(
     "DATABASE_URL",
     "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp",
@@ -283,7 +289,10 @@ def telegram_defaults(account_id):
         # Secret key holding this account's gramjs session; None → the
         # TELEGRAM_SESSION_STRING already loaded by envFrom (personal).
         "sessionSecretKey": f"TELEGRAM_SESSION_STRING_{account_id.upper().replace('-', '_')}",
-        "connectorMemoryLimit": "768Mi",
+        # INFRA-888: the personal connector OOMKilled at 768Mi (working set ~695Mi at
+# death, ~300Mi/h under load). Raised to 1.5Gi with measured headroom; if it
+# still OOMs the growth is a leak in the connector code, not a sizing problem.
+        "connectorMemoryLimit": "1536Mi",
         "syncMemoryLimit": "3Gi",
         "connectorNodeSelector": {"topology": "lan", "kubernetes.io/arch": "amd64"},
         # telegram-sync is SESSION-LESS (ingests via NATS + the connector HTTP
@@ -300,7 +309,7 @@ def render_telegram(account):
     d = {**telegram_defaults(aid), **account.get("deploy", {})}
     cname, sname = d["connectorName"], d["syncName"]
 
-    c_env = [NATS_ENV]
+    c_env = [NATS_ENV, DASHBOARD_URL_ENV]
     if d["connectorAccountEnv"]:
         c_env.append(_env("CONNECTOR_ACCOUNT", aid))
     if d["sessionSecretKey"]:

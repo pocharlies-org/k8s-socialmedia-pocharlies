@@ -605,6 +605,8 @@ spec:
         env:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets
@@ -613,7 +615,7 @@ spec:
             cpu: 30m
             memory: 256Mi
           limits:
-            memory: 768Mi
+            memory: 1536Mi
 ---
 apiVersion: v1
 kind: Service
@@ -774,6 +776,8 @@ spec:
         env:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
         - name: CONNECTOR_ACCOUNT
           value: professional
         - name: TELEGRAM_SESSION_STRING
@@ -789,7 +793,7 @@ spec:
             cpu: 30m
             memory: 256Mi
           limits:
-            memory: 768Mi
+            memory: 1536Mi
 ---
 apiVersion: v1
 kind: Service
