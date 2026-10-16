@@ -289,9 +289,10 @@ def telegram_defaults(account_id):
         # Secret key holding this account's gramjs session; None → the
         # TELEGRAM_SESSION_STRING already loaded by envFrom (personal).
         "sessionSecretKey": f"TELEGRAM_SESSION_STRING_{account_id.upper().replace('-', '_')}",
-        # INFRA-888: the personal connector OOMKilled at 768Mi (working set ~695Mi at
-# death, ~300Mi/h under load). Raised to 1.5Gi with measured headroom; if it
-# still OOMs the growth is a leak in the connector code, not a sizing problem.
+        # INFRA-888: 768Mi (SC-2517 subió a 1Gi) no basta: el arranque con
+        # backfill de la cuenta personal llenó 1Gi en ~11 min (medido 16-10
+        # 21:46→21:57). 1.5Gi deja margen sobre ese pico; si aun así OOMKillea
+        # al arrancar, es la fuga del conector, no el tamaño.
         "connectorMemoryLimit": "1536Mi",
         "syncMemoryLimit": "3Gi",
         "connectorNodeSelector": {"topology": "lan", "kubernetes.io/arch": "amd64"},
