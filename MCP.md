@@ -121,6 +121,9 @@ Writes pass through the connector's `ENABLE_SENDING` /
   message to each; members are reported, not messaged. Per-person `results`
   with `reason` `invited | already_participant | send_failed |
 invite_link_unavailable`; nobody invited → `invite_not_sent`.
+- `social_get_reactions` (Telegram, read-only): `total` (Telegram's own count)
+  and `byEmoji` for one `messageId`, or for every message of a forum topic
+  (`topicId`, or target `<chat>_<topic>`) sorted by total — the photo-contest tally.
 - `social_send_poll`, `social_vote_poll` (`options: []` retracts),
   `social_get_poll_results`, `social_send_event`, `social_respond_event`,
   `social_get_event_results`.

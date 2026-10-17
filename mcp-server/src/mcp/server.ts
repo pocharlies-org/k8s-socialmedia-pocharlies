@@ -759,6 +759,16 @@ export class MCPServer {
         return this.canonicalManageComment(args);
       case 'reactMessage':
         return this.canonicalReactMessage(args);
+      case 'getReactions':
+        this.requireChannel(args, 'telegram');
+        this.providerOnlyRead(args, 'Telegram reactions');
+        return this.handleTelegramGetReactions({
+          chatId: this.target(args),
+          account: this.account(args),
+          messageId: args.messageId,
+          topicId: args.topicId,
+          limit: args.limit,
+        });
       case 'starMessage':
         return this.canonicalStarMessage(args);
       case 'pinMessage':
@@ -5169,6 +5179,79 @@ export class MCPServer {
       }
     );
     return this.jsonResponse(data);
+  }
+
+  /**
+   * Reaction counts from the Telegram connector's GET /messages/reactors
+   * (contract http.telegram-connector.messages-reactors.v1): `total` is
+   * Telegram's own count, `byEmoji` tallies the reactor list. Without
+   * messageId, every message of the topic (connector search with threadId).
+   */
+  private async handleTelegramGetReactions(args: {
+    chatId: string;
+    account?: string;
+    messageId?: string;
+    topicId?: number | string;
+    limit?: number;
+  }) {
+    const account = normalizeAccount(args.account);
+    const target = this.telegramTopicTarget(args.chatId, args.topicId);
+    const { chatId } = target;
+    const tgUrl = this.tgUrl(args.account);
+    const chatPath = encodeURIComponent(chatId);
+    const count = async (msgId: number) => {
+      // The connector pages Telegram 100 at a time up to 50 pages; ask for all of them.
+      const rx = await this.connectorCall(
+        tgUrl,
+        'GET',
+        `/api/v1/messages/reactors/${chatPath}/${msgId}?limit=5000`,
+        undefined,
+        60000
+      );
+      const byEmoji: Record<string, number> = {};
+      for (const r of rx?.reactors || []) byEmoji[r.emoji] = (byEmoji[r.emoji] || 0) + 1;
+      return { total: Number(rx?.total) || 0, byEmoji };
+    };
+    const describe = async (msgId: number) => {
+      const single = await this.connectorCall(
+        tgUrl,
+        'GET',
+        `/api/v1/messages/single/${chatPath}/${msgId}`
+      );
+      const m = single?.message || {};
+      return {
+        messageId: String(msgId),
+        date: m.telegramTimestamp ?? m.date ?? null,
+        from: m.senderFirstName || m.senderUsername || null,
+        senderId: m.senderTelegramId ?? null,
+        type: m.messageType ?? null,
+        text: typeof m.content === 'string' ? m.content.slice(0, 200) : null,
+        ...(await count(msgId)),
+      };
+    };
+
+    if (args.messageId !== undefined && args.messageId !== null && args.messageId !== '') {
+      return this.jsonResponse(
+        await describe(this.telegramMessageNumber(String(args.messageId), chatId, account))
+      );
+    }
+    if (!target.topicId) {
+      throw this.canonicalError(
+        'invalid_request',
+        'messageId or a forum topic (topicId, or target <chat>_<topic>) is required'
+      );
+    }
+    const { results } = await this.connectorCall(tgUrl, 'POST', '/api/v1/messages/search', {
+      query: '',
+      chatId,
+      threadId: target.topicId,
+      limit: clampInteger(args.limit, 100, 1, 200),
+    });
+    const messages = [];
+    // Sequential on purpose: one Telegram session, and a burst of reactor pages trips FLOOD_WAIT.
+    for (const m of results || []) messages.push(await describe(Number(m.id)));
+    messages.sort((a, b) => b.total - a.total);
+    return this.jsonResponse({ chatId, topicId: target.topicId, count: messages.length, messages });
   }
 
   /**

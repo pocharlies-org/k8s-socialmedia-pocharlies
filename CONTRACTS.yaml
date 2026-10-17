@@ -1101,7 +1101,9 @@ contracts:
       HMAC-signed route of the house Telegram connectors (telegram-connector,
       telegram-connector-professional). GET
       /api/v1/messages/reactors/:chatId/:msgId?limit (read, ungated), consumed
-      by dgx-messages ("who reacted?" tooltip). 200 {total, reactors: [{emoji,
+      by dgx-messages ("who reacted?" tooltip) and by the MCP tool
+      social_get_reactions (INFRA-926, handleTelegramGetReactions in
+      mcp-server/src/mcp/server.ts). 200 {total, reactors: [{emoji,
       userId, displayName, mine}]}; 400 bad msgId. Registered with the sending
       gate (the route predates the registry). The path, the body fields and
       the 200 shape are contract: changing any is breaking — a new `.v2` entry
@@ -2517,7 +2519,7 @@ contracts:
       - mcp-server/src/mcp/tool-registry.contract.spec.ts
     status: active
     note: >-
-      El catálogo de tools MCP (73) se genera desde
+      El catálogo de tools MCP (74) se genera desde
       mcp-server/src/mcp/tool-registry.ts y el generador propaga el digest a cuatro
       puntos: contracts/socialmedia-tools.{json,md},
       mcp-server/src/mcp/contract.generated.ts y las dos anotaciones
@@ -2533,6 +2535,9 @@ contracts:
       voz nativa), digest sha256:e30a45214c5bc91b836454ccce87a4f9c515771cd8f51231ad8b0feb60c0993d.
       SKIRM-118: descripción de social_send_message.attachments[].url y .mimeType (Telegram
       audio/ogg → nota de voz), digest sha256:b8e69e01a7aa7fbaf5cb37edf3c052c4d94adf146ed6762de6cddef0e788d053.
+      INFRA-926: aditivo, tool nueva social_get_reactions (read, social.read,
+      messages.reactions; Telegram), digest
+      sha256:94a52d2b53d541a78ace6c30a35cc032d81bad52cb0df675d1ca3c1d697720ac.
       INFRA-635: aditivo, sin tocar el digest ni los esquemas. El envelope de
       social_search_messages (handleSearchMessages en server.ts) puede llevar
       meta.partialErrors y source.completeness 'partial' cuando una instancia del brain

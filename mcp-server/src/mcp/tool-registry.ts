@@ -1206,6 +1206,29 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     idempotent: true,
   }),
   tool({
+    name: 'social_get_reactions',
+    title: 'Get message reactions',
+    description:
+      'Count the reactions on Telegram messages: total (Telegram’s own count) and per emoji. ' +
+      'With messageId, that message; without it, every message of the forum topic topicId ' +
+      '(or a target <chat>_<topic>), sorted by total. Use it to tally a photo contest.',
+    effect: 'read',
+    authScope: 'social.read',
+    capability: 'messages.reactions',
+    handler: 'getReactions',
+    inputSchema: objectSchema(
+      {
+        ...commonProperties,
+        messageId: { type: 'string', minLength: 1 },
+        topicId: { type: ['string', 'integer'], description: 'Forum topic to tally.' },
+        limit: { type: 'integer', minimum: 1, maximum: 200, default: 100 },
+        readSource,
+      },
+      ['channel', 'accountId', 'target']
+    ),
+    idempotent: true,
+  }),
+  tool({
     name: 'social_star_message',
     title: 'Star message',
     description:
