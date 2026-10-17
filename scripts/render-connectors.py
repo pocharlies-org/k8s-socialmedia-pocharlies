@@ -289,11 +289,14 @@ def telegram_defaults(account_id):
         # Secret key holding this account's gramjs session; None → the
         # TELEGRAM_SESSION_STRING already loaded by envFrom (personal).
         "sessionSecretKey": f"TELEGRAM_SESSION_STRING_{account_id.upper().replace('-', '_')}",
-        # INFRA-888: 768Mi (SC-2517 subió a 1Gi) no basta: el arranque con
-        # backfill de la cuenta personal llenó 1Gi en ~11 min (medido 16-10
-        # 21:46→21:57). 1.5Gi deja margen sobre ese pico; si aun así OOMKillea
-        # al arrancar, es la fuga del conector, no el tamaño.
-        "connectorMemoryLimit": "1536Mi",
+        # INFRA-888 puso 1.5Gi y sigue OOMKilling: medido 17-10 (journalctl
+        # kernel, nodo ubuntu) el node del conector personal llegó a 1531 MB
+        # de anon-rss en el kill (3 OOM en 21:33/21:42/21:48, cada uno ~5 min
+        # tras el arranque: pico del backfill, no fuga — la instancia estable
+        # se queda en ~300 MiB). 3Gi es el techo que ya lleva el telegram-sync.
+        # Si con 3Gi OOMKillea estando estable, es fuga del conector: ticket
+        # del whatsappmcp, no tamaño.
+        "connectorMemoryLimit": "3Gi",
         "syncMemoryLimit": "3Gi",
         "connectorNodeSelector": {"topology": "lan", "kubernetes.io/arch": "amd64"},
         # telegram-sync is SESSION-LESS (ingests via NATS + the connector HTTP
