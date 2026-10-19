@@ -79,9 +79,11 @@ test('SQL keeps account predicates and joins participant names by scoped id', ()
 test('chat views filter archive state before limiting results', () => {
   assert.match(CHAT_LIST_ACTIVE_SQL, /WHERE c\.account = \$1[\s\S]*AND \(COALESCE\(c\.archived, false\) OR COALESCE\(pn_alias\.archived, false\)\) = false\s+ORDER BY[\s\S]*LIMIT 500$/);
   assert.match(CHAT_LIST_ARCHIVED_SQL, /WHERE c\.account = \$1[\s\S]*AND \(COALESCE\(c\.archived, false\) OR COALESCE\(pn_alias\.archived, false\)\) = true\s+ORDER BY/);
-  // SC-2760: igualdad + ANY separados (array_prepend impedía el índice por
-  // conversación → escaneo global de messages; medido 4 s/conversación).
-  assert.match(CHAT_LIST_ACTIVE_SQL, /m\.conversation_id = c\.id OR m\.conversation_id = ANY\(COALESCE\(pn_alias\.ids/);
+  // SC-2760: cada LATERAL de messages va en UNION ALL (igualdad + ANY por
+  // brazo); con array_prepend o un solo ANY no constante el planner abandona
+  // el índice por conversación y escanea messages por timestamp global.
+  assert.equal((CHAT_LIST_ACTIVE_SQL.match(/m\.conversation_id = c\.id\b/g) || []).length, 2);
+  assert.ok((CHAT_LIST_ACTIVE_SQL.match(/UNION ALL/g) || []).length >= 2);
   assert.match(CHAT_LIST_ARCHIVED_SQL, /lid\.account = c\.account/);
   assert.doesNotMatch(CHAT_LIST_ARCHIVED_SQL, /LIMIT 500$/);
 });

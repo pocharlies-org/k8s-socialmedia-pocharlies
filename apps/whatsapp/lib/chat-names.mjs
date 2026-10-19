@@ -241,28 +241,51 @@ LEFT JOIN LATERAL (
   ORDER BY u.wa_timestamp DESC, u.id DESC
   LIMIT 1
 ) last_message ON true
+-- Mismo UNION ALL que last_message: con el array no constante de pn_alias.ids
+-- en un solo brazo, el planner abandona el índice por conversación y escanea
+-- messages por timestamp global.
 LEFT JOIN LATERAL (
-  SELECT p.id AS sender_id, p.name AS sender_name, p.push_name
-  FROM messages m
-  LEFT JOIN participants p
-    ON p.id = m.sender_wa_id
-   AND p.account = m.account
-  -- igualdad + ANY por separado: con array_prepend Postgres no puede usar el
-  -- índice por conversación y escanea messages por timestamp (medido 19-10:
-  -- 4 s/conversación con 449k mensajes; la forma OR, 0,1 s).
-  WHERE (m.conversation_id = c.id OR m.conversation_id = ANY(COALESCE(pn_alias.ids, ARRAY[]::text[])))
-    AND m.account = $1
-    AND m.platform = 'whatsapp'
-    AND ${MESSAGE_RETAINED_SQL}
-    AND ${MESSAGE_VISIBLE_SQL}
-    AND m.direction = 'INBOUND'
-  ORDER BY (
-    (p.name IS NOT NULL AND BTRIM(p.name) <> ''
-      AND p.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
-    OR (p.push_name IS NOT NULL AND BTRIM(p.push_name) <> ''
-      AND p.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
-  ) DESC,
-  m.wa_timestamp DESC
+  SELECT v.sender_id, v.sender_name, v.push_name
+  FROM (
+    (SELECT p.id AS sender_id, p.name AS sender_name, p.push_name,
+            ((p.name IS NOT NULL AND BTRIM(p.name) <> ''
+              AND p.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
+            OR (p.push_name IS NOT NULL AND BTRIM(p.push_name) <> ''
+              AND p.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')) AS name_quality,
+            m.wa_timestamp
+     FROM messages m
+     LEFT JOIN participants p
+       ON p.id = m.sender_wa_id
+      AND p.account = m.account
+     WHERE m.conversation_id = c.id
+       AND m.account = $1
+       AND m.platform = 'whatsapp'
+       AND ${MESSAGE_RETAINED_SQL}
+       AND ${MESSAGE_VISIBLE_SQL}
+       AND m.direction = 'INBOUND'
+     ORDER BY name_quality DESC, m.wa_timestamp DESC
+     LIMIT 1)
+    UNION ALL
+    (SELECT p.id AS sender_id, p.name AS sender_name, p.push_name,
+            ((p.name IS NOT NULL AND BTRIM(p.name) <> ''
+              AND p.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
+            OR (p.push_name IS NOT NULL AND BTRIM(p.push_name) <> ''
+              AND p.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')) AS name_quality,
+            m.wa_timestamp
+     FROM messages m
+     LEFT JOIN participants p
+       ON p.id = m.sender_wa_id
+      AND p.account = m.account
+     WHERE m.conversation_id = ANY(COALESCE(pn_alias.ids, ARRAY[]::text[]))
+       AND m.account = $1
+       AND m.platform = 'whatsapp'
+       AND ${MESSAGE_RETAINED_SQL}
+       AND ${MESSAGE_VISIBLE_SQL}
+       AND m.direction = 'INBOUND'
+     ORDER BY name_quality DESC, m.wa_timestamp DESC
+     LIMIT 1)
+  ) v
+  ORDER BY v.name_quality DESC, v.wa_timestamp DESC
   LIMIT 1
 ) inbound ON true
 WHERE c.account = $1
