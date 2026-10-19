@@ -146,3 +146,9 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
+  # SC-2760: app de WhatsApp del fork de Jordi. El base la deja en :latest (no
+  # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija a la
+  # imagen publicada por el run 39219283043 (deploy/prod@c77c732, PR #269).
+  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
+    newTag: v1.3.113
+    digest: sha256:c38a97c63fe82c04582e05152f3cbbb87ce546b4a4abc1576b59218547994deb
