@@ -126,7 +126,8 @@ contracts:
       changing any of them is breaking — a new `.v2` entry beside this one.
       SKIRM-103: deprecated, and still served unauthenticated and unchanged until
       remove_after. No consumer outside this registry: the house QR flow is
-      /qr/page.
+      /qr/page — since SC-2760 served on its own host,
+      https://whatsapp-qr.e-dani.com/qr/page (whatsapp.e-dani.com is the app).
   - id: http.whatsapp-connector.auth-qr.v2
     kind: http-route
     value: /api/v2/auth/qr

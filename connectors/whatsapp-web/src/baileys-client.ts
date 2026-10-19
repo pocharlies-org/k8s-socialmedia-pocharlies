@@ -1947,7 +1947,7 @@ export class BaileysClient extends EventEmitter {
     qrcodeTerminal.generate(qr, { small: true });
     QRCode.toFile(join(this.sessionPath, 'qr.png'), qr, { width: 400 }).catch(() => {});
     this.logger.warn(
-      `WhatsApp requires QR scan at ${process.env.WA_QR_PUBLIC_URL || 'https://whatsapp.e-dani.com/'}`
+      `WhatsApp requires QR scan at ${process.env.WA_QR_PUBLIC_URL || 'https://whatsapp-qr.e-dani.com/'}`
     );
     this.emit('qr', qr);
   }
@@ -1999,7 +1999,7 @@ export class BaileysClient extends EventEmitter {
       if (now - this.lastQrReminderAt > 10 * 60 * 1000) {
         this.lastQrReminderAt = now;
         this.logger.warn(
-          `WhatsApp is waiting for manual QR scan: ${process.env.WA_QR_PUBLIC_URL || 'https://whatsapp.e-dani.com/'}`
+          `WhatsApp is waiting for manual QR scan: ${process.env.WA_QR_PUBLIC_URL || 'https://whatsapp-qr.e-dani.com/'}`
         );
       }
       return;
@@ -7437,7 +7437,7 @@ export class BaileysClient extends EventEmitter {
       watchdogIntervalMs: this.watchdogIntervalMs,
       initializeMaxMs: this.initializeMaxMs,
       historySyncOnLogin: this.historySyncOnLogin,
-      qrUrl: process.env.WA_QR_PUBLIC_URL || 'https://whatsapp.e-dani.com/',
+      qrUrl: process.env.WA_QR_PUBLIC_URL || 'https://whatsapp-qr.e-dani.com/',
       backend: 'baileys',
     };
   }
