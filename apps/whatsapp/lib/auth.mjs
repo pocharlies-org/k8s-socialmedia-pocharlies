@@ -247,4 +247,19 @@ export class AppAuth {
   }
 }
 
+/**
+ * Página de "cuenta no autorizada": el JSON del fallo dejaba al usuario sin
+ * salida con una sesión SSO que no podía cerrar (Dani, 19-10). El enlace
+ * termina la sesión de Keycloak y devuelve a la app.
+ */
+export function unauthorizedHtml(publicUrl, issuer) {
+  const logout = new URL('protocol/openid-connect/logout', `${issuer.href.replace(/\/$/, '')}/`);
+  logout.searchParams.set('redirect_uri', publicUrl);
+  return `<!doctype html><html lang="es"><meta charset="utf-8"><title>Cuenta no autorizada</title>
+<body style="font:16px system-ui;max-width:36em;margin:4em auto">
+<p>Tu sesión de Keycloak no está en la lista de cuentas de esta app.</p>
+<p><a href="${logout.href}">Cerrar sesión en Keycloak</a> y volver a intentarlo con otra cuenta.</p>
+</body>`;
+}
+
 export { SESSION_COOKIE, TRANSACTION_COOKIE, clearCookie, cookie, parseCookie, safeReturnTo };

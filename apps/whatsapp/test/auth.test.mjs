@@ -158,6 +158,9 @@ test('OIDC rejects callback state and nonce mismatches and unauthorized subjects
   unauthorized.idp.nonce = unauthorizedLocation.searchParams.get('nonce');
   const unauthorizedResult = await unauthorized.request(`/auth/callback?code=test-code&state=${unauthorizedLocation.searchParams.get('state')}`, { headers: { cookie: `__Host-wa_oidc_tx=${cookieValue(unauthorizedLogin.headers.get('set-cookie'), '__Host-wa_oidc_tx')}` } });
   assert.equal(unauthorizedResult.status, 403);
+  assert.match(unauthorizedResult.headers.get('content-type'), /text\/html/);
+  const unauthorizedBody = await unauthorizedResult.text();
+  assert.match(unauthorizedBody, /href="https:\/\/idp\.example\/realms\/apps\/protocol\/openid-connect\/logout\?redirect_uri=https%3A%2F%2Fwa\.example%2F"/);
   assert.equal(unauthorizedResult.headers.get('set-cookie'), null);
   assert.equal(location.searchParams.get('state')?.length > 20, true);
 });

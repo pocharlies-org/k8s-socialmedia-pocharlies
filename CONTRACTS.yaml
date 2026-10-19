@@ -2638,6 +2638,18 @@ contracts:
       GET /favicon.ico (y el resto de assets de instalacion PWA: manifest,
       icon.svg, icon-192/512.png) de la app whatsapp.e-dani.com, servido PUBLICO
       antes del login OIDC. Consumidor: el propio navegador del usuario.
+  - id: http.whatsapp-app.auth-callback.v1
+    kind: http-route
+    value: /auth/callback
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET /auth/callback de la app whatsapp.e-dani.com: cierre del flujo OIDC
+      (codigo + state -> sesion). El 403 (sub fuera de OIDC_ALLOWED_SUBJECTS) se
+      contesta en HTML con el enlace de logout del issuer, no en JSON: quien
+      navega necesita cerrar la sesion SSO equivocada (Dani, 19-10).
   - id: http.whatsapp-app.hermes-stop.v1
     kind: http-route
     value: /api/ai/stop

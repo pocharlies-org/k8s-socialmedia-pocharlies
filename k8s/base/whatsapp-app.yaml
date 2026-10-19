@@ -80,7 +80,7 @@ spec:
             - { name: APP_PUBLIC_URL, value: "https://whatsapp.e-dani.com" }
             - { name: OIDC_ISSUER_URL, value: "https://auth-next.e-dani.com/realms/edani" }
             - { name: OIDC_CLIENT_ID, value: "whatsapp-app" }
-            - { name: OIDC_ALLOWED_SUBJECTS, value: "e51253a7-c137-4c6c-9fb9-af9cecd3b147" }
+            - { name: OIDC_ALLOWED_SUBJECTS, value: "e51253a7-c137-4c6c-9fb9-af9cecd3b147,19477a95-5db3-416a-858c-2eeb3cf136f0" }
             - name: OIDC_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: whatsapp-app-secrets, key: OIDC_CLIENT_SECRET } }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }

@@ -11,7 +11,7 @@ import { pipeline } from 'node:stream/promises';
 import pg from 'pg';
 import { utcDatabaseTypes } from './lib/database-time.mjs';
 import { checkOrigin, sendingEnabled, signedHeaders, required, uploadBytes, isValidBase64, fail } from './lib/security.mjs';
-import { AppAuth, TRANSACTION_COOKIE, parseCookie, safeReturnTo } from './lib/auth.mjs';
+import { AppAuth, TRANSACTION_COOKIE, parseCookie, safeReturnTo, unauthorizedHtml } from './lib/auth.mjs';
 import { mediaRequest } from './lib/media.mjs';
 import { readMediaLibrary } from './lib/media-library.mjs';
 import { readChatDirectory } from './lib/chat-directory.mjs';
@@ -1398,12 +1398,24 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const result = await auth.beginLogin(url.searchParams.get('returnTo') || '/');
         return redirect(result.location, result.setCookie);
       }
+      // CONTRACT: http.whatsapp-app.auth-callback.v1
       if (auth.oidcEnabled && path === '/auth/callback' && req.method === 'GET') {
         const configuredCallback = new URL(auth.callbackUrl);
         if (url.pathname !== configuredCallback.pathname) throw fail(404, 'Not found');
         const callbackUrl = new URL(configuredCallback);
         callbackUrl.search = url.search;
-        const result = await auth.finishLogin(callbackUrl, parseCookie(req.headers.cookie, TRANSACTION_COOKIE));
+        let result;
+        try {
+          result = await auth.finishLogin(callbackUrl, parseCookie(req.headers.cookie, TRANSACTION_COOKIE));
+        } catch (error) {
+          // Un 403 en el callback es navegable: se contesta en HTML con la salida
+          // (cerrar sesión Keycloak), no con JSON que deja la sesión SSO colgada.
+          if (error?.status === 403) {
+            res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' });
+            return res.end(unauthorizedHtml(auth.publicUrl, auth.issuer));
+          }
+          throw error;
+        }
         return redirect(result.location, result.setCookie);
       }
       const principal = auth.isAuthenticated(req);
