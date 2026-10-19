@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180">
+  <rect width="320" height="180" fill="#242626"/>
+  <circle cx="80" cy="72" r="28" fill="#21c063"/>
+  <path d="m24 148 76-64 52 44 44-40 100 60H24Z" fill="#43d77d"/>
+  <text x="160" y="35" fill="#fafafa" font-family="sans-serif" font-size="18" text-anchor="middle">fixture gallery</text>
+</svg>

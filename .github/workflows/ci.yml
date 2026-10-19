@@ -133,6 +133,7 @@ jobs:
           {"name":"whatsappmcp-telegram-sync","context":".","dockerfile":"connectors/telegram-sync/Dockerfile"},
           {"name":"whatsappmcp-instagram-connector","context":".","dockerfile":"connectors/instagram/Dockerfile"},
           {"name":"whatsappmcp-whatsapp-open-worker","context":".","dockerfile":"workers/whatsapp-open-worker/Dockerfile"},
-          {"name":"whatsappmcp-mcp-server","context":".","dockerfile":"mcp-server/Dockerfile"}
+          {"name":"whatsappmcp-mcp-server","context":".","dockerfile":"mcp-server/Dockerfile"},
+          {"name":"whatsappmcp-whatsapp-app","context":"apps/whatsapp","dockerfile":"apps/whatsapp/Dockerfile"}
         ]
     secrets: inherit

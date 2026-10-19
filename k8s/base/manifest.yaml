@@ -668,15 +668,26 @@ spec:
       services:
         - name: whatsapp-connector
           port: 3001
-    # Everything else (QR page, status) only behind the generic Keycloak chain:
-    # this host is internet-facing through Cloudflare.
-    - match: Host(`whatsapp.e-dani.com`)
+    # SC-2760: la pagina de emparejamiento QR sigue en el conector detras de la
+    # cadena Keycloak de siempre (la pagina publica del personal es legado y no
+    # se replica; el QR de leila sigue solo por LAN). Traefik prefiere esta regla
+    # mas especifica sobre la catch-all de abajo.
+    - match: Host(`whatsapp.e-dani.com`) && PathPrefix(`/qr`)
       kind: Rule
       middlewares:
         - { name: sso-chain, namespace: keycloak }
       services:
         - name: whatsapp-connector
           port: 3001
+    # SC-2760: todo lo demas es la app de WhatsApp del fork de Jordi
+    # (apps/whatsapp @ ef500ec, tal cual), que autentica por su cuenta contra el
+    # realm `edani` (cliente `whatsapp-app`, sub permitido = Dani): sin
+    # sso-chain aqui, la app falla cerrada por si sola.
+    - match: Host(`whatsapp.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-app
+          port: 3080
   tls:
     store: { name: default, namespace: traefik-edge }
 ---

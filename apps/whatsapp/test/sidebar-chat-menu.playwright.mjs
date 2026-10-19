@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import { startPublicFixture, sidebarMenuFixture } from './browser-fixture.mjs';
+const {chromium} = await import(process.env.PLAYWRIGHT_MODULE || '/app/node_modules/playwright/index.mjs');
+function initializeSidebar(installFeatureUI) {
+  localStorage.setItem('socialmedia-wa-features:alpha', JSON.stringify({lists:[{id:'work',name:'Trabajo',chatIds:[]}]}));
+  window.calls=[]; window.errors=[]; window.fail=false;
+  window.target={id:'target',name:'Ana Fixture',pinned:true,unread:0};
+  window.ui=installFeatureUI({state:{account:'alpha',chat:'selected'},api:async(path,body)=>{calls.push({path,body});if(window.fail)throw Error('Fallo de prueba');if(path==='/api/lists'&&!body)return{account:'gamma',lists:{Equipo:[]}};return{};},query:p=>p,getChats:()=>[target],showError:e=>errors.push(e.message)});
+}
+const fixture = sidebarMenuFixture(initializeSidebar, { stylesheet: true });
+const server = await startPublicFixture({ html: fixture });
+const browser=await chromium.launch({headless:true,args:['--no-sandbox'],...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{})});
+try{
+const page=await browser.newPage({viewport:{width:1000,height:800}});
+await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ui);
+const open=()=>page.locator('#opener').click();
+await open(); assert.equal(await page.evaluate(()=>calls.filter(call => call.body !== undefined).length),0);
+await page.keyboard.press('ArrowDown');await page.keyboard.press('ArrowRight');
+assert.equal(await page.locator(':focus').textContent(),'8 horas');
+await page.keyboard.press('Escape');assert.match(await page.locator(':focus').textContent(),/Silenciar/);
+await page.keyboard.press('ArrowRight');await page.getByRole('menuitem',{name:'1 semana',exact:true}).click();
+assert.deepEqual(await page.evaluate(()=>calls.at(-1).body),{account:'alpha',chat:'target',action:'mute',durationMs:604800000});
+await open();await page.getByRole('menuitem',{name:'Desfijar chat',exact:true}).click();
+assert.equal(await page.evaluate(()=>calls.at(-1).body.action),'unpin');
+await open();await page.getByRole('menuitem',{name:'Añadir a la lista ›',exact:true}).click();await page.getByRole('menuitem',{name:'Trabajo',exact:true}).click();
+assert.equal(await page.evaluate(()=>calls.at(-1).path),'/api/lists');assert.equal(await page.evaluate(()=>calls.at(-1).body.chat),'target');
+await page.evaluate(()=>ui.accountChanged('beta'));
+await open();await page.getByRole('menuitem',{name:'Añadir a la lista ›',exact:true}).click();
+await page.getByRole('menuitem',{name:'Nueva lista',exact:true}).click();
+assert.match(await page.locator('.feature-dialog').textContent(),/Chat seleccionado: Ana Fixture/);
+await page.getByRole('textbox',{name:'Nombre de la lista'}).fill('Familia');
+await page.evaluate(()=>window.fail=true);
+await page.getByRole('button',{name:'Crear lista'}).click();
+await page.waitForFunction(()=>window.errors.includes('Fallo de prueba'));
+assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('socialmedia-wa-features:beta')||'{}').lists||[]),[],'failed association must not create an orphan local list');
+await page.evaluate(()=>window.fail=false);
+await page.getByRole('button',{name:'Crear lista'}).click();
+await page.waitForFunction(()=>JSON.parse(localStorage.getItem('socialmedia-wa-features:beta')||'{}').lists?.length===1);
+assert.deepEqual(await page.evaluate(()=>calls.at(-1).body),{account:'beta',chat:'target',action:'list',list:'Familia',id:'target'});
+assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('socialmedia-wa-features:beta')).lists[0].chatIds),['target']);
+assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('socialmedia-wa-features:alpha')).lists[0].chatIds),['target'],'list creation must not alter another account');
+await page.evaluate(()=>window.errors.length=0);
+await page.evaluate(()=>window.fail=true);await open();await page.getByRole('menuitem',{name:'Archivar chat',exact:true}).click();
+assert.equal(await page.evaluate(()=>target.archived),undefined);assert.deepEqual(await page.evaluate(()=>errors),['Fallo de prueba']);
+await open();await page.getByRole('menu').evaluate(element=>Promise.all(element.getAnimations().map(animation=>animation.finished)));await page.screenshot({path:'/tmp/sidebar-chat-menu.png'});await page.keyboard.press('Escape');assert.equal(await page.locator(':focus').getAttribute('id'),'opener');
+await page.setViewportSize({width:375,height:667});await open();const bounds=await page.getByRole('menu').boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=375);
+await page.keyboard.press('Escape');await page.evaluate(()=>{window.fail=false;ui.accountChanged('gamma');});
+await page.waitForFunction(()=>JSON.parse(localStorage.getItem('socialmedia-wa-features:gamma')||'{}').lists?.[0]?.name==='Equipo');
+await open();await page.getByRole('menuitem',{name:'Añadir a la lista ›',exact:true}).click();
+assert.equal(await page.getByRole('menuitem',{name:'Equipo',exact:true}).count(),1,'server list must appear without a browser-local copy');
+console.log('PASS sidebar menu: scoped actions, keyboard submenus, lists, errors, focus and mobile');
+}finally{await browser.close();server.close();}

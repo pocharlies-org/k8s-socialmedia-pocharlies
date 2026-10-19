@@ -1,0 +1,117 @@
+# SC-2760: la app de WhatsApp del fork de Jordi (jibanez-staticduo/
+# k8s-socialmedia-pocharlies @ ef500ec, `apps/whatsapp` verbatim) desplegada
+# tal cual para probarla en https://whatsapp.e-dani.com. Lee la Postgres
+# `whatsappmcp` compartida, sirve media desde el MinIO de la casa y envía por
+# los conectores firmando con CONNECTOR_SHARED_SECRET (la misma clave que ya
+# usan; el gate de envío del conector sigue mandando). Login: OIDC propio
+# contra el realm `edani` (cliente `whatsapp-app`, sub permitido = Dani).
+# La migración opcional del app (apps/whatsapp/migrations/001_feature_api.sql,
+# índices aditivos) NO se aplica aquí: es rendimiento, no funcionalidad.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: whatsapp-app-accounts
+  namespace: whatsapp-mcp
+data:
+  accounts.json: |
+    [
+      {"channel": "whatsapp", "accountId": "personal", "label": "WhatsApp personal", "enabled": true,
+       "connectorUrl": "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001",
+       "secretEnv": "CONNECTOR_SHARED_SECRET"},
+      {"channel": "whatsapp", "accountId": "professional", "label": "WhatsApp professional", "enabled": true,
+       "connectorUrl": "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001",
+       "secretEnv": "CONNECTOR_SHARED_SECRET"},
+      {"channel": "whatsapp", "accountId": "leila", "label": "WhatsApp Leila", "enabled": true,
+       "connectorUrl": "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001",
+       "secretEnv": "CONNECTOR_SHARED_SECRET"}
+    ]
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: whatsapp-app-secrets
+  namespace: whatsapp-mcp
+spec:
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: whatsapp-app-secrets
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef: { key: whatsapp-app, property: OIDC_CLIENT_SECRET }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-app
+  namespace: whatsapp-mcp
+  labels: { app: whatsapp-app }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: whatsapp-app }
+  template:
+    metadata:
+      labels: { app: whatsapp-app }
+    spec:
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: app
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app:latest
+          ports:
+            - { name: http, containerPort: 3080 }
+          env:
+            - { name: APP_AUTH_MODE, value: "oidc" }
+            - { name: APP_PUBLIC_URL, value: "https://whatsapp.e-dani.com" }
+            - { name: OIDC_ISSUER_URL, value: "https://auth-next.e-dani.com/realms/edani" }
+            - { name: OIDC_CLIENT_ID, value: "whatsapp-app" }
+            - { name: OIDC_ALLOWED_SUBJECTS, value: "e51253a7-c137-4c6c-9fb9-af9cecd3b147" }
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-app-secrets, key: OIDC_CLIENT_SECRET } }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            - { name: SOCIAL_ACCOUNTS_FILE, value: "/etc/whatsapp-app/accounts.json" }
+            - { name: DATA_DIR, value: "/data" }
+            - { name: APP_ENABLE_SENDING, value: "true" }
+            - { name: LITELLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+            - name: LITELLM_API_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: OPENAI_API_KEY } }
+            - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: MINIO_USE_SSL, value: "false" }
+            - { name: MINIO_BUCKET, value: "socialmedia-media" }
+            - name: MINIO_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: MINIO_ROOT_USER } }
+            - name: MINIO_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: MINIO_ROOT_PASSWORD } }
+          envFrom:
+            - { secretRef: { name: whatsapp-mcp-secrets } }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: accounts, mountPath: /etc/whatsapp-app, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /health, port: 3080 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3080 }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: accounts
+          configMap: { name: whatsapp-app-accounts }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whatsapp-app
+  namespace: whatsapp-mcp
+spec:
+  selector: { app: whatsapp-app }
+  ports:
+    - { name: http, port: 3080, targetPort: 3080 }

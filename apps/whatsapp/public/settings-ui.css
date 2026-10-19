@@ -1,0 +1,76 @@
+.rail-settings .rail-popover {
+  position: fixed;
+  inset: 0 auto 0 var(--rail-width);
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  width: min(390px, calc(100vw - var(--rail-width)));
+  height: 100dvh;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  box-shadow: 18px 0 44px rgba(0, 0, 0, .24);
+}
+
+.settings-header { display: flex; align-items: center; justify-content: space-between; flex: none; min-height: 102px; padding: 22px 24px 18px; border-bottom: 1px solid var(--line); }
+.rail-settings .settings-header { order: 0; }
+.settings-eyebrow { color: var(--accent-strong); font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+.rail-settings .rail-popover-title { margin-top: 5px; font-size: 24px; font-weight: 700; letter-spacing: -.035em; }
+.settings-close { width: 36px; height: 36px; border-radius: 50%; background: var(--surface-raised); color: var(--muted-strong); font-size: 26px; line-height: 1; }
+.settings-close:hover { color: var(--text); }
+.settings-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: var(--line) transparent; }
+.rail-settings .settings-scroll { order: 1; }
+.settings-section { padding: 20px 24px 22px; border-bottom: 1px solid var(--line); }
+.settings-section h3 { margin: 0 0 16px; color: var(--accent-strong); font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.rail-settings .settings-field { display: grid; gap: 8px; color: var(--muted-strong); font-size: 13px; }
+.rail-settings .settings-field select { min-height: 44px; border-radius: 9px; background: var(--surface-raised); font-size: 14px; }
+.settings-switch { display: flex !important; align-items: center; justify-content: space-between; gap: 14px !important; min-height: 64px; padding: 12px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.settings-switch strong { display: block; color: var(--text); font-size: 14px; font-weight: 500; }
+.settings-switch small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.settings-switch input { position: relative; flex: 0 0 38px; width: 38px; height: 22px; margin: 0; appearance: none; border-radius: 20px; background: var(--muted); transition: background .15s; }
+.settings-switch input::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: white; content: ''; transition: transform .15s; }
+.settings-switch input:checked { background: var(--accent); }
+.settings-switch input:checked::after { transform: translateX(16px); }
+.settings-wallpaper { min-width: 0; margin: 18px 0 0; padding: 0; border: 0; }
+.settings-wallpaper legend { padding: 0; color: var(--muted-strong); font-size: 13px; }
+.settings-swatches { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.settings-swatches label { display: flex !important; flex: 1; flex-direction: column; align-items: center; gap: 7px !important; color: var(--muted-strong); cursor: pointer; }
+.settings-swatches small { font-size: 11px; }
+.settings-swatches input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.settings-swatch { display: block; width: 42px; height: 42px; border: 2px solid transparent; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
+.settings-swatch-default { background: linear-gradient(135deg, #efeae2 50%, #161717 50%); }
+.settings-swatch-sand { background: #e5dac5; }
+.settings-swatch-sage { background: #cedbd1; }
+.settings-swatch-slate { background: #cbd5db; }
+.settings-swatches input:checked + .settings-swatch { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.settings-swatches input:focus-visible + .settings-swatch { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.settings-shortcuts p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.rail-settings .rail-popover > #feature-notifications,
+.rail-settings .rail-popover > #feature-privacy { flex: none; min-height: 48px; margin: 0 24px; padding: 9px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.rail-settings .rail-popover > #feature-notifications { order: 2; }
+.rail-settings .rail-popover > #feature-privacy { order: 3; }
+.rail-settings .rail-popover > #feature-notifications:hover,
+.rail-settings .rail-popover > #feature-privacy:hover { color: var(--accent-strong); }
+.settings-footer { flex: none; padding: 16px 24px max(20px, env(safe-area-inset-bottom)); }
+.rail-settings .settings-footer { order: 4; }
+#settings-logout { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-raised); color: var(--danger); text-align: left; padding: 0 14px; }
+#settings-logout:hover { border-color: var(--danger); }
+#settings-logout-error { margin-bottom: 10px; color: var(--danger); font-size: 12px; }
+body[data-theme="light"][data-wallpaper="sand"] { --wallpaper: #e5dac5; --wallpaper-mark: rgba(84, 80, 61, .11); }
+body[data-theme="light"][data-wallpaper="sage"] { --wallpaper: #cedbd1; --wallpaper-mark: rgba(35, 76, 53, .10); }
+body[data-theme="light"][data-wallpaper="slate"] { --wallpaper: #cbd5db; --wallpaper-mark: rgba(33, 60, 74, .10); }
+body[data-theme="dark"][data-wallpaper="sand"] { --wallpaper: #2c2923; --wallpaper-mark: rgba(223, 205, 160, .09); }
+body[data-theme="dark"][data-wallpaper="sage"] { --wallpaper: #202d28; --wallpaper-mark: rgba(167, 212, 188, .09); }
+body[data-theme="dark"][data-wallpaper="slate"] { --wallpaper: #222c31; --wallpaper-mark: rgba(175, 206, 223, .09); }
+@media (max-width: 760px) {
+  .rail-settings .rail-popover { left: var(--rail-width); width: calc(100vw - var(--rail-width)); }
+}
+@media (max-width: 480px) {
+  .rail-settings .rail-popover { left: 0; width: 100vw; }
+  .settings-header { min-height: 86px; }
+}
+@media (prefers-reduced-motion: reduce) { .settings-switch input, .settings-switch input::after { transition: none; } }

@@ -9,6 +9,9 @@ resources:
   # INFRA-364 fase 0: transcripción de notas de voz de WhatsApp (ruta viva +
   # backfill suspendido).
   - whatsapp-voice.yaml
+  # SC-2760: la app de WhatsApp del fork de Jordi (apps/whatsapp verbatim) en
+  # whatsapp.e-dani.com, a prueba.
+  - whatsapp-app.yaml
   - networkpolicy.yaml
   # SC-1197 P3 (SC-1226): API de emparejamientos por sub, inerte (replicas 0, flag off).
   - social-pairing.yaml
