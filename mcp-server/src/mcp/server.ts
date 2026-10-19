@@ -4312,7 +4312,7 @@ export class MCPServer {
               {
                 message:
                   'WhatsApp disconnected successfully. New QR code will be generated shortly.',
-                instructions: `Visit https://whatsapp.e-dani.com/ to scan the new QR code.`,
+                instructions: `Visit https://whatsapp-qr.e-dani.com/ to scan the new QR code.`,
               },
               null,
               2
@@ -4359,7 +4359,7 @@ export class MCPServer {
                   : data.qrAvailable
                     ? 'QR code is available for scanning'
                     : 'WhatsApp is disconnected. Use social_manage_session with action=renewQr.',
-                qrUrl: 'https://whatsapp.e-dani.com/',
+                qrUrl: 'https://whatsapp-qr.e-dani.com/',
               },
               null,
               2
