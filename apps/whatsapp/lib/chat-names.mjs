@@ -212,15 +212,33 @@ LEFT JOIN LATERAL (
            AND regexp_replace(other_lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net') =
                regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')) = 1
 ) pn_alias ON true
+-- UNION ALL con LIMIT 1 por brazo: con ANY(array_prepend(...)) el planner
+-- no usa el índice por conversación y escanea messages por timestamp global
+-- (medido 19-10: 4 s/conversación con 449k mensajes; así, 0,2 s).
 LEFT JOIN LATERAL (
-  SELECT m.content, m.wa_timestamp, m.direction, m.message_type
-  FROM messages m
-  WHERE m.conversation_id = ANY(array_prepend(c.id, COALESCE(pn_alias.ids, ARRAY[]::text[])))
-    AND m.account = $1
-    AND m.platform = 'whatsapp'
-    AND ${MESSAGE_RETAINED_SQL}
-    AND ${MESSAGE_VISIBLE_SQL}
-  ORDER BY m.wa_timestamp DESC, m.id DESC
+  SELECT u.content, u.wa_timestamp, u.direction, u.message_type
+  FROM (
+    (SELECT m.content, m.wa_timestamp, m.direction, m.message_type, m.id
+     FROM messages m
+     WHERE m.conversation_id = c.id
+       AND m.account = $1
+       AND m.platform = 'whatsapp'
+       AND ${MESSAGE_RETAINED_SQL}
+       AND ${MESSAGE_VISIBLE_SQL}
+     ORDER BY m.wa_timestamp DESC, m.id DESC
+     LIMIT 1)
+    UNION ALL
+    (SELECT m.content, m.wa_timestamp, m.direction, m.message_type, m.id
+     FROM messages m
+     WHERE m.conversation_id = ANY(COALESCE(pn_alias.ids, ARRAY[]::text[]))
+       AND m.account = $1
+       AND m.platform = 'whatsapp'
+       AND ${MESSAGE_RETAINED_SQL}
+       AND ${MESSAGE_VISIBLE_SQL}
+     ORDER BY m.wa_timestamp DESC, m.id DESC
+     LIMIT 1)
+  ) u
+  ORDER BY u.wa_timestamp DESC, u.id DESC
   LIMIT 1
 ) last_message ON true
 LEFT JOIN LATERAL (
@@ -229,7 +247,10 @@ LEFT JOIN LATERAL (
   LEFT JOIN participants p
     ON p.id = m.sender_wa_id
    AND p.account = m.account
-  WHERE m.conversation_id = ANY(array_prepend(c.id, COALESCE(pn_alias.ids, ARRAY[]::text[])))
+  -- igualdad + ANY por separado: con array_prepend Postgres no puede usar el
+  -- índice por conversación y escanea messages por timestamp (medido 19-10:
+  -- 4 s/conversación con 449k mensajes; la forma OR, 0,1 s).
+  WHERE (m.conversation_id = c.id OR m.conversation_id = ANY(COALESCE(pn_alias.ids, ARRAY[]::text[])))
     AND m.account = $1
     AND m.platform = 'whatsapp'
     AND ${MESSAGE_RETAINED_SQL}
