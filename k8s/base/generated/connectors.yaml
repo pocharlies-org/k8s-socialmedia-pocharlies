@@ -59,7 +59,7 @@ spec:
         - name: SESSION_PATH
           value: /app/persistent-session
         - name: WA_QR_PUBLIC_URL
-          value: https://whatsapp.e-dani.com/qr/page
+          value: https://whatsapp-qr.e-dani.com/qr/page
         - name: S3_ENDPOINT
           value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
         - name: S3_BUCKET

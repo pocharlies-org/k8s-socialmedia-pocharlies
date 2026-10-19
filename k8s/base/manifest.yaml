@@ -668,26 +668,43 @@ spec:
       services:
         - name: whatsapp-connector
           port: 3001
-    # SC-2760: la pagina de emparejamiento QR sigue en el conector detras de la
-    # cadena Keycloak de siempre (la pagina publica del personal es legado y no
-    # se replica; el QR de leila sigue solo por LAN). Traefik prefiere esta regla
-    # mas especifica sobre la catch-all de abajo.
-    - match: Host(`whatsapp.e-dani.com`) && PathPrefix(`/qr`)
+    # SC-2760 (Dani 19-10): el host queda SOLO para la app de WhatsApp del fork
+    # de Jordi (apps/whatsapp @ ef500ec, tal cual), que autentica por su cuenta
+    # contra el realm `edani` (cliente `whatsapp-app`, sub permitido = Dani): sin
+    # sso-chain aqui, la app falla cerrada por si sola. La pagina QR del
+    # personal se fue a whatsapp-qr.e-dani.com (IngressRoute abajo).
+    - match: Host(`whatsapp.e-dani.com`)
+      kind: Rule
+      services:
+        - name: whatsapp-app
+          port: 3080
+  tls:
+    store: { name: default, namespace: traefik-edge }
+---
+# SC-2760 (Dani 19-10): la pagina de emparejamiento QR del personal, antes en
+# la catch-all de whatsapp.e-dani.com, en su propio host. Mismo backend y misma
+# cadena Keycloak que tenia; el QR de leila sigue solo por LAN. El
+# `qrPublicUrl` del registro (social-accounts.json) apunta aqui.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whatsapp-qr
+  namespace: whatsapp-mcp
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: whatsapp-qr.e-dani.com
+    external-dns.alpha.kubernetes.io/target: "57.129.17.172"
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  entryPoints: [websecure]
+  ingressClassName: traefik-edge
+  routes:
+    - match: Host(`whatsapp-qr.e-dani.com`)
       kind: Rule
       middlewares:
         - { name: sso-chain, namespace: keycloak }
       services:
         - name: whatsapp-connector
           port: 3001
-    # SC-2760: todo lo demas es la app de WhatsApp del fork de Jordi
-    # (apps/whatsapp @ ef500ec, tal cual), que autentica por su cuenta contra el
-    # realm `edani` (cliente `whatsapp-app`, sub permitido = Dani): sin
-    # sso-chain aqui, la app falla cerrada por si sola.
-    - match: Host(`whatsapp.e-dani.com`)
-      kind: Rule
-      services:
-        - name: whatsapp-app
-          port: 3080
   tls:
     store: { name: default, namespace: traefik-edge }
 ---
