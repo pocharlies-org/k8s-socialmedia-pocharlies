@@ -9,3 +9,10 @@
 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chat_time
   ON messages (account, conversation_id, wa_timestamp DESC)
   WHERE platform = 'whatsapp';
+
+-- El LATERAL saved_contact (vista 022) filtra por el jid derivado del id: sin
+-- índice de expresión, cada conversación barría los ~5.900 participants de la
+-- cuenta evaluando el CASE (medido 19-10: 37 s el listado; con este índice,
+-- 1,6 s). La expresión coincide literalmente con la de la vista 022.
+CREATE INDEX IF NOT EXISTS idx_participants_account_jid
+  ON participants (account, (CASE WHEN position(':' IN id) > 0 THEN split_part(id, ':', 2) ELSE id END));
