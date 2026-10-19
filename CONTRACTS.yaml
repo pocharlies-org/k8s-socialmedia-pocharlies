@@ -2621,3 +2621,64 @@ contracts:
       /:account/comments/:id/reply.
       The prefix, the signature scheme and the 401/503 answers are contract:
       changing any is breaking — a new `.v2` entry beside this one.
+  # SC-2760: superficies marcadas con `# CONTRACT:` en el codigo verbatim del
+  # fork de Jordi (apps/whatsapp). Se registran tal cual: el unico consumidor
+  # de estas rutas es el propio frontend de la app; los ids
+  # http.whatsapp-connector.* nombran el contrato de la casa que la app
+  # re-sirve o consume, no una ruta nueva del conector.
+  - id: http.whatsapp-app.favicon.v1
+    kind: http-route
+    value: /favicon.ico
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET /favicon.ico (y el resto de assets de instalacion PWA: manifest,
+      icon.svg, icon-192/512.png) de la app whatsapp.e-dani.com, servido PUBLICO
+      antes del login OIDC. Consumidor: el propio navegador del usuario.
+  - id: http.whatsapp-app.hermes-stop.v1
+    kind: http-route
+    value: /api/ai/stop
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      POST /api/ai/stop de la app whatsapp.e-dani.com: interrumpe un turno
+      Hermes en curso (cuerpo {account, chat, turnId, sessionId?}). Solo detras
+      de la sesion OIDC de la app.
+  - id: http.whatsapp-app.hermes-settings.v1
+    kind: http-route
+    value: /api/ai/settings
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET/POST /api/ai/settings de la app whatsapp.e-dani.com: lectura y cambio
+      del modelo del asistente reenviados al gateway Hermes
+      (/api/model/options). 503 sin HERMES_API_URL/HERMES_API_KEY.
+  - id: http.whatsapp-connector.history-recover.v1
+    kind: http-route
+    value: /api/messages/recover
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      POST /api/messages/recover de la app whatsapp.e-dani.com: recuperacion de
+      un mensaje/historico por (account, chat, messageId), respaldada en la
+      lectura de la DB compartida y el conector. Marcado por el codigo del fork
+      con el id del contrato de la casa; consumidor: el frontend de la app.
+  - id: http.whatsapp-connector.messages-info.v1
+    kind: http-route
+    value: /api/messages/info
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET /api/messages/info de la app whatsapp.e-dani.com: detalle de un
+      mensaje (reacciones, estado, temporizador) por (account, chat,
+      messageId). Consumidor: el frontend de la app (panel de info del mensaje).
