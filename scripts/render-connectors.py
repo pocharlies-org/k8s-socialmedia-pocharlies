@@ -53,8 +53,7 @@ HEADER = (
 )
 
 WA_IMAGE = (
-    "harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6"
-    "@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae"
+    "harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e"
 )
 TG_CONNECTOR_IMAGE = "harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest"
 TG_SYNC_IMAGE = "harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:latest"
