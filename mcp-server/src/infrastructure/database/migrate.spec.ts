@@ -84,6 +84,8 @@ const ALL_FILES = [
   '019_whatsapp_statuses.sql',
   '020_whatsapp_direct_chat_self_links.sql',
   '021_whatsapp_novedades_channels.sql',
+  '022_whatsapp_contacts_view.sql',
+  '023_whatsapp_chat_time_index.sql',
 ];
 
 describe('migrate.ts _migrations ledger', () => {
@@ -95,27 +97,33 @@ describe('migrate.ts _migrations ledger', () => {
     expect(db.ledger.every(l => !l.baseline)).toBe(true);
     expect(db.executed).toHaveLength(ALL_FILES.length);
     expect(db.executed[0]).toMatch(/CREATE TABLE conversations/); // 001, the non-idempotent one
-    expect(db.executed[db.executed.length - 9]).toMatch(
+    expect(db.executed[db.executed.length - 11]).toMatch(
       /CREATE TABLE IF NOT EXISTS whatsapp_poll_votes/
     ); // 013
-    expect(db.executed[db.executed.length - 8]).toMatch(
+    expect(db.executed[db.executed.length - 10]).toMatch(
       /ADD COLUMN IF NOT EXISTS ephemeral_expiration/
     ); // 014
-    expect(db.executed[db.executed.length - 7]).toMatch(/FUNCTION public\.merge_inbound_reaction/); // 015
-    expect(db.executed[db.executed.length - 6]).toMatch(/CREATE TABLE IF NOT EXISTS brain_windows/); // 016
-    expect(db.executed[db.executed.length - 5]).toMatch(/FUNCTION notify_message_edit_delete/); // 017
-    expect(db.executed[db.executed.length - 4]).toMatch(
+    expect(db.executed[db.executed.length - 9]).toMatch(/FUNCTION public\.merge_inbound_reaction/); // 015
+    expect(db.executed[db.executed.length - 8]).toMatch(/CREATE TABLE IF NOT EXISTS brain_windows/); // 016
+    expect(db.executed[db.executed.length - 7]).toMatch(/FUNCTION notify_message_edit_delete/); // 017
+    expect(db.executed[db.executed.length - 6]).toMatch(
       /CREATE TABLE IF NOT EXISTS whatsapp_message_stars/
     ); // 018
-    expect(db.executed[db.executed.length - 3]).toMatch(
+    expect(db.executed[db.executed.length - 5]).toMatch(
       /CREATE TABLE IF NOT EXISTS whatsapp_statuses/
     ); // 019
-    expect(db.executed[db.executed.length - 2]).toMatch(
+    expect(db.executed[db.executed.length - 4]).toMatch(
       /CREATE TABLE IF NOT EXISTS conversation_participants_removed/
     ); // 020
-    expect(db.executed[db.executed.length - 1]).toMatch(
+    expect(db.executed[db.executed.length - 3]).toMatch(
       /CREATE TABLE IF NOT EXISTS whatsapp_novedades_channels/
-    ); // 021, the last one
+    ); // 021
+    expect(db.executed[db.executed.length - 2]).toMatch(
+      /CREATE OR REPLACE VIEW whatsapp_contacts/
+    ); // 022
+    expect(db.executed[db.executed.length - 1]).toMatch(
+      /CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chat_time/
+    ); // 023, the last one
     expect(db.commits).toBe(ALL_FILES.length);
     expect(db.openTx).toBe(false);
   });
