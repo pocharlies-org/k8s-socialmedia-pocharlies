@@ -228,14 +228,23 @@ LEFT JOIN LATERAL (
      ORDER BY m.wa_timestamp DESC, m.id DESC
      LIMIT 1)
     UNION ALL
-    (SELECT m.content, m.wa_timestamp, m.direction, m.message_type, m.id
-     FROM messages m
-     WHERE m.conversation_id = ANY(COALESCE(pn_alias.ids, ARRAY[]::text[]))
-       AND m.account = $1
-       AND m.platform = 'whatsapp'
-       AND ${MESSAGE_RETAINED_SQL}
-       AND ${MESSAGE_VISIBLE_SQL}
-     ORDER BY m.wa_timestamp DESC, m.id DESC
+    -- unnest + LATERAL por id: con ANY(array) no constante el planner estima
+    -- miles de filas y prefiere el escaneo global por timestamp; con ids vacío
+    -- este brazo ni toca messages (medido 19-10: el ANY, minutos por listado).
+    (SELECT lm.content, lm.wa_timestamp, lm.direction, lm.message_type, lm.id
+     FROM unnest(COALESCE(pn_alias.ids, ARRAY[]::text[])) AS aid(id)
+     JOIN LATERAL (
+       SELECT m.content, m.wa_timestamp, m.direction, m.message_type, m.id
+       FROM messages m
+       WHERE m.conversation_id = aid.id
+         AND m.account = $1
+         AND m.platform = 'whatsapp'
+         AND ${MESSAGE_RETAINED_SQL}
+         AND ${MESSAGE_VISIBLE_SQL}
+       ORDER BY m.wa_timestamp DESC, m.id DESC
+       LIMIT 1
+     ) lm ON true
+     ORDER BY lm.wa_timestamp DESC, lm.id DESC
      LIMIT 1)
   ) u
   ORDER BY u.wa_timestamp DESC, u.id DESC
