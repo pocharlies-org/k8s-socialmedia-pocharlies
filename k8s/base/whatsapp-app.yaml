@@ -57,14 +57,25 @@ spec:
       labels: { app: whatsapp-app }
     spec:
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      # Security (PR 268): solo las tres claves que la app lee del secret de la
+      # casa — nada de envFrom ancho en un pod de internet con codigo ajeno.
+      automountServiceAccountToken: false
       securityContext:
         fsGroup: 1000
       containers:
         - name: app
+          # El pin tag@digest del overlay prod (patrón de la casa) lo escribe el
+          # Release Production en su job manifests tras el primer build.
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app:latest
           ports:
             - { name: http, containerPort: 3080 }
           env:
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_PASSWORD } }
+            - name: CONNECTOR_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
             - { name: APP_AUTH_MODE, value: "oidc" }
             - { name: APP_PUBLIC_URL, value: "https://whatsapp.e-dani.com" }
             - { name: OIDC_ISSUER_URL, value: "https://auth-next.e-dani.com/realms/edani" }
@@ -86,8 +97,6 @@ spec:
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: MINIO_ROOT_USER } }
             - name: MINIO_SECRET_KEY
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: MINIO_ROOT_PASSWORD } }
-          envFrom:
-            - { secretRef: { name: whatsapp-mcp-secrets } }
           volumeMounts:
             - { name: data, mountPath: /data }
             - { name: accounts, mountPath: /etc/whatsapp-app, readOnly: true }
@@ -115,3 +124,40 @@ spec:
   selector: { app: whatsapp-app }
   ports:
     - { name: http, port: 3080, targetPort: 3080 }
+---
+# El default-deny del ns cortaria a traefik-edge (whatsapp.e-dani.com es
+# publico) y a traefik-lan. Mismo patron que whatsapp-mcp-allow-traefik-
+# instagram: hostNetwork del edge (sauvage + los tres cps por tailnet) y el
+# /16 del overlay flannel para el trayecto entre nodos.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-traefik-app
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: whatsapp-app
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-lan
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-edge
+        - ipBlock:
+            cidr: 100.109.183.9/32  # sauvage — public callback arrives with this source IP
+        - ipBlock:
+            cidr: 100.107.21.89/32  # ks5-cp-1
+        - ipBlock:
+            cidr: 100.71.117.127/32 # ks5-cp-2
+        - ipBlock:
+            cidr: 100.75.189.75/32  # ks5-cp-3
+        - ipBlock:
+            cidr: 10.42.0.0/16  # flannel.1 node IPs — source NAT of the pod overlay
+      ports:
+        - protocol: TCP
+          port: 3080
+  policyTypes:
+    - Ingress
