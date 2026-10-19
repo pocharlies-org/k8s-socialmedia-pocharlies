@@ -698,6 +698,15 @@ spec:
   entryPoints: [websecure]
   ingressClassName: traefik-edge
   routes:
+    # El host nuevo no queda mas abierto que el viejo: el deny de /api/public
+    # de whatsapp-public se replica aqui (veredicto security PR 268).
+    - match: Host(`whatsapp-qr.e-dani.com`) && PathPrefix(`/api/public`)
+      kind: Rule
+      middlewares:
+        - { name: connector-public-api-deny, namespace: whatsapp-mcp }
+      services:
+        - name: whatsapp-connector
+          port: 3001
     - match: Host(`whatsapp-qr.e-dani.com`)
       kind: Rule
       middlewares:
