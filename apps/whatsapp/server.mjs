@@ -2261,6 +2261,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         if (result.ok !== true || result.sent !== true) throw featureError(502, 'UPSTREAM_INVALID', 'Connector did not report a sent poll vote');
         return json(200, { account: a.accountId, chat, confirmed: true, messageId: result.messageId || null });
       }
+      // CONTRACT: http.whatsapp-app.messages-delete.v1
       if (req.method === 'POST' && (path === '/api/messages/reply' || path === '/api/messages/react' || path === '/api/messages/forward' || path === '/api/messages/edit' || path === '/api/messages/delete' || path === '/api/message-actions' || path === '/api/messages/action' || path === '/api/messages/actions')) {
         const body = await bodyJSON(req);
         const a = accountParam(body.account); const chat = safeChatId(body.chat || body.chatId);
@@ -2300,7 +2301,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           if (!['me', 'everyone'].includes(body.scope)) throw fail(400, 'Invalid delete scope');
           const suffix = body.scope === 'me' ? '/for-me' : '';
           result = await featureConnector(a, `/messages/${encodeURIComponent(target.providerChat)}/${encodeURIComponent(messageId)}${suffix}`, { method: 'DELETE', body: {}, requireSending: true });
-          await query("UPDATE messages SET is_deleted=true, status='deleted', deleted_at=COALESCE(deleted_at,now()), updated_at=now(), metadata=COALESCE(metadata,'{}'::jsonb) || jsonb_build_object('deleted_for_me',$4::boolean) WHERE account=$1 AND conversation_id=$2 AND (id::text=$3 OR wa_message_id=$3)", [a.accountId, target.message.conversation_id, body.messageId || body.id, body.scope === 'me']);
+          // La casa no tiene columna deleted_at: la revocación vive en metadata->>'deleted_at'
+          // (mismo linaje que DELETED_AT_SQL y el conector). Borrar para mí no toca is_deleted.
+          await query("UPDATE messages SET updated_at=now(), is_deleted = is_deleted OR NOT $4::boolean, status = CASE WHEN $4::boolean THEN status ELSE 'deleted' END, metadata = COALESCE(metadata,'{}'::jsonb) || CASE WHEN $4::boolean THEN jsonb_build_object('deleted_for_me', true) ELSE jsonb_build_object('deleted_at', now()::text) END WHERE account=$1 AND conversation_id=$2 AND (id::text=$3 OR wa_message_id=$3)", [a.accountId, target.message.conversation_id, body.messageId || body.id, body.scope === 'me']);
         }
         return json(200, { account: a.accountId, chat, action, confirmed: true, ...result });
       }
