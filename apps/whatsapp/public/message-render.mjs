@@ -141,7 +141,7 @@ function pushText(tokens, value) {
   else tokens.push({ type: 'text', value });
 }
 
-function parseRuns(input) {
+function parseRuns(input, links = true) {
   const tokens = [];
   let plainStart = 0;
   let index = 0;
@@ -169,7 +169,8 @@ function parseRuns(input) {
         continue;
       }
     }
-    const link = linkAt(input, index);
+    // links=false: el preview del chat vive dentro de un <button>; un <a> anidado es HTML inválido.
+    const link = links ? linkAt(input, index) : null;
     if (link) {
       flushText(index);
       tokens.push(link);
@@ -195,8 +196,8 @@ function parseRuns(input) {
 }
 
 /** Parse WhatsApp-style formatting into safe, DOM-independent render tokens. */
-export function parseRichText(value) {
-  return parseRuns(textValue(value));
+export function parseRichText(value, links = true) {
+  return parseRuns(textValue(value), links);
 }
 
 function parseTimestamp(value) {
@@ -327,10 +328,10 @@ function appendToken(parent, token, documentRef) {
 }
 
 /** Append parsed message text using text nodes and allowlisted anchor URLs. */
-export function appendRichText(parent, value, documentRef = globalThis.document) {
+export function appendRichText(parent, value, documentRef = globalThis.document, links = true) {
   if (!parent || !documentRef) return parent;
   const fragment = documentRef.createDocumentFragment();
-  for (const token of parseRichText(value)) appendToken(fragment, token, documentRef);
+  for (const token of parseRichText(value, links)) appendToken(fragment, token, documentRef);
   parent.append(fragment);
   return parent;
 }
@@ -1000,19 +1001,23 @@ function messageIcon(documentRef, kind) {
   return svg;
 }
 
-function messageKindLine(documentRef, type, value, { unavailable = false } = {}) {
+function messageKindLine(documentRef, type, value, { unavailable = false, richText = false } = {}) {
   const kind = MESSAGE_KINDS[messageType(type)];
   const line = makeElement(documentRef, 'span', 'message-kind-line');
   const label = unavailable ? 'Mensaje no disponible' : textValue(value).trim() || kind?.label || 'Mensaje no disponible';
   if (kind || unavailable || !textValue(value).trim()) line.append(messageIcon(documentRef, unavailable || !kind ? 'unavailable' : kind.icon));
-  line.append(makeElement(documentRef, 'span', 'message-kind-label', label));
+  const labelElement = makeElement(documentRef, 'span', 'message-kind-label');
+  // richText: el preview del chat pinta el marcado de WhatsApp (*negrita*, etc.) sin dejarlo literal.
+  if (richText) appendRichText(labelElement, label, documentRef, false);
+  else labelElement.textContent = label;
+  line.append(labelElement);
   return line;
 }
 
 export function renderChatPreview(chat, { document: documentRef = globalThis.document } = {}) {
   const type = messageType(chat?.previewType);
   const value = textValue(chat?.preview);
-  const line = messageKindLine(documentRef, type, value || MESSAGE_KINDS[type]?.label || 'Sin mensajes disponibles');
+  const line = messageKindLine(documentRef, type, value || MESSAGE_KINDS[type]?.label || 'Sin mensajes disponibles', { richText: true });
   line.className = 'chat-preview message-kind-line';
   return line;
 }

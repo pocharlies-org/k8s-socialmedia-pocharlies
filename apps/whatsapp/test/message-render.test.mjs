@@ -133,6 +133,13 @@ test('chat preview icons follow message type, preserve captions and never infer 
   assert.equal(treeText(empty), 'Audio');
 });
 
+test('chat preview renders WhatsApp markup but never a nested anchor (QA #15)', () => {
+  const preview = renderer.renderChatPreview({ previewType: 'TEXT', preview: 'Hola *fuerte* https://x.test' }, { document: fakeDocument });
+  assert(preview.querySelector('.message-strong'), 'markup renders as strong, not literal asterisks');
+  assert.equal(preview.querySelector('.message-link'), null, 'the preview lives inside a button: no nested anchor');
+  assert.equal(treeText(preview), 'Hola fuerte https://x.test');
+});
+
 test('parseRichText renders supported WhatsApp formatting without treating HTML as markup', () => {
   const tokens = parseRichText('*negrita* _cursiva_ ~tachado~ `codigo` ```bloque```');
 
