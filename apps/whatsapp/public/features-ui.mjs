@@ -1674,6 +1674,11 @@ export function installFeatureUI({
 
   async function openStarred() {
     const modal = openModal('Mensajes destacados', { wide: true });
+    // El chip «Destacados» abre un diálogo, no filtra la lista (matchesChat('starred') es false),
+    // así que no pasa por setView: se marca activo mientras el diálogo vive y se restaura al cerrar.
+    const paint = active => { for (const chip of documentRef.querySelectorAll('[data-feature-view]')) chip.setAttribute('aria-pressed', String(chip.dataset.featureView === active)); };
+    paint('starred');
+    modal.onClose = () => paint(runtime.currentView);
     const account = runtime.account;
     const loadPage = async before => {
       let result;

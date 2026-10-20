@@ -55,6 +55,13 @@ test('sidebar has one feature filter row without the old duplicate controls', as
   assert.doesNotMatch(ui, /\['Archivados', 'archived'\]/);
 });
 
+test('the starred chip shows active while its dialog is open (QA #17)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  // No pasa por setView (vaciaría la lista: matchesChat('starred') es false); marca y restaura.
+  assert.match(ui, /paint\('starred'\)/);
+  assert.match(ui, /modal\.onClose = \(\) => paint\(runtime\.currentView\)/);
+});
+
 test('feature preferences normalize invalid entries and persist per account', () => {
   const calls = new Map();
   const storage = {
