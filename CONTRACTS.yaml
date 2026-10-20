@@ -2650,6 +2650,19 @@ contracts:
       (codigo + state -> sesion). El 403 (sub fuera de OIDC_ALLOWED_SUBJECTS) se
       contesta en HTML con el enlace de logout del issuer, no en JSON: quien
       navega necesita cerrar la sesion SSO equivocada (Dani, 19-10).
+  - id: http.whatsapp-app.messages-list.v1
+    kind: http-route
+    value: /api/messages
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET /api/messages de la app whatsapp.e-dani.com: pagina de mensajes de
+      (account, chat) con adjuntos, thumbnails y previews de enlaces. Las
+      consultas auxiliares comparan messages.id por texto: bigint en la BD de
+      la casa (linaje NAS) y uuid en la del desplegador original (42883 si se
+      fija un tipo, medido 20-10).
   - id: http.whatsapp-app.hermes-stop.v1
     kind: http-route
     value: /api/ai/stop

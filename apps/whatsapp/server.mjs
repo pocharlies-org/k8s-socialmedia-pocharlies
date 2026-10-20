@@ -719,7 +719,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       `SELECT a.id,a.message_id,a.mime_type,a.file_name,a.file_type,a.file_size,a.file_url,a.caption
          FROM attachments a JOIN messages m ON m.id=a.message_id
         WHERE m.account=$1 AND m.conversation_id=ANY($2::text[]) AND m.platform='whatsapp'
-          AND ${MESSAGE_RETAINED_SQL} AND m.id=ANY($3::uuid[])`,
+          AND ${MESSAGE_RETAINED_SQL} AND m.id::text=ANY($3::text[])`,
       [account.accountId, readIds, ids]
     ) : [];
     const attachedIds = new Set(attachments.map(item => item.message_id));
@@ -727,7 +727,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     const thumbnails = missingImages.length ? await query(
       `SELECT m.id FROM messages m JOIN whatsapp_message_payloads p
          ON p.wa_message_id=m.wa_message_id AND p.account=m.account
-        WHERE m.id=ANY($1::uuid[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
+        WHERE m.id::text=ANY($1::text[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
           AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}
           AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
           AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000`,
@@ -739,7 +739,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       `SELECT m.id, p.message_payload->'extendedTextMessage' AS preview_payload
          FROM messages m JOIN whatsapp_message_payloads p
            ON p.wa_message_id=m.wa_message_id AND p.account=m.account
-        WHERE m.id=ANY($1::uuid[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
+        WHERE m.id::text=ANY($1::text[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
           AND m.platform='whatsapp' AND m.message_type='TEXT' AND ${MESSAGE_RETAINED_SQL}
           AND pg_column_size(p.message_payload->'extendedTextMessage') <= 300000`,
       [textIds, account.accountId, readIds]
@@ -1587,6 +1587,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         }), a.accountId);
         return json(200, { chats, archived: true });
       }
+      // CONTRACT: http.whatsapp-app.messages-list.v1
       if (req.method === 'GET' && path === '/api/messages') {
         const a = accountParam(url.searchParams.get('account')); const chat = safeChatId(url.searchParams.get('chat'));
         const result = await readMessageRows(a, chat, { before: url.searchParams.get('before'), limit: url.searchParams.get('limit') });
