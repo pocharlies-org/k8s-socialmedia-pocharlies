@@ -150,5 +150,5 @@ images:
   # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija a la
   # imagen publicada por el run 39219283043 (deploy/prod@c77c732, PR #269).
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
-    newTag: v1.3.116
-    digest: sha256:ce685ff68faf5e2fee6c4188b86f13c52ad00aefa8b2b6893ea424a2d8056daa
+    newTag: v1.3.117
+    digest: sha256:fb436faba3cd019456ef5a71ab34dfbc94c331df11700fd48cab223acd16a107
