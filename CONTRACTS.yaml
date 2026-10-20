@@ -2735,6 +2735,20 @@ contracts:
       everyone). El espejo local escribe la revocacion en metadata
       (deleted_for_me / deleted_at como texto): la casa no tiene columna
       deleted_at (42703 medido 20-10); el conector es la fuente de verdad.
+  - id: http.whatsapp-app.search.v1
+    kind: http-route
+    value: /api/search
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET /api/search (alias /api/messages/search,
+      /api/chats/<jid>/search) de la app whatsapp.e-dani.com. Filtra
+      m.content con ILIKE y necesita el índice trigram
+      idx_messages_content_trgm (migración 002); sin él es seq scan y
+      revienta el statement_timeout (57014). chatName sale legible
+      (readableChatName), nunca el jid crudo (QA #10).
   - id: http.whatsapp-app.chat-details.v1
     kind: http-route
     value: /api/chat-details

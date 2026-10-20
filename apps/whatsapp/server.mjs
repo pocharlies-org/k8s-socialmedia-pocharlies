@@ -1894,7 +1894,13 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           messageId: item.wa_message_id || item.id,
           chat: item.chat_id || item.conversation_id,
           chatId: item.chat_id || item.conversation_id,
-          chatName: item.chat_name || item.conversation_id,
+          // Nombre legible igual que el listado: c.name suele ser el jid crudo
+          // y pintar eso en el resultado es la queja de la QA #10.
+          chatName: readableChatName({
+            id: item.chat_id || item.conversation_id,
+            name: item.chat_name,
+            isGroup: String(item.chat_id || item.conversation_id || '').endsWith('@g.us'),
+          }) || item.conversation_id,
           text: item.content || '',
           fromMe: item.direction === 'OUTBOUND',
           type: item.message_type,

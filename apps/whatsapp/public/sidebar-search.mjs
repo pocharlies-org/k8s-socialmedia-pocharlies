@@ -109,7 +109,11 @@ export function installSidebarMessageSearch({documentRef, input, chatList, getAc
     section.hidden = !visible || selected !== 'messages';
     emptyChats.hidden = !visible || selected !== 'conversations' || chatCount > 0;
     conversationsButton.textContent = `Conversaciones (${chatCount})`;
-    messagesButton.textContent = `Mensajes (${snapshot.results.length}${snapshot.nextCursor ? '+' : ''})`;
+    // En error el recuento es mentira (results está vacío por el fallo, no por
+    // falta de coincidencias): el status de abajo ya dice qué pasó (QA #10).
+    messagesButton.textContent = snapshot.status === 'error'
+      ? 'Mensajes'
+      : `Mensajes (${snapshot.results.length}${snapshot.nextCursor ? '+' : ''})`;
     conversationsButton.setAttribute('aria-selected', String(selected === 'conversations'));
     messagesButton.setAttribute('aria-selected', String(selected === 'messages'));
     conversationsButton.tabIndex = selected === 'conversations' ? 0 : -1;
