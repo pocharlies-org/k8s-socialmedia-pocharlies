@@ -267,42 +267,57 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT v.sender_id, v.sender_name, v.push_name
   FROM (
-    (SELECT p.id AS sender_id, p.name AS sender_name, p.push_name,
+    -- shortcut: el nombre sale de los 10 entrantes más recientes (orden del índice),
+    -- no de todo el histórico: ORDER BY name_quality no usa el índice y, con 885k
+    -- mensajes de personal, escaneaba todos los entrantes de cada conversación
+    -- (medido 20-10: 9,7 s por listado → statement_timeout 57014).
+    (SELECT recent.sender_wa_id AS sender_id, p.name AS sender_name, p.push_name,
             ((p.name IS NOT NULL AND BTRIM(p.name) <> ''
               AND p.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
             OR (p.push_name IS NOT NULL AND BTRIM(p.push_name) <> ''
               AND p.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')) AS name_quality,
-            m.wa_timestamp
-     FROM messages m
+            recent.wa_timestamp
+     FROM (
+       SELECT m.sender_wa_id, m.account, m.wa_timestamp
+       FROM messages m
+       WHERE m.conversation_id = c.id
+         AND m.account = $1
+         AND m.platform = 'whatsapp'
+         AND ${MESSAGE_RETAINED_SQL}
+         AND ${MESSAGE_VISIBLE_SQL}
+         AND m.direction = 'INBOUND'
+       ORDER BY m.wa_timestamp DESC, m.id DESC
+       LIMIT 10
+     ) recent
      LEFT JOIN participants p
-       ON p.id = m.sender_wa_id
-      AND p.account = m.account
-     WHERE m.conversation_id = c.id
-       AND m.account = $1
-       AND m.platform = 'whatsapp'
-       AND ${MESSAGE_RETAINED_SQL}
-       AND ${MESSAGE_VISIBLE_SQL}
-       AND m.direction = 'INBOUND'
-     ORDER BY name_quality DESC, m.wa_timestamp DESC
+       ON p.id = recent.sender_wa_id
+      AND p.account = recent.account
+     ORDER BY name_quality DESC, recent.wa_timestamp DESC
      LIMIT 1)
     UNION ALL
-    (SELECT p.id AS sender_id, p.name AS sender_name, p.push_name,
+    (SELECT recent.sender_wa_id AS sender_id, p.name AS sender_name, p.push_name,
             ((p.name IS NOT NULL AND BTRIM(p.name) <> ''
               AND p.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
             OR (p.push_name IS NOT NULL AND BTRIM(p.push_name) <> ''
               AND p.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')) AS name_quality,
-            m.wa_timestamp
-     FROM messages m
+            recent.wa_timestamp
+     FROM unnest(COALESCE(pn_alias.ids, ARRAY[]::text[])) AS aid(id)
+     JOIN LATERAL (
+       SELECT m.sender_wa_id, m.account, m.wa_timestamp
+       FROM messages m
+       WHERE m.conversation_id = aid.id
+         AND m.account = $1
+         AND m.platform = 'whatsapp'
+         AND ${MESSAGE_RETAINED_SQL}
+         AND ${MESSAGE_VISIBLE_SQL}
+         AND m.direction = 'INBOUND'
+       ORDER BY m.wa_timestamp DESC, m.id DESC
+       LIMIT 10
+     ) recent ON true
      LEFT JOIN participants p
-       ON p.id = m.sender_wa_id
-      AND p.account = m.account
-     WHERE m.conversation_id = ANY(COALESCE(pn_alias.ids, ARRAY[]::text[]))
-       AND m.account = $1
-       AND m.platform = 'whatsapp'
-       AND ${MESSAGE_RETAINED_SQL}
-       AND ${MESSAGE_VISIBLE_SQL}
-       AND m.direction = 'INBOUND'
-     ORDER BY name_quality DESC, m.wa_timestamp DESC
+       ON p.id = recent.sender_wa_id
+      AND p.account = recent.account
+     ORDER BY name_quality DESC, recent.wa_timestamp DESC
      LIMIT 1)
   ) v
   ORDER BY v.name_quality DESC, v.wa_timestamp DESC
