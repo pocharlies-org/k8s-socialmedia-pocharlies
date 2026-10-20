@@ -29,8 +29,8 @@ export function mediaLibraryOptions(account, params) {
       if (!raw || raw.length > 2048) throw new Error();
       cursor = JSON.parse(Buffer.from(raw, 'base64url').toString());
       if (cursor.scope !== scope || typeof cursor.timestamp !== 'string' || !Number.isFinite(Date.parse(cursor.timestamp)) ||
-          typeof cursor.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(cursor.id) ||
-          typeof cursor.attachment !== 'string' || (cursor.attachment && !/^[a-f0-9-]{36}$/i.test(cursor.attachment)) ||
+          typeof cursor.id !== 'string' || !/^(?:[a-f0-9-]{36}|\d+)$/i.test(cursor.id) ||
+          typeof cursor.attachment !== 'string' || (cursor.attachment && !/^(?:[a-f0-9-]{36}|\d+)$/i.test(cursor.attachment)) ||
           (order === 'longest' && (!Number.isSafeInteger(cursor.duration) || cursor.duration < -1 || cursor.duration > 2147483647))) throw new Error();
     } catch { throw fail(400, 'Invalid media cursor'); }
   }
@@ -57,7 +57,7 @@ export async function readMediaLibrary({ account, params, query }) {
   const isLinks = options.kind === 'links';
   const durationOrder = options.order === 'longest';
   const attachmentKey = isLinks ? "''::text" : "COALESCE(a.id::text, '')";
-  const durationKey = isLinks ? '-1' : 'COALESCE(NULLIF(a.duration_seconds, 0), NULLIF(a.duration, 0), -1)';
+  const durationKey = isLinks ? '-1' : 'COALESCE(NULLIF(a.duration_seconds, 0), -1)';
   if (isLinks) where.push("m.content ~* 'https?://[^[:space:]]+'");
   else if (options.kind === 'documents') where.push("m.message_type='DOCUMENT'");
   else if (options.kind === 'all') where.push("(m.message_type IN ('IMAGE','VIDEO','AUDIO','STICKER','DOCUMENT') OR m.content ~* 'https?://[^[:space:]]+')");
@@ -81,7 +81,7 @@ export async function readMediaLibrary({ account, params, query }) {
   const rows = await query(`SELECT m.id, m.wa_message_id, m.conversation_id, m.content,
       m.direction, m.message_type, m.wa_timestamp, m.wa_timestamp::text AS cursor_timestamp,
       c.name AS chat_name, ${attachmentKey} AS attachment_id
-      ${isLinks ? '' : ', a.mime_type, a.file_name, a.file_size, a.duration_seconds, a.duration'}
+      ${isLinks ? '' : ', a.mime_type, a.file_name, a.file_size, a.duration_seconds'}
     FROM messages m JOIN conversations c ON c.id=m.conversation_id AND c.account=m.account
     ${options.q ? 'LEFT JOIN participants sender ON sender.id=m.sender_wa_id AND sender.account=m.account' : ''}
     ${isLinks ? '' : 'LEFT JOIN attachments a ON a.message_id=m.id'}
