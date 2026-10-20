@@ -10,11 +10,13 @@ export function mediaRequest(ref, env) {
     if (url.username || url.password || !origins.includes(url.origin)) throw fail(403, 'Media origin is not allowed');
     return { url: url.href, headers: {} };
   }
-  const endpoint = env.S3_ENDPOINT || env.MINIO_ENDPOINT;
-  const access = env.AWS_ACCESS_KEY_ID || env.MINIO_ACCESS_KEY;
-  const secret = env.AWS_SECRET_ACCESS_KEY || env.MINIO_SECRET_KEY;
-  if (!endpoint || !access || !secret) throw fail(503, 'Media storage is not configured');
   const s3 = ref.startsWith('s3://') ? new URL(ref) : null;
+  // s3:// absoluto → backend S3 (skirmshop-drive); clave suelta → MinIO legacy. Igual que parseStorageRef del conector.
+  const useS3 = Boolean(s3) && Boolean(env.S3_ENDPOINT);
+  const endpoint = useS3 ? env.S3_ENDPOINT : env.MINIO_ENDPOINT;
+  const access = (useS3 ? env.AWS_ACCESS_KEY_ID : env.MINIO_ACCESS_KEY) || env.MINIO_ACCESS_KEY || env.AWS_ACCESS_KEY_ID;
+  const secret = (useS3 ? env.AWS_SECRET_ACCESS_KEY : env.MINIO_SECRET_KEY) || env.MINIO_SECRET_KEY || env.AWS_SECRET_ACCESS_KEY;
+  if (!endpoint || !access || !secret) throw fail(503, 'Media storage is not configured');
   const bucket = s3?.hostname || env.MINIO_BUCKET || 'socialmedia-media';
   const allowed = (env.MEDIA_ALLOWED_BUCKETS || env.S3_BUCKET || env.MINIO_BUCKET || 'socialmedia-media').split(',');
   if (!allowed.includes(bucket)) throw fail(403, 'Media bucket is not allowed');

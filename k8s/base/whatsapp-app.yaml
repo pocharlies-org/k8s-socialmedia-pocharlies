@@ -97,8 +97,13 @@ spec:
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
             - { name: MINIO_USE_SSL, value: "false" }
             - { name: MINIO_BUCKET, value: "socialmedia-media" }
-            # file_url绝对 → skirmshop-drive (54583 adjuntos); relativas → MINIO_BUCKET (15308)
+            # file_url absolutos → skirmshop-drive (54583 adjuntos); claves sueltas → MinIO legacy (15308)
             - { name: MEDIA_ALLOWED_BUCKETS, value: "skirmshop-drive,socialmedia-media" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } }
             - name: MINIO_ACCESS_KEY
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: MINIO_ROOT_USER } }
             - name: MINIO_SECRET_KEY

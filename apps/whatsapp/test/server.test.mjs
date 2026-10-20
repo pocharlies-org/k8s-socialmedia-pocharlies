@@ -450,6 +450,16 @@ test('malicious uploads and storage URLs are rejected', () => {
   assert.throws(() => mediaRequest('https://user:pass@media.example/a', { MEDIA_ALLOWED_ORIGINS: 'https://media.example' }));
   assert.equal(mediaRequest('https://media.example/a', { MEDIA_ALLOWED_ORIGINS: 'https://media.example' }).url, 'https://media.example/a');
   assert.throws(() => mediaRequest('s3://other/private', { S3_ENDPOINT: 'http://minio:9000', AWS_ACCESS_KEY_ID: 'a', AWS_SECRET_ACCESS_KEY: 's' }));
+  // QA #46: s3:// se firma contra S3_ENDPOINT; la clave suelta, contra el MinIO legacy (QA #46)
+  const twoBackends = {
+    S3_ENDPOINT: 'http://drive-s3:9000', AWS_ACCESS_KEY_ID: 'a', AWS_SECRET_ACCESS_KEY: 's',
+    MINIO_ENDPOINT: 'http://minio:9000', MINIO_ACCESS_KEY: 'm', MINIO_SECRET_KEY: 'p',
+    MEDIA_ALLOWED_BUCKETS: 'skirmshop-drive,socialmedia-media',
+  };
+  assert.match(mediaRequest('s3://skirmshop-drive/x.jpg', twoBackends).url, /^http:\/\/drive-s3:9000\/skirmshop-drive\/x\.jpg/);
+  assert.match(mediaRequest('attachments/1/x.jpg', twoBackends).url, /^http:\/\/minio:9000\/socialmedia-media\/attachments\/1\/x\.jpg/);
+  // sin S3_ENDPOINT (despliegues de un solo backend): el s3:// sigue firmando contra el MinIO
+  assert.match(mediaRequest('s3://socialmedia-media/y.jpg', { MINIO_ENDPOINT: 'http://minio:9000', MINIO_ACCESS_KEY: 'm', MINIO_SECRET_KEY: 'p' }).url, /^http:\/\/minio:9000\/socialmedia-media\/y\.jpg/);
 });
 test('common documents need matching extensions and safe signatures', () => {
   const asBody = (name, mimeType, bytes) => ({ name, mimeType, data: Buffer.from(bytes).toString('base64') });
