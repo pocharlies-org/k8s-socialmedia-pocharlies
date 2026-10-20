@@ -359,7 +359,10 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
   const auth = new AppAuth({ env, fetchImpl, ...(oidc ? { oidc } : {}), ...(now ? { now } : {}) });
   const accounts = (registry || JSON.parse(await readFile(env.SOCIAL_ACCOUNTS_FILE, 'utf8'))).filter(a => a.channel === 'whatsapp' && a.enabled !== false);
   if (new Set(accounts.map(a => a.accountId)).size !== accounts.length) throw Error('Duplicate account');
-  const pool = db || new pg.Pool({ connectionString: env.DATABASE_URL, max: 5, statement_timeout: 10000, types: utcDatabaseTypes() });
+  // 30 s, no 10: con la caché de Postgres evacuada (pod compartido, 885k mensajes)
+  // la primera pasada del listado de chats medía 21-126 s y el arranque de la app
+  // era una moneda (57014, medido 20-10). Caliente, el mismo query entra en 2 s.
+  const pool = db || new pg.Pool({ connectionString: env.DATABASE_URL, max: 5, statement_timeout: 30000, types: utcDatabaseTypes() });
   // Change hints arrive over one dedicated LISTEN connection per process, not
   // per browser tab. APP_REALTIME_ENABLED=false disables it and every client
   // keeps its existing polling fallback.
@@ -1620,7 +1623,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const a = accountParam(url.searchParams.get('account')); const chat = safeChatId(url.searchParams.get('chat'));
         const readIds = await conversationReadIds(a, await conversationFor(a, chat));
         const id = path.slice('/api/media/link-thumb/'.length);
-        if (!/^[a-f0-9-]{36}$/.test(id)) throw fail(404, 'Media not found');
+        if (!/^(?:\d{1,19}|[a-f0-9-]{36})$/.test(id)) throw fail(404, 'Media not found');
         const rows = await query(
           `SELECT m.content, p.message_payload->'extendedTextMessage' AS preview_payload
              FROM messages m JOIN whatsapp_message_payloads p
@@ -1644,7 +1647,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const chat = required(url.searchParams.get('chat'), 'chat');
         const readIds = await conversationReadIds(a, await conversationFor(a, chat));
         const id = path.slice('/api/media/thumb/'.length);
-        if (!/^[a-f0-9-]{36}$/.test(id)) throw fail(404, 'Media not found');
+        if (!/^(?:\d{1,19}|[a-f0-9-]{36})$/.test(id)) throw fail(404, 'Media not found');
         const rows = await query(
           `SELECT p.message_payload->'imageMessage'->'jpegThumbnail' AS thumbnail
              FROM messages m JOIN whatsapp_message_payloads p
@@ -1664,7 +1667,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       if (req.method === 'GET' && path.startsWith('/api/media/')) {
         const a = accountFor(url.searchParams.get('account')); const chat = required(url.searchParams.get('chat'), 'chat');
         const readIds = await conversationReadIds(a, await conversationFor(a, chat));
-        const id = path.slice('/api/media/'.length); if (!/^[a-f0-9-]{36}$/.test(id)) throw fail(404, 'Media not found');
+        const id = path.slice('/api/media/'.length); if (!/^(?:\d{1,19}|[a-f0-9-]{36})$/.test(id)) throw fail(404, 'Media not found');
         const rows = await query(`SELECT COALESCE(a.file_url,a.storage_key) AS ref,a.mime_type,a.file_name FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id=$1 AND m.account=$2 AND m.conversation_id=ANY($3::text[]) AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}`, [id, a.accountId, readIds]);
         if (!rows.length) throw fail(404, 'Media not found');
         const media = rows[0]; const upstream = mediaRequest(media.ref, env);

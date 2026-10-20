@@ -1,4 +1,4 @@
-import { CHAT_LIST_BASE_SQL } from './chat-names.mjs';
+import { CHAT_LIST_BASE_SQL, chatListDecorated } from './chat-names.mjs';
 
 const sortTime = 'COALESCE(last_message.wa_timestamp, c.last_message_at)';
 const invalid = () => Object.assign(new Error('Invalid chat cursor'), { status: 400 });
@@ -32,11 +32,11 @@ export async function readChatDirectory({ query, account, archived = false, curs
     }
   }
   args.push(limit + 1);
-  const rows = await query(`${CHAT_LIST_BASE_SQL}
+  const rows = await query(chatListDecorated(`${CHAT_LIST_BASE_SQL}
 AND (COALESCE(c.archived, false) OR COALESCE(pn_alias.archived, false)) = $2
 ${after}
 ORDER BY ${sortTime} DESC NULLS LAST, c.id DESC
-LIMIT $${args.length}`, args);
+LIMIT $${args.length}`), args);
   const page = rows.slice(0, limit);
   const last = page.at(-1);
   // Keep PostgreSQL's microseconds intact: JS Date would lose the cursor boundary.
