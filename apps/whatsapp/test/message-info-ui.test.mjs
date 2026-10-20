@@ -119,6 +119,17 @@ test('refresh errors preserve the last receipt evidence and allow another retry'
   assert.equal(calls, 3);
 });
 
+test('unsupported upstream hides the useless retry (QA #10)', async () => {
+  const ui = fixture(async () => {
+    const error = new Error('WhatsApp provider does not support this operation');
+    error.code = 'UNSUPPORTED_UPSTREAM';
+    throw error;
+  });
+  await ui.load();
+  assert.match(ui.notice.textContent, /El proveedor no ofrece esta información/);
+  assert.equal(ui.retry.hidden, true);
+});
+
 test('recovery pending refreshes at most three times and keeps a manual update', async () => {
   const scheduled = [];
   let calls = 0;

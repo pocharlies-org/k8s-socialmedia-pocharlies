@@ -468,8 +468,13 @@ export function createMessageInfoPanel({ documentRef, container, message, contex
       retry.textContent = 'Actualizar'; retry.hidden = false;
     } catch (error) {
       if (!current()) return;
-      notice.textContent = error?.message || 'No se pudo cargar la información del mensaje.';
-      retry.textContent = 'Reintentar'; retry.hidden = false;
+      // 501 del conector: el upstream no soporta la operación, reintentar es
+      // inútil (QA #10). Si el conector la gana, esto deja de aplicarse solo.
+      const unsupported = error?.code === 'UNSUPPORTED_UPSTREAM';
+      notice.textContent = unsupported
+        ? 'El proveedor no ofrece esta información para este mensaje.'
+        : error?.message || 'No se pudo cargar la información del mensaje.';
+      retry.textContent = 'Reintentar'; retry.hidden = unsupported;
     } finally {
       if (current()) { retry.disabled = false; container.setAttribute('aria-busy', 'false'); }
     }
