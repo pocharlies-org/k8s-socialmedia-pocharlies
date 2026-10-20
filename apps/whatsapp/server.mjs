@@ -715,11 +715,18 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         if (error?.code !== '42P01') throw error;
       }
     }
+    // shortcut: con ids numéricos (la casa, bigint) compara m.id directo y usa el
+    // índice; el cast m.id::text sobre 80k filas de un grupo no usa la PK y en frío
+    // pasaba de los 10 s del statement_timeout (57014, medido 20-10). Con ids uuid
+    // (el desplegador original) sigue la comparación por texto (42883).
+    const idAny = (param, list) => (list.every((id) => /^\d+$/.test(String(id)))
+      ? `m.id = ANY(${param}::bigint[])`
+      : `m.id::text = ANY(${param}::text[])`);
     const attachments = ids.length ? await query(
       `SELECT a.id,a.message_id,a.mime_type,a.file_name,a.file_type,a.file_size,a.file_url,a.caption
          FROM attachments a JOIN messages m ON m.id=a.message_id
         WHERE m.account=$1 AND m.conversation_id=ANY($2::text[]) AND m.platform='whatsapp'
-          AND ${MESSAGE_RETAINED_SQL} AND m.id::text=ANY($3::text[])`,
+          AND ${MESSAGE_RETAINED_SQL} AND ${idAny('$3', ids)}`,
       [account.accountId, readIds, ids]
     ) : [];
     const attachedIds = new Set(attachments.map(item => item.message_id));
@@ -727,7 +734,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     const thumbnails = missingImages.length ? await query(
       `SELECT m.id FROM messages m JOIN whatsapp_message_payloads p
          ON p.wa_message_id=m.wa_message_id AND p.account=m.account
-        WHERE m.id::text=ANY($1::text[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
+        WHERE ${idAny('$1', missingImages)} AND m.account=$2 AND m.conversation_id=ANY($3::text[])
           AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}
           AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
           AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000`,
@@ -739,7 +746,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       `SELECT m.id, p.message_payload->'extendedTextMessage' AS preview_payload
          FROM messages m JOIN whatsapp_message_payloads p
            ON p.wa_message_id=m.wa_message_id AND p.account=m.account
-        WHERE m.id::text=ANY($1::text[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
+        WHERE ${idAny('$1', textIds)} AND m.account=$2 AND m.conversation_id=ANY($3::text[])
           AND m.platform='whatsapp' AND m.message_type='TEXT' AND ${MESSAGE_RETAINED_SQL}
           AND pg_column_size(p.message_payload->'extendedTextMessage') <= 300000`,
       [textIds, account.accountId, readIds]

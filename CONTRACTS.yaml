@@ -2718,9 +2718,11 @@ contracts:
     note: >-
       GET /api/messages de la app whatsapp.e-dani.com: pagina de mensajes de
       (account, chat) con adjuntos, thumbnails y previews de enlaces. Las
-      consultas auxiliares comparan messages.id por texto: bigint en la BD de
-      la casa (linaje NAS) y uuid en la del desplegador original (42883 si se
-      fija un tipo, medido 20-10).
+      consultas auxiliares comparan messages.id: con ids numéricos (bigint, la
+      casa, linaje NAS) por id para usar el índice — el cast por texto sobre
+      80k filas de un grupo pasaba de los 10 s del statement_timeout en frío
+      (57014, medido 20-10) —; con ids uuid (el desplegador original) por
+      texto (42883 si se fija un tipo, medido 20-10).
   - id: http.whatsapp-app.messages-delete.v1
     kind: http-route
     value: /api/messages/delete
