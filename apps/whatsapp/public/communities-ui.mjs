@@ -175,7 +175,7 @@ export function installCommunitiesUI({
   }
   function displayCount(count) {
     return count !== null && count !== undefined && Number.isSafeInteger(Number(count)) && Number(count) >= 0
-      ? `${Number(count)} participantes` : 'Comunidad';
+      ? `${Number(count)} ${Number(count) === 1 ? 'participante' : 'participantes'}` : 'Comunidad';
   }
   function renderList() {
     const focusedCommunity = documentRef.activeElement?.dataset?.communityId;

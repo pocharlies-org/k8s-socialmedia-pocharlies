@@ -1217,7 +1217,7 @@ export function installFeatureUI({
     if (selected) runtime.selectedMessageIds.add(text(id)); else runtime.selectedMessageIds.delete(text(id));
     enhanceMessages();
     const count = documentRef.getElementById('feature-selection-count');
-    if (count) count.textContent = `${runtime.selectedMessageIds.size} seleccionados`;
+    if (count) count.textContent = `${runtime.selectedMessageIds.size} ${runtime.selectedMessageIds.size === 1 ? 'seleccionado' : 'seleccionados'}`;
   }
 
   async function reactTo(message, emoji) {
