@@ -328,12 +328,10 @@ export const CHAT_LIST_ARCHIVED_SQL = `${CHAT_LIST_BASE_SQL}
 AND (COALESCE(c.archived, false) OR COALESCE(pn_alias.archived, false)) = true
 ${CHAT_LIST_ORDER_SQL}`;
 
-// Legacy NAS dates are UTC without a zone; other deployments use timestamptz.
-export const DELETED_AT_SQL = `CASE WHEN m.deleted_at IS NULL THEN NULL
-  WHEN pg_typeof(m.deleted_at) = 'timestamp without time zone'::regtype
-    THEN to_char(m.deleted_at::timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'
-  ELSE to_char(m.deleted_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'
-END`;
+// La casa guarda la revocación en metadata (backfill 015 y el conector,
+// message-mutations.ts): ISO-UTC texto; la columna deleted_at no existe en
+// esta BD (la consulta daba 42703 → 500 al abrir cualquier conversación).
+export const DELETED_AT_SQL = `m.metadata->>'deleted_at'`;
 
 /** Query used by the app server before it maps attachment rows. */
 export const MESSAGE_LIST_BASE_SQL = `
