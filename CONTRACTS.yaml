@@ -2735,6 +2735,31 @@ contracts:
       everyone). El espejo local escribe la revocacion en metadata
       (deleted_for_me / deleted_at como texto): la casa no tiene columna
       deleted_at (42703 medido 20-10); el conector es la fuente de verdad.
+  - id: http.whatsapp-app.logout.v1
+    kind: http-route
+    value: /auth/logout
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      POST /auth/logout de la app whatsapp.e-dani.com (CSRF por Origin).
+      Responde 200 { logoutUrl }: el front redirige al logout del IdP —
+      sin eso el SSO de Keycloak retoma la sesión sola y el usuario sigue
+      dentro tras «Cerrar sesión» (QA #12). null en modo basic.
+  - id: http.whatsapp-app.media.v1
+    kind: http-route
+    value: /api/media
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET /api/media/<attachment id> (proxy de adjuntos con Range) de la app
+      whatsapp.e-dani.com. El id es bigint (o uuid legacy): nunca validar solo
+      por patrón uuid (QA #6). La referencia sale solo de attachments.file_url
+      — storage_key no existe en la casa (42703, QA #12) — y mediaRequest
+      entiende refs s3:// contra S3_ENDPOINT/S3_BUCKET.
   - id: http.whatsapp-app.search.v1
     kind: http-route
     value: /api/search

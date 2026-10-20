@@ -1440,7 +1440,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       }
       if (req.method === 'POST') checkOrigin(req, env);
       if (path === '/auth/logout' && req.method === 'POST') {
-        const result = await auth.logout(req); res.setHeader('set-cookie', result.setCookie ? [result.setCookie] : []); res.writeHead(204); return res.end();
+        const result = await auth.logout(req); res.setHeader('set-cookie', result.setCookie ? [result.setCookie] : []);
+        // logoutUrl: sin redirigir al IdP el SSO retoma la sesión sola (QA #12).
+        return json(200, { logoutUrl: result.logoutUrl || null });
       }
       if (path === '/auth/logout' && req.method === 'GET') {
         res.setHeader('allow', 'POST'); return json(405, { error: 'Use POST to log out' });
@@ -1672,7 +1674,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const a = accountFor(url.searchParams.get('account')); const chat = required(url.searchParams.get('chat'), 'chat');
         const readIds = await conversationReadIds(a, await conversationFor(a, chat));
         const id = path.slice('/api/media/'.length); if (!/^(?:\d{1,19}|[a-f0-9-]{36})$/.test(id)) throw fail(404, 'Media not found');
-        const rows = await query(`SELECT COALESCE(a.file_url,a.storage_key) AS ref,a.mime_type,a.file_name FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id=$1 AND m.account=$2 AND m.conversation_id=ANY($3::text[]) AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}`, [id, a.accountId, readIds]);
+        // attachments no tiene storage_key en la casa (42703, QA #12): la ref
+        // real (s3:// o http) vive solo en file_url.
+        const rows = await query(`SELECT a.file_url AS ref,a.mime_type,a.file_name FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id=$1 AND m.account=$2 AND m.conversation_id=ANY($3::text[]) AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}`, [id, a.accountId, readIds]);
         if (!rows.length) throw fail(404, 'Media not found');
         const media = rows[0]; const upstream = mediaRequest(media.ref, env);
         const range = req.headers.range;

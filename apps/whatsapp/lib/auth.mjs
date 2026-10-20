@@ -241,9 +241,15 @@ export class AppAuth {
       const id = parseCookie(req.headers.cookie, SESSION_COOKIE);
       if (id) this.sessions.delete(id);
       await this.saveSessions();
-      return { setCookie: clearCookie(SESSION_COOKIE) };
+      // Soltar solo la cookie de la app deja viva la sesión de Keycloak: el
+      // siguiente /auth/login la retoma solo y el usuario sigue dentro
+      // (QA #12). La URL es la misma construcción que ya usa la página de
+      // cuenta no autorizada (19-10).
+      const logout = new URL('protocol/openid-connect/logout', `${this.issuer.href.replace(/\/$/, '')}/`);
+      logout.searchParams.set('redirect_uri', this.publicUrl.href);
+      return { setCookie: clearCookie(SESSION_COOKIE), logoutUrl: logout.href };
     }
-    return { setCookie: null };
+    return { setCookie: null, logoutUrl: null };
   }
 }
 

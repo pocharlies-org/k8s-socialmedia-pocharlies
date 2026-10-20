@@ -56,7 +56,7 @@ export function installChatSelection({ documentRef = document, getScope, getAcco
       if (active) row.setAttribute('aria-pressed', String(selected.has(row.dataset.chatId)));
       else row.removeAttribute('aria-pressed');
     }
-    count.textContent = `${selected.size} seleccionados`;
+    count.textContent = `${selected.size} ${selected.size === 1 ? 'seleccionado' : 'seleccionados'}`;
     const chosen = getChats().filter(chat => selected.has(chat.id));
     archive.dataset.action = chosen.length && chosen.every(chat => chat.archived) ? 'unarchive' : 'archive';
     mute.dataset.action = chosen.length && chosen.every(chat => chat.muted) ? 'unmute' : 'mute';

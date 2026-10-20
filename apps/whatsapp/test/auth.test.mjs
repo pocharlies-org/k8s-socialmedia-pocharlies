@@ -187,7 +187,9 @@ test('OIDC sessions expire and logout clears the server session', async t => {
   assert.equal(wrongOriginPost.status, 403);
   assert.equal((await fresh.request('/api/accounts', { headers: { cookie: `__Host-wa_session=${loggedIn.session}` } })).status, 200);
   const logout = await fresh.request('/auth/logout', { method: 'POST', headers: { cookie: `__Host-wa_session=${loggedIn.session}`, origin: 'https://wa.example', 'content-type': 'application/json' }, body: '{}' });
-  assert.equal(logout.status, 204);
+  assert.equal(logout.status, 200);
+  // QA #12: sin URL de logout del IdP el SSO retoma la sesión sola.
+  assert.match((await logout.json()).logoutUrl, /protocol\/openid-connect\/logout\?redirect_uri=https%3A%2F%2Fwa\.example%2F$/);
   assert.equal((await fresh.request('/api/accounts', { headers: { cookie: `__Host-wa_session=${loggedIn.session}` } })).status, 401);
   const loggedOutApproval = await fresh.request('/api/ai/proposal', { method: 'POST', headers: { cookie: `__Host-wa_session=${loggedIn.session}`, origin: 'https://wa.example', 'content-type': 'application/json' }, body: JSON.stringify(approval) });
   assert.equal(loggedOutApproval.status, 401);
