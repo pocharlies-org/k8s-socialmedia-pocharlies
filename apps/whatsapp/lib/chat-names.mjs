@@ -105,6 +105,18 @@ export function readableChatName(chat) {
  * JID, while the group branch never promotes a participant to group title.
  */
 export const CHAT_LIST_BASE_SQL = `
+-- Teléfonos con exactamente una conversación @lid, una sola vez: los dos COUNT(*)
+-- correlacionados por fila escaneaban conversations 1038 veces (~3,2 s con 2,3k
+-- chats de la cuenta, medido 20-10; era la causa del statement_timeout).
+WITH lid_phones AS MATERIALIZED (
+  SELECT regexp_replace(wa_chat_id, '@c\\.us$', '@s.whatsapp.net') AS phone
+  FROM conversations
+  WHERE account = $1
+    AND COALESCE(is_group, false) = false
+    AND id ~ '@lid$'
+  GROUP BY 1
+  HAVING COUNT(*) = 1
+)
 SELECT c.id,
        c.wa_chat_id AS "waChatId",
        CASE
@@ -171,6 +183,10 @@ SELECT c.id,
        COALESCE(last_message.wa_timestamp, c.last_message_at)::text AS "_sortTimestamp",
        last_message.direction = 'OUTBOUND' AS "fromMe"
 FROM conversations c
+LEFT JOIN lid_phones one_lid
+  ON one_lid.phone = regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')
+LEFT JOIN lid_phones one_lid_self
+  ON one_lid_self.phone = regexp_replace(c.id, '@c\\.us$', '@s.whatsapp.net')
 LEFT JOIN LATERAL (
   SELECT BTRIM(wc.name) AS name
   FROM whatsapp_contacts wc
@@ -205,12 +221,7 @@ LEFT JOIN LATERAL (
     AND pn.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
     AND regexp_replace(pn.id, '@c\\.us$', '@s.whatsapp.net') =
         regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')
-    AND (SELECT COUNT(*) FROM conversations other_lid
-         WHERE other_lid.account = c.account
-           AND COALESCE(other_lid.is_group, false) = false
-           AND other_lid.id ~ '@lid$'
-           AND regexp_replace(other_lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net') =
-               regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')) = 1
+    AND one_lid.phone IS NOT NULL
 ) pn_alias ON true
 -- UNION ALL con LIMIT 1 por brazo: con ANY(array_prepend(...)) el planner
 -- no usa el índice por conversación y escanea messages por timestamp global
@@ -304,11 +315,7 @@ WHERE c.account = $1
   AND NOT (
     COALESCE(c.is_group, false) = false
     AND c.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
-    AND (SELECT COUNT(*) FROM conversations lid
-         WHERE lid.account = c.account AND COALESCE(lid.is_group, false) = false
-           AND lid.id ~ '@lid$'
-           AND regexp_replace(lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net') =
-               regexp_replace(c.id, '@c\\.us$', '@s.whatsapp.net')) = 1
+    AND one_lid_self.phone IS NOT NULL
   )`;
 
 const CHAT_LIST_ORDER_SQL = 'ORDER BY COALESCE(last_message.wa_timestamp, c.last_message_at) DESC NULLS LAST, c.id DESC';

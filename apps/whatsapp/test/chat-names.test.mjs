@@ -84,7 +84,10 @@ test('chat views filter archive state before limiting results', () => {
   // el índice por conversación y escanea messages por timestamp global.
   assert.equal((CHAT_LIST_ACTIVE_SQL.match(/m\.conversation_id = c\.id\b/g) || []).length, 2);
   assert.ok((CHAT_LIST_ACTIVE_SQL.match(/UNION ALL/g) || []).length >= 2);
-  assert.match(CHAT_LIST_ARCHIVED_SQL, /lid\.account = c\.account/);
+  // 20-10: el COUNT(*) correlacionado por fila (lid.account = c.account) se
+  // sustituye por la CTE agrupada; si vuelve el COUNT por fila, timeout otra vez.
+  assert.match(CHAT_LIST_ARCHIVED_SQL, /WITH lid_phones AS MATERIALIZED/);
+  assert.doesNotMatch(CHAT_LIST_ARCHIVED_SQL, /SELECT COUNT\(\*\) FROM conversations/);
   assert.doesNotMatch(CHAT_LIST_ARCHIVED_SQL, /LIMIT 500$/);
 });
 

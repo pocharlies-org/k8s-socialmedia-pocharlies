@@ -83,7 +83,9 @@ spec:
             - { name: OIDC_ALLOWED_SUBJECTS, value: "e51253a7-c137-4c6c-9fb9-af9cecd3b147,19477a95-5db3-416a-858c-2eeb3cf136f0" }
             - name: OIDC_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: whatsapp-app-secrets, key: OIDC_CLIENT_SECRET } }
-            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            # jit=off: las consultas listas del chat son de ~2 s y JIT gastaba ~3 s
+            # compilando 115 funciones por query (EXPLAIN ANALYZE, 20-10).
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp?options=-c%20jit%3Doff" }
             - { name: SOCIAL_ACCOUNTS_FILE, value: "/etc/whatsapp-app/accounts.json" }
             - { name: DATA_DIR, value: "/data" }
             - { name: APP_ENABLE_SENDING, value: "true" }
