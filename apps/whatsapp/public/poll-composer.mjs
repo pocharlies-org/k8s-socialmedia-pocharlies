@@ -13,12 +13,15 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
     return element;
   };
   const form = node('form', 'poll-composer feature-form');
+  // La validación nativa (required) bloqueaba el submit sin mensaje visible
+  // dentro del diálogo: pollDraft ya valida y su error llega al status (QA #13).
+  form.noValidate = true;
   const fields = node('fieldset', 'poll-fields');
   const questionLabel = node('label', 'feature-field', 'Pregunta');
   const question = node('textarea'); question.name = 'question'; question.rows = 2;
   question.maxLength = 255; question.required = true; question.placeholder = 'Haz una pregunta';
   questionLabel.append(question);
-  const heading = node('h3', '', 'Opci\u00f3nes');
+  const heading = node('h3', '', 'Opciones');
   const list = node('div', 'poll-option-list');
   const rows = [];
   const add = button('A\u00f1adir opci\u00f3n');

@@ -22,6 +22,10 @@ try {
   const page = await browser.newPage({viewport:{width:900,height:850}}); const errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(()=>window.ready);
+  // Pregunta vacía: sin validación nativa el submit corre y pollDraft responde (QA #13).
+  await page.getByRole('button',{name:'Enviar encuesta',exact:true}).click();
+  assert.equal(await page.evaluate(()=>calls.length),0,'Empty question must not submit');
+  assert.match(await page.getByRole('alert').textContent(), /pregunta/i);
   await page.getByLabel('Pregunta',{exact:true}).fill('Que comida elegimos?');
   await page.getByLabel('Opci\u00f3n 1',{exact:true}).fill('Pasta, ensalada');
   await page.getByLabel('Opci\u00f3n 2',{exact:true}).fill('Arroz');
