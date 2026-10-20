@@ -90,6 +90,8 @@ spec:
             - { name: DATA_DIR, value: "/data" }
             - { name: APP_ENABLE_SENDING, value: "true" }
             - { name: LITELLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+            # único modelo que lista la clave del app (GET /models desde el pod, QA #44)
+            - { name: HERMES_DEFAULT_MODEL, value: "tooling" }
             - name: LITELLM_API_KEY
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: OPENAI_API_KEY } }
             - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
