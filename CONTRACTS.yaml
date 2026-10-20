@@ -2735,6 +2735,24 @@ contracts:
       everyone). El espejo local escribe la revocacion en metadata
       (deleted_for_me / deleted_at como texto): la casa no tiene columna
       deleted_at (42703 medido 20-10); el conector es la fuente de verdad.
+  - id: http.whatsapp-app.chat-details.v1
+    kind: http-route
+    value: /api/chat-details
+    role: provider
+    files:
+      - apps/whatsapp/server.mjs
+    status: active
+    note: >-
+      GET /api/chat-details (alias contact-details, group-details,
+      /api/chats/<jid>/group|contact, /api/groups/<jid>/info|participants) de
+      la app whatsapp.e-dani.com. Las consultas de participants usan solo
+      columnas de la casa (id, name, push_name, phone, profile_pic_url):
+      wa_user_id es del esquema del desplegador original y no existe aqui
+      (42703 en todos los chats, medido 20-10). El listado de chats expone
+      avatarUrl solo con foto guardada (null = iniciales): forzar la URL del
+      proxy en cada fila disparaba ~1 peticion por chat al abrir (985 medidas,
+      931x404 + 54x502 del conector); la busqueda al proveedor queda para la
+      cabecera del chat abierto.
   - id: http.whatsapp-app.hermes-stop.v1
     kind: http-route
     value: /api/ai/stop

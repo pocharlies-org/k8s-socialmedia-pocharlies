@@ -1057,7 +1057,7 @@ test('group details retain provider permissions and account-scoped saved member 
   const groupId = 'personal:group@g.us';
   db.conversations[groupId] = { id: groupId, account: 'personal', name: 'Group', wa_chat_id: 'personal:wrong@s.whatsapp.net', is_group: true, archived: false, unread: 0 };
   const originalQuery = db.query;
-  db.query = async (sql, args) => /SELECT id, wa_user_id, name, push_name FROM participants/.test(sql)
+  db.query = async (sql, args) => /SELECT id, name, push_name FROM participants/.test(sql)
     ? { rows: [{ id: 'personal:member@s.whatsapp.net', wa_user_id: 'personal:member@s.whatsapp.net', name: 'Saved member', push_name: null }] }
     : originalQuery(sql, args);
   const upstream = [];

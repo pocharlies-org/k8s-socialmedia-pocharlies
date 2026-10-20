@@ -1571,9 +1571,13 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           ...safeChat,
           name: readableChatName(chat),
           // Never return a provider/storage URL to the browser; avatars always
-          // flow through the authenticated account-scoped proxy.
-          // The proxy also performs provider lookup when no stored photo exists.
-          avatarUrl: `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}`,
+          // flow through the authenticated account-scoped proxy. Pero solo cuando
+          // hay foto guardada: forzar la URL en los ~500 chats del listado
+          // disparaba 985 peticiones al abrir (931×404 + 54×502 del conector,
+          // medido 20-10). Sin foto: iniciales, como WhatsApp; la búsqueda al
+          // proveedor queda para la cabecera del chat abierto.
+          avatarUrl: (chat.avatarUrl || chat.avatar_url)
+            ? `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}` : null,
           archived: chat.archived === true,
           unread: chat.unread ?? 0,
           };
@@ -1593,7 +1597,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         let chats = await query(CHAT_LIST_ARCHIVED_SQL, [a.accountId]);
         chats = await fillMediaPreviews(chats.filter(chat => chat.archived === true).map(chat => {
           const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, _sortTimestamp, ...safeChat } = chat;
-          return { ...safeChat, name: readableChatName(chat), avatarUrl: `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}`, archived: true };
+          return { ...safeChat, name: readableChatName(chat), avatarUrl: (chat.avatarUrl || chat.avatar_url) ? `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}` : null, archived: true };
         }), a.accountId);
         return json(200, { chats, archived: true });
       }
@@ -1724,12 +1728,16 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           const infoById = new Map(infoParticipants.map(item => [item.id || item.jid, item]));
           const participantIds = participants.map(item => item.id || item.jid).filter(Boolean);
           const known = participantIds.length ? await query(
-            `SELECT id, wa_user_id, name, push_name FROM participants
-              WHERE account=$1 AND (id=ANY($2::text[]) OR wa_user_id=ANY($2::text[]))`,
+            `SELECT id, name, push_name FROM participants
+              WHERE account=$1 AND id=ANY($2::text[])`,
             [a.accountId, participantIds.flatMap(id => [id, `${a.accountId}:${id}`])]
           ) : [];
-          const knownById = new Map(known.flatMap(item => [item.id, item.wa_user_id]
-            .filter(Boolean).flatMap(id => [[id, item], [id.startsWith(`${a.accountId}:`) ? id.slice(a.accountId.length + 1) : id, item]])));
+          // La casa no tiene wa_user_id (esquema del desplegador original); el ANY
+          // ya lleva el id con y sin prefijo de cuenta (42703, medido 20-10).
+          const knownById = new Map(known.flatMap(item => {
+            const bare = item.id.startsWith(`${a.accountId}:`) ? item.id.slice(a.accountId.length + 1) : item.id;
+            return [[item.id, item], [bare, item]];
+          }));
           const capabilities = {
             manageMembers: info?.capabilities?.manageMembers === true,
             editInfo: info?.capabilities?.editInfo === true,
@@ -1746,7 +1754,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           })) });
         }
         const rows = await query(
-          `SELECT p.id, p.wa_user_id, p.phone, p.name, p.push_name, p.profile_pic_url
+          `SELECT p.id, p.phone, p.name, p.push_name, p.profile_pic_url
              FROM participants p
             WHERE p.account=$1 AND EXISTS (
               SELECT 1 FROM conversation_participants cp
@@ -1757,10 +1765,10 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         );
         const contact = rows[0] || {};
         return json(200, { ...result, contact: {
-          id: contact.wa_user_id || contact.id || conversation.id,
+          id: contact.id || conversation.id,
           phone: contact.phone || null,
           name: contact.name || contact.push_name || conversation.name || null,
-          avatarUrl: `/api/contacts/${encodeURIComponent(contact.wa_user_id || contact.id || conversation.id)}/avatar?account=${encodeURIComponent(a.accountId)}`,
+          avatarUrl: `/api/contacts/${encodeURIComponent(contact.id || conversation.id)}/avatar?account=${encodeURIComponent(a.accountId)}`,
           presence: { state: 'unknown', lastSeen: null, available: false },
         } });
       }
@@ -1903,8 +1911,8 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const a = accountParam(url.searchParams.get('account'));
         const contactId = required(decodeURIComponent(path.slice('/api/contacts/'.length, -'/avatar'.length)), 'contact', 512);
         const rows = await query(
-          `SELECT p.id,p.wa_user_id,p.profile_pic_url FROM participants p
-            WHERE p.account=$1 AND (p.id=$2 OR p.wa_user_id=$2) LIMIT 1`,
+          `SELECT p.id,p.profile_pic_url FROM participants p
+            WHERE p.account=$1 AND p.id=$2 LIMIT 1`,
           [a.accountId, contactId]
         );
         if (!rows.length) throw fail(404, 'Contact not found');
@@ -1917,7 +1925,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             if (error?.status && ![403, 404, 502].includes(error.status)) throw error;
           }
         }
-        const providerContact = participant.wa_user_id || participant.id;
+        const providerContact = participant.id;
         const result = await featureConnector(a, `/chats/${encodeURIComponent(providerContact)}/photo`, { method: 'GET' });
         const data = typeof result.data === 'string' ? result.data : '';
         if (!data || data.length > Math.ceil(MAX_AVATAR_BYTES * 4 / 3) + 8 || !isValidBase64(data)) throw featureError(404, 'AVATAR_UNAVAILABLE', 'Avatar is unavailable for this contact');

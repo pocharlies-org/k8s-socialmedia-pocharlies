@@ -75,7 +75,11 @@ async function fixture(t, { env = {}, fetchImpl, conversations } = {}) {
   return { request };
 }
 
-test('chat lists expose a proxy URL when the provider is the only photo source', async t => {
+// 20-10: forzar la URL del proxy en cada fila del listado disparaba ~1 petición
+// por chat al abrir (985 medidas, 931×404 + 54×502). Sin foto guardada el listado
+// expone null (iniciales); el proxy con búsqueda al proveedor queda para la
+// cabecera del chat abierto, que es donde tiene sentido.
+test('chat lists expose no avatar URL when the provider is the only photo source', async t => {
   const calls = [];
   const { request } = await fixture(t, {
     fetchImpl: async url => {
@@ -86,8 +90,9 @@ test('chat lists expose a proxy URL when the provider is the only photo source',
   const list = await request('/api/chats?account=personal');
   assert.equal(list.status, 200);
   const body = await list.json();
-  assert.match(body.chats[0].avatarUrl, /^\/api\/chats\/same-chat\/avatar\?account=personal$/);
-  const avatar = await request(body.chats[0].avatarUrl);
+  assert.equal(body.chats[0].avatarUrl, null);
+  assert.equal(calls.length, 0);
+  const avatar = await request('/api/chats/same-chat/avatar?account=personal');
   assert.equal(avatar.status, 200);
   assert.equal(calls.length, 1);
 });
