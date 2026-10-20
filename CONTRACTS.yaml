@@ -397,6 +397,64 @@ contracts:
       the 200 shape and the failureClass values are contract: changing any is
       breaking — a new `.v2` entry beside this one.
       Also consumed by the MCP tool social_react_message (mcp-server/src/mcp/server.ts canonicalReactMessage; added later, surface unchanged).
+  - id: http.whatsapp-connector.chats-modify-parameterized.v1
+    kind: http-route
+    value: /chats/:chatId/modify
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      Alias de la app whatsapp.e-dani.com (SC-2760): la app pone el id de chat
+      en la ruta y firma el body que manda (action, value para mute: value > 0
+      se traduce a durationMs y value 0 = silenciar siempre). El alias hace
+      merge del param al body DESPUÉS del HMAC y reutiliza el handler de
+      /chats/modify (mismo gate de envío). Se retira cuando el conector lleve
+      las rutas de Jordi en tándem con la app.
+  - id: http.whatsapp-connector.contacts-block-parameterized.v1
+    kind: http-route
+    value: /chats/:chatId/block
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      Alias de la app whatsapp.e-dani.com (SC-2760): POST {blocked: boolean};
+      el alias lo traduce a {conversationId, action, confirm: true} y llama al
+      handler de /contacts/block. El confirm se da por cumplido porque el
+      consumidor es interno (HMAC) y la app ya confirma con el usuario.
+  - id: http.whatsapp-connector.chats-disappearing-parameterized.v1
+    kind: http-route
+    value: /chats/:chatId/disappearing
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      Alias de la app whatsapp.e-dani.com (SC-2760): id en la ruta, body
+      {expiration}; merge tras el HMAC, mismo handler que /chats/disappearing.
+  - id: http.whatsapp-connector.groups-update-parameterized.v1
+    kind: http-route
+    value: /groups/:chatId/update
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      Alias de la app whatsapp.e-dani.com (SC-2760): id de grupo en la ruta;
+      merge a groupId tras el HMAC, mismo handler que /groups/update.
+  - id: http.whatsapp-connector.messages-delete-parameterized.v1
+    kind: http-route
+    value: /messages/:chatId/:msgId/for-me
+    role: provider
+    files:
+      - connectors/whatsapp-web/src/api/controller.ts
+    status: active
+    note: >-
+      Alias de la app whatsapp.e-dani.com (SC-2760): DELETE con ids en la ruta
+      y body vacío (firma "{}"); el alias rellena chatId/messageId/forMe=true
+      tras el HMAC y llama al handler de /messages/delete. El DELETE plano
+      /messages/:chatId/:msgId (para todos) ya existía.
   - id: http.whatsapp-connector.chats-modify.v1
     kind: http-route
     value: /chats/modify

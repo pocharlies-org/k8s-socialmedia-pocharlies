@@ -583,6 +583,17 @@ load();
 </html>`;
 }
 
+// Alias de la app (whatsapp.e-dani.com): la app pone el id en la ruta y firma el
+// body que manda; las rutas planas lo leen del body. El merge va DESPUÉS del
+// HMAC (que firma JSON.stringify(req.body)) y reutiliza el mismo handler.
+function mergePathParam(req: AuthenticatedRequest, param: string, field: string): void {
+  const raw = req.params[param];
+  if (typeof raw !== 'string') return;
+  const body = optionalObject(req.body);
+  if (body[field] === undefined) body[field] = decodeURIComponent(raw);
+  req.body = body;
+}
+
 export function createRouter(
   client: BaileysClient,
   qrHandler: QRHandler,
@@ -1368,7 +1379,7 @@ export function createRouter(
   // patch to WhatsApp, same gate as every send, recorded on the canonical
   // conversation. Ids travel inside the signed body.
   // CONTRACT: http.whatsapp-connector.chats-modify.v1 — body {conversationId, action, durationMs?, muteUntil?, actor?}, 200 {modified, action, chatId, conversationId, persisted, state}
-  router.post('/chats/modify', auth, (req: AuthenticatedRequest, res: Response): void => {
+  const chatsModifyHandler = (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
       try {
         const body = optionalObject(req.body);
@@ -1398,7 +1409,27 @@ export function createRouter(
         mutationErrorResponse(res, error, 'modify chat');
       }
     })();
-  });
+  };
+  router.post('/chats/modify', auth, chatsModifyHandler);
+  // Alias de la app: POST /chats/:chatId/modify (id en la ruta; mute manda
+  // `value` en ms). Mismo handler y mismo gate tras el HMAC.
+  // CONTRACT: http.whatsapp-connector.chats-modify-parameterized.v1
+  router.post(
+    '/chats/:chatId/modify',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      mergePathParam(req, 'chatId', 'conversationId');
+      const body = optionalObject(req.body);
+      if (body.action === 'mute' && body.durationMs === undefined && body.muteUntil === undefined) {
+        const value = Number(body.value);
+        if (Number.isFinite(value) && value > 0) body.durationMs = value;
+        delete body.value;
+      }
+      req.body = body;
+      next();
+    },
+    chatsModifyHandler
+  );
 
   // Force app-state resync → persists current unread/archived to the DB.
   router.post('/chats/resync-state', auth, (req: AuthenticatedRequest, res: Response): void => {
@@ -1479,7 +1510,7 @@ export function createRouter(
   });
 
   // CONTRACT: http.whatsapp-connector.groups-update.v1 — body {groupId, subject?, description?, settings?: {announce?, restrict?}, actor?}, 200 {updated, groupId, changed, unchanged, persisted, group}
-  router.post('/groups/update', auth, (req: AuthenticatedRequest, res: Response): void => {
+  const groupsUpdateHandler = (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
         const body = optionalObject(req.body);
@@ -1495,7 +1526,19 @@ export function createRouter(
         mutationErrorResponse(res, e, 'update group');
       }
     })();
-  });
+  };
+  router.post('/groups/update', auth, groupsUpdateHandler);
+  // Alias de la app: POST /groups/:chatId/update (id en la ruta).
+  // CONTRACT: http.whatsapp-connector.groups-update-parameterized.v1
+  router.post(
+    '/groups/:chatId/update',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      mergePathParam(req, 'chatId', 'groupId');
+      next();
+    },
+    groupsUpdateHandler
+  );
 
   // CONTRACT: http.whatsapp-connector.groups-participants.v1 — body {groupId, action: add|remove|promote|demote, participants[], actor?}, 200 {updated, action, groupId, results, succeeded, failed, partial, persisted, group}
   router.post('/groups/participants', auth, (req: AuthenticatedRequest, res: Response): void => {
@@ -1884,7 +1927,7 @@ export function createRouter(
   );
 
   // CONTRACT: http.whatsapp-connector.chats-disappearing.v1 — body {conversationId, expiration: 0|86400|604800|7776000 (or off|24h|7d|90d), actor?}, 200 {updated, chatId, conversationId, isGroup, expiration, label, previous, changed, persisted}
-  router.post('/chats/disappearing', auth, (req: AuthenticatedRequest, res: Response): void => {
+  const chatsDisappearingHandler = (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
         const body = optionalObject(req.body);
@@ -1906,7 +1949,19 @@ export function createRouter(
         mutationErrorResponse(res, e, 'change the disappearing timer');
       }
     })();
-  });
+  };
+  router.post('/chats/disappearing', auth, chatsDisappearingHandler);
+  // Alias de la app: POST /chats/:chatId/disappearing (id en la ruta).
+  // CONTRACT: http.whatsapp-connector.chats-disappearing-parameterized.v1
+  router.post(
+    '/chats/:chatId/disappearing',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      mergePathParam(req, 'chatId', 'conversationId');
+      next();
+    },
+    chatsDisappearingHandler
+  );
 
   // Start chat, stickers / GIFs and contacts (fase 3 / PR-9). Ids inside the
   // signed body (GET /contacts: its query only filters a read). The body is
@@ -2096,7 +2151,7 @@ export function createRouter(
   // read: no gate, only the connection. Ids inside the signed body.
 
   // CONTRACT: http.whatsapp-connector.contacts-block.v1 — body {phone | conversationId, action: block|unblock, confirm: true, actor?}, 200 {ok, action, blocked, changed, confirmed, jid, jids, conversationId}, 409 block_not_confirmed, 422 identity_unresolved|rejected_by_whatsapp
-  router.post('/contacts/block', auth, (req: AuthenticatedRequest, res: Response): void => {
+  const contactsBlockHandler = (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
         const body = optionalObject(req.body);
@@ -2109,7 +2164,28 @@ export function createRouter(
         mutationErrorResponse(res, e, 'change the contact block');
       }
     })();
-  });
+  };
+  router.post('/contacts/block', auth, contactsBlockHandler);
+  // Alias de la app: POST /chats/:chatId/block con {blocked: boolean}; la app ya
+  // confirma con el usuario y pasa su propio gate de envío, así que aquí el
+  // confirm del contrato se da por cumplido (consumidor interno firmado).
+  // CONTRACT: http.whatsapp-connector.contacts-block-parameterized.v1
+  router.post(
+    '/chats/:chatId/block',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      const body = optionalObject(req.body);
+      const action = body.blocked === false ? 'unblock' : 'block';
+      req.body = {
+        ...body,
+        conversationId: decodeURIComponent(req.params.chatId),
+        action,
+        confirm: true,
+      };
+      next();
+    },
+    contactsBlockHandler
+  );
 
   // CONTRACT: http.whatsapp-connector.contacts-blocklist.v1 — GET ?fresh=1 (signed over "{}"), 200 {blocked: [{id, jids, blockedJids, phone, name, pushName, conversationId}], count, readAt, cached}
   router.get('/contacts/blocklist', auth, (req: AuthenticatedRequest, res: Response): void => {
@@ -2367,7 +2443,7 @@ export function createRouter(
 
   // Delete for everyone (revoke) or, with forMe: true, only for this account.
   // CONTRACT: http.whatsapp-connector.messages-delete.v1 — body {chatId, messageId, forMe?}, 200 {deleted, scope, messageId, deletedAt}
-  router.post('/messages/delete', auth, (req: AuthenticatedRequest, res: Response): void => {
+  const messagesDeleteHandler = (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
         if (rejectWhenSendingDisabled(res)) return;
@@ -2396,7 +2472,21 @@ export function createRouter(
         mutationErrorResponse(res, e, 'delete message');
       }
     })();
-  });
+  };
+  router.post('/messages/delete', auth, messagesDeleteHandler);
+  // Alias de la app: DELETE /messages/:chatId/:msgId/for-me (ids en la ruta, body vacío).
+  // CONTRACT: http.whatsapp-connector.messages-delete-parameterized.v1
+  router.delete(
+    '/messages/:chatId/:msgId/for-me',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      mergePathParam(req, 'chatId', 'chatId');
+      mergePathParam(req, 'msgId', 'messageId');
+      (req.body as Record<string, unknown>).forMe = true;
+      next();
+    },
+    messagesDeleteHandler
+  );
 
   // Legacy delete for everyone (path params are not covered by the HMAC:
   // prefer POST /messages/delete). Same gate and behaviour.
