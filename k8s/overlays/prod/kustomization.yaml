@@ -147,8 +147,8 @@ images:
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
   # SC-2760: app de WhatsApp del fork de Jordi. El base la deja en :latest (no
-  # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija a la
-  # imagen publicada por el run 39219283043 (deploy/prod@c77c732, PR #269).
+  # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija. v1.3.126
+  # (run 39508533271) lleva el enrutado de media por bucket (skirmshop-drive vs legacy).
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
-    newTag: v1.3.125
-    digest: sha256:386a75f191f80f51daaaae9f036d8530193ddd3e81c1d63e44651d8beaaf2f93
+    newTag: v1.3.126
+    digest: sha256:fd41746515dd6c867e0c5514cc2c072fd9f7cf9eb92815d795981c4a8037be18
