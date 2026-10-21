@@ -42,6 +42,18 @@ spec:
     - secretKey: OIDC_CLIENT_SECRET
       remoteRef: { key: whatsapp-app, property: OIDC_CLIENT_SECRET }
 ---
+# QA #26/22-10: /data guardaba app-state.json (listas, favoritos, destacados)
+# y las sesiones OIDC en un emptyDir: cada deploy o reschedule los borraba.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whatsapp-app-data
+  namespace: whatsapp-mcp
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  storageClassName: longhorn
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -50,6 +62,9 @@ metadata:
   labels: { app: whatsapp-app }
 spec:
   replicas: 1
+  # Longhorn es RWO: con RollingUpdate el pod nuevo (surge) no puede montar el
+  # PVC mientras vive el viejo. Recreate: unos segundos de parada por deploy.
+  strategy: { type: Recreate }
   selector:
     matchLabels: { app: whatsapp-app }
   template:
@@ -122,7 +137,7 @@ spec:
             limits: { memory: 512Mi }
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim: { claimName: whatsapp-app-data }
         - name: accounts
           configMap: { name: whatsapp-app-accounts }
 ---
