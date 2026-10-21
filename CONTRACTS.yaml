@@ -2708,6 +2708,17 @@ contracts:
       (codigo + state -> sesion). El 403 (sub fuera de OIDC_ALLOWED_SUBJECTS) se
       contesta en HTML con el enlace de logout del issuer, no en JSON: quien
       navega necesita cerrar la sesion SSO equivocada (Dani, 19-10).
+    exception:
+      reason: >-
+        Log de acceso y eventos de auth (QA #77): se anade console.log dentro del
+        handler (log de request con res.on('finish') y [auth] login/logout). No
+        altera la superficie: /auth/callback sigue siendo GET con el mismo
+        contrato de respuesta.
+      consumers_checked: >-
+        superficie anonima barrida (QA #66: todo /api/* -> 401, resto -> 302); el
+        unico cambio observable es que ahora hay lineas de peticion en el log.
+        Ningun consumidor cambia de contrato.
+      approved_by: dani 2026-10-21
   - id: http.whatsapp-app.messages-list.v1
     kind: http-route
     value: /api/messages

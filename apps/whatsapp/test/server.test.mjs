@@ -837,3 +837,17 @@ test('omits provider and previous_response_id when unconfigured so the external 
   assert.equal(body.provider, undefined);
   assert.equal('previous_response_id' in body, false);
 });
+test('access log records method, path (query stripped) and status; /health is not logged (QA #77)', async t => {
+  const { request } = await fixture(t);
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => { lines.push(args.join(' ')); };
+  t.after(() => { console.log = original; });
+  await request('/api/chats?account=personal&limit=2');
+  await request('/health', null, { authorization: '' });
+  const access = lines.find(l => l.startsWith('GET /api/chats '));
+  assert(access, `expected an access line, got: ${JSON.stringify(lines)}`);
+  assert(!access.includes('account=personal'), 'query must not be logged (avoids leaking the callback code/token)');
+  assert(/^GET \/api\/chats 200 \d+ms$/.test(access), `unexpected access line: ${access}`);
+  assert(!lines.some(l => l.includes(' /health ')), '/health must not be logged (probe spam)');
+});

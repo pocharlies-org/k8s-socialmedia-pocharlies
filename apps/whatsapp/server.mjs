@@ -1381,6 +1381,11 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       if (setCookie) headers['set-cookie'] = Array.isArray(setCookie) ? setCookie : [setCookie];
       res.writeHead(302, headers); res.end();
     };
+    // QA #77: sin log de acceso no se puede saber si alguien entró (#61) ni qué ruta falló.
+    // Sin query para no loguear el code/token del callback; fuera /health para no ahogar el log con las sondas.
+    const startedAt = Date.now();
+    const accessPath = req.url.split('?')[0];
+    res.on('finish', () => { if (accessPath !== '/health') console.log(`${req.method} ${accessPath} ${res.statusCode} ${Date.now() - startedAt}ms`); });
     res.setHeader('cache-control', 'no-store'); res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'no-referrer'); res.setHeader('x-frame-options', 'DENY');
     res.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
@@ -1426,6 +1431,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           }
           throw error;
         }
+        console.log('[auth] login');
         return redirect(result.location, result.setCookie);
       }
       const principal = auth.isAuthenticated(req);
@@ -1442,6 +1448,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       if (path === '/auth/logout' && req.method === 'POST') {
         const result = await auth.logout(req); res.setHeader('set-cookie', result.setCookie ? [result.setCookie] : []);
         // logoutUrl: sin redirigir al IdP el SSO retoma la sesión sola (QA #12).
+        console.log('[auth] logout');
         return json(200, { logoutUrl: result.logoutUrl || null });
       }
       if (path === '/auth/logout' && req.method === 'GET') {
