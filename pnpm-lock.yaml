@@ -291,8 +291,8 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
-        version: 1.31.0(supports-color@8.1.1)(zod@3.25.76)
+        specifier: ^1.32.0
+        version: 1.32.1(supports-color@8.1.1)(zod@3.25.76)
       '@nestjs/common':
         specifier: ^10.3.0
         version: 10.4.22(reflect-metadata@0.1.14)(rxjs@7.8.2)(supports-color@8.1.1)
@@ -1119,8 +1119,8 @@ packages:
     resolution: {integrity: sha512-Z7C/xXCiGWsg0KuKsHTKJxbWhpI3Vs5GwLfOean7MGyVFGqdRgBbAjOCh6u4bbjPc/8MJ2pZmK/0DLdCbivLDA==}
     engines: {node: '>=8'}
 
-  '@modelcontextprotocol/sdk@1.31.0':
-    resolution: {integrity: sha512-UvTMgnNlnIBO/22ob2RcVGDlcvOslQs8T59+FTGdA0L27a39fdGF/EDETNtDVK4DZGpwomlsYpRdA8UXcVL/pw==}
+  '@modelcontextprotocol/sdk@1.32.1':
+    resolution: {integrity: sha512-2DdE+SJDtzLEEWzY1ZjY7Q+VcPhcV1KisD3zI4u0XZyktsjHum1mwbMI+JaulUBi2OZk+KJAi2uPXzxichPkdw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -4672,7 +4672,7 @@ snapshots:
 
   '@lukeed/csprng@1.1.0': {}
 
-  '@modelcontextprotocol/sdk@1.31.0(supports-color@8.1.1)(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 1.19.15(hono@4.12.32)
       ajv: 8.20.0
