@@ -12,7 +12,7 @@ import pg from 'pg';
 import { utcDatabaseTypes } from './lib/database-time.mjs';
 import { getDatabaseSchema, useDatabaseSchema, validDatabaseId } from './lib/database-schema.mjs';
 import { checkOrigin, sendingEnabled, signedHeaders, required, uploadBytes, isValidBase64, fail } from './lib/security.mjs';
-import { AppAuth, TRANSACTION_COOKIE, parseCookie, safeReturnTo, unauthorizedHtml } from './lib/auth.mjs';
+import { AppAuth, TRANSACTION_COOKIE, callbackErrorHtml, parseCookie, safeReturnTo, unauthorizedHtml } from './lib/auth.mjs';
 import { mediaRequest } from './lib/media.mjs';
 import { readMediaLibrary } from './lib/media-library.mjs';
 import { readChatDirectory } from './lib/chat-directory.mjs';
@@ -1426,6 +1426,11 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' });
             return res.end(unauthorizedHtml(auth.publicUrl, auth.issuer));
           }
+          // UX #1.1: el 400 (enlace caducado/inválido) también es navegable.
+          if (error?.status === 400) {
+            res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+            return res.end(callbackErrorHtml());
+          }
           throw error;
         }
         console.log('[auth] login');
@@ -1673,7 +1678,8 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const bytes = jpegThumbnailBytes(rows[0]?.thumbnail);
         if (!bytes) throw fail(404, 'Media not found');
         res.setHeader('content-type', 'image/jpeg');
-        res.setHeader('cache-control', 'no-store');
+        // Miniatura del payload del mensaje: inmutable por id (QA velocidad).
+        res.setHeader('cache-control', 'private, max-age=86400, immutable');
         res.end(bytes);
         return;
       }
@@ -1700,6 +1706,11 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         for (const name of ['accept-ranges', 'content-range', 'etag', 'last-modified']) {
           const value = response.headers.get(name); if (value) res.setHeader(name, value);
         }
+        // QA velocidad: la fila de attachments es inmutable por id; sin esto el scroll
+        // volvía a bajar cada foto (el visor libera la copia al salir de vista).
+        // shortcut: un mensaje borrado deja su copia del día en el navegador; si la
+        // política de borrado lo exige, bajar a max-age=0 + etag.
+        if (response.status === 200 || response.status === 206) res.setHeader('cache-control', 'private, max-age=86400, immutable');
         if (!response.headers.get('content-encoding') && response.headers.has('content-length')) res.setHeader('content-length', response.headers.get('content-length'));
         const safeInline = /^(image\/(jpeg|png|gif|webp)|audio\/|video\/)/.test(media.mime_type || '');
         res.setHeader('content-type', safeInline ? media.mime_type : 'application/octet-stream');
@@ -3049,6 +3060,13 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       if (file.includes('..') || file.includes('\\') || file.includes('\0')) throw fail(404, 'Not found');
       const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
       let bytes; try { bytes = await readFile(join(root, 'public', file)); } catch { throw fail(404, 'Not found'); }
+      // QA velocidad: sin ETag no hay 304 posible y el navegador bajaba los 2,33 MB de
+      // public/ en cada navegación (el no-store global heredado). El HTML del shell sigue
+      // no-store: es el que apunta a los assets.
+      const etag = `"${createHash('sha1').update(bytes).digest('base64url')}"`;
+      if (!file.endsWith('.html')) res.setHeader('cache-control', 'private, max-age=300');
+      if (req.headers['if-none-match'] === etag) { res.statusCode = 304; return res.end(); }
+      res.setHeader('etag', etag);
       res.setHeader('content-type', types[extname(file)] || 'application/octet-stream'); res.end(bytes);
     } catch (e) {
       if (res.headersSent) { res.destroy(); return; }

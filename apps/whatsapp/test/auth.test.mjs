@@ -136,6 +136,9 @@ test('OIDC rejects callback state and nonce mismatches and unauthorized subjects
   const transaction = `__Host-wa_oidc_tx=${cookieValue(loginResponse.headers.get('set-cookie'), '__Host-wa_oidc_tx')}`;
   const invalidState = await wrongState.request(`/auth/callback?code=test-code&state=wrong`, { headers: { cookie: transaction } });
   assert.equal(invalidState.status, 400);
+  // UX #1.1: enlace caducado → página en español con «Volver a entrar», nunca JSON desnudo.
+  assert.match(invalidState.headers.get('content-type'), /text\/html/);
+  assert.match(await invalidState.text(), /Volver a entrar/);
 
   const wrongNonce = await fixture(t);
   const wrongNonceLogin = await wrongNonce.request('/auth/login');
