@@ -735,6 +735,56 @@ function ensureMediaPolicyListener(documentRef, policy) {
   documentRef.addEventListener('wa:media-autodownload-change', event => reevaluatePendingMedia(documentRef, event?.detail));
 }
 
+const mediaVisibilityObservers = new WeakMap();
+
+/**
+ * Carga perezosa: un contenedor fuera de la vista no descarga, y uno ya cargado deja de
+ * fijar su copia en la caché de la política (se desaloja y recarga al volver). Sin
+ * IntersectionObserver (tests, SSR) devuelve false y el llamador carga ágilmente como antes.
+ */
+function observeMediaVisibility(documentRef, container, { onEnter, onLeave }) {
+  const Observer = globalThis.IntersectionObserver;
+  if (typeof Observer === 'undefined' || !container || !documentRef?.documentElement) return false;
+  let vis = mediaVisibilityObservers.get(documentRef);
+  if (!vis) {
+    const handlers = new WeakMap();
+    const observer = new Observer(entries => {
+      for (const entry of entries) {
+        const handler = handlers.get(entry.target);
+        if (!handler) continue;
+        if (!entry.target.isConnected) { observer.unobserve(entry.target); handlers.delete(entry.target); continue; }
+        if (entry.isIntersecting) handler.onEnter?.();
+        else handler.onLeave?.();
+      }
+    }, { rootMargin: '300px' });
+    vis = { observer, handlers };
+    mediaVisibilityObservers.set(documentRef, vis);
+  }
+  vis.handlers.set(container, { onEnter, onLeave });
+  vis.observer.observe(container);
+  return true;
+}
+
+/** Dispara load('auto') al entrar en vista y libera la copia al salir (recargando si fue desalojada). Devuelve false si no hay IntersectionObserver. */
+function wireLazyMedia(documentRef, container, controller, policy) {
+  return observeMediaVisibility(documentRef, container, {
+    onEnter: () => {
+      container.__mediaOffscreen = false;
+      if (controller.state === 'loaded') {
+        const held = mountedMediaStates.get(container)?.objectUrl;
+        if (held && !policy.isLive(held)) { controller.state = 'manual'; void controller.load('auto'); }
+        return;
+      }
+      if (controller.state === 'manual') void controller.load('auto');
+    },
+    onLeave: () => {
+      container.__mediaOffscreen = true;
+      const held = mountedMediaStates.get(container)?.objectUrl;
+      if (controller.state === 'loaded' && held) policy.release(held, container);
+    },
+  });
+}
+
 /** Start the visible placeholders that a new setting enables, per their own account scope. */
 export function reevaluatePendingMedia(scope, detail = {}) {
   const type = textValue(detail?.mediaType);
@@ -867,7 +917,7 @@ export function createAttachmentElement(attachment, { document: documentRef = gl
       policy.cancel?.(url, container);
     };
     pendingMediaControllers.set(card, controller);
-    if (policy.enabled('document', account)) void controller.load('auto');
+    if (policy.enabled('document', account) && !wireLazyMedia(documentRef, container, controller, policy)) void controller.load('auto');
     return container;
   }
 
@@ -966,7 +1016,7 @@ export function createAttachmentElement(attachment, { document: documentRef = gl
   pendingMediaControllers.set(wrap, controller);
   container.append(wrap);
   if (captionElement) container.append(captionElement);
-  if (policy.enabled(kind, account) && sizeWithinAutoLimit) queueMicrotask(() => { void controller.load('auto'); });
+  if (policy.enabled(kind, account) && sizeWithinAutoLimit && !wireLazyMedia(documentRef, container, controller, policy)) queueMicrotask(() => { void controller.load('auto'); });
   return container;
 }
 

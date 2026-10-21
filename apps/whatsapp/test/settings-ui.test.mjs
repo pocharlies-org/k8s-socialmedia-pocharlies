@@ -331,6 +331,20 @@ test('three live mounts cannot retain more than a 1 KiB global budget', async ()
   assert.equal(policy.isLive(third.objectUrl), true);
 });
 
+test('an off-screen mount stops pinning its copy: the next load evicts it instead of failing (QA #83.2)', async () => {
+  const { fetchImpl } = stubFetch(new Uint8Array(400));
+  const policy = createMediaDownloadPolicy({ storage: memoryStorage(), fetchImpl, cacheMaxBytes: 1024 });
+  const owners = Array.from({ length: 3 }, () => ({ isConnected: true }));
+  const first = await policy.loadBytes('/first?account=uno', { owner: owners[0] });
+  const second = await policy.loadBytes('/second?account=uno', { owner: owners[1] });
+  owners[0].__mediaOffscreen = true;
+  const third = await policy.loadBytes('/third?account=uno', { owner: owners[2] });
+  assert.equal(policy.isLive(first.objectUrl), false, 'la copia fuera de pantalla se desalojó');
+  assert.equal(policy.isLive(second.objectUrl), true, 'la visible sigue fija');
+  assert.equal(policy.isLive(third.objectUrl), true);
+  assert.equal(policy.cacheStats().bytes, 800);
+});
+
 test('concurrent requests for one URL share the GET and claim both live mounts', async () => {
   let releaseResponse;
   let calls = 0;

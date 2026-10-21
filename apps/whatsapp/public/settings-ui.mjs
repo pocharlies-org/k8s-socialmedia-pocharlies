@@ -114,7 +114,9 @@ export function createMediaDownloadPolicy(options = {}) {
   const mountObservers = new Map();
   let inFlightBytes = 0;
   const forget = entry => { try { globalThis.URL?.revokeObjectURL?.(entry.objectUrl); } catch {} };
-  const isLive = owner => owner?.isConnected === true;
+  // shortcut: un montaje fuera de pantalla (marcado por el IntersectionObserver de la vista)
+  // no fija su copia: se desaloja y se recarga al volver. Si el observador no existe, todo es vivo.
+  const isLive = owner => owner?.isConnected === true && owner.__mediaOffscreen !== true;
   const hasLiveOwner = entry => {
     for (const owner of entry.owners || []) if (isLive(owner)) return true;
     return false;
