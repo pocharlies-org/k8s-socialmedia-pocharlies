@@ -139,17 +139,21 @@ showRecent.type = 'button';
 showRecent.onclick = () => { state.historyMode = false; historyNotice.hidden = true; resetMessageHistory(); state.signature = ''; $('messages').replaceChildren(node('div', 'welcome', 'Cargando mensajes…')); loadMessages(); };
 historyNotice.append(showRecent);
 $('messages').before(historyNotice);
+// UX #2.3: WhatsApp no tiene botón «Cargar mensajes anteriores»: el histórico
+// entra al llegar arriba. El aviso solo muestra el spinner durante la carga.
 const olderNotice = node('div', 'notice');
 olderNotice.hidden = true;
-const loadOlderButton = node('button', 'feature-button', 'Cargar mensajes anteriores');
-loadOlderButton.type = 'button';
-loadOlderButton.onclick = () => { void loadOlderMessages(); };
-olderNotice.append(loadOlderButton);
+olderNotice.append(node('span', '', 'Cargando mensajes anteriores…'));
 $('messages').before(olderNotice);
+$('messages').addEventListener('scroll', () => {
+  if ($('messages').scrollTop < 80) updateOlderControl();
+});
 function updateOlderControl() {
-  olderNotice.hidden = !state.chat || !state.historyCursor;
-  loadOlderButton.disabled = state.loadingOlder;
-  loadOlderButton.textContent = state.loadingOlder ? 'Cargando mensajes anteriores…' : 'Cargar mensajes anteriores';
+  olderNotice.hidden = !state.loadingOlder;
+  const pane = $('messages');
+  // Si el hilo no desborda el panel no hay scroll que dispare: se rellena solo
+  // hasta llenar la vista (para cuando historyCursor se agota).
+  if (state.chat && state.historyCursor && !state.loadingOlder && (pane.scrollTop < 80 || pane.scrollHeight <= pane.clientHeight + 80)) void loadOlderMessages();
 }
 function resetMessageHistory() {
   void pinnedUI?.refresh();
@@ -642,7 +646,11 @@ function closeMobileChat() {
   document.body.classList.remove('chat-open');
 }
 function selectChat(chat, {fromHistory = false} = {}) {
-  messageRenderer?.closeMediaViewer?.(); saveDraft(); cancelRecording(); cameraController?.close(); cancelAttachment(); state.selectedChat = chat; state.chat = chat.id; state.historyMode = false; historyNotice.hidden = true; state.version++; resetMessageHistory(); state.signature = ''; $('message').value = state.drafts.get(`${state.account}:${state.chat}`) || ''; resizeMessageInput(); $('chat-title').textContent = chat.name || chat.id; $('chat-subtitle').textContent = chat.isGroup === true ? 'Grupo' : 'Contacto'; setConversationAvatar(chat); setAgentContext(chat); $('messages').replaceChildren(node('div', 'welcome', 'Cargando mensajes…')); renderMessages(); assistant?.select(context()); document.body.classList.add('chat-open'); error(); featureUI?.chatChanged?.(chat); renderChats(); updateControls();
+  messageRenderer?.closeMediaViewer?.(); saveDraft(); cancelRecording(); cameraController?.close(); cancelAttachment(); state.selectedChat = chat; state.chat = chat.id; state.historyMode = false; historyNotice.hidden = true; state.version++; resetMessageHistory(); state.signature = ''; $('message').value = state.drafts.get(`${state.account}:${state.chat}`) || ''; resizeMessageInput(); $('chat-title').textContent = chat.name || chat.id;
+  // UX #2.4: sin dato real de estado no hay subtítulo; «Contacto» fijo no lo
+  // tiene nadie en WhatsApp. Los grupos conservan «Grupo» (es verificable).
+  $('chat-subtitle').textContent = chat.isGroup === true ? 'Grupo' : '';
+  $('chat-subtitle').hidden = chat.isGroup !== true; setConversationAvatar(chat); setAgentContext(chat); $('messages').replaceChildren(node('div', 'welcome', 'Cargando mensajes…')); renderMessages(); assistant?.select(context()); document.body.classList.add('chat-open'); error(); featureUI?.chatChanged?.(chat); renderChats(); updateControls();
   if (!fromHistory && matchMedia('(max-width: 760px), (max-width: 1024px) and (max-height: 500px) and (pointer: coarse)').matches) {
     const entry = {...(typeof history.state === 'object' && history.state || {}), socialMediaChat: true, account: state.account, chat: state.chat};
     if (mobileChatEntry()) history.replaceState(entry, '');
@@ -696,7 +704,7 @@ async function switchAccount(accountId) {
   liveUpdates?.stop();
   if (mobileChatEntry()) history.replaceState({...history.state, socialMediaChat: false}, '');
   state.chat = ''; state.historyMode = false; historyNotice.hidden = true; state.selectedChat = null; state.version++; resetMessageHistory(); state.chats = []; state.signature = '';
-  $('message').value = ''; resizeMessageInput(); $('chat-title').textContent = 'SocialMedia'; $('chat-subtitle').textContent = 'Selecciona un chat para empezar'; setConversationAvatar(); setAgentContext();
+  $('message').value = ''; resizeMessageInput(); $('chat-title').textContent = 'SocialMedia'; $('chat-subtitle').textContent = 'Selecciona un chat para empezar'; $('chat-subtitle').hidden = false; setConversationAvatar(); setAgentContext();
   $('messages').replaceChildren(node('div', 'welcome', 'Selecciona una conversación de esta cuenta.'));
   assistant?.select(context());
   document.body.classList.remove('chat-open'); sidebarSearch?.accountChanged(); uploadQualityUI?.accountChanged(); featureUI?.accountChanged?.(state.account); communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); error(); renderChats(); updateControls(); await loadChats(); if (state.account === accountId) liveUpdates?.start(accountId);
@@ -771,20 +779,20 @@ async function sendPlannedMessages(items) {
   }
 }
 function enterToSendEnabled() { return safeLocalStorage()?.getItem('wa-enter-to-send') !== 'false'; }
-const compactComposerHint = matchMedia('(max-width: 560px)');
 function updateMessageComposerHint(enabled = enterToSendEnabled()) {
   const message = $('message');
   const hint = enabled
     ? 'Enter para enviar · Shift+Enter para nueva línea'
     : 'Ctrl/Cmd+Enter para enviar · Enter para nueva línea';
-  message.placeholder = compactComposerHint.matches ? 'Escribe un mensaje' : hint;
+  // UX #2.2: el placeholder es siempre «Escribe un mensaje» (como el móvil y
+  // WhatsApp Web); las teclas van en el tooltip y la descripción accesible.
+  message.placeholder = 'Escribe un mensaje';
   message.title = hint;
   message.setAttribute('aria-description', hint);
   message.enterKeyHint = enabled ? 'send' : 'enter';
 }
 updateMessageComposerHint();
 document.addEventListener('wa:enter-to-send-change', event => updateMessageComposerHint(event.detail?.enabled ?? enterToSendEnabled()));
-compactComposerHint.addEventListener?.('change', () => updateMessageComposerHint());
 $('message').onkeydown = event => {
   if (event.keyCode !== 229 && shouldSubmitMessageKey(event, enterToSendEnabled(), false)) {
     event.preventDefault();

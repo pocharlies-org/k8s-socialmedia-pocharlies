@@ -52,7 +52,7 @@ try {
   assert.match(await message.getAttribute('aria-description'), /Enter para enviar.*Shift\+Enter/);
   assert.equal(await message.evaluate(element => element.enterKeyHint), 'send');
   await page.setViewportSize({width:1280,height:844});
-  await page.waitForFunction(() => document.querySelector('#message')?.placeholder.includes('Enter para enviar'));
+  await page.waitForFunction(() => document.querySelector('#message')?.placeholder === 'Escribe un mensaje' && /Enter para enviar/.test(document.querySelector('#message')?.title || ''));
   await page.setViewportSize({width:390,height:844});
   await page.waitForFunction(() => document.querySelector('#message')?.placeholder === 'Escribe un mensaje');
 
@@ -91,10 +91,11 @@ try {
   assert.equal(uploads[0].name, 'nota.txt');
 
   await page.setViewportSize({width:1280,height:844});
-  await page.waitForFunction(() => document.querySelector('#message')?.placeholder.includes('Enter para enviar'));
+  await page.waitForFunction(() => /Enter para enviar/.test(document.querySelector('#message')?.title || ''));
   await page.locator('.rail-settings summary').click();
   await page.locator('#settings-enter-send').uncheck();
-  assert.match(await message.getAttribute('placeholder'), /Ctrl\/Cmd\+Enter para enviar.*Enter para nueva línea/);
+  // UX #2.2: el placeholder es fijo; la preferencia de teclado se comunica por título.
+  assert.equal(await message.getAttribute('placeholder'), 'Escribe un mensaje');
   assert.match(await message.getAttribute('title'), /Ctrl\/Cmd\+Enter para enviar.*Enter para nueva línea/);
   assert.equal(await message.evaluate(element => element.enterKeyHint), 'enter');
   await page.locator('#settings-close').click();
