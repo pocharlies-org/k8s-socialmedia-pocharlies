@@ -283,31 +283,41 @@ function renderChats() {
   }
   $('chat-status').textContent = !state.chats.length ? (filter === 'archived' ? 'No hay chats archivados.' : 'Todavía no hay chats sincronizados para esta cuenta.') : !chats.length ? 'No hay conversaciones que coincidan.' : '';
 }
+const chatLoads = new Map();
 async function loadChats({background = false} = {}) {
   if (!state.account || (background && state.chatLoading)) return;
   const account = state.account;
-  const requestToken = ++state.chatRequestToken;
   const archivedView = featureUI?.isFeatureView?.() === 'archived';
   const scope = `${account}:${archivedView}`;
+  // QA velocidad 3: 22 peticiones a /api/chats en una sola apertura (init +
+  // módulos + SSE). Las concurrentes del mismo ámbito comparten una carga;
+  // las posteriores siguen revalidando (el eco de un envío debe verse).
+  const running = chatLoads.get(scope);
+  if (running) return running;
+  const requestToken = ++state.chatRequestToken;
   const previous = state.chatListScope === scope ? state.chats : [];
   const isCurrent = () => account === state.account && requestToken === state.chatRequestToken && archivedView === (featureUI?.isFeatureView?.() === 'archived');
-  state.chatLoading = true;
-  try {
-    const {loadChatPages} = await import('./chat-directory.mjs');
-    await loadChatPages({previous, isCurrent,
-      fetchPage: cursor => api(`/api/chats?${new URLSearchParams({account, limit: '100', ...(archivedView ? {archived: 'only'} : {}), ...(cursor ? {cursor} : {})})}`),
-      onPage: (chats, hasMore) => {
-        state.chats = chats; state.chatListScope = scope;
-        featureUI?.chatsChanged?.(state.chats);
-        renderChats();
-        if (hasMore) $('chat-status').textContent = 'Cargando más conversaciones…';
-      },
-    });
-  } catch (err) {
-    if (isCurrent()) $('chat-status').textContent = err.message;
-  } finally {
-    if (requestToken === state.chatRequestToken) state.chatLoading = false;
-  }
+  const run = (async () => {
+    state.chatLoading = true;
+    try {
+      const {loadChatPages} = await import('./chat-directory.mjs');
+      await loadChatPages({previous, isCurrent,
+        fetchPage: cursor => api(`/api/chats?${new URLSearchParams({account, limit: '100', ...(archivedView ? {archived: 'only'} : {}), ...(cursor ? {cursor} : {})})}`),
+        onPage: (chats, hasMore) => {
+          state.chats = chats; state.chatListScope = scope;
+          featureUI?.chatsChanged?.(state.chats);
+          renderChats();
+          if (hasMore) $('chat-status').textContent = 'Cargando más conversaciones…';
+        },
+      });
+    } catch (err) {
+      if (isCurrent()) $('chat-status').textContent = err.message;
+    } finally {
+      if (requestToken === state.chatRequestToken) state.chatLoading = false;
+    }
+  })();
+  chatLoads.set(scope, run);
+  try { return await run; } finally { chatLoads.delete(scope); }
 }
 function outgoingKey(account, chat) { return `${account}:${chat}`; }
 function outgoingFor(account, chat) { return state.outgoing.get(outgoingKey(account, chat)) || []; }

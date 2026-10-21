@@ -71,9 +71,30 @@ async function fixture(t, { env = {}, fetchImpl, conversations } = {}) {
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await app.close(); await rm(dir, { recursive: true, force: true }); });
   const base = `http://127.0.0.1:${app.server.address().port}`;
-  const request = path => fetch(base + path, { headers: { authorization: auth } });
+  const request = (path, options = {}) => fetch(base + path, { ...options, headers: { authorization: auth, ...(options.headers || {}) } });
   return { request };
 }
+
+// QA velocidad 3: el no-store global hacía que cada apertura bajara los 157
+// avatares otra vez (7,6 MB medidos). Ahora son cacheables con ETag/304.
+test('avatars are cacheable: private max-age, etag, and 304 on revalidation', async t => {
+  let calls = 0;
+  const { request } = await fixture(t, {
+    fetchImpl: async () => {
+      calls += 1;
+      return Response.json({ data: Buffer.from('avatar-bytes').toString('base64'), contentType: 'image/jpeg' });
+    },
+  });
+  const first = await request('/api/chats/same-chat/avatar?account=personal');
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get('cache-control'), 'private, max-age=86400');
+  const etag = first.headers.get('etag');
+  assert.match(etag, /^"[A-Za-z0-9_-]{16,}"$/);
+  const revalidated = await request('/api/chats/same-chat/avatar?account=personal', { headers: { 'if-none-match': etag } });
+  assert.equal(revalidated.status, 304);
+  assert.equal(await revalidated.text(), '');
+  assert.equal(calls, 1);
+});
 
 // 20-10: forzar la URL del proxy en cada fila del listado disparaba ~1 petición
 // por chat al abrir (985 medidas, 931×404 + 54×502). Sin foto guardada el listado

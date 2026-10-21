@@ -2392,4 +2392,7 @@ contracts:
     avatarUrl solo con foto guardada (null = iniciales): forzar la URL del
     proxy en cada fila disparaba ~1 peticion por chat al abrir (985 medidas,
     931x404 + 54x502 del conector); la busqueda al proveedor queda para la
-    cabecera del chat abierto.
+    cabecera del chat abierto. Los 200 de avatar (chats y contacts) salen con
+    cache-control private max-age=86400 + ETag y responden 304 a
+    if-none-match (QA velocidad 3, 22-10: el no-store global hacia bajar 7,6 MB
+    de avatares en cada apertura); los 404/5xx siguen no-store.
