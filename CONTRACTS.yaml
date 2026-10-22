@@ -1992,9 +1992,9 @@ contracts:
     GET returns a multi-resolution ICO; HEAD has the same MIME and content length.
     Query parameters may version the icon without changing the route. index.html
     esta listado porque el shell apunta el icono (link rel=icon): lo que es
-    contrato aqui es esa referencia y la ruta; el texto del banner y el orden
-    del estado de carga bajo la lista no forman parte de esta entrada
-    (SC-2760, 22-10).'
+    contrato aqui es esa referencia y la ruta; el texto del banner, el meta
+    viewport del shell y el orden del estado de carga bajo la lista no forman
+    parte de esta entrada (SC-2760, 22-10).'
 - id: http.hindsight.socialmedia-bank.v1
   kind: http-route
   value: /v1/default/banks/{bank_id}

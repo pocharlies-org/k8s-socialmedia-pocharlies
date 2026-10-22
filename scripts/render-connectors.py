@@ -231,6 +231,16 @@ def render_whatsapp(account):
                         "initialDelaySeconds": 15,
                         "timeoutSeconds": 3,
                     },
+                    # QA #39: un proceso colgado no se reiniciaba nunca (solo dejaba
+                    # de recibir tráfico). /api/v1/health responde 200 aunque el socket
+                    # esté caído: el liveness solo dispara si el HTTP cuelga.
+                    "livenessProbe": {
+                        "httpGet": {"path": "/api/v1/health", "port": 3001},
+                        "initialDelaySeconds": 60,
+                        "periodSeconds": 30,
+                        "timeoutSeconds": 10,
+                        "failureThreshold": 4,
+                    },
                     "volumeMounts": [
                         {"name": d["sessionPvc"], "mountPath": "/app/persistent-session"}
                     ],

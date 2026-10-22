@@ -456,6 +456,7 @@ h1, h2, p { margin: 0; }
 .sidebar-message-result strong, .sidebar-message-result span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-message-result span { max-width: 100%; font-size: 13px; }
 .sidebar-message-result small { color: var(--muted); }
+.sidebar-message-result mark { background: var(--wallpaper-mark); color: inherit; border-radius: 3px; }
 
 .sidebar-search-more {
   display: block;

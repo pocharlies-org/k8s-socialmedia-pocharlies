@@ -123,7 +123,7 @@ class FakeElement {
 }
 
 test('search tabs count rendered conversations and preserve manual selection through async results', async () => {
-  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }};
+  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }, createTextNode(text) { const node = new FakeElement('#text', this); node.textContent = text; return node; }};
   const sidebar = document.createElement('aside'); sidebar.className = 'chat-sidebar';
   document.querySelector = () => sidebar;
   const input = document.createElement('input');
@@ -159,7 +159,7 @@ test('search tabs count rendered conversations and preserve manual selection thr
   messages.click();
   account = 'work'; loaded = [];
   ui.accountChanged();
-  assert.equal(conversations.textContent, 'Conversaciones (0)');
+  assert.equal(conversations.textContent, 'Conversaciones');
   assert.equal(messages['aria-selected'], 'true');
   assert.equal(messages.textContent, 'Mensajes (0)');
   input.value = ''; ui.changed();
@@ -169,7 +169,7 @@ test('search tabs count rendered conversations and preserve manual selection thr
 });
 
 test('sidebar UI shows message pages, opens a chat absent from the loaded list, and supports keyboard navigation', async () => {
-  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }};
+  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }, createTextNode(text) { const node = new FakeElement('#text', this); node.textContent = text; return node; }};
   const sidebar = document.createElement('aside'); sidebar.className = 'chat-sidebar';
   document.querySelector = () => sidebar;
   const input = document.createElement('input');
@@ -200,7 +200,7 @@ test('sidebar UI shows message pages, opens a chat absent from the loaded list, 
 });
 
 test('archive view clears and aborts global search, then allows a new editable query', async () => {
-  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }};
+  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }, createTextNode(text) { const node = new FakeElement('#text', this); node.textContent = text; return node; }};
   const sidebar = document.createElement('aside'); sidebar.className = 'chat-sidebar';
   document.querySelector = () => sidebar;
   const input = document.createElement('input');
@@ -230,7 +230,7 @@ test('archive view clears and aborts global search, then allows a new editable q
 });
 
 test('load-more keeps keyboard focus during loading and moves it to the last result at the end', async () => {
-  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }};
+  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }, createTextNode(text) { const node = new FakeElement('#text', this); node.textContent = text; return node; }};
   const sidebar = document.createElement('aside'); sidebar.className = 'chat-sidebar';
   document.querySelector = () => sidebar;
   const input = document.createElement('input');
@@ -261,7 +261,7 @@ test('retry after a failed first page keeps focus through loading and completion
     {label: 'empty', finalPage: {results: []}, expectedKey: 'status'},
   ]) {
     await t.test(label, async () => {
-      const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }};
+      const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }, createTextNode(text) { const node = new FakeElement('#text', this); node.textContent = text; return node; }};
       const sidebar = document.createElement('aside'); sidebar.className = 'chat-sidebar';
       document.querySelector = () => sidebar;
       const input = document.createElement('input');

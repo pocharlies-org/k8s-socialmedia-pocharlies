@@ -909,9 +909,14 @@ export function installFeatureUI({
       control.onclick = () => { closeModal(); openChatAction(action); };
       actions.append(control);
     }
-    if (!isGroup && blockState !== null) {
-      const control = button(documentRef, blockState ? 'Desbloquear contacto' : 'Bloquear contacto', 'feature-button subtle');
-      control.onclick = () => {
+    if (!isGroup) {
+      const control = button(documentRef, blockState === true ? 'Desbloquear contacto' : 'Bloquear contacto', 'feature-button subtle');
+      if (blockState === null) {
+        // QA #13: sin estado del proveedor el botón se ve inutilizable con el
+        // motivo, no desaparece (el 501 del conector no debe ser silencioso).
+        control.disabled = true;
+        control.title = 'Bloqueo no disponible con este proveedor';
+      } else control.onclick = () => {
         const nextBlocked = !blockState;
         const confirmation = openModal(nextBlocked ? 'Bloquear contacto' : 'Desbloquear contacto');
         confirmation.body.append(node('p', 'feature-description', nextBlocked

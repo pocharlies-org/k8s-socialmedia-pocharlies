@@ -84,7 +84,8 @@ try {
     touchIcon: document.querySelector('link[rel="apple-touch-icon"]')?.getAttribute('href'),
   }));
   assert(metadata.viewport.includes('width=device-width') && metadata.viewport.includes('viewport-fit=cover'));
-  assert(metadata.viewport.includes('user-scalable=no') && metadata.viewport.includes('maximum-scale=1'));
+  // QA #34 (WCAG 1.4.4): el zoom del sistema debe quedar disponible.
+  assert(!metadata.viewport.includes('user-scalable') && !metadata.viewport.includes('maximum-scale'));
   assert.equal(metadata.capable, 'yes');
   assert(metadata.touchIcon);
   const manifestResponse = await page.request.get(new URL(manifest, url).href);

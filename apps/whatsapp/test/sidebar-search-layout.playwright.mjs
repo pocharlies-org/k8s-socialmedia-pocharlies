@@ -83,6 +83,8 @@ try {
     assert.equal(await messages.getAttribute('aria-selected'), 'true');
     await conversations.click();
     assert(await page.getByText('No se encontraron conversaciones.').isVisible());
+    // UX #9.6: sin coincidencias el botón no repite el (0) del empty-state.
+    assert.equal(await conversations.textContent(), 'Conversaciones');
     await page.evaluate(() => {
       const row = document.createElement('button'); row.className = 'chat-item'; row.dataset.chatId = 'chat-0';
       document.querySelector('#chats').append(row);
@@ -96,6 +98,11 @@ try {
     await page.evaluate(() => { window.searchUI.viewChanged(false); document.body.dataset.theme = 'light'; });
     await page.locator('#search').fill('maria');
     assert(await conversations.isVisible());
+    // UX #9.4: la coincidencia del texto del mensaje sale en <mark>.
+    await page.locator('#search').fill('a');
+    await page.waitForFunction(() => document.querySelectorAll('.sidebar-message-result').length === 50);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.sidebar-message-result mark').length), 50);
+    assert.equal(await page.locator('.sidebar-message-result mark').first().textContent(), 'a');
     await page.screenshot({path:`${artifacts}/search-light-${viewport.width}x${viewport.height}.png`});
     await page.close();
   }
