@@ -708,6 +708,24 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
 
 .mobile-back { display: none; }
 
+.scroll-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  z-index: 6;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 28%);
+}
+.scroll-bottom:hover { background: var(--surface); }
+
 .messages {
   position: relative;
   z-index: 1;

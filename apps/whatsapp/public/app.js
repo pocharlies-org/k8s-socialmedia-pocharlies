@@ -145,11 +145,25 @@ const olderNotice = node('div', 'notice');
 olderNotice.hidden = true;
 olderNotice.append(node('span', '', 'Cargando mensajes anteriores…'));
 $('messages').before(olderNotice);
+// QA 22-10: sin botón «ir abajo», volver al final de un chat largo era a pulso.
+const scrollBottom = node('button', 'scroll-bottom', '↓');
+scrollBottom.type = 'button';
+scrollBottom.setAttribute('aria-label', 'Ir al final del chat');
+scrollBottom.title = 'Ir al final del chat';
+scrollBottom.hidden = true;
+scrollBottom.onclick = () => $('messages').scrollTo({top: $('messages').scrollHeight, behavior: 'smooth'});
+$('messages').after(scrollBottom);
+function updateScrollBottom() {
+  const pane = $('messages');
+  scrollBottom.hidden = !state.chat || pane.scrollHeight - pane.scrollTop - pane.clientHeight < 300;
+}
 $('messages').addEventListener('scroll', () => {
   if ($('messages').scrollTop < 80) updateOlderControl();
+  updateScrollBottom();
 });
 function updateOlderControl() {
   olderNotice.hidden = !state.loadingOlder;
+  updateScrollBottom();
   const pane = $('messages');
   // Si el hilo no desborda el panel no hay scroll que dispare: se rellena solo
   // hasta llenar la vista (para cuando historyCursor se agota).
