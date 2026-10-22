@@ -146,3 +146,16 @@ test('duration-only schemas never reference duration_seconds and keep a stable l
   assert.doesNotMatch(statements[0], /a\.duration_seconds/);
   assert.match(statements[0], /CASE WHEN a\.duration BETWEEN/);
 });
+
+test('link cards carry the preview title only for URLs actually in the message (UX #38.1)', async () => {
+  let sql;
+  const result = await readMediaLibrary({ account: 'a', params: params({ kind: 'links' }), query: async statement => { sql = statement; return [
+    row(1, { attachment_id: '', content: 'mira https://example.com/a', preview_payload: { matchedText: 'https://example.com/a', title: '  Título  real ' } }),
+    row(2, { attachment_id: '', content: 'mira https://example.org/b', preview_payload: { matchedText: 'https://otro.invalid/x', title: 'No es este' } }),
+  ]; } });
+  assert.match(sql, /LEFT JOIN whatsapp_message_payloads p ON p\.wa_message_id=m\.wa_message_id AND p\.account=m\.account/);
+  assert.match(sql, /pg_column_size\(p\.message_payload->'extendedTextMessage'\) <= 300000/);
+  assert.equal(result.items[0].links[0].title, 'Título real');
+  // Sin coincidencia de URL el helper no inventa título: queda el dominio, mejor que la URL cruda.
+  assert.equal(result.items[1].links[0].title, 'example.org');
+});

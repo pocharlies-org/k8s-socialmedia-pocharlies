@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { MESSAGE_RETAINED_SQL, MESSAGE_VISIBLE_SQL, readableChatName } from './chat-names.mjs';
 import { fail } from './security.mjs';
 import { getDatabaseSchema, validDatabaseId } from './database-schema.mjs';
+import { linkPreviewFromPayload } from './link-preview.mjs';
 
 function validId(value, type) {
   return typeof value === 'string' && validDatabaseId(value, type);
@@ -96,9 +97,11 @@ export async function readMediaLibrary({ account, params, query }) {
   const rows = await query(`SELECT m.id::text AS id, m.wa_message_id, m.conversation_id, m.content,
       m.direction, m.message_type, m.wa_timestamp, m.wa_timestamp::text AS cursor_timestamp,
       c.name AS chat_name, ${attachmentId} AS attachment_id
-      ${isLinks ? '' : `, a.mime_type, a.file_name, a.file_size${durationColumns.map(column => `, a.${column}`).join('')}`}
+      ${isLinks ? ', p.message_payload->\'extendedTextMessage\' AS preview_payload' : `, a.mime_type, a.file_name, a.file_size${durationColumns.map(column => `, a.${column}`).join('')}`}
     FROM messages m JOIN conversations c ON c.id=m.conversation_id AND c.account=m.account
     ${options.q ? 'LEFT JOIN participants sender ON sender.id=m.sender_wa_id AND sender.account=m.account' : ''}
+    // UX #38.1: el título del preview vive en el payload duradero (misma guarda de tamaño que /api/link-thumb).
+    ${isLinks ? 'LEFT JOIN whatsapp_message_payloads p ON p.wa_message_id=m.wa_message_id AND p.account=m.account AND pg_column_size(p.message_payload->\'extendedTextMessage\') <= 300000' : ''}
     ${isLinks ? '' : 'LEFT JOIN attachments a ON a.message_id=m.id'}
     WHERE ${where.join(' AND ')}
     ORDER BY ${durationOrder ? `${durationKey} DESC, ` : ''}m.wa_timestamp ${direction}, m.id ${direction}, ${attachmentKey} ${direction}
@@ -108,6 +111,12 @@ export async function readMediaLibrary({ account, params, query }) {
     const kind = isLinks || options.kind === 'all' && !['IMAGE', 'VIDEO', 'AUDIO', 'STICKER', 'DOCUMENT'].includes(row.message_type)
       ? 'link' : ({ IMAGE: 'image', VIDEO: 'video', AUDIO: 'audio', STICKER: 'image' }[row.message_type] || 'document');
     const links = kind === 'link' ? publicLinks(row.content) : [];
+    if (links.length && row.preview_payload) {
+      // El helper solo titulará una URL que esté de verdad en el mensaje (matchedText/canonicalUrl).
+      const preview = linkPreviewFromPayload(row.content, { extendedTextMessage: row.preview_payload });
+      const target = links.find(link => link.url === preview?.url);
+      if (target && preview.title) target.title = preview.title;
+    }
     return {
       id: row.attachment_id || row.id, kind,
       chatId: row.conversation_id,

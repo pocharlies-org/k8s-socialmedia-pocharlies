@@ -362,7 +362,7 @@ function attachmentSizeBytes(attachment) {
   return Number.isFinite(size) && size > 0 ? size : null;
 }
 
-function formatMediaSize(bytes) {
+export function formatMediaSize(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '';
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${Math.max(1, Math.ceil(bytes / 1024))} KB`;

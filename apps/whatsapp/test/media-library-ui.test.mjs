@@ -133,3 +133,10 @@ test('la miniatura se anuncia con tipo y fecha, no con el mensaje entero', async
   assert.match(src, /tile\.setAttribute\('aria-label', tileLabel\)/);
   assert.match(src, /image\.alt = tileLabel/);
 });
+
+test('las tarjetas de documento enseñan tamaño y tipo bajo el nombre (UX #38.3)', async () => {
+  const src = await readFile(new URL('../public/media-library-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /import \{ formatMediaSize \} from '\.\/message-render\.mjs'/);
+  assert.match(src, /const documentSize = item\.kind === 'document' \? \[formatMediaSize\(item\.size\), documentType\(item\)\]\.filter\(Boolean\)\.join\(' · '\) : '';/);
+  assert.match(src, /const meta = \[formatDate\(item\.timestamp\), formatDuration\(item\.durationSeconds\), documentSize, item\.fromMe \? 'Tú' : ''\]\.filter\(Boolean\)\.join\(' · '\);/);
+});

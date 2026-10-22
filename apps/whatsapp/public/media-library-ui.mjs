@@ -3,6 +3,8 @@
  * los chats. La descarga requiere una selección explícita del usuario.
  */
 
+import { formatMediaSize } from './message-render.mjs';
+
 export const MEDIA_LIBRARY_LIMIT = 50;
 
 export const MEDIA_LIBRARY_TABS = Object.freeze([
@@ -321,6 +323,10 @@ export function installMediaLibraryUI({
   const requested = () => ({ kind: queryKind(), sender: senderFilter.input.value, order: orderFilter.input.value, q: searchInput.value.trim() });
   const formatDate = value => value ? new Date(value).toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
   const formatDuration = value => value ? `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}` : '';
+  const documentType = item => {
+    const ext = item.name?.match(/\.([a-z0-9]{1,5})$/i)?.[1] || (item.mimeType || '').split('/').pop().split('.').pop();
+    return ext && ext.length <= 5 ? ext.toUpperCase() : '';
+  };
   const titleFor = item => item.name || item.text.trim() || (item.kind === 'link' ? item.links[0]?.title || item.links[0]?.url : '') || KIND_LABEL[item.kind];
 
   function setStatus(message, kind = '') {
@@ -463,7 +469,9 @@ export function installMediaLibraryUI({
     }
     const copy = make('div', 'media-library-copy');
     copy.append(make('strong', '', titleFor(item)));
-    const meta = [formatDate(item.timestamp), formatDuration(item.durationSeconds), item.fromMe ? 'Tú' : ''].filter(Boolean).join(' · ');
+    // UX #38.3: WhatsApp pone «12 KB · PDF» bajo el nombre del documento.
+    const documentSize = item.kind === 'document' ? [formatMediaSize(item.size), documentType(item)].filter(Boolean).join(' · ') : '';
+    const meta = [formatDate(item.timestamp), formatDuration(item.durationSeconds), documentSize, item.fromMe ? 'Tú' : ''].filter(Boolean).join(' · ');
     copy.append(make('small', 'media-library-meta', meta));
     const actions = make('div', 'media-library-actions');
     const chatButton = control('media-library-chat', item.chatName);
