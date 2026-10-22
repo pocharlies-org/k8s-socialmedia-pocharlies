@@ -310,3 +310,11 @@ test('privacidad sin ningún valor leído no deja guardar a ciegas (UX 20.1)', a
   assert.match(ui, /submit\.disabled = !loaded/);
   assert.match(ui, /No se ha podido leer tu estado actual/);
 });
+
+test('filtrando por lista, una pestaña con su nombre queda activa y sale (QA 22-10)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /documentRef\.getElementById\('feature-list-chip'\)\?\.remove\(\)/);
+  assert.match(ui, /`Lista: \$\{listView\.name\}`/);
+  assert.match(ui, /chip\.setAttribute\('aria-pressed', 'true'\)/);
+  assert.match(ui, /chip\.onclick = \(\) => setView\('all'\)/);
+});
