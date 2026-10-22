@@ -184,7 +184,7 @@ function PrivateChat({ctx, request, useDraft, active, api, draftPrompt, draftLab
         const imagesRestored = names.length === imageParts.length && names.every(name => typeof name === 'string' && name);
         const attachments = imagesRestored ? imageParts.map((part, index) => ({name: names[index], url: part.image_url?.url})) : [];
         setFailedTurn({text, retryable: Boolean(owner && failed.turnId && failed.retryable === true && imagesRestored), options: {userId: `user-${failed.turnId}`, images: attachments, allowSend: failed.allowSend === true, allowPropose: failed.allowPropose === true, retryFailedRun: true}});
-        setProblem(`${failed.error || 'El agente no pudo completar la respuesta.'}${imagesRestored ? '' : ' No se conservaron los datos originales de las imagenes. Adjuntalas de nuevo en un mensaje nuevo.'}`);
+        setProblem(`${failed.error || 'El agente no pudo completar la respuesta.'}${imagesRestored ? '' : ' No se conservaron los datos originales de las imágenes. Adjúntalas de nuevo en un mensaje nuevo.'}`);
         setActivity(null);
         setActivityLog([]);
       }
@@ -402,8 +402,8 @@ function PrivateChat({ctx, request, useDraft, active, api, draftPrompt, draftLab
   const addImages = async files => {
     if (readingImages) return;
     const selected = Array.from(files);
-    if (selected.some(file => !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type))) { setProblem('Adjunta imagenes PNG, JPEG, WebP o GIF.'); return; }
-    if (images.length + selected.length > 4 || images.reduce((total, image) => total + image.size, 0) + selected.reduce((total, file) => total + file.size, 0) > 8 * 1024 * 1024) { setProblem('Maximo 4 imagenes y 8 MiB en total.'); return; }
+    if (selected.some(file => !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type))) { setProblem('Adjunta imágenes PNG, JPEG, WebP o GIF.'); return; }
+    if (images.length + selected.length > 4 || images.reduce((total, image) => total + image.size, 0) + selected.reduce((total, file) => total + file.size, 0) > 8 * 1024 * 1024) { setProblem('Máximo 4 imágenes y 8 MiB en total.'); return; }
     setReadingImages(true);
     try {
       const next = await Promise.all(selected.map(file => new Promise((resolve, reject) => {
@@ -497,7 +497,7 @@ function PrivateChat({ctx, request, useDraft, active, api, draftPrompt, draftLab
             </div>
           </article>)}
         </section>}
-        {images.length > 0 && <div className="ai-attachments" aria-label="Imagenes adjuntas">{images.map((image, index) => <div key={`${image.name}-${index}`} className="ai-attachment"><img src={image.url} alt={image.name} /><button type="button" aria-label={`Quitar ${image.name}`} onClick={() => setImages(previous => previous.filter((_, i) => i !== index))}>×</button></div>)}</div>}
+        {images.length > 0 && <div className="ai-attachments" aria-label="Imágenes adjuntas">{images.map((image, index) => <div key={`${image.name}-${index}`} className="ai-attachment"><img src={image.url} alt={image.name} /><button type="button" aria-label={`Quitar ${image.name}`} onClick={() => setImages(previous => previous.filter((_, i) => i !== index))}>×</button></div>)}</div>}
         <form className="ai-composer" onSubmit={submit}>
           <input type="file" ref={fileRef} hidden accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={event => { void addImages(event.target.files); event.target.value = ''; }} />
           <button type="button" className="ai-send ai-attach" aria-label="Adjuntar imágenes" disabled={!ctx.chat || loading || readingImages} onClick={() => fileRef.current?.click()}>+</button>
