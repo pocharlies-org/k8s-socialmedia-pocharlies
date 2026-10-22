@@ -92,3 +92,9 @@ test('el pendiente del outbox proyecta su adjunto (QA #113)', async () => {
   assert.match(app, /attachments: \[\{name: item\.file\?\.name \|\| item\.fileName, mimeType: item\.file\?\.type \|\| '', size: item\.file\?\.size, pending: true\}\]/);
   assert.match(app, /text: item\.text \|\| ''/);
 });
+
+test('varios adjuntos de un mismo envío salen a la vez, no en serie (QA #122)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /async function sendPlannedMessages\(items\) \{\n(?:.*\n)*?\s*await Promise\.all\(items\.map\(async item => \{/);
+  assert.doesNotMatch(app, /async function sendPlannedMessages\(items\) \{\n\s*for \(const item of items\)/);
+});

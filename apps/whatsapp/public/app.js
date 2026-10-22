@@ -940,14 +940,17 @@ $('composer').onsubmit = event => {
   void sendPlannedMessages(items);
 };
 async function sendPlannedMessages(items) {
-  for (const item of items) {
+  // QA #122 (22-10): en serie, 3 fotos del mismo acto tardaban ~34 s (huecos de 23 s).
+  // sendOptimistic no lanza (devuelve false), así que el Promise.all no traga errores.
+  // shortcut: el orden de llegada puede barajarse; el orden garantizado es el álbum (#236).
+  await Promise.all(items.map(async item => {
     if (item.file) {
       await sendOptimistic(item, '/api/upload', async () => attachmentTools.uploadPayload(item.file, await base64(item.file), item.caption, item.replyTo, item.quality, item.viewOnce));
     } else {
       const replyTo = item.replyTo;
       await sendOptimistic(item, replyTo ? '/api/messages/reply' : '/api/send', {text: item.text, ...(replyTo ? {replyTo, messageId: replyTo} : {})});
     }
-  }
+  }));
 }
 function enterToSendEnabled() { return safeLocalStorage()?.getItem('wa-enter-to-send') !== 'false'; }
 function updateMessageComposerHint(enabled = enterToSendEnabled()) {
