@@ -393,6 +393,18 @@ function renderChats() {
 }
 const chatLoads = new Map();
 const chatCache = new Map();
+// Jordi 22-10 (criterio de Dani: sin pantallas de carga): la última lista de cada
+// ámbito se guarda en localStorage y se pinta al abrir, incluso tras F5.
+const CHATS_CACHE_PREFIX = 'wa-chats-cache-v1:';
+try {
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith(CHATS_CACHE_PREFIX)) chatCache.set(key.slice(CHATS_CACHE_PREFIX.length), {chats: JSON.parse(localStorage.getItem(key))});
+  }
+} catch { /* caché corrupta: se rellena de la red */ }
+function rememberChats(scope, chats) {
+  try { localStorage.setItem(CHATS_CACHE_PREFIX + scope, JSON.stringify(chats)); } catch { /* cuota: la memoria de la sesión basta */ }
+}
 async function loadChats({background = false} = {}) {
   if (!state.account || (background && state.chatLoading)) return;
   const account = state.account;
@@ -419,11 +431,12 @@ async function loadChats({background = false} = {}) {
       const {loadChatPages} = await import('./chat-directory.mjs');
       await loadChatPages({previous, isCurrent,
         fetchPage: cursor => api(`/api/chats?${new URLSearchParams({account, limit: '100', ...(archivedView ? {archived: 'only'} : {}), ...(cursor ? {cursor} : {})})}`),
-        onPage: (chats, hasMore) => {
+        onPage: chats => {
           state.chats = chats; state.chatListScope = scope; chatCache.set(scope, {chats});
+          rememberChats(scope, chats);
           featureUI?.chatsChanged?.(state.chats);
-          renderChats();
-          if (hasMore) $('chat-status').textContent = 'Cargando más conversaciones…';
+          // Jordi 22-10: sin aviso «Cargando más conversaciones…»: la lista ya está
+          // pintada y crece sola; el aviso era ruido sobre contenido útil.
         },
       });
     } catch (err) {
