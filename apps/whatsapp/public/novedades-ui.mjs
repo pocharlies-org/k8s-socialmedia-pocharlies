@@ -722,7 +722,7 @@ export function installNovedadesUI({
       setStatus(authors.length ? `${total} ${total === 1 ? 'estado activo' : 'estados activos'}` : '')
     } catch {
       if (!isCurrent(token) || requestId !== state.request) return
-      errorPane('No se pudieron cargar los estados. Comprueba la conexión del conector.', renderStatusesTab)
+      errorPane('No se pudieron cargar los estados. Reintenta.', renderStatusesTab)
     } finally {
       if (isCurrent(token) && requestId === state.request) state.panel?.setAttribute('aria-busy', 'false')
     }
@@ -1100,7 +1100,7 @@ export function installNovedadesUI({
       state.channelsMore.hidden = !state.channelsCursor
     } catch {
       if (!isCurrent(token) || requestId !== state.request) return
-      errorPane('No se pudieron cargar los canales. Comprueba la conexión del conector.', renderChannelsTab)
+      errorPane('No se pudieron cargar los canales. Reintenta.', renderChannelsTab)
       state.channelsMore.hidden = true
     } finally {
       state.channelsLoading = false
@@ -1759,7 +1759,7 @@ export function installNovedadesUI({
       audienceState.cursor = typeof result?.nextCursor === 'string' && result.nextCursor ? result.nextCursor : null
     } catch {
       if (composerIsCurrent(token) && serial === audienceState.serial) {
-        audienceState.error = 'No se pudieron cargar los contactos. Comprueba la conexión del conector.'
+        audienceState.error = 'No se pudieron cargar los contactos. Reintenta.'
       }
     } finally {
       if (composerIsCurrent(token) && serial === audienceState.serial) {
@@ -2157,8 +2157,8 @@ export function installNovedadesUI({
       state.lookupChannel = null
       renderChannelRows()
     })
-    const lookup = button('novedades-lookup', 'Consultar en WhatsApp')
-    lookup.textContent = 'Consultar en WhatsApp'
+    const lookup = button('novedades-lookup', 'Buscar en WhatsApp')
+    lookup.textContent = 'Buscar en WhatsApp'
     lookup.onclick = () => void lookupCurrentChannel()
     state.searchRow.append(state.searchInput, lookup)
 

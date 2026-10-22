@@ -167,7 +167,7 @@ try {
   assert.equal(await tab.getByText('Publicación del canal anterior').count(), 0, 'late previous channel cannot replace current posts');
   await tab.getByRole('button', { name: 'Volver a la lista de canales' }).click();
   await tab.getByLabel('Buscar canales').fill('https://whatsapp.com/channel/InviteCode');
-  await tab.getByRole('button', { name: 'Consultar en WhatsApp' }).click();
+  await tab.getByRole('button', { name: 'Buscar en WhatsApp' }).click();
   await tab.getByText('Canal encontrado').waitFor();
   assert(new URLSearchParams(requests.filter(item => item.path === '/api/novedades/channels/lookup').at(-1).search).get('account') === 'alpha');
   const openFound = tab.getByRole('button', { name: 'Abrir canal encontrado' });
