@@ -66,7 +66,7 @@ export function createCameraController({documentRef, mediaDevices, getContext, i
     const ctx = getContext();
     opener = documentRef.activeElement;
     if (!ctx.chat || !mediaDevices?.getUserMedia) {
-      showError('La camara no esta disponible en este navegador o chat.');
+      showError('La cámara no está disponible en este navegador o chat.');
       return;
     }
     overlay.hidden = false;
@@ -81,7 +81,7 @@ export function createCameraController({documentRef, mediaDevices, getContext, i
     } catch (err) {
       if (token === generation && isCurrent(ctx)) {
         close(true);
-        showError(`No se pudo abrir la camara: ${err.message}`);
+        showError(`No se pudo abrir la cámara: ${err.message}`);
       }
     }
   }
@@ -91,7 +91,7 @@ export function createCameraController({documentRef, mediaDevices, getContext, i
     const ctx = getContext();
     const width = video.videoWidth;
     const height = video.videoHeight;
-    if (!width || !height) { showError('La camara todavia no muestra una imagen.'); return; }
+    if (!width || !height) { showError('La cámara todavía no muestra una imagen.'); return; }
     const scale = Math.min(1, 1920 / Math.max(width, height));
     const canvas = documentRef.createElement('canvas');
     canvas.width = Math.round(width * scale);
