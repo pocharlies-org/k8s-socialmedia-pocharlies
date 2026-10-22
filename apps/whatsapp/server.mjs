@@ -12,7 +12,7 @@ import pg from 'pg';
 import { utcDatabaseTypes } from './lib/database-time.mjs';
 import { getDatabaseSchema, useDatabaseSchema, validDatabaseId } from './lib/database-schema.mjs';
 import { checkOrigin, sendingEnabled, signedHeaders, required, uploadBytes, isValidBase64, fail } from './lib/security.mjs';
-import { AppAuth, TRANSACTION_COOKIE, parseCookie, safeReturnTo, unauthorizedHtml } from './lib/auth.mjs';
+import { AppAuth, TRANSACTION_COOKIE, callbackErrorHtml, parseCookie, safeReturnTo, unauthorizedHtml } from './lib/auth.mjs';
 import { mediaRequest } from './lib/media.mjs';
 import { readMediaLibrary } from './lib/media-library.mjs';
 import { readChatDirectory } from './lib/chat-directory.mjs';
@@ -846,12 +846,29 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       fileName: media.file_name || 'avatar',
     };
   }
-  function sendAvatar(res, avatar) {
+  function sendAvatar(req, res, avatar) {
+    // QA velocidad 3: el no-store global hacía que cada re-render de la lista
+    // bajara otra vez los avatares (157 peticiones y 7,6 MB medidos en una
+    // apertura). La imagen de perfil cambia rara vez: 24 h en el navegador.
+    // shortcut: si un contacto cambia su foto y debe verse antes, se baja el
+    // max-age o se revalida por SSE; el ETag ya permite el 304 barato.
+    const cacheable = (avatar.status || 200) === 200;
+    const etag = `"${createHash('sha1').update(avatar.bytes).digest('base64url')}"`;
+    if (cacheable && req?.headers?.['if-none-match'] === etag) {
+      res.statusCode = 304;
+      res.setHeader('cache-control', 'private, max-age=86400');
+      res.setHeader('etag', etag);
+      return res.end();
+    }
     res.statusCode = avatar.status || 200;
     for (const [name, value] of Object.entries(avatar.headers || {})) res.setHeader(name, value);
     res.setHeader('content-length', avatar.bytes.length);
     res.setHeader('content-type', safeImageType(avatar.contentType));
     res.setHeader('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(avatar.fileName || 'avatar')}`);
+    if (cacheable) {
+      res.setHeader('cache-control', 'private, max-age=86400');
+      res.setHeader('etag', etag);
+    }
     res.end(avatar.bytes);
   }
   async function avatarResponse(req, res, account, chat) {
@@ -864,14 +881,14 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     const cached = getAvatarCacheEntry(cacheKey, source);
     if (cached) {
       if (cached.negative) throw featureError(404, 'AVATAR_UNAVAILABLE', 'Avatar is unavailable for this chat');
-      sendAvatar(res, cached);
+      sendAvatar(req, res, cached);
       return;
     }
     const inflightKey = `${cacheKey}\u0000${source}`;
     const pending = avatarInflight.get(inflightKey);
     if (pending) {
       const avatar = await pending;
-      sendAvatar(res, avatar);
+      sendAvatar(req, res, avatar);
       return;
     }
     const load = async () => {
@@ -900,7 +917,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     try {
       const avatar = await request;
       setAvatarCacheEntry(cacheKey, source, avatar, avatarCacheConfig.ttlMs);
-      sendAvatar(res, avatar);
+      sendAvatar(req, res, avatar);
     } catch (error) {
       if (error?.code === 'AVATAR_UNAVAILABLE') setAvatarCacheEntry(cacheKey, source, { negative: true }, avatarCacheConfig.negativeTtlMs);
       throw error;
@@ -1426,6 +1443,11 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' });
             return res.end(unauthorizedHtml(auth.publicUrl, auth.issuer));
           }
+          // UX #1.1: el 400 (enlace caducado/inválido) también es navegable.
+          if (error?.status === 400) {
+            res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+            return res.end(callbackErrorHtml());
+          }
           throw error;
         }
         console.log('[auth] login');
@@ -1673,7 +1695,8 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const bytes = jpegThumbnailBytes(rows[0]?.thumbnail);
         if (!bytes) throw fail(404, 'Media not found');
         res.setHeader('content-type', 'image/jpeg');
-        res.setHeader('cache-control', 'no-store');
+        // Miniatura del payload del mensaje: inmutable por id (QA velocidad).
+        res.setHeader('cache-control', 'private, max-age=86400, immutable');
         res.end(bytes);
         return;
       }
@@ -1700,6 +1723,11 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         for (const name of ['accept-ranges', 'content-range', 'etag', 'last-modified']) {
           const value = response.headers.get(name); if (value) res.setHeader(name, value);
         }
+        // QA velocidad: la fila de attachments es inmutable por id; sin esto el scroll
+        // volvía a bajar cada foto (el visor libera la copia al salir de vista).
+        // shortcut: un mensaje borrado deja su copia del día en el navegador; si la
+        // política de borrado lo exige, bajar a max-age=0 + etag.
+        if (response.status === 200 || response.status === 206) res.setHeader('cache-control', 'private, max-age=86400, immutable');
         if (!response.headers.get('content-encoding') && response.headers.has('content-length')) res.setHeader('content-length', response.headers.get('content-length'));
         const safeInline = /^(image\/(jpeg|png|gif|webp)|audio\/|video\/)/.test(media.mime_type || '');
         res.setHeader('content-type', safeInline ? media.mime_type : 'application/octet-stream');
@@ -1947,7 +1975,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const participant = rows[0];
         if (participant.profile_pic_url) {
           try {
-            sendAvatar(res, await readStoredMedia({ ref: participant.profile_pic_url, mime_type: 'image/jpeg', file_name: 'avatar.jpg' }));
+            sendAvatar(req, res, await readStoredMedia({ ref: participant.profile_pic_url, mime_type: 'image/jpeg', file_name: 'avatar.jpg' }));
             return;
           } catch (error) {
             if (error?.status && ![403, 404, 502].includes(error.status)) throw error;
@@ -3049,6 +3077,13 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       if (file.includes('..') || file.includes('\\') || file.includes('\0')) throw fail(404, 'Not found');
       const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
       let bytes; try { bytes = await readFile(join(root, 'public', file)); } catch { throw fail(404, 'Not found'); }
+      // QA velocidad: sin ETag no hay 304 posible y el navegador bajaba los 2,33 MB de
+      // public/ en cada navegación (el no-store global heredado). El HTML del shell sigue
+      // no-store: es el que apunta a los assets.
+      const etag = `"${createHash('sha1').update(bytes).digest('base64url')}"`;
+      if (!file.endsWith('.html')) res.setHeader('cache-control', 'private, max-age=300');
+      if (req.headers['if-none-match'] === etag) { res.statusCode = 304; return res.end(); }
+      res.setHeader('etag', etag);
       res.setHeader('content-type', types[extname(file)] || 'application/octet-stream'); res.end(bytes);
     } catch (e) {
       if (res.headersSent) { res.destroy(); return; }

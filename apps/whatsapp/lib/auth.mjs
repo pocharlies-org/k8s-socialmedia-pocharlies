@@ -268,4 +268,14 @@ export function unauthorizedHtml(publicUrl, issuer) {
 </body>`;
 }
 
+// UX #1.1: un enlace de callback caducado o inválido se navegaba como JSON crudo
+// en página negra; el 400 del finishLogin siempre viene de un navegador.
+export function callbackErrorHtml() {
+  return `<!doctype html><html lang="es"><meta charset="utf-8"><title>Inicio de sesión no completado</title>
+<body style="font:16px system-ui;max-width:36em;margin:4em auto">
+<p>El enlace de entrada ha caducado o no es válido. Vuelve a intentarlo.</p>
+<p><a href="/auth/login?returnTo=%2F">Volver a entrar</a></p>
+</body>`;
+}
+
 export { SESSION_COOKIE, TRANSACTION_COOKIE, clearCookie, cookie, parseCookie, safeReturnTo };
