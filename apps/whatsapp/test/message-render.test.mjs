@@ -266,10 +266,10 @@ test('attachment rendering falls back safely when URL data is absent or unsafe',
   assert.equal(missing.children.some(child => child.tagName === 'IMG' || child.tagName === 'A'), false);
 });
 
-test('a pending outbox attachment shows its name and «Enviando…», never the error (QA #113)', () => {
+test('a pending outbox attachment shows its name, never «Enviando…» text nor the error (QA #113, Jordi 22-10)', () => {
   const container = createAttachmentElement({ name: 'informe.pdf', mimeType: 'application/pdf', size: 2048, pending: true }, { document: fakeDocument });
   assert.match(treeText(container), /informe\.pdf/);
-  assert.match(treeText(container), /Enviando…/);
+  assert.doesNotMatch(treeText(container), /Enviando/);
   assert.equal(container.querySelector('.attachment-error'), null);
   assert.equal(container.children.some(child => child.tagName === 'A'), false);
 });
@@ -708,7 +708,7 @@ test('la primera letra fuerte decide la dirección del texto (QA #111)', () => {
 
 test('pending y failed tienen indicador en la burbuja (QA #109)', async () => {
   const src = await readFile(new URL('../public/message-render.mjs', import.meta.url), 'utf8');
-  assert.match(src, /status === 'pending'\) return \{ symbol: '\\u23f3', label: 'Pendiente', className: 'status-pending' \}/);
+  assert.match(src, /status === 'pending'\) return \{ symbol: '\\u25f7', label: 'Pendiente', className: 'status-pending' \}/);
   assert.match(src, /status === 'failed'\) return \{ symbol: '!', label: 'No enviado', className: 'status-failed' \}/);
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.message-status\.status-failed \{ color: var\(--danger\);/);

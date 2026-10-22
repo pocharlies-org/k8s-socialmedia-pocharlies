@@ -829,7 +829,8 @@ export function createAttachmentElement(attachment, { document: documentRef = gl
   const name = attachmentName(attachment);
   if (!url) {
     // QA #113: un adjunto pendiente (fuera del outbox, aún sin fila en el servidor) no
-    // tiene URL; se pinta la tarjeta con el nombre y «Enviando…» en vez del error.
+    // tiene URL; se pinta la tarjeta con el nombre en vez del error. Jordi 22-10: sin
+    // texto «Enviando…»: el reloj de la burbuja ya dice que va en vuelo.
     if (attachment?.pending) {
       const card = makeElement(documentRef, 'div', 'attachment-document');
       const icon = makeElement(documentRef, 'span', 'document-icon', MEDIA_PENDING_BADGES[getAttachmentKind(attachment)]);
@@ -837,7 +838,7 @@ export function createAttachmentElement(attachment, { document: documentRef = gl
       const details = makeElement(documentRef, 'span', 'document-details');
       details.append(makeElement(documentRef, 'strong', 'document-name', name));
       const size = attachmentSizeBytes(attachment);
-      details.append(makeElement(documentRef, 'span', 'document-size', size ? `${formatMediaSize(size)} · Enviando…` : 'Enviando…'));
+      if (size) details.append(makeElement(documentRef, 'span', 'document-size', formatMediaSize(size)));
       card.append(icon, details);
       container.append(card);
       return container;
@@ -1051,7 +1052,8 @@ function deliveryStatus(message) {
   if (status === 'delivered') return { symbol: '\u2713\u2713', label: 'Entregado', className: 'status-delivered' };
   if (['read', 'played'].includes(status)) return { symbol: '\u2713\u2713', label: status === 'played' ? 'Reproducido' : 'Le\u00eddo', className: 'status-read' };
   // QA #109: sin estos dos estados un fallo de env\u00edo era invisible en el hilo.
-  if (status === 'pending') return { symbol: '\u23f3', label: 'Pendiente', className: 'status-pending' };
+  // Jordi 22-10: reloj de trazo (\u25f7), no emoji a color: es un tick, no un adorno.
+  if (status === 'pending') return { symbol: '\u25f7', label: 'Pendiente', className: 'status-pending' };
   if (status === 'failed') return { symbol: '!', label: 'No enviado', className: 'status-failed' };
   return null;
 }

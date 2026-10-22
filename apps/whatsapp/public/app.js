@@ -564,10 +564,16 @@ function renderMessages() {
     const meta = bubble.querySelector('.message-meta') || bubble.appendChild(node('div', 'message-meta'));
     meta.querySelectorAll('.message-send-feedback, .message-restore, .message-reply-warning, .message-file-warning, .message-view-once').forEach(element => element.remove());
     if (item.viewOnce) meta.append(node('span', 'message-view-once', 'Ver una vez'));
-    if (item.state !== 'confirmed') meta.append(node('span', 'message-send-feedback', item.state === 'failed' ? 'Entrega no confirmada' : 'Enviando…'));
+    // Jordi 22-10: sin texto «Enviando…/Entrega no confirmada»: el glifo del CSS (reloj/⚠)
+    // basta; el estado va en el aria-label de la burbuja, puesto arriba.
+    if (item.state !== 'confirmed') {
+      const feedback = node('span', 'message-send-feedback', '');
+      feedback.setAttribute('aria-hidden', 'true');
+      meta.append(feedback);
+    }
     if (item.state === 'failed') {
-      if (item.replyTo) meta.append(node('span', 'message-reply-warning', ' · La cita se recuperará al editar si sigue disponible.'));
-      if (item.fileName && !item.file) meta.append(node('span', 'message-file-warning', item.viewOnce ? ' · Adjunta el archivo y activa Ver una vez de nuevo.' : ' · Adjunta el archivo de nuevo.'));
+      if (item.replyTo) meta.append(node('span', 'message-reply-warning', 'La cita se recuperará al editar si sigue disponible.'));
+      if (item.fileName && !item.file) meta.append(node('span', 'message-file-warning', item.viewOnce ? 'Adjunta el archivo y activa Ver una vez de nuevo.' : 'Adjunta el archivo de nuevo.'));
       const restore = node('button', 'message-restore', 'Editar texto');
       restore.type = 'button';
       restore.onclick = () => {

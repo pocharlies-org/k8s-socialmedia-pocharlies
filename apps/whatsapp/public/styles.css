@@ -883,7 +883,8 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
 
 .message-status { color: var(--bubble-meta); letter-spacing: -2px; }
 
-.message-status.status-read { color: var(--accent-strong); }
+/* Jordi 22-10: ✓✓ leído en azul WhatsApp, no en el verde del tema. */
+.message-status.status-read { color: #53bdeb; }
 /* QA #109: un fallo de envío debe verse; el reloj pendiente usa el mutado por defecto. */
 .message-status.status-failed { color: var(--danger); letter-spacing: 0; font-weight: 700; }
 

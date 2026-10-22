@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /*
- * The pending-send receipt ("Enviando…", "Entrega no confirmada", the recovery
- * buttons and the message clock) sits inside the bubble, so it has to stay legible
- * on both bubble colors of both themes. WCAG AA for this 11px text is 4.5:1.
+ * The pending-send receipt (a glyph-only clock/warning since Jordi 22-10, the
+ * recovery buttons and the message clock) sits inside the bubble, so it has to
+ * stay legible on both bubble colors of both themes. WCAG AA is 4.5:1.
  */
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
@@ -91,14 +91,16 @@ try {
     await page.locator('.message[data-send-state="sending"] .message-send-feedback').first().waitFor();
     const pending = await page.evaluate(MEASURE, [selectors.pending]);
     assert.equal(pending.length, 1, 'no pending send receipt to measure');
-    assert.match(pending[0].text, /Enviando/, 'the pending receipt does not say Enviando');
+    // Jordi 22-10: el recibo pendiente es solo el reloj (glifo del CSS), sin texto.
+    assert.doesNotMatch(pending[0].text, /Enviando/, 'the pending receipt must be glyph-only');
     for (const sample of pending) assert(sample.ratio >= 4.5, `pending send receipt unreadable in ${theme} (${sample.ratio}:1, ${sample.color} on ${sample.background})`);
 
     await sendRoute.fulfill({status: 502, contentType: 'application/json', body: JSON.stringify({error: 'No confirmado'})});
     await page.locator('.message[data-send-state="failed"] .message-send-feedback').first().waitFor();
     const failed = await page.evaluate(MEASURE, [selectors.failed, selectors.restore]);
     assert(failed.length >= 3, 'the failed send receipt or its recovery actions are missing');
-    assert.match(failed[0].text, /Entrega no confirmada/, 'the failed receipt did not explain the state');
+    // Jordi 22-10: el recibo fallido es solo el ⚠ (el estado va en el aria-label de la burbuja).
+    assert.doesNotMatch(failed[0].text, /Entrega no confirmada/, 'the failed receipt must be glyph-only');
     assert(failed.some(sample => sample.selector === selectors.restore), 'the recovery actions were not measured');
     for (const sample of failed) assert(sample.ratio >= 4.5, `failed send UI unreadable in ${theme} (${sample.ratio}:1, ${sample.color} on ${sample.background})`);
     assert.notEqual(failed[0].color, pending[0].color, 'a failed send looks identical to a pending one');
