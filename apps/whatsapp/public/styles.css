@@ -690,9 +690,9 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
 .header-icon,
 .mobile-back {
   display: grid;
-  width: 40px;
-  height: 40px;
-  min-height: 40px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
   place-items: center;
   border-radius: 50%;
   background: transparent;
@@ -1203,10 +1203,11 @@ body[data-theme="light"] .date-chip {
 
 .composer-icon {
   display: grid;
-  flex: 0 0 40px;
-  width: 40px;
-  height: 40px;
-  min-height: 40px;
+  /* QA #94: 40 px pasaba WCAG AA pero quedaba bajo los 44 de Apple; en móvil se fallaba el toque. */
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
   place-items: center;
   border-radius: 50%;
   background: transparent;
