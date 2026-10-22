@@ -2342,6 +2342,9 @@ contracts:
     everyone). El espejo local escribe la revocacion en metadata
     (deleted_for_me / deleted_at como texto): la casa no tiene columna
     deleted_at (42703 medido 20-10); el conector es la fuente de verdad.
+    Un rechazo 4xx del conector sigue respondiendo 502 (la accion no quedo
+    confirmada) pero con su motivo y failureClass en el cuerpo (QA #10,
+    22-10): sin ello el navegador solo veia "Upstream returned HTTP 400".
 - id: http.whatsapp-app.logout.v1
   kind: http-route
   value: /auth/logout

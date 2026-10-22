@@ -506,8 +506,19 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
   async function remote(url, options, timeout = 30000, acceptedStatuses = []) {
     try { const result = await fetchImpl(url, { ...options, redirect: 'error', signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout) });
       if (!result.ok && !acceptedStatuses.includes(result.status)) {
-        const error = fail(502, `Upstream returned HTTP ${result.status}`);
+        // QA #10: el conector habla en su cuerpo (error/failureClass). Se
+        // conserva el 502 (la accion no quedo confirmada: semantica de las
+        // rutas de estado) pero el motivo viaja al navegador: sin ello
+        // cualquier 400 era "Upstream returned HTTP 400" ininterpretable.
+        const body = await result.json().catch(() => null);
+        const reason = body && typeof body === 'object' ? cleanProviderValue(body.error, 300) : null;
+        const failureClass = body && typeof body === 'object' ? cleanProviderValue(body.failureClass, 64) : null;
+        const error = fail(502, reason || `Upstream returned HTTP ${result.status}`);
         error.upstreamStatus = result.status;
+        if (reason || failureClass) {
+          error.code = cleanProviderValue(body.code, 64) || 'UPSTREAM_REJECTED';
+          if (failureClass) error.details = { failureClass };
+        }
         throw error;
       }
       return result;
