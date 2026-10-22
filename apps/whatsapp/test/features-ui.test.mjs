@@ -304,6 +304,13 @@ test('en modo selección, pulsar la burbuja alterna el mensaje (QA 22-10)', asyn
   assert.match(ui, /toggleMessageSelected\(id, !runtime\.selectedMessageIds\.has\(id\)\)/);
 });
 
+test('privacidad sin ningún valor leído no deja guardar a ciegas (UX 20.1)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /loaded = known\.some\(value => value !== '' && value !== null && value !== undefined\)/);
+  assert.match(ui, /submit\.disabled = !loaded/);
+  assert.match(ui, /No se ha podido leer tu estado actual/);
+});
+
 test('filtrando por lista, una pestaña con su nombre queda activa y sale (QA 22-10)', async () => {
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(ui, /documentRef\.getElementById\('feature-list-chip'\)\?\.remove\(\)/);

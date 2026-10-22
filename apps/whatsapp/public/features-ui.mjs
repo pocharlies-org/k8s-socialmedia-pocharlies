@@ -2124,11 +2124,16 @@ export function installFeatureUI({
       status.value = initial.status || '';
       groupsAdd.value = initial.groupsAdd || '';
       receipts.value = initial.readReceipts || '';
-      loaded = true;
-      submit.disabled = false;
-      notice.textContent = [initial.profile, initial.lastSeen, initial.groupsAdd].includes('contact_blacklist')
-        ? 'Para cambiar las personas excluidas, usa WhatsApp en tu teléfono. Los demás ajustes se aplican a tu cuenta.'
-        : 'Estos ajustes se aplican a tu cuenta de WhatsApp.';
+      // UX 20.1: WhatsApp puede no reportar ningún valor; dejar editar a ciegas es
+      // peor que no ofrecer el panel. Sin ningún valor leído, Guardar no se activa.
+      const known = [initial.profile, initial.lastSeen, initial.online, initial.status, initial.groupsAdd, initial.readReceipts];
+      loaded = known.some(value => value !== '' && value !== null && value !== undefined);
+      submit.disabled = !loaded;
+      notice.textContent = !loaded
+        ? 'No se ha podido leer tu estado actual; cambia estos ajustes desde WhatsApp en tu teléfono.'
+        : [initial.profile, initial.lastSeen, initial.groupsAdd].includes('contact_blacklist')
+          ? 'Para cambiar las personas excluidas, usa WhatsApp en tu teléfono. Los demás ajustes se aplican a tu cuenta.'
+          : 'Estos ajustes se aplican a tu cuenta de WhatsApp.';
     } catch {
       if (isCurrent()) notice.textContent = 'No se pudieron cargar las preferencias actuales; Guardar permanece desactivado.';
     }
@@ -2423,6 +2428,7 @@ export function installFeatureUI({
     openChatMenu,
     openSidebarChatMenu,
     isChatPinned: chat => chatIsPinned(chat, prefs()),
+    isChatFavorite: chat => chatIsFavorite(chat, prefs()),
     /** Close every features dialog from the app shell (rail panels are mutually exclusive). */
     closePanels: () => { runtime.closeAttachMenu?.(); closeContactDirectory(); closeModal(); },
     setView,
