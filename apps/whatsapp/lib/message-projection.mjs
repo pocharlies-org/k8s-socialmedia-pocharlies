@@ -1,13 +1,23 @@
 const string = (value, max = 4096) => typeof value === 'string' ? value.slice(0, max) : null;
 const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 
-export function publicMessageMetadata(value) {
+export function publicMessageMetadata(value, messageType = null) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return { ...typedMessageMetadata(source), ...(source.viewOnce === true ? { viewOnce: true } : {}) };
+  // QA #77: el conector nunca escribe viewOnce en metadata; el tipo de fila sí lo dice.
+  return { ...typedMessageMetadata(source), ...(source.viewOnce === true || messageType === 'VIEWONCEMESSAGE' ? { viewOnce: true } : {}) };
 }
 
 function typedMessageMetadata(value) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const stored = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  // QA #79: el conector guarda el payload bajo la clave en singular (contact/poll/
+  // event), nunca con `kind` (ninguna fila de WhatsApp lo trae): normalizar aquí,
+  // único punto de lectura. El contacto aplanado: phones[0] es el número.
+  const source = !stored.kind && stored.contact
+    ? {kind: 'contact', contacts: (Array.isArray(stored.contact.contacts) && stored.contact.contacts.length
+        ? stored.contact.contacts : [stored.contact]).map(item => ({...item, phone: item?.phones?.[0] ?? item?.phone}))}
+    : !stored.kind && stored.poll ? {kind: 'poll', ...stored.poll}
+    : !stored.kind && stored.event ? {kind: 'event', ...stored.event, isCancelled: stored.event.isCanceled === true}
+    : stored;
   const kind = string(source.kind, 32);
   if (kind === 'poll') return {
     kind,

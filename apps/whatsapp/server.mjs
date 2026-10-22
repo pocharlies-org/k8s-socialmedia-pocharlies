@@ -792,7 +792,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       } : {}),
       ...(row.replyToMessageId ? { replyPreview: projectReplyPreview({ replyToMessageId: row.replyToMessageId, replyType, replyText, replySenderName, replyAvailable, replyLocallyDeleted }, metadata, conversation) } : {}),
       metadata: {
-        ...publicMessageMetadata(metadata),
+        ...publicMessageMetadata(metadata, row.type),
         ...(row.type === 'POLL' && pollResults.has(optionalProviderMessageId(row.waMessageId))
           ? { results: pollResults.get(optionalProviderMessageId(row.waMessageId)) } : {}),
       },
@@ -2142,9 +2142,13 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const conversation = await conversationFor(a, chat);
         const providerChat = providerChatId(conversation);
         if (conversation.is_group || !/^\d+@(c\.us|s\.whatsapp\.net|lid)$/.test(providerChat)) throw fail(400, 'A direct contact is required');
-        const result = await featureConnector(a, `/chats/${encodeURIComponent(providerChat)}/block`, { method: 'GET' });
-        if (typeof result.blocked !== 'boolean' || result.confirmed !== true) throw fail(502, 'Contact block state was not confirmed');
-        return json(200, { account: a.accountId, chat, blocked: result.blocked, confirmed: true, source: 'provider' });
+        // QA #13: no existe una lectura por-chat en el conector (era 501 y el botón se
+        // ocultaba); el estado se deriva del listado, que sí está desplegado. Los dígitos
+        // casan @c.us/@s.whatsapp.net/@lid: Baileys bloquea la persona bajo ambas identidades.
+        const blockedJids = await providerBlocklist(a);
+        const digits = providerChat.match(/^(\d+)@/)?.[1];
+        const blocked = blockedJids.some(jid => jid === providerChat || jid.startsWith(`${digits}@`));
+        return json(200, { account: a.accountId, chat, blocked, confirmed: true, source: 'provider' });
       }
       if (req.method === 'GET' && path === '/api/blocked-contacts') {
         const a = accountParam(url.searchParams.get('account'));
@@ -2450,7 +2454,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             catch (error) { throw fail(400, error.message); }
             result = await connector(a, '/messages/poll', {
               name: draft.question,
-              values: draft.options,
+              // QA #78: el conector vivo (v1.3.120) sólo lee `options`; el alias
+              // `values` llegó en 8702dd4, sin desplegar → 400 siempre.
+              options: draft.options,
               selectableCount: draft.selectableCount,
               sendToken: sendToken(body),
               conversationId: providerChat,
@@ -2461,9 +2467,10 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             catch (error) { throw fail(400, error.message); }
             result = await connector(a, '/messages/event', {
               name: draft.title,
-              startDate: draft.dateTime,
+              // QA #78: mismo que la encuesta — nombres del contrato declarado.
+              startTime: draft.dateTime,
               ...(draft.description ? {description: draft.description} : {}),
-              ...(draft.endDateTime ? {endDate: draft.endDateTime} : {}),
+              ...(draft.endDateTime ? {endTime: draft.endDateTime} : {}),
               ...(draft.location ? {location: {name: draft.location}} : {}),
               sendToken: sendToken(body),
               conversationId: providerChat,

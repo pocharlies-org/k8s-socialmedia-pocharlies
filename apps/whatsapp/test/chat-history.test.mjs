@@ -115,3 +115,9 @@ test('la fila de chat tiene acciones rápidas fijar/silenciar/archivar (UX 21.2)
   assert.match(css, /\.chat-row:hover \.chat-quick/);
   assert.match(css, /@media \(hover: none\) \{ \.chat-quick \{ display: none; \}/);
 });
+test('QA #82: el avatar 404 de un chat se cachea y no se vuelve a pedir', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const avatarFailures = new Set\(\)/);
+  assert.match(app, /avatarFailures\.has\(key\) \? null : messageRenderer\?\.safeMessageUrl/);
+  assert.match(app, /avatarFailures\.add\(key\)/);
+});

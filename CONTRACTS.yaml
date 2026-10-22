@@ -466,7 +466,7 @@ contracts:
     question, metadata.poll {question, options, selectableCount}); its secret stays in whatsapp_message_payloads.
     The path, the body fields, the 200 shape and the failureClass values are contract: changing any is
     breaking — a new `.v2` entry beside this one. Also consumed by the MCP tool social_send_poll (mcp-server/src/mcp/server.ts
-    canonicalSendPoll; added later, surface unchanged).'
+    canonicalSendPoll; added later, surface unchanged). Consumer apps/whatsapp/server.mjs (whatsapp-app composer) sent values/startDate/endDate, never accepted by a live connector; migrated to the declared names (QA #78, 22-10).'
 - id: http.whatsapp-connector.messages-poll-vote.v1
   kind: http-route
   value: /messages/poll/vote
@@ -527,7 +527,7 @@ contracts:
     description, startTime, endTime (ms), location, joinLink, isCanceled, extraGuestsAllowed}). The path,
     the body fields, the 200 shape and the failureClass values are contract: changing any is breaking
     — a new `.v2` entry beside this one. Also consumed by the MCP tool social_send_event (mcp-server/src/mcp/server.ts
-    canonicalSendEvent; added later, surface unchanged).'
+    canonicalSendEvent; added later, surface unchanged). Consumer apps/whatsapp/server.mjs (whatsapp-app composer) sent startDate/endDate, never accepted by a live connector; migrated to the declared names (QA #78, 22-10).'
 - id: http.whatsapp-connector.messages-event-respond.v1
   kind: http-route
   value: /messages/event/respond
@@ -1363,7 +1363,7 @@ contracts:
     when none)}], count, readAt, cached}. Names read only from conversations / participants; a pairing
     client (ingest off) answers the bare identities. The path and the 200 shape are contract: changing
     either is breaking — a new `.v2` entry beside this one. Also consumed by the MCP tool social_list_blocked
-    (mcp-server/src/mcp/server.ts canonicalListBlocked; added later, surface unchanged).'
+    (mcp-server/src/mcp/server.ts canonicalListBlocked; added later, surface unchanged). Also consumed by apps/whatsapp/server.mjs (GET /api/contact-block derives the per-chat state from this list; the per-chat GET the app used to call never existed on a live connector, QA #13, 22-10).'
 - id: http.whatsapp-connector.groups-invite.v1
   kind: http-route
   value: /groups/invite
@@ -2341,7 +2341,12 @@ contracts:
     casa, linaje NAS) por id para usar el índice — el cast por texto sobre
     80k filas de un grupo pasaba de los 10 s del statement_timeout en frío
     (57014, medido 20-10) —; con ids uuid (el desplegador original) por
-    texto (42883 si se fija un tipo, medido 20-10).
+    texto (42883 si se fija un tipo, medido 20-10). Desde 22-10 la
+    proyección de metadata normaliza la forma almacenada por el conector
+    (claves en singular contact/poll/event → {kind,…}, phones[0] → phone,
+    isCanceled → isCancelled) y deriva viewOnce del message_type
+    (QA #79/#77): aditivo, filas que antes salían con metadata {} salen
+    ahora con su payload.
 - id: http.whatsapp-app.messages-delete.v1
   kind: http-route
   value: /api/messages/delete
