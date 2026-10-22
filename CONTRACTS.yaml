@@ -2003,7 +2003,8 @@ contracts:
     esta listado porque el shell apunta el icono (link rel=icon): lo que es
     contrato aqui es esa referencia y la ruta; el texto del banner, el meta
     viewport del shell y el orden del estado de carga bajo la lista no forman
-    parte de esta entrada (SC-2760, 22-10). El icono es ahora de marca (burbuja
+    parte de esta entrada (SC-2760, 22-10); tampoco la copia de la sección
+    «Atajos» (QA #104 documenta el mapa featureShortcut). El icono es ahora de marca (burbuja
     verde WhatsApp, ICO multi-resolución 16/32/48); la ruta, el MIME y la
     referencia del shell no cambian. El <title> pasa a «WhatsApp» y la app lo
     reemplaza por «(N) WhatsApp» con no leídos (QA #74) — el título no es
