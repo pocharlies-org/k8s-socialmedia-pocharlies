@@ -29,7 +29,6 @@
 .emoji-picker-categories { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 5px; }
 .emoji-picker-category { flex: 0 0 auto; border: 0; border-bottom: 3px solid transparent; padding: 8px; background: transparent; color: var(--muted-strong); border-radius: 6px; }
 .emoji-picker-category[aria-pressed="true"] { border-bottom-color: var(--accent); color: var(--accent); background: var(--surface-raised); }
-.emoji-picker-status { margin: 0; font-size: 12px; color: var(--muted-strong); }
 .emoji-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); align-content: start; gap: 3px; max-height: min(350px, 45dvh); overflow-y: auto; overscroll-behavior: contain; }
 .emoji-picker-item { position: relative; min-height: 42px; padding: 5px; border: 0; border-radius: 8px; font-size: 27px; line-height: 1.2; background: transparent; color: var(--text); cursor: pointer; }
 .emoji-picker-item:hover { background: var(--surface-raised); }

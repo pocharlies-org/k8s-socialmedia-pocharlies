@@ -56,7 +56,8 @@ export function createEmojiPicker({documentRef = document, account, onSelect, is
   });
   let preferences = readEmojiPreferences(storage, account); tone.value = String(preferences.tone);
   const categories = make('nav', 'emoji-picker-categories'); categories.setAttribute('aria-label', 'Categor\u00edas de emoji');
-  const status = make('p', 'emoji-picker-status', 'Cargando emojis...'); status.setAttribute('role', 'status');
+  // UX #37.1: live-region para el lector — oculto visualmente (sr-only), no texto suelto en el picker.
+  const status = make('p', 'emoji-picker-status sr-only', 'Cargando emojis...'); status.setAttribute('role', 'status');
   const grid = make('div', 'emoji-picker-grid'); grid.setAttribute('aria-label', 'Emojis');
   const variants = make('div', 'emoji-picker-variants'); variants.hidden = true;
   toolbar.append(search, tone); root.append(toolbar, categories, status, variants, grid);
