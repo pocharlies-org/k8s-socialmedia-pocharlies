@@ -268,6 +268,8 @@ function setConversationAvatar(chat = null) {
   } else avatar.textContent = chatInitials(chat);
 }
 function renderChats() {
+  // QA #89/#97: «Destacados» es una vista de mensajes, no de chats.
+  if (featureUI?.isFeatureView?.() === 'starred') { $('chat-status').textContent = ''; void featureUI.starredView?.($('chats')); return; }
   const archivedView = featureUI?.isFeatureView?.() === 'archived';
   sidebarSearch?.viewChanged(archivedView);
   // UX #6.1: el buscador filtra también dentro de Archivados (antes se vaciaba).

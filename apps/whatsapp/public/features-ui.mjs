@@ -1761,29 +1761,28 @@ export function installFeatureUI({
 
   function cryptoRandom() { return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
-  async function openStarred() {
-    const modal = openModal('Mensajes destacados', { wide: true });
-    // El chip «Destacados» abre un diálogo, no filtra la lista (matchesChat('starred') es false),
-    // así que no pasa por setView: se marca activo mientras el diálogo vive y se restaura al cerrar.
-    const paint = active => { for (const chip of documentRef.querySelectorAll('[data-feature-view]')) chip.setAttribute('aria-pressed', String(chip.dataset.featureView === active)); };
-    paint('starred');
-    modal.onClose = () => paint(runtime.currentView);
+  // QA #89/#97: «Destacados» es una vista de mensajes (no un diálogo): renderiza en la lista lateral.
+  let starredToken = 0;
+  async function renderStarredView(container) {
+    const token = ++starredToken;
     const account = runtime.account;
+    const isCurrent = () => token === starredToken && runtime.account === account && runtime.currentView === 'starred';
+    container.replaceChildren(node('p', 'feature-muted', 'Cargando mensajes destacados…'));
     const loadPage = async before => {
       let result;
       try { result = await request('/api/favorites/starred', undefined, { limit: '100', ...(before ? { before } : {}) }); }
-      catch (error) { if (runtime.modal?.body === modal.body) modal.body.append(node('p', 'feature-muted', error.message || 'No se pudieron cargar los mensajes destacados.')); return; }
-      if (runtime.account !== account || runtime.modal?.body !== modal.body) return;
-      modal.body.querySelector('.feature-load-more')?.remove();
+      catch (error) { if (isCurrent()) container.replaceChildren(node('p', 'feature-muted', error.message || 'No se pudieron cargar los mensajes destacados.')); return; }
+      if (!isCurrent()) return;
+      container.querySelector('.feature-load-more')?.remove();
       const items = array(result.items);
-      if (!items.length && !before) { modal.body.append(node('p', 'feature-muted', 'No hay mensajes destacados.')); return; }
+      if (!items.length && !before) { container.replaceChildren(node('p', 'feature-muted', 'No hay mensajes destacados.')); return; }
       for (const item of items) {
         const row = button(documentRef, '', 'feature-search-result');
         row.append(node('strong', '', item.chatName || item.chatId || 'Conversación'), node('span', '', messageText(item)));
-        row.onclick = () => { const id = text(item.chatId); if (!id) return; const chat = array(getChats()).find(candidate => text(candidate.id) === id) || { id, name: item.chatName || id }; closeModal(); selectChat(chat); };
-        modal.body.append(row);
+        row.onclick = () => { const id = text(item.chatId); if (!id) return; const chat = array(getChats()).find(candidate => text(candidate.id) === id) || { id, name: item.chatName || id }; selectChat(chat); };
+        container.append(row);
       }
-      if (result.nextCursor) { const more = button(documentRef, 'Mostrar más', 'feature-button subtle feature-load-more'); more.onclick = () => loadPage(text(result.nextCursor)); modal.body.append(more); }
+      if (result.nextCursor) { const more = button(documentRef, 'Mostrar más', 'feature-button subtle feature-load-more'); more.onclick = () => loadPage(text(result.nextCursor)); container.append(more); }
     };
     await loadPage('');
   }
@@ -2270,7 +2269,7 @@ export function installFeatureUI({
     const search = documentRef.querySelector('.chat-sidebar > .search');
     const views = node('nav', 'feature-view-nav'); views.setAttribute('aria-label', 'Vistas de conversaciones');
     for (const [label, view] of [['Todos', 'all'], ['No leídos', 'unread'], ['Grupos', 'groups'], ['Favoritos', 'favorites'], ['Destacados', 'starred']]) {
-      const item = button(documentRef, label, 'feature-view-button'); item.dataset.featureView = view; item.setAttribute('aria-pressed', String(runtime.currentView === view)); item.onclick = () => view === 'starred' ? openStarred() : setView(view); views.append(item);
+      const item = button(documentRef, label, 'feature-view-button'); item.dataset.featureView = view; item.setAttribute('aria-pressed', String(runtime.currentView === view)); item.onclick = () => setView(view); views.append(item);
     }
     search?.after(views);
     const archiveTitle = node('header', 'feature-archive-title'); archiveTitle.id = 'feature-archived-title'; archiveTitle.hidden = true;
@@ -2477,6 +2476,7 @@ export function installFeatureUI({
     closePanels: () => { runtime.closeAttachMenu?.(); closeContactDirectory(); closeModal(); },
     setView,
     isFeatureView: () => runtime.currentView,
+    starredView: renderStarredView,
     getState: () => ({ ...runtime, selectedMessageIds: new Set(runtime.selectedMessageIds) }),
   };
 }
