@@ -61,3 +61,10 @@ test('composer Enter preference honors Shift, composition, keyboard shortcuts an
   assert.equal(shouldSubmitMessageKey(key({isComposing:true}), true, false), false);
   assert.equal(shouldSubmitMessageKey(key(), true, true), false);
 });
+
+test('el favorito se marca en la fila y Favoritos vacío explica cómo marcarlo (QA 22-10)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /featureUI\?\.isChatFavorite\?\.\(chat\)/);
+  assert.match(app, /aria-label', 'Chat en favoritos'/);
+  assert.match(app, /Aún no hay favoritos\. Marca uno desde/);
+});

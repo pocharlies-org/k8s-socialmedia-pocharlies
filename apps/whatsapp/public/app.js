@@ -276,6 +276,13 @@ function renderChats() {
       pin.title = 'Chat fijado';
       nameRow.append(pin);
     }
+    // QA 22-10: el favorito se filtraba pero no se veía en la fila de «Todos».
+    if (featureUI?.isChatFavorite?.(chat) || chat.favorite === true || chat.isFavorite === true) {
+      const fav = node('span', 'chat-fav');
+      fav.setAttribute('aria-label', 'Chat en favoritos');
+      fav.title = 'Chat en favoritos';
+      nameRow.append(fav);
+    }
     if (chat.muted === true || chat.isMuted === true) {
       const muted = node('span', 'chat-muted', 'Silenciado');
       muted.setAttribute('aria-label', 'Chat silenciado');
@@ -304,7 +311,7 @@ function renderChats() {
     row.append(button, menu);
     $('chats').append(row);
   }
-  $('chat-status').textContent = !state.chats.length ? (filter === 'archived' ? 'No hay chats archivados.' : 'Todavía no hay chats sincronizados para esta cuenta.') : !chats.length ? 'No hay conversaciones que coincidan.' : '';
+  $('chat-status').textContent = !state.chats.length ? (filter === 'archived' ? 'No hay chats archivados.' : 'Todavía no hay chats sincronizados para esta cuenta.') : !chats.length ? (filter === 'favorites' ? 'Aún no hay favoritos. Marca uno desde «⌄» en cualquier chat.' : 'No hay conversaciones que coincidan.') : '';
 }
 const chatLoads = new Map();
 async function loadChats({background = false} = {}) {

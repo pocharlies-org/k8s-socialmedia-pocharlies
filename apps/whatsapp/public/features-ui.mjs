@@ -2412,6 +2412,7 @@ export function installFeatureUI({
     openChatMenu,
     openSidebarChatMenu,
     isChatPinned: chat => chatIsPinned(chat, prefs()),
+    isChatFavorite: chat => chatIsFavorite(chat, prefs()),
     /** Close every features dialog from the app shell (rail panels are mutually exclusive). */
     closePanels: () => { runtime.closeAttachMenu?.(); closeContactDirectory(); closeModal(); },
     setView,
