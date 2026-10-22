@@ -1901,6 +1901,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             name: item.file_name || link,
             size: item.file_size || null,
             url: item.attachment_id ? `/api/media/${encodeURIComponent(item.attachment_id)}?account=${encodeURIComponent(a.accountId)}&chat=${encodeURIComponent(chat)}` : link,
+            // QA #72: la galería se bajaba los originales (9,2 MB/45 items). El thumb
+            // va por id de mensaje, como el de las burbujas (readMessages).
+            thumbUrl: item.message_type === 'IMAGE' ? `/api/media/thumb/${encodeURIComponent(item.id)}?account=${encodeURIComponent(a.accountId)}&chat=${encodeURIComponent(chat)}` : null,
             caption: item.caption || null,
           };
         }), nextCursor });

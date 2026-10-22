@@ -100,3 +100,9 @@ test('el fallo al saltar a un mensaje recarga la ventana en vez de clavarse (QA 
   const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(src, /\+\+state\.messageRequestToken;\s*\n\s*\$\('messages'\)\.replaceChildren/);
 });
+test('la pestaña avisa de los no leídos (QA #74)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /document\.title = unreadTotal \? `\(\$\{unreadTotal > 99 \? '99\+' : unreadTotal\}\) WhatsApp` : 'WhatsApp'/);
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<title>WhatsApp<\/title>/);
+});

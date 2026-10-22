@@ -1008,10 +1008,13 @@ export function installFeatureUI({
     }
     modal.body.append(tabs, node('p', 'feature-loading', 'Cargando…'));
     let items = [];
+    let cursor = null;
+    const serverKind = kind === 'media' ? 'gallery' : kind;
     try {
-      const serverKind = kind === 'media' ? 'gallery' : kind;
-      const result = await request('/api/chats/media', undefined, { chat: runtime.chat, kind: serverKind });
+      // QA #72: antes se pintaban los originales (9,2 MB/45 items) de una sola vez.
+      const result = await request('/api/chats/media', undefined, { chat: runtime.chat, kind: serverKind, limit: 60 });
       items = array(result.items || result.media || result.results);
+      cursor = result.nextCursor || null;
     } catch {
       items = localGallery(kind);
     }
@@ -1019,13 +1022,18 @@ export function installFeatureUI({
     const list = node('div', `feature-gallery-grid ${kind === 'links' ? 'links' : ''}`);
     list.replaceChildren();
     if (!items.length) list.append(node('p', 'feature-muted', 'No hay elementos disponibles en este chat.'));
-    for (const item of items) {
+    const renderCard = item => {
       const card = node('article', 'feature-gallery-card');
       const url = kind === 'links' ? safeWebUrl(item.url || item.href) : mediaUrl(item, windowRef?.location?.href || 'http://localhost/');
       if (kind === 'media' && url && text(item.mimeType || item.mime_type).startsWith('image/')) {
         const image = node('img', '', text(item.name || 'Imagen'));
-        image.src = url; image.alt = text(item.name || 'Imagen'); image.loading = 'lazy';
-        image.onerror = () => { image.remove(); card.prepend(node('span', 'feature-gallery-icon', 'IMG')); };
+        // La rejilla usa el thumb (jpegThumbnail del payload); el original solo
+        // al abrir (clic). Sin thumb, se cae al original como antes.
+        image.src = item.thumbUrl || url; image.alt = text(item.name || 'Imagen'); image.loading = 'lazy';
+        image.onerror = () => {
+          if (image.src !== url && url) { image.onerror = () => { image.remove(); card.prepend(node('span', 'feature-gallery-icon', 'IMG')); }; image.src = url; }
+          else { image.remove(); card.prepend(node('span', 'feature-gallery-icon', 'IMG')); }
+        };
         card.append(image);
       } else card.append(node('span', 'feature-gallery-icon', kind === 'documents' ? 'DOC' : kind === 'links' ? '↗' : 'MEDIA'));
       const copy = node('div', 'feature-gallery-copy');
@@ -1040,9 +1048,31 @@ export function installFeatureUI({
         card.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
       }
       list.append(card);
-    }
+    };
+    items.forEach(renderCard);
     modal.body.querySelector('.feature-loading')?.remove();
     modal.body.append(list);
+    // QA #72: paginación — «Cargar más» baja la siguiente página de 60.
+    const loadMore = () => {
+      const more = button(documentRef, 'Cargar más', 'feature-button subtle');
+      more.onclick = async () => {
+        more.disabled = true;
+        try {
+          const page = await request('/api/chats/media', undefined, { chat: runtime.chat, kind: serverKind, limit: 60, cursor });
+          const next = array(page.items || page.media || page.results);
+          if (!runtime.modal || runtime.modal.body !== modal.body) return;
+          next.forEach(renderCard);
+          cursor = page.nextCursor || null;
+          more.remove();
+          if (cursor) loadMore();
+        } catch {
+          more.disabled = false;
+          more.textContent = 'Reintentar';
+        }
+      };
+      modal.body.append(more);
+    };
+    if (cursor) loadMore();
   }
 
   function openSearch() {

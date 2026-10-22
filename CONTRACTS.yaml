@@ -2001,7 +2001,11 @@ contracts:
     esta listado porque el shell apunta el icono (link rel=icon): lo que es
     contrato aqui es esa referencia y la ruta; el texto del banner, el meta
     viewport del shell y el orden del estado de carga bajo la lista no forman
-    parte de esta entrada (SC-2760, 22-10).'
+    parte de esta entrada (SC-2760, 22-10). El icono es ahora de marca (burbuja
+    verde WhatsApp, ICO multi-resolución 16/32/48); la ruta, el MIME y la
+    referencia del shell no cambian. El <title> pasa a «WhatsApp» y la app lo
+    reemplaza por «(N) WhatsApp» con no leídos (QA #74) — el título no es
+    contrato.'
 - id: http.hindsight.socialmedia-bank.v1
   kind: http-route
   value: /v1/default/banks/{bank_id}
@@ -2384,7 +2388,11 @@ contracts:
     entiende refs s3:// contra S3_ENDPOINT/S3_BUCKET. Los 200/206 llevan
     cache-control private, max-age=86400, immutable (la fila de attachments es
     inmutable por id; sin ella el scroll volvía a bajar cada foto, QA
-    velocidad 22-10); los 4xx siguen sin caché.
+    velocidad 22-10); los 4xx siguen sin caché. /api/chats/media añade por
+    item `thumbUrl` (GET /api/media/thumb/<id de mensaje>, jpegThumbnail del
+    payload): la rejilla de la galería pinta el thumb y el original solo al
+    abrir — 9,2 MB/45 items a cientos de KB (QA #72). Campo aditivo; el
+    envelope y el cursor no cambian.
 - id: http.whatsapp-app.search.v1
   kind: http-route
   value: /api/search
