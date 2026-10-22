@@ -60,6 +60,16 @@ test('UI modules are served with a browser executable MIME type and require auth
   const font = await request('/fonts/roboto-latin-wght-normal.woff2');
   assert.equal(font.status, 200);
   assert.equal(font.headers.get('content-type'), 'font/woff2');
+  // QA velocidad: sin ETag el navegador no puede revalidar y bajaba los 2,33 MB de
+  // public/ en cada navegación (el no-store global heredado).
+  assert.equal(response.headers.get('cache-control'), 'private, max-age=300');
+  const etag = response.headers.get('etag');
+  assert.match(etag, /^"[A-Za-z0-9_-]{16,}"$/);
+  assert.equal((await request('/message-render.mjs', null, { 'if-none-match': etag })).status, 304);
+  // El HTML del shell sigue no-store: es el que apunta a los assets.
+  const shell = await request('/');
+  assert.equal(shell.status, 200);
+  assert.equal(shell.headers.get('cache-control'), 'no-store');
 });
 test('authenticated media preserves partial responses for audio seeking and rejects invalid ranges', async t => {
   const id = '11111111-1111-1111-1111-111111111111';
@@ -82,6 +92,8 @@ test('authenticated media preserves partial responses for audio seeking and reje
   const path = `/api/media/${id}?account=personal&chat=personal-chat`;
   const response = await request(path, null, { range: 'bytes=2-5', 'if-range': '"fixture"' });
   assert.equal(response.status, 206);
+  // QA velocidad: attachments es inmutable por id; sin esto el scroll volvía a bajar cada foto.
+  assert.equal(response.headers.get('cache-control'), 'private, max-age=86400, immutable');
   assert.equal(response.headers.get('content-range'), 'bytes 2-5/10');
   assert.equal(response.headers.get('accept-ranges'), 'bytes');
   assert.equal(response.headers.get('content-length'), '4');
@@ -376,7 +388,8 @@ test('thumbnail fallback is account and chat scoped and serves only bounded JPEG
   const response = await request(path);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'image/jpeg');
-  assert.equal(response.headers.get('cache-control'), 'no-store');
+  // QA velocidad: la miniatura del payload es inmutable por id → cacheable.
+  assert.equal(response.headers.get('cache-control'), 'private, max-age=86400, immutable');
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), jpeg);
   thumbnail = { __socialmedia_type: 'Uint8Array', value: jpeg.toString('base64') };
   assert.deepEqual(Buffer.from(await (await request(path)).arrayBuffer()), jpeg);

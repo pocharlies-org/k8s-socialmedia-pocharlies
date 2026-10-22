@@ -2297,7 +2297,10 @@ contracts:
     GET /auth/callback de la app whatsapp.e-dani.com: cierre del flujo OIDC
     (codigo + state -> sesion). El 403 (sub fuera de OIDC_ALLOWED_SUBJECTS) se
     contesta en HTML con el enlace de logout del issuer, no en JSON: quien
-    navega necesita cerrar la sesion SSO equivocada (Dani, 19-10).
+    navega necesita cerrar la sesion SSO equivocada (Dani, 19-10). El 400
+    (enlace caducado o state/nonce invalido) tambien es HTML, con «Volver a
+    entrar» que reinicia el flujo: nunca JSON desnudo al navegador (UX #1.1,
+    22-10).
   exception:
     reason: >-
       Log de acceso y eventos de auth (QA #77): se anade console.log dentro del
@@ -2360,7 +2363,10 @@ contracts:
     whatsapp.e-dani.com. El id es bigint (o uuid legacy): nunca validar solo
     por patrón uuid (QA #6). La referencia sale solo de attachments.file_url
     — storage_key no existe en la casa (42703, QA #12) — y mediaRequest
-    entiende refs s3:// contra S3_ENDPOINT/S3_BUCKET.
+    entiende refs s3:// contra S3_ENDPOINT/S3_BUCKET. Los 200/206 llevan
+    cache-control private, max-age=86400, immutable (la fila de attachments es
+    inmutable por id; sin ella el scroll volvía a bajar cada foto, QA
+    velocidad 22-10); los 4xx siguen sin caché.
 - id: http.whatsapp-app.search.v1
   kind: http-route
   value: /api/search
@@ -2392,4 +2398,7 @@ contracts:
     avatarUrl solo con foto guardada (null = iniciales): forzar la URL del
     proxy en cada fila disparaba ~1 peticion por chat al abrir (985 medidas,
     931x404 + 54x502 del conector); la busqueda al proveedor queda para la
-    cabecera del chat abierto.
+    cabecera del chat abierto. Los 200 de avatar (chats y contacts) salen con
+    cache-control private max-age=86400 + ETag y responden 304 a
+    if-none-match (QA velocidad 3, 22-10: el no-store global hacia bajar 7,6 MB
+    de avatares en cada apertura); los 404/5xx siguen no-store.
