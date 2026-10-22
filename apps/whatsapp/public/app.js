@@ -682,6 +682,10 @@ function resizeMessageInput() {
   input.style.overflowY = input.scrollHeight > height ? 'auto' : 'hidden';
 }
 // QA #60: el límite del servidor (20000) devolvía un 400 lejos del foco; el contador avisa antes.
+// Va en JS y no en index.html porque el shell está bajo contrato (http.whatsapp-app.favicon.v1).
+$('message').maxLength = 20000;
+const charCount = node('small', ''); charCount.id = 'char-count'; charCount.hidden = true;
+document.querySelector('.message-input').append(charCount);
 function saveDraft() {
   resizeMessageInput();
   const length = $('message').value.length;
