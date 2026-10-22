@@ -2418,8 +2418,10 @@ contracts:
     mismo término no vuelve a la BD; 30 s de antigüedad aceptables). Desde
     QA #100 hay además caché de resultado en el proceso (60 s por
     cuenta+término+ámbito+cursor): el trgm de un término común trae miles de
-    filas y el heap fetch costaba 2,9 s repetida. El envelope y el cursor son
-    contrato; la cabecera de caché no lo es.
+    filas y el heap fetch costaba 2,9 s repetida. Toda mutación de mensaje
+    (reply/react/forward/edit/delete) vacía esa caché: un mensaje borrado o
+    editado no puede seguir saliendo en la búsqueda. El envelope y el cursor
+    son contrato; la cabecera de caché no lo es.
 - id: http.whatsapp-app.chat-details.v1
   kind: http-route
   value: /api/chat-details

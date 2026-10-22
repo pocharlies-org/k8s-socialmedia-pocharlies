@@ -2383,6 +2383,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       // CONTRACT: http.whatsapp-app.messages-delete.v1
       if (req.method === 'POST' && (path === '/api/messages/reply' || path === '/api/messages/react' || path === '/api/messages/forward' || path === '/api/messages/edit' || path === '/api/messages/delete' || path === '/api/message-actions' || path === '/api/messages/action' || path === '/api/messages/actions')) {
         const body = await bodyJSON(req);
+        // Any message mutation can change what /api/search must answer (deletion,
+        // edit), so the 60 s result cache dies here rather than serving a stale body.
+        searchCache.clear();
         const a = accountParam(body.account); const chat = safeChatId(body.chat || body.chatId);
         const pathAction = path.match(/^\/api\/messages\/(reply|react|forward|edit|delete)$/)?.[1];
         const action = String(body.action || pathAction || '').toLowerCase();
