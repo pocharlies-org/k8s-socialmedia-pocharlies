@@ -124,8 +124,9 @@ test('History.clear drops every retained snapshot on close', () => {
 test('applying an edit revalidates size and type through the attachment guard', () => {
   const oversize = {name: 'grande-editada.jpg', type: 'image/jpeg', size: MAX_ATTACHMENT_BYTES + 1};
   assert.equal(attachmentError(oversize), 'El archivo supera el límite de 10 MiB.');
+  // QA #91: octet-stream ya no se rechaza — entra como documento.
   const wrongType = {name: 'editada.bin', type: 'application/octet-stream', size: 1000};
-  assert.equal(attachmentError(wrongType), 'Este tipo de archivo no se puede enviar.');
+  assert.equal(attachmentError(wrongType), '');
   const valid = {name: 'bien-editada.jpg', type: 'image/jpeg', size: 4096};
   assert.equal(attachmentError(valid), '');
 });

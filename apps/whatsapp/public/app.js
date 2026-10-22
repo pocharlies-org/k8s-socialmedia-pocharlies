@@ -990,6 +990,8 @@ function stageSelectedFiles(files, viewOnce = false) {
 $('attach').onclick = () => $('attachment').click();
 $('suggest').onclick = () => { void proposeMessage(); };
 $('attachment').multiple = true;
+// QA #91: el accept del diálogo era una lista cerrada de 6 tipos; el shell está bajo contrato, se abre desde JS.
+$('attachment').accept = '';
 $('attachment').onchange = () => { const files = [...$('attachment').files]; $('attachment').value = ''; stageSelectedFiles(files); };
 document.addEventListener('paste', event => {
   if (!attachmentTools || !state.chat || !state.sending) return;
