@@ -9,6 +9,7 @@ import { createEventComposer } from './event-composer.mjs';
 import { localDayRange } from './message-date.mjs';
 import { createEmojiPicker } from './emoji-picker.mjs';
 import { attachmentError } from './composer-attachment.mjs';
+import { appendRichText } from './message-render.mjs';
 
 /*
  * Feature UI for the selected WhatsApp Web inventory.  The module owns the
@@ -848,7 +849,9 @@ export function installFeatureUI({
     identity.append(photo, copy);
     modal.body.append(identity);
     if (isGroup) {
-      const about = node('p', 'feature-description', info.description || info.desc || 'Sin descripción');
+      // UX #8.3: la descripción se pinta con el mismo marcado que los cuerpos.
+      const about = node('p', 'feature-description');
+      appendRichText(about, info.description || info.desc || 'Sin descripción', documentRef, false);
       modal.body.append(about);
       const capabilities = result.capabilities || info.capabilities || {};
       if (bool(capabilities.editInfo)) {
@@ -1143,7 +1146,9 @@ export function installFeatureUI({
     if (!composer) return;
     let quote = documentRef.getElementById('feature-reply-quote');
     if (!quote) { quote = node('div', 'feature-reply-quote'); quote.id = 'feature-reply-quote'; composer.parentElement.insertBefore(quote, composer); }
-    quote.replaceChildren(node('span', 'feature-reply-label', 'Respondiendo a'), node('strong', '', messageText(message)));
+    // UX #8.4: el autor citado, como WhatsApp («Respondiendo a <nombre>»).
+    const sender = message?.fromMe ? 'Tú' : String(message?.senderName || '').trim();
+    quote.replaceChildren(node('span', 'feature-reply-label', sender ? `Respondiendo a ${sender}` : 'Respondiendo a'), node('strong', '', messageText(message)));
     const close = button(documentRef, 'Cancelar', 'feature-reply-close');
     close.onclick = clearReply;
     quote.append(close);

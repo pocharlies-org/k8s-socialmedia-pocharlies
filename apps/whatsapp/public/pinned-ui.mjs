@@ -1,3 +1,5 @@
+import { appendRichText } from './message-render.mjs';
+
 export function installPinnedUI({messages, getContext, api, openMessage, documentRef = globalThis.document, now = Date.now, schedule = setTimeout, cancel = clearTimeout}) {
   const bar = documentRef.createElement('nav');
   bar.className = 'pinned-message-bar';
@@ -23,7 +25,10 @@ export function installPinnedUI({messages, getContext, api, openMessage, documen
     const link = documentRef.createElement('button');
     link.type = 'button'; link.className = 'pinned-message-link';
     const label = documentRef.createElement('strong'); label.textContent = 'Mensaje fijado';
-    const preview = documentRef.createElement('span'); preview.textContent = item.text || ({IMAGE:'Foto',VIDEO:'Video',AUDIO:'Audio',POLL:'Encuesta',EVENT:'Evento',DOCUMENT:'Documento'}[item.type] || 'Mensaje');
+    const preview = documentRef.createElement('span');
+    // UX #8.3: el banner de fijado pinta los marcadores como los cuerpos.
+    if (item.text) appendRichText(preview, item.text, documentRef, false);
+    else preview.textContent = ({IMAGE:'Foto',VIDEO:'Video',AUDIO:'Audio',POLL:'Encuesta',EVENT:'Evento',DOCUMENT:'Documento'}[item.type] || 'Mensaje');
     link.append(label, preview);
     const capturedScope = scope;
     link.onclick = async () => {

@@ -24,9 +24,10 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
   const heading = node('h3', '', 'Opciones');
   const list = node('div', 'poll-option-list');
   const rows = [];
-  const add = button('A\u00f1adir opci\u00f3n');
+  const add = button('A\u00f1adir otra opci\u00f3n');
   const multipleLabel = node('label', 'poll-multiple');
-  const multiple = node('input'); multiple.type = 'checkbox'; multiple.checked = true;
+  // UX #8.7: WhatsApp crea la encuesta con votación única (el toggle, apagado).
+  const multiple = node('input'); multiple.type = 'checkbox'; multiple.checked = false;
   multiple.setAttribute('role', 'switch');
   multipleLabel.append(multiple, node('span', '', 'Permitir varias respuestas'));
   const status = node('p', 'poll-composer-status'); status.setAttribute('role', 'alert'); status.hidden = true;
