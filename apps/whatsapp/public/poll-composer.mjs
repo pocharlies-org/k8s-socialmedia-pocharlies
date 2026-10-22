@@ -20,6 +20,8 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
   const questionLabel = node('label', 'feature-field', 'Pregunta');
   const question = node('textarea'); question.name = 'question'; question.rows = 2;
   question.maxLength = 255; question.required = true; question.placeholder = 'Haz una pregunta';
+  // QA #78: el placeholder no es nombre accesible; el label envuelto no bastaba.
+  question.setAttribute('aria-label', 'Pregunta de la encuesta');
   questionLabel.append(question);
   const heading = node('h3', '', 'Opciones');
   const list = node('div', 'poll-option-list');
@@ -65,6 +67,7 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
     const element = node('div', 'poll-option-row');
     const label = node('label', 'feature-field');
     const input = node('input'); input.type = 'text'; input.maxLength = 100; input.required = true; input.placeholder = 'A\u00f1ade texto';
+    input.setAttribute('aria-label', 'Texto de la opci\u00f3n');
     const up = button('\u2191'); const down = button('\u2193'); const remove = button('\u00d7');
     const controls = node('div', 'poll-option-controls'); controls.append(up, down, remove);
     const row = {element, label, input, up, down, remove};

@@ -11,6 +11,8 @@ export function createEventComposer({documentRef = globalThis.document, submit, 
     const input = node(type === 'textarea' ? 'textarea' : 'input');
     if (type === 'textarea') input.rows = 3; else input.type = type;
     if (maxLength) input.maxLength = maxLength;
+    // QA #78: nombre accesible explícito (el placeholder no cuenta como tal).
+    input.setAttribute('aria-label', label);
     wrapper.append(input); return {wrapper, input};
   };
   const form = node('form', 'event-composer feature-form');

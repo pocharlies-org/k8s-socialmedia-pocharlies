@@ -81,7 +81,7 @@ test('event creation sends explicit instants, end date, description, named locat
   assert.equal(calls.length, 0);
   assert.equal((await request('/api/messages/compose', body)).status, 200);
   assert.deepEqual(calls, [{url: 'http://secondary-connector/api/v1/messages/event', body: {name: 'Picnic', description: 'Bring lunch',
-    location: {name: 'Park'}, startDate: '2026-09-30T16:00:00.000Z', endDate: '2026-09-30T18:00:00.000Z', conversationId: 'secondary-chat', sendToken: body.sendToken, idempotencyKey: body.sendToken}}]);
+    location: {name: 'Park'}, startTime: '2026-09-30T16:00:00.000Z', endTime: '2026-09-30T18:00:00.000Z', conversationId: 'secondary-chat', sendToken: body.sendToken, idempotencyKey: body.sendToken}}]);
 });
 
 test('poll creation preserves option rows, validates provider limits and forwards the scoped retry token', async t => {
@@ -101,7 +101,7 @@ test('poll creation preserves option rows, validates provider limits and forward
   assert.equal(calls.length, 0);
   assert.equal((await request('/api/messages/compose', body)).status, 200);
   assert.deepEqual(calls, [{url: 'http://secondary-connector/api/v1/messages/poll', body: {
-    conversationId: 'secondary-chat', name: 'Menu?', values: ['Pasta, ensalada', 'Arroz'], selectableCount: 1, sendToken: body.sendToken, idempotencyKey: body.sendToken,
+    conversationId: 'secondary-chat', name: 'Menu?', options: ['Pasta, ensalada', 'Arroz'], selectableCount: 1, sendToken: body.sendToken, idempotencyKey: body.sendToken,
   }}]);
 });
 
@@ -1176,4 +1176,15 @@ test('/api/chats/media enseña thumbUrl para que la galería no baje originales 
   const src = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
   assert.match(src, /thumbUrl: item\.message_type === 'IMAGE'/);
   assert.match(src, /\/api\/media\/thumb\/\$\{encodeURIComponent\(item\.id\)\}\?account=/);
+});
+
+test('QA #79/#77: la proyección normaliza la forma almacenada por el conector', () => {
+  assert.deepEqual(publicMessageMetadata({ contact: { displayName: 'Ana', contacts: [{ displayName: 'Ana', phones: ['+34600111222'], waids: ['waid'] }] } }),
+    { kind: 'contact', contacts: [{ displayName: 'Ana', phone: '+34600111222', email: null, organization: null }] });
+  assert.deepEqual(publicMessageMetadata({ poll: { question: 'Menú?', options: ['A', 'B'], selectableCount: 1 } }),
+    { kind: 'poll', options: ['A', 'B'], selectableCount: 1 });
+  assert.deepEqual(publicMessageMetadata({ event: { name: 'Comida', description: '14:00', startTime: 1790000000000, endTime: 1790003600000, isCanceled: true } }),
+    { kind: 'event', description: '14:00', startTime: 1790000000000, endTime: 1790003600000,
+      location: { name: null, degreesLatitude: null, degreesLongitude: null }, isCancelled: true, extraGuestsAllowed: false });
+  assert.equal(publicMessageMetadata({}, 'VIEWONCEMESSAGE').viewOnce, true);
 });
