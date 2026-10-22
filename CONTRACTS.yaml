@@ -1957,7 +1957,9 @@ contracts:
     retry: each owner attempt retains its original model/effort snapshot. Model options are sent
     to the native session lock and run/completion request; default sends an empty options object
     to clear a prior explicit reasoning override. The provider may clamp reasoning levels; the
-    catalog must not claim a distinct unsupported wire level or expose credentials.'
+    catalog must not claim a distinct unsupported wire level or expose credentials. El texto
+    legible de los errores 502/503 no es contrato (copia para el usuario, traducida al castellano
+    en QA #13 22-10); lo congelado es la ruta, la autenticación y los códigos de estado.'
 - id: http.whatsapp-app.hermes-stop.v1
   kind: http-route
   value: /api/ai/stop
@@ -1979,7 +1981,9 @@ contracts:
     Settlement checks the current ledger run under the session lock so an old stop cannot overwrite
     a later retry. Failed results add sanitized error and retryable fields; only a proven unknown
     provider failure before execution permits explicit retryFailedRun on the same owner turn,
-    preserving its delivery request ID and using a separate run-submission idempotency key.'
+    preserving its delivery request ID and using a separate run-submission idempotency key. El texto
+    legible de los errores 502/503 no es contrato (copia para el usuario, traducida al castellano
+    en QA #13 22-10); lo congelado es la ruta, la autenticación y los códigos de estado.'
 - id: http.whatsapp-app.favicon.v1
   kind: http-route
   value: /favicon.ico

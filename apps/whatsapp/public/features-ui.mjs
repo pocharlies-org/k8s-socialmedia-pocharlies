@@ -288,6 +288,8 @@ export async function runScopedMutation({ request, isCurrent, refreshChats, refr
     if (refreshMessages) await refreshMessages();
     if (!isCurrent()) return null;
     if (success) toast(success, 'success');
+    // QA #13: el banner de error era pegajoso — ninguna ruta de éxito lo limpiaba.
+    showError('');
     return result;
   } catch (error) {
     if (!isCurrent()) return null;
@@ -1055,6 +1057,7 @@ export function installFeatureUI({
     let jumping = false;
     dateForm.onsubmit = async event => {
       event.preventDefault(); if (jumping) return;
+      if (!date.input.value) { dateStatus.textContent = 'Elige una fecha antes de pulsar Ir.'; return; }
       refreshToday();
       const context = {account: runtime.account, chat: runtime.chat, generation: runtime.generation};
       const current = () => runtime.modal?.body === modal.body && runtime.account === context.account && runtime.chat === context.chat && runtime.generation === context.generation;
@@ -1131,7 +1134,7 @@ export function installFeatureUI({
           if (!messageId) return;
           const renderedId = text(runtime.currentMessages.find(message => text(message.id) === messageId || text(message.waMessageId) === messageId)?.id || messageId);
           const bubble = [...documentRef.querySelectorAll('#messages [data-message-id]')].find(element => element.dataset.messageId === renderedId);
-          if (bubble) { bubble.tabIndex = -1; bubble.scrollIntoView?.({ block: 'center' }); bubble.focus?.({preventScroll: true}); }
+          if (bubble) { bubble.tabIndex = -1; bubble.classList.add('message-highlight'); bubble.scrollIntoView?.({ block: 'center' }); bubble.focus?.({preventScroll: true}); }
           else {
             try { await showHistoricalMessage(messageId); }
             catch (error) { toast(error.message || 'No se pudo cargar el mensaje encontrado.', 'error'); }

@@ -513,7 +513,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const body = await result.json().catch(() => null);
         const reason = body && typeof body === 'object' ? cleanProviderValue(body.error, 300) : null;
         const failureClass = body && typeof body === 'object' ? cleanProviderValue(body.failureClass, 64) : null;
-        const error = fail(502, reason || `Upstream returned HTTP ${result.status}`);
+        const error = fail(502, reason || `El servicio de WhatsApp devolvió HTTP ${result.status}`);
         error.upstreamStatus = result.status;
         if (reason || failureClass) {
           error.code = cleanProviderValue(body.code, 64) || 'UPSTREAM_REJECTED';
@@ -522,7 +522,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         throw error;
       }
       return result;
-    } catch (e) { if (e.status) throw e; throw fail(502, 'Upstream unavailable or timed out; action is not confirmed'); }
+    } catch (e) { if (e.status) throw e; throw fail(502, 'El servicio de WhatsApp no responde o ha agotado el tiempo de espera; la acción no está confirmada'); }
   }
   async function recoverHermesAnswer(hermesId, marker) {
     const response = await remote(`${hermesApiBaseUrl(env.HERMES_API_URL)}/api/sessions/${encodeURIComponent(hermesId)}/messages?limit=500&order=latest`, {
@@ -2786,7 +2786,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       }
       // CONTRACT: http.whatsapp-app.hermes-settings.v1
       if (['GET', 'POST'].includes(req.method) && path === '/api/ai/settings') {
-        if (!env.HERMES_API_URL || !env.HERMES_API_KEY) throw fail(503, 'Hermes endpoint is not configured');
+        if (!env.HERMES_API_URL || !env.HERMES_API_KEY) throw fail(503, 'El asistente de IA no está configurado');
         const body = req.method === 'POST' ? await bodyJSON(req) : Object.fromEntries(url.searchParams);
         const a = accountFor(body.account);
         const conversation = await conversationFor(a, body.chat);
@@ -2865,7 +2865,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           if (body.voice) return json(200, await connector(a, '/messages/audio', { conversationId: providerChat, audioBase64: (await voiceBytes(bytes)).toString('base64'), mimeType: 'audio/ogg; codecs=opus', sourceDigest, sourceMimeType: body.mimeType, sendToken: sendToken(body) }));
           return json(200, await connector(a, '/messages/media/send', { conversationId: providerChat, fileUrl: `data:${body.mimeType};base64,${bytes.toString('base64')}`, fileName: body.name, quality, caption, replyTo, ...(viewOnce ? { viewOnce: true } : {}), sourceDigest, sourceMimeType: body.mimeType, sendToken: sendToken(body) }));
         }
-        if (!env.HERMES_API_URL || !env.HERMES_API_KEY) throw fail(503, 'Hermes endpoint is not configured');
+        if (!env.HERMES_API_URL || !env.HERMES_API_KEY) throw fail(503, 'El asistente de IA no está configurado');
         const images = hermesImages(body.images);
         const message = required(body.message || (images.length ? 'Describe estas imagenes' : ''), 'message', 20000);
         required(env.HERMES_DEFAULT_MODEL || env.APP_AI_DEFAULT_MODEL, 'HERMES_DEFAULT_MODEL', 200);

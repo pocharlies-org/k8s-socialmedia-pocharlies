@@ -803,7 +803,7 @@ test('reject removes a scoped proposal without sending; emergency gate blocks ap
 test('upstream timeout returns explicit uncertainty', async t => {
   const { request } = await fixture(t, { fetchImpl: async () => { throw new DOMException('timeout', 'TimeoutError'); } });
   const response = await request('/api/send', { account: 'personal', chat: 'personal-chat', text: 'hello' });
-  assert.equal(response.status, 502); assert.match((await response.json()).error, /not confirmed/);
+  assert.equal(response.status, 502); assert.match((await response.json()).error, /no está confirmada/);
 });
 test('model catalog excludes non-chat metadata and exposes configured default', async t => {
   const { request } = await fixture(t, { env: { LITELLM_BASE_URL: 'http://models/v1', LITELLM_API_KEY: 'key', APP_AI_DEFAULT_MODEL: 'chat-a' }, fetchImpl: async url => {
