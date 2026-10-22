@@ -429,3 +429,9 @@ test('los seis filtros del listado llevan recuento y aria-label con número (QA 
   assert.match(src, /entry\.setAttribute\('aria-label', `Archivados: \$\{counts\.archived\}`\)/);
   assert.match(src, /filterChats = array\(chats\);\n\s*updateFilterCounts\(\);/);
 });
+test('el adjunto citado se nombra por tipo (nit QA 22-10)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /type\.startsWith\('video'\) \? 'Vídeo'/);
+  assert.match(src, /type === 'sticker' \? 'Sticker'/);
+  assert.match(src, /startsWith\('image'\) \? 'Foto'/);
+});

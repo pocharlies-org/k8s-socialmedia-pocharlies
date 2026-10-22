@@ -527,7 +527,13 @@ function initials(value) {
 }
 
 function messageText(message) {
-  return text(message?.text || message?.content).trim() || (array(message?.attachments).length ? 'Archivo adjunto' : 'Mensaje no disponible');
+  // Nit QA 22-10: la oficial distingue el adjunto citado por tipo; «Archivo adjunto»
+  // solo queda para lo que no se reconozca.
+  const attachment = array(message?.attachments)[0];
+  const type = text(attachment?.type || attachment?.fileType || attachment?.file_type).toLowerCase();
+  const kind = type.startsWith('video') ? 'Vídeo' : type.startsWith('audio') ? 'Audio'
+    : type === 'sticker' ? 'Sticker' : type.startsWith('image') ? 'Foto' : type === 'document' ? 'Documento' : 'Archivo adjunto';
+  return text(message?.text || message?.content).trim() || (array(message?.attachments).length ? kind : 'Mensaje no disponible');
 }
 
 function mediaUrl(item, baseUrl = 'http://localhost/') {
