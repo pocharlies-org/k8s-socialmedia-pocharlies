@@ -2450,7 +2450,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             catch (error) { throw fail(400, error.message); }
             result = await connector(a, '/messages/poll', {
               name: draft.question,
-              values: draft.options,
+              // QA #78: el conector vivo (v1.3.120) sólo lee `options`; el alias
+              // `values` llegó en 8702dd4, sin desplegar → 400 siempre.
+              options: draft.options,
               selectableCount: draft.selectableCount,
               sendToken: sendToken(body),
               conversationId: providerChat,
@@ -2461,9 +2463,10 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
             catch (error) { throw fail(400, error.message); }
             result = await connector(a, '/messages/event', {
               name: draft.title,
-              startDate: draft.dateTime,
+              // QA #78: mismo que la encuesta — nombres del contrato declarado.
+              startTime: draft.dateTime,
               ...(draft.description ? {description: draft.description} : {}),
-              ...(draft.endDateTime ? {endDate: draft.endDateTime} : {}),
+              ...(draft.endDateTime ? {endTime: draft.endDateTime} : {}),
               ...(draft.location ? {location: {name: draft.location}} : {}),
               sendToken: sendToken(body),
               conversationId: providerChat,

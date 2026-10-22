@@ -81,7 +81,7 @@ test('event creation sends explicit instants, end date, description, named locat
   assert.equal(calls.length, 0);
   assert.equal((await request('/api/messages/compose', body)).status, 200);
   assert.deepEqual(calls, [{url: 'http://secondary-connector/api/v1/messages/event', body: {name: 'Picnic', description: 'Bring lunch',
-    location: {name: 'Park'}, startDate: '2026-09-30T16:00:00.000Z', endDate: '2026-09-30T18:00:00.000Z', conversationId: 'secondary-chat', sendToken: body.sendToken, idempotencyKey: body.sendToken}}]);
+    location: {name: 'Park'}, startTime: '2026-09-30T16:00:00.000Z', endTime: '2026-09-30T18:00:00.000Z', conversationId: 'secondary-chat', sendToken: body.sendToken, idempotencyKey: body.sendToken}}]);
 });
 
 test('poll creation preserves option rows, validates provider limits and forwards the scoped retry token', async t => {
@@ -101,7 +101,7 @@ test('poll creation preserves option rows, validates provider limits and forward
   assert.equal(calls.length, 0);
   assert.equal((await request('/api/messages/compose', body)).status, 200);
   assert.deepEqual(calls, [{url: 'http://secondary-connector/api/v1/messages/poll', body: {
-    conversationId: 'secondary-chat', name: 'Menu?', values: ['Pasta, ensalada', 'Arroz'], selectableCount: 1, sendToken: body.sendToken, idempotencyKey: body.sendToken,
+    conversationId: 'secondary-chat', name: 'Menu?', options: ['Pasta, ensalada', 'Arroz'], selectableCount: 1, sendToken: body.sendToken, idempotencyKey: body.sendToken,
   }}]);
 });
 
