@@ -414,3 +414,10 @@ test('reenviar al chat abierto refresca el transcript (QA #116)', async () => {
   const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(src, /if \(sent && targetChat === source\.chat\) refetchAfterEcho\(\);/);
 });
+
+test('los mensajes ajenos ofrecen «Eliminar para mí» con el alcance único (UX #36.1)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /add\('Eliminar para mí', item => \{ closeModal\(\); openDelete\(item, false\); \}/);
+  assert.match(src, /function openDelete\(message, mine = true\)/);
+  assert.match(src, /\.\.\.\(mine \? \[option\(documentRef, 'Eliminar para todos', 'everyone'\)\] : \[\]\)/);
+});

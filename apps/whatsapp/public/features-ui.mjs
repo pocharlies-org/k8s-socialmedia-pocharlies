@@ -1395,10 +1395,11 @@ export function installFeatureUI({
     modal.body.append(form);
   }
 
-  function openDelete(message) {
+  function openDelete(message, mine = true) {
     const modal = openModal('Eliminar mensaje', { opener: documentRef.activeElement });
-    modal.body.append(node('p', '', 'Elige si quieres quitar el mensaje solo de tu historial o solicitar su eliminación para todos.'));
-    const scope = documentRef.createElement('select'); scope.setAttribute('aria-label', 'Alcance del borrado'); scope.append(option(documentRef, 'Eliminar para mí', 'me'), option(documentRef, 'Eliminar para todos', 'everyone'));
+    // UX #36.1: en un mensaje ajeno solo existe «para mí» (como la oficial); «para todos» es solo de los propios.
+    modal.body.append(node('p', '', mine ? 'Elige si quieres quitar el mensaje solo de tu historial o solicitar su eliminación para todos.' : 'El mensaje solo se quita de tu historial; tus contactos lo seguirán viendo.'));
+    const scope = documentRef.createElement('select'); scope.setAttribute('aria-label', 'Alcance del borrado'); scope.append(option(documentRef, 'Eliminar para mí', 'me'), ...(mine ? [option(documentRef, 'Eliminar para todos', 'everyone')] : []));
     const confirm = button(documentRef, 'Eliminar', 'feature-button danger');
     confirm.onclick = async () => { const result = await mutate('/api/messages/delete', { messageId: message.id, scope: scope.value }, { refreshMessages: true, success: 'Mensaje eliminado.' }); if (result) closeModal(); };
     modal.body.append(scope, confirm);
@@ -1494,6 +1495,9 @@ export function installFeatureUI({
     if (message.fromMe === true) {
       add('Editar', item => { closeModal(); openEdit(item); });
       add('Eliminar', item => { closeModal(); openDelete(item); }, 'feature-button danger');
+    } else {
+      // UX #36.1: los ajenos se pueden quitar del propio historial (el servidor ya lo admite: allowRevoked scope=me).
+      add('Eliminar para mí', item => { closeModal(); openDelete(item, false); }, 'feature-button danger');
     }
     modal.body.append(actions);
     actions.firstElementChild?.focus();
