@@ -756,10 +756,29 @@ async function sendOptimistic(item, path, payload) {
     result = await api(path, {account: item.account, chat: item.chat, ...body, sendToken: item.sendToken});
     if (!result.messageId) throw new Error('El servidor no confirmó el identificador del mensaje.');
   } catch (err) {
+    // QA 22-10: un 4xx de validación es determinista — no se envió nada. La burbuja
+    // optimista mentía («Entrega no confirmada») y el aviso de resultado incierto
+    // era falso. Fuera la burbuja y el texto vuelve al composer (sin adjuntos: esos
+    // conservan el flujo failed con «Adjunta de nuevo»).
+    if (err.status >= 400 && err.status < 500 && err.status !== 401 && err.outcomeUncertain !== true && !item.file && !item.fileName) {
+      state.outgoing.set(outgoingKey(item.account, item.chat), outgoingFor(item.account, item.chat).filter(entry => entry !== item));
+      persistOutbox();
+      if (current(item.ctx)) {
+        const composer = $('message');
+        composer.value = composer.value ? `${composer.value}\n${item.text}` : item.text;
+        resizeMessageInput(); saveDraft();
+        if (item.replyTo) featureUI?.restoreReply?.(item.replyTo);
+        error(err.message);
+        state.signature = '';
+        renderMessages();
+      }
+      return false;
+    }
     item.state = 'failed';
     persistOutbox();
     if (current(item.ctx)) {
-      error(`${err.message} Comprueba si llegó antes de volver a enviarlo.`);
+      const uncertain = !err.status || err.status >= 500 || err.outcomeUncertain === true;
+      error(uncertain && !err.message.includes('Comprueba') ? `${err.message} Comprueba si llegó antes de volver a enviarlo.` : err.message);
       state.signature = '';
       renderMessages();
     }

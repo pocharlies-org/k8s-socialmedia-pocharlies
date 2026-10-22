@@ -18,7 +18,8 @@ export function signedHeaders(body, secret) {
     'x-connector-signature': `sha256=${createHmac('sha256', secret).update(`${timestamp}:${JSON.stringify(body)}`).digest('hex')}` };
 }
 export function required(value, name, max = 1024) {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw fail(400, `Invalid ${name}`);
+  // QA 22-10: era «Invalid text» en inglés; el texto legible no es contrato (#318).
+  if (typeof value !== 'string' || !value.trim() || value.length > max) throw fail(400, `El campo ${name} no es válido o supera los ${max} caracteres`);
   return value;
 }
 export function isValidBase64(value) {

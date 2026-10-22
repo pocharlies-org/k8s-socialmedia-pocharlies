@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidBase64, uploadBytes } from '../lib/security.mjs';
+import { isValidBase64, required, uploadBytes } from '../lib/security.mjs';
 
 test('base64 validation preserves the previous alphabet and padding semantics', () => {
   const previous = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -24,4 +24,9 @@ test('base64 validation handles multi-MiB strings and malformed tails without ex
     assert.deepEqual(uploadBytes({ name: 'image.png', mimeType: 'image/png', data }), bytes);
     assert.equal(isValidBase64(data.slice(0, -4) + 'AA=A'), false);
   }
+});
+
+test('required rechaza en castellano y dice el máximo (QA 22-10)', () => {
+  assert.throws(() => required('x'.repeat(20_001), 'text', 20_000), /El campo text no es válido o supera los 20000 caracteres/);
+  assert.equal(required('hola', 'text', 20_000), 'hola');
 });
