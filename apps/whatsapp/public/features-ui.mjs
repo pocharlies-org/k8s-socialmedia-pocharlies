@@ -625,9 +625,36 @@ export function installFeatureUI({
 
   function prefs() { return store.read(runtime.account); }
 
+  // QA #84 (22-10): cada filtro enseña cuántos chats muestra. chatFilter es cliente (app.js),
+  // así que el array cargado siempre es completo — el recuento no cuesta un refetch.
+  const VIEW_FILTERS = [['Todos', 'all'], ['No leídos', 'unread'], ['Grupos', 'groups'], ['Favoritos', 'favorites'], ['Destacados', 'starred']];
+  let filterChats = [];
+
+  function updateFilterCounts() {
+    if (!filterChats.length) return;
+    const local = prefs();
+    const counts = { starred: local.starredMessages.length };
+    for (const view of ['all', 'unread', 'groups', 'favorites', 'archived']) {
+      counts[view] = filterChats.filter(chat => matchesChatView(chat, view, local)).length;
+    }
+    for (const [label, view] of VIEW_FILTERS) {
+      const item = documentRef.querySelector(`[data-feature-view="${view}"]`);
+      if (!item) continue;
+      item.textContent = `${label} ${counts[view]}`;
+      item.setAttribute('aria-label', `${label}: ${counts[view]}`);
+    }
+    const entry = documentRef.getElementById('feature-archived-entry');
+    if (entry) {
+      const count = documentRef.getElementById('feature-archived-count');
+      if (count) count.textContent = ` ${counts.archived}`;
+      entry.setAttribute('aria-label', `Archivados: ${counts.archived}`);
+    }
+  }
+
   function savePrefs(updater) {
     const next = store.update(runtime.account, updater);
     runtime.currentView = next.view;
+    updateFilterCounts();
     return next;
   }
 
@@ -2265,6 +2292,8 @@ export function installFeatureUI({
   }
 
   function chatListChanged(chats) {
+    filterChats = array(chats);
+    updateFilterCounts();
     const account = runtime.account;
     const firstSnapshot = !runtime.notificationSnapshots.has(account);
     if (firstSnapshot) runtime.notificationSnapshots.set(account, Date.now());
@@ -2334,7 +2363,7 @@ export function installFeatureUI({
     sidebarActions.append(newChat, lists); sidebarHeader?.append(sidebarActions);
     const search = documentRef.querySelector('.chat-sidebar > .search');
     const views = node('nav', 'feature-view-nav'); views.setAttribute('aria-label', 'Vistas de conversaciones');
-    for (const [label, view] of [['Todos', 'all'], ['No leídos', 'unread'], ['Grupos', 'groups'], ['Favoritos', 'favorites'], ['Destacados', 'starred']]) {
+    for (const [label, view] of VIEW_FILTERS) {
       const item = button(documentRef, label, 'feature-view-button'); item.dataset.featureView = view; item.setAttribute('aria-pressed', String(runtime.currentView === view)); item.onclick = () => setView(view); views.append(item);
     }
     search?.after(views);
@@ -2344,6 +2373,7 @@ export function installFeatureUI({
     sidebarHeader?.after(archiveTitle);
     const archiveEntry = button(documentRef, 'Archivados', 'feature-archive-entry'); archiveEntry.id = 'feature-archived-entry'; archiveEntry.setAttribute('aria-pressed', String(runtime.currentView === 'archived'));
     const archiveIcon = node('span', 'feature-archive-icon', '▤'); archiveIcon.setAttribute('aria-hidden', 'true'); archiveEntry.prepend(archiveIcon);
+    const archiveCount = node('span', 'feature-archive-count'); archiveCount.id = 'feature-archived-count'; archiveEntry.append(archiveCount);
     archiveEntry.onclick = () => setView('archived');
     views.after(archiveEntry);
     const archiveHint = node('p', 'feature-archive-hint', 'Estos chats permanecen archivados y no aparecen en la lista principal.'); archiveHint.id = 'feature-archived-hint'; archiveHint.hidden = true;

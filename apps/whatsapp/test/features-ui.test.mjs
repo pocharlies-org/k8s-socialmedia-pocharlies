@@ -421,3 +421,11 @@ test('los mensajes ajenos ofrecen «Eliminar para mí» con el alcance único (U
   assert.match(src, /function openDelete\(message, mine = true\)/);
   assert.match(src, /\.\.\.\(mine \? \[option\(documentRef, 'Eliminar para todos', 'everyone'\)\] : \[\]\)/);
 });
+
+test('los seis filtros del listado llevan recuento y aria-label con número (QA #84)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /counts\[view\] = filterChats\.filter\(chat => matchesChatView\(chat, view, local\)\)\.length/);
+  assert.match(src, /item\.setAttribute\('aria-label', `\$\{label\}: \$\{counts\[view\]\}`\)/);
+  assert.match(src, /entry\.setAttribute\('aria-label', `Archivados: \$\{counts\.archived\}`\)/);
+  assert.match(src, /filterChats = array\(chats\);\n\s*updateFilterCounts\(\);/);
+});
