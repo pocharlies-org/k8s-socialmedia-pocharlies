@@ -72,7 +72,9 @@ export function createEmojiPicker({documentRef = document, account, onSelect, is
         preferences = rememberEmoji(preferences, item.emoji);
         writeEmojiPreferences(storage, account, preferences);
       }
-      if (active()) { variants.hidden = true; opener?.focus(); }
+      // QA 22-10: si la selección ya movió el foco (el composer tras insertar), no
+      // se lo quitamos; el opener solo recupera el foco si se había quedado huérfano.
+      if (active()) { variants.hidden = true; const ae = documentRef.activeElement; if (!ae || ae === documentRef.body) opener?.focus(); }
     } catch (error) { if (active()) status.textContent = error.message || 'No se pudo seleccionar el emoji.'; }
     finally {pending = false; root.removeAttribute('aria-busy');}
   };
