@@ -294,3 +294,12 @@ test('runScopedMutation limpia el banner de error al acertar (QA #13)', async ()
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(shown, [''], 'el éxito debe borrar el banner dejado por un fallo anterior');
 });
+
+test('en modo selección, pulsar la burbuja alterna el mensaje (QA 22-10)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  // El click en la burbuja debe alternar sin tocar el checkbox, y los elementos
+  // interactivos (media, enlaces, checkbox) no pueden desencadenar la selección.
+  assert.match(ui, /bubble\.onclick = runtime\.selectedMessageIds\.size/);
+  assert.match(ui, /closest\?\.\('button, a, input'\)|closest\('button, a, input'\)/);
+  assert.match(ui, /toggleMessageSelected\(id, !runtime\.selectedMessageIds\.has\(id\)\)/);
+});

@@ -1221,6 +1221,11 @@ export function installFeatureUI({
         }
         selector.checked = runtime.selectedMessageIds.has(id);
       } else selector?.remove();
+      // QA 22-10: en modo selección, pulsar la burbuja alterna (comportamiento de WhatsApp).
+      // Media, enlaces y el checkbox conservan su propio comportamiento.
+      bubble.onclick = runtime.selectedMessageIds.size
+        ? event => { if (!event.target?.closest?.('button, a, input')) toggleMessageSelected(id, !runtime.selectedMessageIds.has(id)); }
+        : null;
       const reactions = reactionFor(message);
       let reactionStrip = bubble.querySelector('.feature-reactions');
       if (reactions.length) {
