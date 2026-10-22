@@ -267,13 +267,28 @@ export function installMediaLibraryUI({
   preview.hidden = true;
   const previewHeader = make('header', 'media-library-preview-header');
   const previewTitle = make('span', 'media-library-preview-title');
+  const previewCount = make('span', 'media-library-preview-count');
   const previewClose = control('media-library-close is-overlay');
   previewClose.setAttribute('aria-label', 'Cerrar vista previa');
   previewClose.append(icon(['m6 6 12 12M18 6 6 18']));
-  previewHeader.append(previewTitle, previewClose);
+  previewHeader.append(previewTitle, previewCount, previewClose);
   const previewBody = make('div', 'media-library-preview-body');
+  // UX #7.2: navegación entre elementos con flechas y contador, como WhatsApp.
+  const previewPrev = control('media-library-preview-arrow');
+  previewPrev.setAttribute('aria-label', 'Anterior');
+  previewPrev.append(icon(['m15 6-6 6 6 6']));
+  const previewNext = control('media-library-preview-arrow');
+  previewNext.setAttribute('aria-label', 'Siguiente');
+  previewNext.append(icon(['m9 6 6 6-6 6']));
+  const previewNav = make('div', 'media-library-preview-nav');
+  previewNav.append(previewPrev, previewNext);
+  const previewActions = make('div', 'media-library-preview-actions');
+  const previewDownload = control('media-library-preview-action', 'Descargar');
+  const previewForward = control('media-library-preview-action', 'Reenviar');
+  const previewStar = control('media-library-preview-action', 'Destacar');
+  previewActions.append(previewDownload, previewForward, previewStar);
   const previewChat = control('media-library-preview-chat', 'Abrir chat de origen');
-  preview.append(previewHeader, previewBody, previewChat);
+  preview.append(previewHeader, previewBody, previewNav, previewActions, previewChat);
   const actionShade = make('div', 'media-library-action-shade');
   actionShade.hidden = true;
   const actionDialog = make('section', 'media-library-action-dialog');
@@ -349,11 +364,17 @@ export function installMediaLibraryUI({
     more.hidden = !nextCursor || Boolean(failure);
     more.disabled = loading || acting;
     panel.setAttribute('aria-busy', String(loading || acting));
+    syncPreview();
   }
 
-  function openPreview(item) {
-    if (!item.url) return;
-    previewTitle.textContent = titleFor(item);
+  let previewIndex = -1;
+  const previewItems = () => items.filter(item => item.url && item.kind !== 'link' && item.kind !== 'document');
+  function showPreviewAt(at) {
+    const item = previewItems()[at];
+    if (!item) return;
+    previewIndex = at;
+    // UX #7.3: sin la etiqueta de tipo cuando el mensaje no trae nombre ni texto.
+    previewTitle.textContent = item.name || item.text.trim();
     const media = item.kind === 'audio' ? make('audio') : item.kind === 'video' ? make('video') : make('img');
     if (item.kind === 'image') media.alt = titleFor(item);
     else { media.controls = true; media.preload = 'none'; }
@@ -362,9 +383,28 @@ export function installMediaLibraryUI({
     previewChat.hidden = false;
     previewChat.onclick = () => { closePreview(); openChat(item); };
     preview.hidden = false;
+    syncPreview();
+  }
+  function syncPreview() {
+    if (preview.hidden) return;
+    const list = previewItems();
+    const item = list[previewIndex];
+    if (!item) { closePreview(); return; }
+    previewCount.textContent = list.length > 1 ? `${previewIndex + 1} de ${list.length}` : '';
+    previewPrev.disabled = previewIndex <= 0;
+    previewNext.disabled = previewIndex >= list.length - 1;
+    previewDownload.disabled = item.kind === 'link' || acting;
+    previewForward.disabled = previewStar.disabled = !item.chatId || !item.messageId || acting;
+  }
+  function openPreview(item) {
+    const at = previewItems().indexOf(item);
+    if (at < 0) return;
+    showPreviewAt(at);
     previewClose.focus();
   }
-  const closePreview = () => { preview.hidden = true; previewBody.replaceChildren(); };
+  previewPrev.onclick = () => showPreviewAt(previewIndex - 1);
+  previewNext.onclick = () => showPreviewAt(previewIndex + 1);
+  const closePreview = () => { previewIndex = -1; preview.hidden = true; previewBody.replaceChildren(); };
   const hidePreview = restoreFocus => {
     closePreview();
     if (restoreFocus) closeButton.focus();
@@ -457,7 +497,7 @@ export function installMediaLibraryUI({
   }
 
   async function load({ append = false } = {}) {
-    if (!append) { selected.clear(); actionSeq += 1; acting = false; }
+    if (!append) { selected.clear(); actionSeq += 1; acting = false; closePreview(); }
     const account = getAccount();
     if (!account) {
       requestSeq += 1;
@@ -530,22 +570,23 @@ export function installMediaLibraryUI({
   searchToggle.onclick = () => { searching = true; closePreview(); render(); searchInput.focus(); };
   searchClose.onclick = () => { windowRef?.clearTimeout?.(searchTimer); searching = false; searchInput.value = ''; items = []; nextCursor = null; void load(); tabs.querySelector('[aria-selected="true"]')?.focus(); };
   selectButton.onclick = () => { selecting = !selecting; selected.clear(); closePreview(); render(); };
+  const downloadItem = item => {
+    const link = make('a');
+    link.href = item.url;
+    link.download = item.name || `${item.kind}-${item.messageId}`;
+    documentRef.body.append(link);
+    link.click();
+    link.remove();
+  };
   downloadButton.onclick = () => {
     if (downloadButton.disabled) return;
-    for (const item of selected.values()) {
-      const link = make('a');
-      link.href = item.url;
-      link.download = item.name || `${item.kind}-${item.messageId}`;
-      documentRef.body.append(link);
-      link.click();
-      link.remove();
-    }
+    for (const item of selected.values()) downloadItem(item);
   };
-  const selectedMessages = () => uniqueMediaMessages(selected.values());
+  previewDownload.onclick = () => { const item = previewItems()[previewIndex]; if (item) downloadItem(item); };
   const actionCurrent = token => !overlay.hidden && token.account === getAccount() && token.seq === requestSeq && token.action === actionSeq;
-  async function runAction(path, extra, successText) {
+  async function runAction(path, extra, successText, targets = selected.values()) {
     const token = { account: getAccount(), seq: requestSeq, action: actionSeq + 1 };
-    const messages = selectedMessages();
+    const messages = uniqueMediaMessages(targets);
     if (!messages.length || acting || !token.account) return;
     actionSeq = token.action;
     acting = true; notice = ''; actionError = false; render();
@@ -573,19 +614,20 @@ export function installMediaLibraryUI({
       : completedText;
     render();
   }
-  function openAction(title, build) {
-    if (!selected.size || acting) return;
+  function openAction(title, build, targets = [...selected.values()]) {
+    if (!targets.length || acting) return;
     actionDialog.replaceChildren();
     const heading = make('h3', '', title);
     const cancel = control('media-library-selection-action is-subtle', 'Cancelar');
     cancel.onclick = () => { actionShade.hidden = true; selectButton.focus(); };
     actionDialog.append(heading);
-    build(actionDialog, cancel);
+    build(actionDialog, cancel, targets);
     actionShade.hidden = false;
     cancel.focus();
   }
   actionShade.onclick = event => { if (event.target === actionShade) { actionShade.hidden = true; selectButton.focus(); } };
   starButton.onclick = () => void runAction('/api/chat-actions', { action: 'starred' }, 'destacado');
+  previewStar.onclick = () => { const item = previewItems()[previewIndex]; if (item) void runAction('/api/chat-actions', { action: 'starred' }, 'destacado', [item]); };
   deleteButton.onclick = () => openAction('Eliminar mensajes seleccionados', (dialog, cancel) => {
     dialog.append(make('p', '', 'Elige cómo quieres eliminarlos.'));
     const me = control('media-library-selection-action', 'Eliminar para mí');
@@ -595,7 +637,7 @@ export function installMediaLibraryUI({
     everyone.onclick = () => { actionShade.hidden = true; void runAction('/api/messages/delete', { scope: 'everyone' }, 'eliminado'); };
     dialog.append(me, everyone, cancel);
   });
-  forwardButton.onclick = () => openAction('Reenviar mensajes', (dialog, cancel) => {
+  const forwardDialog = (dialog, cancel, targets) => {
     const label = make('label', 'media-library-action-target', 'Conversación de destino');
     const target = make('select');
     target.setAttribute('aria-label', 'Conversación de destino');
@@ -606,9 +648,11 @@ export function installMediaLibraryUI({
     const send = control('media-library-selection-action', 'Reenviar');
     send.disabled = true;
     target.onchange = () => { send.disabled = !target.value; };
-    send.onclick = () => { if (!target.value) return; actionShade.hidden = true; void runAction('/api/messages/forward', { targetChat: target.value }, 'reenviado'); };
+    send.onclick = () => { if (!target.value) return; actionShade.hidden = true; void runAction('/api/messages/forward', { targetChat: target.value }, 'reenviado', targets); };
     label.append(target); dialog.append(label, send, cancel);
-  });
+  };
+  forwardButton.onclick = () => openAction('Reenviar mensajes', forwardDialog);
+  previewForward.onclick = () => { const item = previewItems()[previewIndex]; if (item) openAction('Reenviar mensajes', forwardDialog, [item]); };
   closeButton.onclick = close;
   previewClose.onclick = () => hidePreview(true);
   for (const tabButton of tabButtons) tabButton.onclick = () => switchTab(tabButton.dataset.kind);
@@ -631,6 +675,12 @@ export function installMediaLibraryUI({
   documentRef.addEventListener('keydown', event => {
     if (overlay.hidden || event.defaultPrevented) return;
     if (event.key === 'Escape') { event.preventDefault(); if (!actionShade.hidden) { actionShade.hidden = true; selectButton.focus(); } else if (preview.hidden) close(); else hidePreview(true); return; }
+    // UX #7.2: ←/→ navegan la vista previa como el visor de WhatsApp.
+    if (!preview.hidden && actionShade.hidden && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      showPreviewAt(previewIndex + (event.key === 'ArrowRight' ? 1 : -1));
+      return;
+    }
     if (event.key !== 'Tab') return;
     const focusable = [...(actionShade.hidden ? panel : actionDialog).querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]')]
       .filter(element => !element.closest('[hidden]'));

@@ -88,11 +88,20 @@ button.media-library-tile:hover { color: var(--media-library-link); }
 .media-library-preview { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; background: rgb(6 11 10 / .95); }
 .media-library-preview[hidden] { display: none; }
 .media-library-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; padding: 12px 20px; }
-.media-library-preview-title { overflow: hidden; color: #f7faf8; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.media-library-preview-title { flex: 1; min-width: 0; overflow: hidden; color: #f7faf8; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.media-library-preview-count { flex: none; color: #a7b3ad; font-size: 13px; }
 .media-library-preview-body { display: grid; flex: 1; min-height: 0; place-items: center; padding: 0 20px; }
 .media-library-preview-body img, .media-library-preview-body video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .media-library-preview-body audio { width: 100%; }
-.media-library-preview-chat { align-self: center; margin: 16px 0 22px; min-height: 38px; padding: 8px 15px; border-radius: 19px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; }
+/* UX #7.2: flechas del visor, centradas sobre el medio como WhatsApp. */
+.media-library-preview-nav { position: absolute; top: 50%; right: 10px; left: 10px; display: flex; justify-content: space-between; transform: translateY(-50%); pointer-events: none; }
+.media-library-preview-arrow { pointer-events: auto; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: rgb(255 255 255 / .14); color: #f7faf8; cursor: pointer; }
+.media-library-preview-arrow:disabled { opacity: .3; cursor: default; }
+.media-library-preview-arrow svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.media-library-preview-actions { align-self: center; display: flex; gap: 8px; margin: 14px 0 0; }
+.media-library-preview-action { min-height: 34px; padding: 6px 13px; border: 0; border-radius: 17px; background: rgb(255 255 255 / .12); color: #f7faf8; font-size: 13px; font-weight: 600; cursor: pointer; }
+.media-library-preview-action:disabled { opacity: .4; cursor: default; }
+.media-library-preview-chat { align-self: center; margin: 10px 0 22px; min-height: 38px; padding: 8px 15px; border-radius: 19px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; }
 @media (max-width: 760px) {
   .media-library-overlay { inset: 0; padding: 0; }
   .media-library-modal { width: 100vw; height: 100dvh; border-radius: 0; box-shadow: none; }

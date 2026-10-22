@@ -279,6 +279,24 @@ try {
   await previewImage.evaluate(node => node.decode());
   assert.match(await previewImage.getAttribute('src'), /^\/api\/media\/img-1/);
   assert.equal(await panel.locator('.media-library-preview-chat').isVisible(), true);
+  // UX #7.2-3: contador, flechas (ratón y teclado) y acciones por elemento.
+  assert.equal(await panel.locator('.media-library-preview-count').textContent(), '1 de 4');
+  assert.equal(await panel.getByRole('button', { name: 'Anterior', exact: true }).isDisabled(), true);
+  await page.keyboard.press('ArrowRight');
+  assert.match(await panel.locator('.media-library-preview video').getAttribute('src'), /^\/api\/media\/vid-1/);
+  assert.equal(await panel.locator('.media-library-preview-count').textContent(), '2 de 4');
+  await panel.getByRole('button', { name: 'Anterior', exact: true }).click();
+  assert.match(await panel.locator('.media-library-preview img').getAttribute('src'), /^\/api\/media\/img-1/);
+  await panel.getByRole('button', { name: 'Destacar', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.media-library-status')?.textContent.includes('1 mensaje destacado'));
+  assert.deepEqual(['account', 'chat', 'messageId', 'action'].map(key => mutations.filter(entry => entry.path === '/api/chat-actions').at(-1)[key]),
+    ['alpha', '123@s.whatsapp.net', 'w-img-1', 'starred']);
+  await panel.getByRole('button', { name: 'Reenviar', exact: true }).click();
+  await panel.getByRole('combobox', { name: 'Conversación de destino' }).selectOption('456@s.whatsapp.net');
+  await panel.locator('.media-library-action-dialog').getByRole('button', { name: 'Reenviar', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.media-library-status')?.textContent.includes('1 mensaje reenviado'));
+  assert.deepEqual(['account', 'chat', 'messageId', 'targetChat'].map(key => mutations.filter(entry => entry.path === '/api/messages/forward').at(-1)[key]),
+    ['alpha', '123@s.whatsapp.net', 'w-img-1', '456@s.whatsapp.net']);
   if (process.env.UI_OUTPUT_DIR) {
     await mkdir(process.env.UI_OUTPUT_DIR, { recursive: true });
     await page.screenshot({ path: path.join(process.env.UI_OUTPUT_DIR, 'media-library-preview.png') });
