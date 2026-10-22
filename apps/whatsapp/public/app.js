@@ -239,10 +239,12 @@ function chatMatchesFilter(chat, filter) {
   if (filter === 'groups') return chat.isGroup === true;
   return true;
 }
+const avatarFailures = new Set(); // QA #82: el 404 de un chat sin foto se re-pedía en cada repintado
 function chatAvatar(chat) {
   const avatar = node('span', 'avatar');
-  const url = messageRenderer?.safeMessageUrl(chat.avatarUrl || chat.avatar_url);
-  if (url) { const image = node('img', 'chat-avatar-image'); image.src = url; image.alt = ''; image.loading = 'lazy'; image.onerror = () => { avatar.replaceChildren(); avatar.textContent = chatInitials(chat); }; avatar.append(image); }
+  const key = String(chat.id ?? '');
+  const url = avatarFailures.has(key) ? null : messageRenderer?.safeMessageUrl(chat.avatarUrl || chat.avatar_url);
+  if (url) { const image = node('img', 'chat-avatar-image'); image.src = url; image.alt = ''; image.loading = 'lazy'; image.onerror = () => { if (key) avatarFailures.add(key); avatar.replaceChildren(); avatar.textContent = chatInitials(chat); }; avatar.append(image); }
   else avatar.textContent = chatInitials(chat);
   return avatar;
 }

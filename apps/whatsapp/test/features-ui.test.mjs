@@ -330,3 +330,10 @@ test('la rejilla de la galería usa el thumb y pagina con «Cargar más» (QA #7
   assert.match(ui, /button\(documentRef, 'Cargar más', 'feature-button subtle'\)/);
   assert.match(ui, /kind: serverKind, limit: 60, cursor/);
 });
+test('QA #59: el diálogo de acciones del mensaje es un menú navegable con flechas', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /setAttribute\('aria-label', 'Acciones del mensaje'\)/);
+  assert.match(ui, /item\.setAttribute\('role', 'menuitem'\); item\.tabIndex = -1; item\.onclick = \(\) => handler\(message\)/);
+  assert.match(ui, /actions\.firstElementChild\?\.focus\(\)/);
+  assert.match(ui, /event\.key === 'ArrowDown' \? \(index \+ 1\) % items\.length : event\.key === 'ArrowUp'/);
+});

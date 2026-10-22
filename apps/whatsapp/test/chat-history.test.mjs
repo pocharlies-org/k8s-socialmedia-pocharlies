@@ -106,3 +106,9 @@ test('la pestaña avisa de los no leídos (QA #74)', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   assert.match(html, /<title>WhatsApp<\/title>/);
 });
+test('QA #82: el avatar 404 de un chat se cachea y no se vuelve a pedir', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const avatarFailures = new Set\(\)/);
+  assert.match(app, /avatarFailures\.has\(key\) \? null : messageRenderer\?\.safeMessageUrl/);
+  assert.match(app, /avatarFailures\.add\(key\)/);
+});

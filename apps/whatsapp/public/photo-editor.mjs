@@ -192,6 +192,7 @@ export function createPhotoEditor({getContext, isCurrent, onApply, showError, do
   apply.id = 'photo-editor-apply';
   apply.className = 'photo-editor-apply';
   apply.textContent = 'Listo';
+  apply.disabled = true; // QA #81: sin imagen cargada era un no-op silencioso
   header.append(cancel, title, undo, redo, apply);
 
   const notice = doc.createElement('p');
@@ -548,6 +549,7 @@ export function createPhotoEditor({getContext, isCurrent, onApply, showError, do
     generation++;
     overlay.hidden = true;
     loaded = false;
+    apply.disabled = true;
     drawing = null;
     cropDrag = null;
     history.clear();
@@ -636,6 +638,7 @@ export function createPhotoEditor({getContext, isCurrent, onApply, showError, do
       }
       paintCanvas(canvas, source.canvas);
       loaded = true;
+      apply.disabled = false;
       textAnchor = null;
       textInput.value = '';
       history.setLimit(historyLimitFor(canvas.width, canvas.height));
