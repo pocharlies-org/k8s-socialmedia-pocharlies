@@ -1143,7 +1143,12 @@ $('record').onclick = async () => {
     stopRecordingTracks(stream);
     if (tokenIsCurrent) state.recordingToken++;
     if (state.stream === stream) clearRecordingState();
-    if (current(ctx) && tokenIsCurrent) error(`No se pudo acceder al micrófono: ${err.message}`);
+    // QA #126 (22-10): el DOMException.message viene en inglés crudo (familia #76/#60);
+    // el motivo se traduce por err.name y el texto del navegador nunca se interpola.
+    if (current(ctx) && tokenIsCurrent) {
+      const reasons = {NotFoundError: 'no hay ningún micrófono conectado.', NotAllowedError: 'permiso denegado.', NotReadableError: 'el micrófono está ocupado.'};
+      error(`No se pudo acceder al micrófono: ${reasons[err?.name] || 'comprueba el micrófono del dispositivo.'}`);
+    }
   }
 };
 $('recording-stop').onclick = () => { if (state.recorder?.state === 'recording') state.recorder.stop(); }; $('recording-cancel').onclick = cancelRecording; $('recording-send').onclick = async () => { if (!state.blob || state.busy || !state.sending) return; const ctx = context(); const blob = state.blob; const token = state.recordingToken; state.recordingSendToken ||= crypto.randomUUID(); try { const data = await base64(blob); if (!current(ctx) || token !== state.recordingToken) return; await sendPayload('/api/upload', {name:`nota-de-voz.${blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm'}`,mimeType:blob.type,data,voice:true,sendToken:state.recordingSendToken}, cancelRecording); } catch (err) { if (current(ctx)) error(err.message); } };

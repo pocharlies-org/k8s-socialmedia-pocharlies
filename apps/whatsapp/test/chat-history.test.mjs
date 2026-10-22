@@ -176,3 +176,10 @@ test('la fila silenciada lo dice en el aria-label y el submenú da 1 año (QA #1
   const features = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(features, /\['1 año', \(\) => perform\('mute', \{ muted: true \}, \{ durationMs: 365 \* 24 \* 60 \* 60 \* 1000 \}\)\]/);
 });
+test('el fallo del micrófono traduce el motivo por err.name (QA #126)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /NotFoundError: 'no hay ningún micrófono conectado\.'/);
+  assert.match(src, /NotAllowedError: 'permiso denegado\.'/);
+  assert.match(src, /NotReadableError: 'el micrófono está ocupado\.'/);
+  assert.doesNotMatch(src, /No se pudo acceder al micrófono: \$\{err\.message\}/);
+});
