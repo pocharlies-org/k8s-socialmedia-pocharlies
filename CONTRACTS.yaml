@@ -2384,7 +2384,11 @@ contracts:
     entiende refs s3:// contra S3_ENDPOINT/S3_BUCKET. Los 200/206 llevan
     cache-control private, max-age=86400, immutable (la fila de attachments es
     inmutable por id; sin ella el scroll volvía a bajar cada foto, QA
-    velocidad 22-10); los 4xx siguen sin caché.
+    velocidad 22-10); los 4xx siguen sin caché. /api/chats/media añade por
+    item `thumbUrl` (GET /api/media/thumb/<id de mensaje>, jpegThumbnail del
+    payload): la rejilla de la galería pinta el thumb y el original solo al
+    abrir — 9,2 MB/45 items a cientos de KB (QA #72). Campo aditivo; el
+    envelope y el cursor no cambian.
 - id: http.whatsapp-app.search.v1
   kind: http-route
   value: /api/search

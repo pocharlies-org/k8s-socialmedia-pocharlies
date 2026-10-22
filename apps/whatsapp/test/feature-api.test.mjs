@@ -1171,3 +1171,9 @@ test('upload validates and forwards media quality with source as the compatible 
   }
   assert.equal(outbound.length, 4);
 });
+
+test('/api/chats/media enseña thumbUrl para que la galería no baje originales (QA #72)', async () => {
+  const src = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
+  assert.match(src, /thumbUrl: item\.message_type === 'IMAGE'/);
+  assert.match(src, /\/api\/media\/thumb\/\$\{encodeURIComponent\(item\.id\)\}\?account=/);
+});
