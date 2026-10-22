@@ -720,7 +720,10 @@ const sidebarSearchReady = import('./sidebar-search.mjs').then(({installSidebarM
   },
   showError: error,
 }); return sidebarSearch; }).catch(err => { error(`No se pudo cargar la b\u00fasqueda: ${err.message}`); return null; });
-$('search').oninput = () => { renderChats(); sidebarSearch?.changed(); }; $('message').oninput = saveDraft; $('back').onclick = () => {
+// UX #9.5: renderChats reconstruye ~720 filas pesadas; sin debounce cada tecla
+// la pagaba entera (hielo medido de ~25 s). La pausa de 150 ms basta.
+let searchRenderTimer = null;
+$('search').oninput = () => { clearTimeout(searchRenderTimer); searchRenderTimer = setTimeout(renderChats, 150); sidebarSearch?.changed(); }; $('message').oninput = saveDraft; $('back').onclick = () => {
   if (mobileChatEntry()) history.back();
   else closeMobileChat();
 };

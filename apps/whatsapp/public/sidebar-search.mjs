@@ -1,3 +1,18 @@
+// UX #9.4: envuelve cada coincidencia de la consulta en <mark> (texto plano si no la hay).
+function appendHighlight(parent, text, query, documentRef) {
+  const needle = String(query || '').trim().toLocaleLowerCase();
+  const lower = text.toLocaleLowerCase();
+  let from = 0;
+  for (let at = needle ? lower.indexOf(needle) : -1; at >= 0; at = lower.indexOf(needle, from)) {
+    if (at > from) parent.append(documentRef.createTextNode(text.slice(from, at)));
+    const mark = documentRef.createElement('mark');
+    mark.textContent = text.slice(at, at + needle.length);
+    parent.append(mark);
+    from = at + needle.length;
+  }
+  parent.append(documentRef.createTextNode(text.slice(from)));
+}
+
 export function createMessageSearch({request, onChange, delay = 220}) {
   let generation = 0;
   let timer = null;
@@ -108,7 +123,8 @@ export function installSidebarMessageSearch({documentRef, input, chatList, getAc
     chatList.hidden = visible && selected !== 'conversations';
     section.hidden = !visible || selected !== 'messages';
     emptyChats.hidden = !visible || selected !== 'conversations' || chatCount > 0;
-    conversationsButton.textContent = `Conversaciones (${chatCount})`;
+    // UX #9.6: con cero coincidencias el (0) repetía al empty-state de abajo.
+    conversationsButton.textContent = chatCount ? `Conversaciones (${chatCount})` : 'Conversaciones';
     // En error el recuento es mentira (results está vacío por el fallo, no por
     // falta de coincidencias): el status de abajo ya dice qué pasó (QA #10).
     messagesButton.textContent = snapshot.status === 'error'
@@ -163,7 +179,11 @@ export function installSidebarMessageSearch({documentRef, input, chatList, getAc
       const row = make('button', 'sidebar-message-result');
       row.type = 'button';
       row.dataset.searchKey = `${chatId}:${messageId}`;
-      row.append(make('strong', '', item.chatName || chatId), make('span', '', item.text || 'Mensaje sin texto'), make('small', '', item.timestamp ? new Date(item.timestamp).toLocaleString('es-ES') : ''));
+      const preview = make('span', '');
+      // UX #9.4: la coincidencia se resalta como en WhatsApp.
+      if (item.text) appendHighlight(preview, item.text, snapshot.query, documentRef);
+      else preview.textContent = 'Mensaje sin texto';
+      row.append(make('strong', '', item.chatName || chatId), preview, make('small', '', item.timestamp ? new Date(item.timestamp).toLocaleString('es-ES') : ''));
       row.onclick = async () => {
         if (getAccount() !== snapshot.account) return;
         row.disabled = true;
