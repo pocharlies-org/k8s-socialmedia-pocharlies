@@ -500,7 +500,7 @@ function PrivateChat({ctx, request, useDraft, active, api, draftPrompt, draftLab
         {images.length > 0 && <div className="ai-attachments" aria-label="Imagenes adjuntas">{images.map((image, index) => <div key={`${image.name}-${index}`} className="ai-attachment"><img src={image.url} alt={image.name} /><button type="button" aria-label={`Quitar ${image.name}`} onClick={() => setImages(previous => previous.filter((_, i) => i !== index))}>×</button></div>)}</div>}
         <form className="ai-composer" onSubmit={submit}>
           <input type="file" ref={fileRef} hidden accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={event => { void addImages(event.target.files); event.target.value = ''; }} />
-          <button type="button" className="ai-send ai-attach" aria-label="Adjuntar imagenes" disabled={!ctx.chat || loading || readingImages} onClick={() => fileRef.current?.click()}>+</button>
+          <button type="button" className="ai-send ai-attach" aria-label="Adjuntar imágenes" disabled={!ctx.chat || loading || readingImages} onClick={() => fileRef.current?.click()}>+</button>
           <label className="sr-only" htmlFor="ai-prompt">Mensaje para Social Media Agent</label>
           <textarea id="ai-prompt" ref={inputRef} value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={onKeyDown} onPaste={event => {
             const files = Array.from(event.clipboardData?.files || []);

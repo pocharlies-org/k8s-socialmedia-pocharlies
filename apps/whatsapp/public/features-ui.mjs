@@ -558,7 +558,9 @@ export function installFeatureUI({
     currentMessageIds: new Set(),
     selectedMessageIds: new Set(),
     replyTarget: null,
-    currentView: store.read(state.account).view,
+    // UX #7.5: Archivados es una vista de paso; al cargar se abre la lista de
+    // chats (la app oficial no arranca nunca en el archivo).
+    currentView: store.read(state.account).view === 'archived' ? 'all' : store.read(state.account).view,
     readPending: new Set(),
     manualUnreadKey: '',
     generation: 0,
@@ -1624,7 +1626,7 @@ export function installFeatureUI({
     const account = runtime.account;
     const current = prefs();
     const form = node('form', 'feature-form');
-    const input = field(documentRef, 'Nueva lista', 'text', 'name');
+    const input = field(documentRef, 'Nombre de la lista', 'text', 'name');
     input.input.maxLength = 100;
     const submit = button(documentRef, 'Crear lista', 'feature-button primary');
     submit.type = 'submit';
@@ -1644,7 +1646,7 @@ export function installFeatureUI({
       } catch (error) { if (runtime.account === account) showError(error); }
       finally { if (runtime.account === account && runtime.modal?.body === modal.body) submit.disabled = false; }
     };
-    modal.body.append(form, node('p', 'feature-muted', 'Las listas se guardan para esta cuenta en SocialMedia. Las listas antiguas de este navegador se conservan.'));
+    modal.body.append(form, node('p', 'feature-muted', 'Las listas se guardan para esta cuenta en SocialMedia.'));
     const refresh = button(documentRef, 'Actualizar listas', 'feature-button subtle');
     refresh.onclick = async () => { await refreshLists(account); if (runtime.account === account && runtime.modal?.body === modal.body) { closeModal(); openLists(); } };
     modal.body.append(refresh);
@@ -2277,7 +2279,7 @@ export function installFeatureUI({
     runtime.presenceStream?.close(); runtime.presenceStream = null;
     runtime.presenceEventVersion = 0;
     runtime.closeAttachMenu?.();
-    closeModal(); runtime.generation += 1; runtime.account = text(account); runtime.chat = ''; runtime.selectedChat = null; runtime.currentMessages = []; runtime.selectedMessageIds.clear(); runtime.replyTarget = null; runtime.manualUnreadKey = ''; runtime.currentView = store.read(runtime.account).view; state.chatFilter = runtime.currentView; runtime.readPending.clear(); runtime.chatListBaseline.clear(); runtime.notificationSnapshots.clear(); statusNotifications.start(runtime.account); documentRef.getElementById('feature-reply-quote')?.remove(); for (const item of documentRef.querySelectorAll('[data-feature-view]')) item.setAttribute('aria-pressed', String(item.dataset.featureView === runtime.currentView)); updateArchiveView(); void refreshLists(runtime.account);
+    closeModal(); runtime.generation += 1; runtime.account = text(account); runtime.chat = ''; runtime.selectedChat = null; runtime.currentMessages = []; runtime.selectedMessageIds.clear(); runtime.replyTarget = null; runtime.manualUnreadKey = ''; runtime.currentView = store.read(runtime.account).view === 'archived' ? 'all' : store.read(runtime.account).view; state.chatFilter = runtime.currentView; runtime.readPending.clear(); runtime.chatListBaseline.clear(); runtime.notificationSnapshots.clear(); statusNotifications.start(runtime.account); documentRef.getElementById('feature-reply-quote')?.remove(); for (const item of documentRef.querySelectorAll('[data-feature-view]')) item.setAttribute('aria-pressed', String(item.dataset.featureView === runtime.currentView)); updateArchiveView(); void refreshLists(runtime.account);
   }
 
   async function markVisibleRead() {

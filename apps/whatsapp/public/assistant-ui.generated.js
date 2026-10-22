@@ -27213,7 +27213,7 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 							/* @__PURE__ */ (0, U.jsx)("button", {
 								type: "button",
 								className: "ai-send ai-attach",
-								"aria-label": "Adjuntar imagenes",
+								"aria-label": "Adjuntar imágenes",
 								disabled: !e.chat || l || C,
 								onClick: () => ee.current?.click(),
 								children: "+"

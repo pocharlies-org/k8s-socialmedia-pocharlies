@@ -1475,8 +1475,9 @@ body[data-theme="light"] .ai-panel-avatar { background: #d8e0e3; color: #34464f;
 .feature-archive-back:hover { color: var(--accent); }
 .feature-archive-hint { margin: 0; padding: 14px 24px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.5; }
 
+/* UX #6.1: el buscador de chats se conserva dentro de Archivados (filtra la
+   lista); la búsqueda global de mensajes sigue oculta ahí. */
 .chat-sidebar[data-archive-view="true"] .chat-sidebar-header,
-.chat-sidebar[data-archive-view="true"] > .search,
 .chat-sidebar[data-archive-view="true"] > .sidebar-search-heading,
 .chat-sidebar[data-archive-view="true"] > .sidebar-search-selector,
 .chat-sidebar[data-archive-view="true"] > .sidebar-message-search,

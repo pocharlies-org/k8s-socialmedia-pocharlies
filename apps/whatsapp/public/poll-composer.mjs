@@ -36,7 +36,12 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
   let pending = false;
   let signature = '';
   let token = '';
-  form.oninput = () => {if (!pending) status.hidden = true;};
+  // QA #10: «Enviar encuesta» quedaba activo con pregunta u opciones vacías.
+  // Se deshabilita hasta tener pregunta y todas las opciones rellenas (como la
+  // app oficial); el alert de pollDraft queda para lo que no se ve en el
+  // estado (opciones repetidas, longitudes).
+  function syncSend() { send.disabled = !question.value.trim() || rows.some(row => !row.input.value.trim()); }
+  form.oninput = () => {if (!pending) { status.hidden = true; syncSend(); }};
 
   function renderRows(focus) {
     list.replaceChildren();
@@ -51,6 +56,7 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
       list.append(row.element);
     });
     add.disabled = rows.length >= 12;
+    syncSend();
     focus?.focus();
   }
   function addRow() {
@@ -98,7 +104,7 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
     } catch (error) {
       if (isCurrent()) {status.textContent = error.message || 'No se ha podido enviar la encuesta.'; status.hidden = false;}
     } finally {
-      pending = false; fields.disabled = false; send.disabled = false;
+      pending = false; fields.disabled = false; syncSend();
       send.textContent = 'Enviar encuesta'; form.setAttribute('aria-busy', 'false');
     }
   };

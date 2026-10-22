@@ -254,7 +254,8 @@ function setConversationAvatar(chat = null) {
 function renderChats() {
   const archivedView = featureUI?.isFeatureView?.() === 'archived';
   sidebarSearch?.viewChanged(archivedView);
-  const search = archivedView ? '' : $('search').value.trim().toLocaleLowerCase();
+  // UX #6.1: el buscador filtra también dentro de Archivados (antes se vaciaba).
+  const search = $('search').value.trim().toLocaleLowerCase();
   const filter = chatFilterValue();
   state.chatFilter = filter;
   const chats = pinnedFirst(state.chats.filter(chat => chatMatchesFilter(chat, filter) && `${chat.name || ''} ${chat.preview || ''}`.toLocaleLowerCase().includes(search)));

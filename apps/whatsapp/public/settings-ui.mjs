@@ -429,6 +429,9 @@ export function initializeSettings(documentRef = document, storage = globalThis.
 
   logout.addEventListener('click', async () => {
     if (logout.disabled) return;
+    // UX #6.4: cerrar sesión cierra también el SSO (QA #12); sin confirmación un
+    // clic equivocado sacaba a quien usaba la app (la app oficial pregunta igual).
+    if (!globalThis.confirm?.('¿Cerrar sesión?')) return;
     logout.disabled = true;
     logoutError.hidden = true;
     try {

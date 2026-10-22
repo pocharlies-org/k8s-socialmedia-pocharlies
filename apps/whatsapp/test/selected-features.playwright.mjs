@@ -1189,7 +1189,7 @@ async function runDesktop(page, state, report) {
     }
     await page.locator('#feature-lists').click();
     let lists = await dialog(page, /Favoritos y listas/i);
-    await fieldLocator(lists, 'Nueva lista').fill('Lista Fixture');
+    await fieldLocator(lists, 'Nombre de la lista').fill('Lista Fixture');
     await clickDialogButton(lists, 'Crear lista');
     lists = await dialog(page, /Favoritos y listas/i);
     await clickDialogButton(lists, 'Añadir chat actual');

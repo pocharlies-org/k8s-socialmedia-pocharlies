@@ -121,6 +121,14 @@ test('logout posts to the web auth endpoint and keeps an error visible on failur
   const f = fixture();
   let request;
   initializeSettings(f.document, f.storage, async (...args) => { request = args; return { ok: false, status: 403 }; });
+  // UX #6.4: el cierre pide confirmación (como la app oficial).
+  const originalConfirm = globalThis.confirm;
+  globalThis.confirm = () => false;
+  f.ids.get('settings-logout').dispatchEvent(new Event('click'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(request, undefined, 'a declined confirmation must not log out');
+  assert.equal(f.ids.get('settings-logout').disabled, false);
+  globalThis.confirm = () => true;
   f.ids.get('settings-logout').dispatchEvent(new Event('click'));
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(request, ['/auth/logout', {
@@ -128,6 +136,7 @@ test('logout posts to the web auth endpoint and keeps an error visible on failur
   }]);
   assert.equal(f.ids.get('settings-logout-error').hidden, false);
   assert.equal(f.ids.get('settings-logout').disabled, false);
+  if (originalConfirm) globalThis.confirm = originalConfirm; else delete globalThis.confirm;
 });
 
 test('settings markup retains account/theme IDs and feature extension hook', async () => {
