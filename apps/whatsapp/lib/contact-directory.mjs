@@ -259,10 +259,6 @@ function statsQuery(shape, account, options) {
   return { args, sql: [`WITH ${directoryCtes(shape)}`, `SELECT ${selects.join(',\n       ')}`].join('\n') };
 }
 
-function lastDigits(value) {
-  return String(value || '').slice(-3);
-}
-
 function publicEntry(entry, account) {
   const phone = entry.phone ? `+${entry.phone}` : null;
   const label = entry.label;
@@ -280,7 +276,7 @@ function publicEntry(entry, account) {
     label,
     // A number only appears when it is a real phone. A private identifier is
     // named by its last digits so two of them can be told apart.
-    sublabel: phone && label !== phone ? phone : (entry.lid && label !== PRIVATE_LABEL ? `LID ···${lastDigits(entry.lid)}` : ''),
+    sublabel: phone && label !== phone ? phone : '',
     kind: entry.has_chat ? 'chat' : (phone ? 'contact' : 'private'),
     chatId: entry.chat_id || null,
     phone,
