@@ -68,3 +68,10 @@ test('hay botón «ir abajo» cuando el chat está lejos del final (QA 22-10)', 
   assert.match(app, /scrollTo\(\{top: \$\('messages'\)\.scrollHeight, behavior: 'smooth'\}\)/);
   assert.match(app, /scrollBottom\.hidden = !state\.chat \|\| pane\.scrollHeight - pane\.scrollTop - pane\.clientHeight < 300/);
 });
+
+test('F5 restaura el chat abierto y volver a la lista lo olvida (QA 22-10 #162)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /setItem\(`wa:lastChat:\$\{state\.account\}`, chat\.id\)/);
+  assert.match(app, /removeItem\(`wa:lastChat:\$\{state\.account\}`\)/);
+  assert.match(app, /restoreLastChat\(\); \} else \$\('chat-status'\)/);
+});

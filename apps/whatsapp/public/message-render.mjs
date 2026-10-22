@@ -12,13 +12,14 @@ const mountedMediaStates = new WeakMap();
 const viewerMediaStates = new WeakMap();
 const mediaPolicyDocuments = new WeakSet();
 const MESSAGE_KINDS = {
-  IMAGE: { label: 'Imagen', icon: 'image' },
-  VIDEO: { label: 'Video', icon: 'video' },
+  // QA UX #17.4: copia de WhatsApp («Foto») y tildes donde faltaban.
+  IMAGE: { label: 'Foto', icon: 'image' },
+  VIDEO: { label: 'Vídeo', icon: 'video' },
   AUDIO: { label: 'Audio', icon: 'audio' },
   DOCUMENT: { label: 'Documento', icon: 'document' },
   STICKER: { label: 'Sticker', icon: 'sticker' },
   POLL: { label: 'Encuesta', icon: 'poll' },
-  LOCATION: { label: 'Ubicacion', icon: 'location' },
+  LOCATION: { label: 'Ubicación', icon: 'location' },
   CONTACT: { label: 'Contacto', icon: 'contact' },
   EVENT: { label: 'Evento', icon: 'event' },
 };
