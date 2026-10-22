@@ -23,7 +23,12 @@ const server = createServer(async (request, response) => {
   if (url.pathname.startsWith('/api/')) {
     let data = {};
     if (url.pathname === '/api/accounts') data = {accounts:[{id:'personal',label:'Personal'},{id:'secondary',label:'Secundaria'}], sendingEnabled:true};
-    if (url.pathname === '/api/chats') data = {chats:[{id:`${account}-chat`,name:account === 'personal' ? 'Ana' : 'Bruno',preview:messages.get(account)?.at(-1),unread:0}]};
+    if (url.pathname === '/api/chats') {
+      // QA #18: el listado de secondary tarda como el de personal en producción
+      // (statement_timeout); el stream no puede depender de él.
+      if (account === 'secondary') await new Promise(resolve => setTimeout(resolve, 2000));
+      data = {chats:[{id:`${account}-chat`,name:account === 'personal' ? 'Ana' : 'Bruno',preview:messages.get(account)?.at(-1),unread:0}]};
+    }
     if (url.pathname === '/api/messages') {
       reads.set(account, (reads.get(account) || 0) + 1);
       data = {messages:(messages.get(account) || []).map((text, index) => ({id:`${account}-${index}`,text,timestamp:new Date(2026,8,29,12,index).toISOString()}))};
@@ -65,6 +70,17 @@ try {
   assert.equal(reads.get('personal'), beforeBurst + 1, 'one event burst should make one message request');
 
   await page.getByRole('button', {name:'Cuenta de WhatsApp: Secundaria'}).click();
+  // QA #18: el stream de la cuenta nueva se abre aunque su listado tarde 2 s.
+  const openedEarly = await new Promise(resolve => {
+    const started = Date.now();
+    const tick = () => {
+      if (streams.get('secondary')?.size) return resolve(true);
+      if (Date.now() - started > 1200) return resolve(false);
+      setTimeout(tick, 50);
+    };
+    tick();
+  });
+  assert(openedEarly, 'el SSE de la cuenta nueva debe abrirse sin esperar al listado de chats (QA #18)');
   await page.locator('#chats .chat-item').first().click();
   await page.locator('#messages .message-text').getByText('Inicial secundaria', {exact:true}).waitFor();
   await waitForStream('secondary');
