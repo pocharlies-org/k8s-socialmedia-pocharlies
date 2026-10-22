@@ -2022,8 +2022,10 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const a = accountParam(url.searchParams.get('account')); const chat = safeChatId(url.searchParams.get('chat'));
         const conversation = await conversationFor(a, chat); const providerChat = providerChatId(conversation);
         try {
-          const result = await featureConnector(a, `/chats/${encodeURIComponent(providerChat)}/presence`, { method: 'GET' });
-          return json(200, { account: a.accountId, chat, ...normalizePresence(result) });
+          // QA #27.1: la GET parametrizada nunca existió en el conector vivo; su lectura es POST /chats/presence/read.
+          const result = await featureConnector(a, '/chats/presence/read', { method: 'POST', body: { conversationId: providerChat } });
+          const presence = normalizePresence(result?.presence?.presence || result?.presence || result);
+          return json(200, { account: a.accountId, chat, ...presence, available: presence.state !== 'unknown' || presence.lastSeen != null });
         } catch (error) {
           if (error?.code !== 'UNSUPPORTED_UPSTREAM') throw error;
           return json(200, { account: a.accountId, chat, state: 'unknown', lastSeen: null, available: false, reason: 'provider_unavailable' });

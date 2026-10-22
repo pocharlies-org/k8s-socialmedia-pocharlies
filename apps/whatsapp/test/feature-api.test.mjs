@@ -1089,12 +1089,14 @@ test('direct chats preserve their stored provider JID', async t => {
   const upstream = [];
   const db = fixtureDatabase([]);
   db.conversations['personal-chat'].wa_chat_id = 'personal:resolved@s.whatsapp.net';
-  const { request } = await fixture(t, { db, fetchImpl: async url => {
-    upstream.push(url);
-    return Response.json({ state: 'unknown' });
+  const { request } = await fixture(t, { db, fetchImpl: async (url, options) => {
+    upstream.push(`${url} ${options?.body || ''}`);
+    return Response.json({ presence: { presence: { status: 'unknown' } } });
   } });
   assert.equal((await request('/api/presence?account=personal&chat=personal-chat')).status, 200);
-  assert.ok(upstream[0].includes('personal%3Aresolved%40s.whatsapp.net'));
+  // QA #27.1: la lectura es POST /chats/presence/read y el JID viaja en el cuerpo.
+  assert.ok(upstream[0].includes('/chats/presence/read'));
+  assert.ok(upstream[0].includes('personal:resolved@s.whatsapp.net'));
 });
 
 test('sending from a LID conversation uses its canonical LID, including a namespaced account', async t => {

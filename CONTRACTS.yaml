@@ -1107,7 +1107,9 @@ contracts:
   - connectors/whatsapp-web/src/api/controller.ts
   status: active
   note: 'POST /api/v1/chats/presence/read of the house WhatsApp connectors (fase 3 / PR-8), consumed by
-    dgx-messages (/messages → contact presence in the chat header). HMAC-signed body {conversationId,
+    dgx-messages (/messages → contact presence in the chat header) and by apps/whatsapp/server.mjs
+    (GET /api/presence → subtítulo del chat directo; la GET parametrizada que la app llamaba antes nunca
+    existió en un conector vivo, QA #27, 22-10 — superficie sin cambios). HMAC-signed body {conversationId,
     participant?} (participant: phone or user jid, for one member of a group). A read: no sending gate;
     503 disconnected. Presence lives in the connector''s memory only (from WhatsApp''s presence.update;
     60 s for online / offline, 8 s for typing / recording; cleared on every reconnect) and is looked up
