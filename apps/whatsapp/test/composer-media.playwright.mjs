@@ -76,11 +76,9 @@ try {
     input.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true}));
   });
   assert.equal(await page.locator('.composer-media-card').count(), 3);
-  const viewOnce = page.getByRole('button', {name:'Ver una vez: primera.png'});
-  assert.equal(await page.locator('.composer-view-once').count(), 1, 'documents cannot be sent as view-once media');
-  assert.equal(await viewOnce.getAttribute('aria-pressed'), 'false');
-  await viewOnce.click();
-  assert.equal(await viewOnce.getAttribute('aria-pressed'), 'true');
+  // QA #77 addendum: el control «Ver una vez» no se ofrece (la ruta del conector degrada el
+  // adjunto a octet-stream y traga el caption) hasta que el conector lo soporte.
+  assert.equal(await page.locator('.composer-view-once').count(), 0);
   await page.locator('#message').fill('Leyenda');
   await page.locator('#attachment-thumbnail').evaluate(image => image.decode());
   assert((await page.locator('#attachment-thumbnail').evaluate(image => image.naturalWidth)) > 0);

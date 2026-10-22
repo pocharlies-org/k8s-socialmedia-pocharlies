@@ -185,22 +185,22 @@ try {
   assert.equal(originalUpload.data, originalB64, 'cancelled original bytes changed');
   await clearAttachments();
 
-  // Apply replaces only that attachment while caption + view-once + siblings hold.
+  // Apply replaces only that attachment while caption + siblings hold.
+  // QA #77 addendum: sin «Ver una vez» (el control no se ofrece hasta que el conector lo soporte).
   await page.locator('#attachment').setInputFiles([
     {name:'lote.png', mimeType:'image/png', buffer:red},
     {name:'otro.gif', mimeType:'image/gif', buffer:gifBuffer},
   ]);
-  await page.getByRole('button', {name:'Ver una vez: lote.png'}).click();
   await page.locator('#message').fill('Leyenda del lote');
   await openEditor();
   await page.locator('#photo-rotate-right').click();
   await page.locator('#photo-editor-apply').click();
   await page.locator('#photo-editor-overlay').waitFor({state:'hidden'});
-  assert.equal(await page.getByRole('button', {name:'Ver una vez: lote-editada.jpg'}).getAttribute('aria-pressed'), 'true', 'view-once lost after edit');
+  assert.equal(await page.locator('.composer-view-once').count(), 0, 'view-once control must not appear after edit');
   await page.locator('#composer').evaluate(form => form.requestSubmit());
   await page.waitForFunction(n => document.querySelectorAll('#messages [data-send-state="confirmed"]').length >= n, 7);
   const lote = uploads.find(item => item.name === 'lote-editada.jpg');
-  assert.equal(lote.viewOnce, true, 'edited upload lost view-once');
+  assert.equal('viewOnce' in lote, false, 'the payload must never carry viewOnce while the connector route degrades it');
   assert.equal(lote.caption, 'Leyenda del lote', 'caption not preserved through edit');
   const gifUpload = uploads.find(item => item.name === 'otro.gif');
   assert.equal(gifUpload.mimeType, 'image/gif');
