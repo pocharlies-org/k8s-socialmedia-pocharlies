@@ -120,20 +120,39 @@ export function typedPhoneTarget(value) {
   return { key: `typed:${digits}`, digits, display, phone: national ? raw : `+${digits}` };
 }
 
+/** Instant local filter over the loaded entries (QA #103): same fold as the chat
+ * list (NFD), numbers matched by digits like the server's searchClause. */
+export function filterDirectoryEntries(entries, query) {
+  const raw = text(query).trim();
+  if (!raw) return entries;
+  if (/^\+?[\d][\d +().-]*$/.test(raw)) {
+    const digits = raw.replace(/\D/g, '');
+    return entries.filter(entry => text(entry.phone).replace(/\D/g, '').includes(digits));
+  }
+  const q = raw.toLocaleLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  return entries.filter(entry => `${entry.label} ${entry.sublabel}`.toLocaleLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').includes(q));
+}
+
+const PAGE_CACHE_TTL_MS = 60_000;
+
 export function createContactDirectoryClient({ api, getAccount, limit = CONTACT_DIRECTORY_LIMIT, baseUrl = () => 'http://localhost/' } = {}) {
   let generation = 0;
   const isCurrent = token => token.generation === generation && token.account === getAccount();
+  const pageCache = new Map();
 
   async function page({ q = '', cursor = null } = {}) {
     const token = { account: text(getAccount()), generation };
     if (!token.account) return null;
+    const cacheKey = `${token.account}|${q}|${cursor || ''}`;
+    const cached = pageCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < PAGE_CACHE_TTL_MS) return isCurrent(token) ? cached.value : null;
     const result = await api(contactDirectoryUrl({ account: token.account, q, cursor, limit }, baseUrl()));
     if (!isCurrent(token)) return null;
     if (result?.account !== token.account || !Array.isArray(result.contacts)) {
       throw new Error('Respuesta del directorio de contactos no válida.');
     }
     const entries = result.contacts.map(entry => normalizeContactEntry(entry, token.account, baseUrl())).filter(Boolean);
-    return {
+    const value = {
       entries,
       query: text(result.query),
       total: Number(result.total || 0),
@@ -142,6 +161,10 @@ export function createContactDirectoryClient({ api, getAccount, limit = CONTACT_
       sendingEnabled: result.sendingEnabled === true,
       sync: result.sync && typeof result.sync === 'object' ? result.sync : {},
     };
+    // shortcut: caché de término pequeño, se vacía entera al crecer; subir a LRU si molesta.
+    pageCache.set(cacheKey, { at: Date.now(), value });
+    if (pageCache.size > 50) pageCache.clear();
+    return value;
   }
 
   return {
@@ -353,6 +376,14 @@ export function installContactDirectoryUI({
 
   function search(value) {
     state.queryInput = text(value);
+    // Feedback instantáneo sobre lo ya cargado (QA #103): la página del servidor
+    // llega un momento después y la sustituye con el resultado completo.
+    if (state.list && (state.entries || []).length) {
+      const visible = filterDirectoryEntries(state.entries, state.queryInput);
+      state.list.replaceChildren(...visible.map(entryRow));
+      if (!visible.length) state.list.append(node('p', 'contact-directory-empty', 'Ningún contacto sincronizado coincide con esta búsqueda.'));
+      syncTypedRow();
+    }
     clearScheduled(state.debounce);
     state.debounce = schedule(() => {
       state.entries = [];

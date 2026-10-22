@@ -13,6 +13,7 @@ import {
   contactEntryHint,
   createContactDirectoryClient,
   directoryStatusLabel,
+  filterDirectoryEntries,
   normalizeContactEntry,
   typedPhoneTarget,
 } from '../public/contact-directory-ui.mjs';
@@ -232,4 +233,28 @@ test('the client keeps only usable entries and normalizes the cursor', async () 
   assert.deepEqual(page.entries.map(entry => entry.key), ['chat:1']);
   assert.equal(page.hasMore, true);
   assert.equal(page.nextCursor, 'cursor-2');
+});
+
+test('el filtro local pliega tildes y los números buscan por dígitos (QA #103)', () => {
+  const entries = [
+    { key: 'a', label: 'Ibáñez', sublabel: '', phone: '+34600111222' },
+    { key: 'b', label: 'Ana', sublabel: 'Cliente', phone: null },
+  ];
+  assert.deepEqual(filterDirectoryEntries(entries, 'ibanez').map(e => e.key), ['a']);
+  assert.deepEqual(filterDirectoryEntries(entries, 'cliente').map(e => e.key), ['b']);
+  assert.deepEqual(filterDirectoryEntries(entries, '600 111').map(e => e.key), ['a']);
+  assert.equal(filterDirectoryEntries(entries, '').length, 2);
+});
+
+test('la misma página repetida sale de la caché sin re-pedir (QA #103)', async () => {
+  let calls = 0;
+  const client = createContactDirectoryClient({
+    api: async () => { calls += 1; return payload(); },
+    getAccount: () => account,
+  });
+  await client.page({ q: 'an' });
+  await client.page({ q: 'an' });
+  assert.equal(calls, 1);
+  await client.page({ q: 'bea' });
+  assert.equal(calls, 2);
 });
