@@ -587,7 +587,8 @@ body[data-theme="light"] .avatar { background: #d8e0e3; color: #34464f; }
   place-items: center;
   border-radius: 10px;
   background: var(--accent);
-  color: #07170f;
+  /* UX #51.1: #07170f daba 3.77:1 sobre el verde a 11 px; blanco ≈ 7:1 (AA). */
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }

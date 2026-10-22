@@ -475,3 +475,11 @@ test('la pegatina es la palabra en toda la interfaz (UX #46.2)', async () => {
   assert.match(src, /'Enviar pegatina'/);
   assert.doesNotMatch(src, /'Crear sticker'|'Nuevo sticker'|'Enviar sticker'|Emoji, GIF y stickers/);
 });
+
+test('el badge de no leídos pasa AA: blanco sobre el verde (UX #51.1)', async () => {
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  const badge = css.match(/\.chat-item > \.badge \{[^}]*\}/)[0];
+  assert.match(badge, /background: var\(--accent\)/);
+  assert.match(badge, /color: #fff/);
+  assert.doesNotMatch(badge, /color: #07170f/);
+});
