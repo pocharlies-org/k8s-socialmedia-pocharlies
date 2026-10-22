@@ -493,6 +493,15 @@ h1, h2, p { margin: 0; }
 .chat-row-menu { position: absolute; right: 8px; top: 32px; width: 28px; height: 28px; padding: 0; background: transparent; color: var(--muted-strong); font-size: 23px; opacity: 0; }
 .chat-row:hover .chat-row-menu, .chat-row:focus-within .chat-row-menu { opacity: 1; }
 @media (hover: none) { .chat-row-menu { opacity: 1; } }
+/* UX 21.2: acciones rápidas al hover (fijar/silenciar/archivar), junto al «⌄».
+   En táctil no se muestran: el menú «⌄» ya está siempre visible. */
+.chat-quick { position: absolute; top: 32px; width: 28px; height: 28px; padding: 0; background: transparent; border: 0; font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; }
+.chat-quick-pin { right: 40px; }
+.chat-quick-mute { right: 68px; }
+.chat-quick-archive { right: 96px; }
+.chat-row:hover .chat-quick, .chat-row:focus-within .chat-quick { opacity: 1; }
+.chat-row .chat-item { padding-right: 126px; }
+@media (hover: none) { .chat-quick { display: none; } .chat-row .chat-item { padding-right: 38px; } }
 .feature-chat-submenu { margin: 0 6px 4px 16px; padding-left: 6px; border-left: 2px solid var(--accent); }
 
 .chat-item[aria-current="true"] {

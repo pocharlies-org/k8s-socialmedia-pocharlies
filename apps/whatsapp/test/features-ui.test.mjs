@@ -318,3 +318,10 @@ test('filtrando por lista, una pestaña con su nombre queda activa y sale (QA 22
   assert.match(ui, /chip\.setAttribute\('aria-pressed', 'true'\)/);
   assert.match(ui, /chip\.onclick = \(\) => setView\('all'\)/);
 });
+
+test('quickChatAction reutiliza chat-actions con refresco de fila (UX 21.2)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /quickChatAction: async \(chat, action\) =>/);
+  assert.match(ui, /\['archive', 'pin', 'mute'\]\.includes\(action\)/);
+  assert.match(ui, /updateChatFlags\(chat\.id, \{ \[action === 'archive' \? 'archived'/);
+});

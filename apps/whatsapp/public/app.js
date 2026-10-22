@@ -322,7 +322,22 @@ function renderChats() {
     menu.onclick = openMenu;
     row.oncontextmenu = openMenu;
     button.onkeydown = event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openMenu(event); };
-    row.append(button, menu);
+    // UX 21.2: fijar/silenciar/archivar al hover (y con foco de teclado), sin
+    // pasar por «⌄». Con 1000+ chats es la diferencia entre 10 s y 5 min.
+    const quicks = [];
+    for (const [action, glyph, label] of [
+      ['pin', '📌', chat.pinned === true || chat.isPinned === true ? 'Desfijar chat' : 'Fijar chat'],
+      ['mute', '🔕', chat.muted === true || chat.isMuted === true ? 'Activar sonido' : 'Silenciar chat'],
+      ['archive', '🗂️', 'Archivar chat'],
+    ]) {
+      const quick = node('button', `chat-quick chat-quick-${action}`, glyph);
+      quick.type = 'button';
+      quick.setAttribute('aria-label', label);
+      quick.title = label;
+      quick.onclick = event => { event.stopPropagation(); void featureUI?.quickChatAction?.(chat, action); };
+      quicks.push(quick);
+    }
+    row.append(button, menu, ...quicks);
     $('chats').append(row);
   }
   $('chat-status').textContent = !state.chats.length ? (filter === 'archived' ? 'No hay chats archivados.' : 'Todavía no hay chats sincronizados para esta cuenta.') : !chats.length ? (filter === 'favorites' ? 'Aún no hay favoritos. Marca uno desde «⌄» en cualquier chat.' : 'No hay conversaciones que coincidan.') : '';

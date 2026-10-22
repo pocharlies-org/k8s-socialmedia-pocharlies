@@ -2429,6 +2429,23 @@ export function installFeatureUI({
     openSidebarChatMenu,
     isChatPinned: chat => chatIsPinned(chat, prefs()),
     isChatFavorite: chat => chatIsFavorite(chat, prefs()),
+    // UX 21.2: acciones rápidas del hover en la fila, sin abrir «⌄». Mismo
+    // camino que el menú de fila (chat-actions + updateChatFlags + loadChats).
+    quickChatAction: async (chat, action) => {
+      const account = runtime.account;
+      if (!account || !chat?.id || !['archive', 'pin', 'mute'].includes(action)) return;
+      const current = action === 'archive' ? chatIsArchived(chat, prefs()) : action === 'pin' ? chatIsPinned(chat, prefs()) : chatIsMuted(chat, prefs());
+      const providerAction = current ? { archive: 'unarchive', pin: 'unpin', mute: 'unmute' }[action] : action;
+      try {
+        await request('/api/chat-actions', { account, chat: chat.id, action: providerAction });
+        if (runtime.account !== account) return;
+        updateChatFlags(chat.id, { [action === 'archive' ? 'archived' : action === 'pin' ? 'pinned' : 'muted']: !current });
+        await loadChats();
+        if (runtime.account === account) toast(!current && action === 'archive' ? 'Chat archivado.' : 'Preferencia actualizada.');
+      } catch (error) {
+        if (runtime.account === account) showError(error);
+      }
+    },
     /** Close every features dialog from the app shell (rail panels are mutually exclusive). */
     closePanels: () => { runtime.closeAttachMenu?.(); closeContactDirectory(); closeModal(); },
     setView,

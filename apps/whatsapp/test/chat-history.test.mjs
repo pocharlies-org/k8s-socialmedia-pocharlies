@@ -89,3 +89,12 @@ test('el cambio de cuenta pinta la última lista conocida y revalida (QA velocid
   assert.match(app, /if \(previous\.length && state\.chatListScope !== scope\) \{/);
   assert.match(app, /chatCache\.set\(scope, \{chats\}\)/);
 });
+
+test('la fila de chat tiene acciones rápidas fijar/silenciar/archivar (UX 21.2)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /chat-quick chat-quick-\$\{action\}/);
+  assert.match(src, /featureUI\?\.quickChatAction\?\.\(chat, action\)/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.chat-row:hover \.chat-quick/);
+  assert.match(css, /@media \(hover: none\) \{ \.chat-quick \{ display: none; \}/);
+});
