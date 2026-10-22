@@ -30,8 +30,9 @@ export function writeUploadQualityPreference(storage, accountId, quality) {
 }
 
 export function readUploadQuality(storage, accountId, file) {
-  if (!/^image\/(jpeg|png|webp)$/.test(file?.type || '')) return 'source';
-  return readUploadQualityPreference(storage, accountId);
+  // shortcut: el conector desplegado rechaza quality (400 quality_unsupported → 502 en toda foto, QA #93).
+  // La preferencia se sigue guardando; volver a leerla cuando el conector con soporte esté desplegado (#133).
+  return 'source';
 }
 
 export function canViewOnce(file) {

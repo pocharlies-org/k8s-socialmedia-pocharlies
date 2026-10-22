@@ -63,9 +63,10 @@ test('upload quality is chosen per account for still images and captured in the 
   const values = new Map([['wa-media-upload-quality', JSON.stringify({personal:'hd', secondary:'standard'})]]);
   const storage = {getItem: key => values.get(key) || null};
   const photo = {name:'foto.jpg', type:'image/jpeg'};
-  assert.equal(readUploadQuality(storage, 'personal', photo), 'hd');
-  assert.equal(readUploadQuality(storage, 'secondary', photo), 'standard');
-  assert.equal(readUploadQuality(storage, 'other', photo), 'standard');
+  // QA #93: el conector vivo rechaza quality; la app manda 'source' (sin campo) pase lo que pase la preferencia.
+  for (const account of ['personal', 'secondary', 'other']) {
+    assert.equal(readUploadQuality(storage, account, photo), 'source', account);
+  }
   assert.equal(readUploadQuality(storage, 'personal', {name:'clip.mp4', type:'video/mp4'}), 'source');
   assert.equal(readUploadQuality(storage, 'personal', {name:'anim.gif', type:'image/gif'}), 'source');
   assert.equal(readUploadQuality(storage, 'personal', {name:'file.pdf', type:'application/pdf'}), 'source');
