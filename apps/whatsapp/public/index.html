@@ -85,8 +85,9 @@
         <input id="search" type="search" placeholder="Buscar o empezar un chat" autocomplete="off">
       </label>
       <span id="chat-count" class="badge" aria-hidden="true">0</span>
-      <p id="chat-status" class="muted"></p>
+      <!-- UX #10.6: bajo la lista; «Cargando más…» colgaba como cabecera fija. -->
       <div id="chats" class="chat-list"></div>
+      <p id="chat-status" class="muted"></p>
     </aside>
 
     <section class="conversation" aria-label="Chat actual">

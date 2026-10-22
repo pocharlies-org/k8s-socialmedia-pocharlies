@@ -1024,8 +1024,18 @@ function deliveryStatus(message) {
   const status = textValue(message?.status || message?.deliveryStatus).toLowerCase();
   if (status === 'sent') return { symbol: '\u2713', label: 'Enviado', className: 'status-sent' };
   if (status === 'delivered') return { symbol: '\u2713\u2713', label: 'Entregado', className: 'status-delivered' };
-  if (['read', 'played'].includes(status)) return { symbol: '\u2713\u2713', label: status === 'played' ? 'Reproducido' : 'Leido', className: 'status-read' };
+  if (['read', 'played'].includes(status)) return { symbol: '\u2713\u2713', label: status === 'played' ? 'Reproducido' : 'Le\u00eddo', className: 'status-read' };
   return null;
+}
+
+// UX #10.3: WhatsApp colorea el nombre por participante; paleta fija indexada
+// por hash del id (estable entre renders y sesiones).
+const SENDER_COLORS = ['#e542a3', '#5b8cff', '#ff8c42', '#a855f7', '#00a8f3', '#ff5151', '#2f9e44', '#d97706'];
+function senderColor(message) {
+  const key = textValue(message?.senderId || message?.senderName || message?.senderPushName);
+  let hash = 0;
+  for (const character of key) hash = (hash * 31 + character.codePointAt(0)) >>> 0;
+  return SENDER_COLORS[hash % SENDER_COLORS.length];
 }
 
 function messageType(value) {
@@ -1123,10 +1133,14 @@ export function renderMessage(message, { document: documentRef = globalThis.docu
   if (message?.id != null) bubble.dataset.messageId = String(message.id);
   bubble.dataset.renderSignature = messageRenderSignature(message);
   bubble.setAttribute('aria-label', fromMe ? 'Mensaje enviado' : 'Mensaje recibido');
-  if (!fromMe && showSenderNames && message?.senderName && message?.isFirstInGroup !== false) bubble.append(makeElement(documentRef, 'strong', 'message-sender', message.senderName));
+  if (!fromMe && showSenderNames && message?.senderName && message?.isFirstInGroup !== false) {
+    const sender = makeElement(documentRef, 'strong', 'message-sender', message.senderName);
+    sender.style.color = senderColor(message);
+    bubble.append(sender);
+  }
   if (message?.replyToMessageId) bubble.append(replyReference(message, documentRef));
   const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
-  if (metadata.viewOnce === true) bubble.append(makeElement(documentRef, 'div', 'message-preservation-marker message-view-once', 'Visualizacion unica'));
+  if (metadata.viewOnce === true) bubble.append(makeElement(documentRef, 'div', 'message-preservation-marker message-view-once', 'Visualización única'));
   if (message?.isDeleted === true) {
     const marker = makeElement(documentRef, 'div', 'message-preservation-marker message-deleted', 'Mensaje eliminado');
     const deletedAt = parseTimestamp(message?.deletedAt);
@@ -1171,7 +1185,7 @@ export function renderMessage(message, { document: documentRef = globalThis.docu
           const name = textValue(voter?.name || voter?.id).trim();
           if (name) list.append(makeElement(documentRef, 'li', '', name));
         }
-        votes.append(list.children.length ? list : makeElement(documentRef, 'span', 'message-poll-note', 'Sin votos registrados para esta opcion'));
+        votes.append(list.children.length ? list : makeElement(documentRef, 'span', 'message-poll-note', 'Sin votos registrados para esta opción'));
         card.append(votes);
       }
     }
