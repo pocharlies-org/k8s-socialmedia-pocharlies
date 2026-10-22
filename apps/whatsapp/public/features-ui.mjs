@@ -486,12 +486,14 @@ export function createMessageInfoPanel({ documentRef, container, message, contex
   return { load, dispose: () => { disposed = true; version += 1; clearScheduled(); } };
 }
 
-function field(documentRef, label, type = 'text', name = '', value = '') {
+function field(documentRef, label, type = 'text', name = '', value = '', placeholder = '') {
   const wrapper = makeElement(documentRef, 'label', 'feature-field');
   wrapper.append(makeElement(documentRef, 'span', '', label));
   const input = makeElement(documentRef, type === 'textarea' ? 'textarea' : 'input', '', type === 'textarea' ? undefined : '');
   input.name = name;
   input.value = value;
+  // UX #43.1: los campos de teléfono piden el pad numérico y enseñan el formato.
+  if (placeholder) input.placeholder = placeholder;
   if (type !== 'textarea') input.type = type;
   if (type === 'textarea') input.rows = 3;
   wrapper.append(input);
@@ -1046,7 +1048,7 @@ export function installFeatureUI({
 
   function openMemberForm() {
     const modal = openModal('Añadir miembro', { opener: documentRef.activeElement });
-    const address = field(documentRef, 'Número o identificador', 'text', 'memberId');
+    const address = field(documentRef, 'Número o identificador', 'tel', 'memberId', '', '+34 600 000 000');
     const submit = button(documentRef, 'Añadir', 'feature-button primary');
     submit.type = 'submit';
     const form = node('form', 'feature-form');
@@ -1882,7 +1884,7 @@ export function installFeatureUI({
     const modal = openModal('Nuevo contacto', { wide: true });
     const form = node('form', 'feature-form');
     const name = field(documentRef, 'Nombre', 'text', 'name');
-    const address = field(documentRef, 'Número o identificador', 'text', 'address');
+    const address = field(documentRef, 'Número o identificador', 'tel', 'address', '', '+34 600 000 000');
     const submit = button(documentRef, 'Continuar', 'feature-button primary');
     submit.type = 'submit';
     form.append(name.wrapper, address.wrapper, submit);
@@ -1902,7 +1904,7 @@ export function installFeatureUI({
     const modal = openModal('Nuevo grupo', { wide: true });
     const form = node('form', 'feature-form');
     const name = field(documentRef, 'Nombre', 'text', 'name');
-    const members = field(documentRef, 'Miembros (separados por comas, p. ej. +34600112233)', 'text', 'members');
+    const members = field(documentRef, 'Miembros (separados por comas, p. ej. +34600112233)', 'text', 'members', '', '+34600112233, +34600112244');
     const submit = button(documentRef, 'Continuar', 'feature-button primary');
     submit.type = 'submit';
     form.append(name.wrapper, members.wrapper, submit);
@@ -2096,7 +2098,7 @@ export function installFeatureUI({
       return;
     }
     const form = node('form', 'feature-form');
-    const fields = [field(documentRef, 'Nombre', 'text', 'name'), field(documentRef, 'Número o identificador', 'text', 'address')];
+    const fields = [field(documentRef, 'Nombre', 'text', 'name'), field(documentRef, 'Número o identificador', 'tel', 'address', '', '+34 600 000 000')];
     const submit = button(documentRef, 'Enviar contacto', 'feature-button primary');
     submit.type = 'submit';
     for (const item of fields) form.append(item.wrapper); form.append(submit);

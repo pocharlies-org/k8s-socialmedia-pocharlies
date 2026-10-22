@@ -435,3 +435,11 @@ test('el adjunto citado se nombra por tipo (nit QA 22-10)', async () => {
   assert.match(src, /type === 'sticker' \? 'Sticker'/);
   assert.match(src, /startsWith\('image'\) \? 'Foto'/);
 });
+test('los campos de teléfono piden pad numérico y enseñan el formato (UX #42.3/#43.1)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /if \(placeholder\) input\.placeholder = placeholder;/);
+  assert.match(src, /'Número o identificador', 'tel', 'address', '', '\+34 600 000 000'/);
+  assert.match(src, /'Número o identificador', 'tel', 'memberId', '', '\+34 600 000 000'/);
+  assert.match(src, /'members', '', '\+34600112233, \+34600112244'/);
+  assert.doesNotMatch(src, /'Número o identificador', 'text'/);
+});
