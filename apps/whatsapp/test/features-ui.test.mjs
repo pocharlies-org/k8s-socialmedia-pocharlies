@@ -294,3 +294,27 @@ test('runScopedMutation limpia el banner de error al acertar (QA #13)', async ()
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(shown, [''], 'el éxito debe borrar el banner dejado por un fallo anterior');
 });
+
+test('en modo selección, pulsar la burbuja alterna el mensaje (QA 22-10)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  // El click en la burbuja debe alternar sin tocar el checkbox, y los elementos
+  // interactivos (media, enlaces, checkbox) no pueden desencadenar la selección.
+  assert.match(ui, /bubble\.onclick = runtime\.selectedMessageIds\.size/);
+  assert.match(ui, /closest\?\.\('button, a, input'\)|closest\('button, a, input'\)/);
+  assert.match(ui, /toggleMessageSelected\(id, !runtime\.selectedMessageIds\.has\(id\)\)/);
+});
+
+test('privacidad sin ningún valor leído no deja guardar a ciegas (UX 20.1)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /loaded = known\.some\(value => value !== '' && value !== null && value !== undefined\)/);
+  assert.match(ui, /submit\.disabled = !loaded/);
+  assert.match(ui, /No se ha podido leer tu estado actual/);
+});
+
+test('filtrando por lista, una pestaña con su nombre queda activa y sale (QA 22-10)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /documentRef\.getElementById\('feature-list-chip'\)\?\.remove\(\)/);
+  assert.match(ui, /`Lista: \$\{listView\.name\}`/);
+  assert.match(ui, /chip\.setAttribute\('aria-pressed', 'true'\)/);
+  assert.match(ui, /chip\.onclick = \(\) => setView\('all'\)/);
+});

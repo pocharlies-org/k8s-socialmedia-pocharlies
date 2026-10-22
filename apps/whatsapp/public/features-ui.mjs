@@ -731,6 +731,17 @@ export function installFeatureUI({
     if (heading) heading.hidden = !archived;
     const hint = documentRef.getElementById('feature-archived-hint');
     if (hint) hint.hidden = !archived;
+    // QA 22-10: dentro de una lista no había pestaña activa ni forma de saber en cuál
+    // se estaba. La lista filtrada se pinta como pestaña con su nombre; pulsarla sale.
+    documentRef.getElementById('feature-list-chip')?.remove();
+    const listView = text(runtime.currentView).startsWith('list:') ? findList(prefs(), runtime.currentView.slice(5)) : null;
+    if (listView) {
+      const chip = button(documentRef, `Lista: ${listView.name}`, 'feature-view-button');
+      chip.id = 'feature-list-chip'; chip.dataset.featureView = runtime.currentView;
+      chip.setAttribute('aria-pressed', 'true'); chip.title = 'Salir de la lista';
+      chip.onclick = () => setView('all');
+      documentRef.querySelector('.feature-view-nav')?.append(chip);
+    }
   }
 
   function matchesChat(chat, view = runtime.currentView) {
@@ -1227,6 +1238,11 @@ export function installFeatureUI({
         }
         selector.checked = runtime.selectedMessageIds.has(id);
       } else selector?.remove();
+      // QA 22-10: en modo selección, pulsar la burbuja alterna (comportamiento de WhatsApp).
+      // Media, enlaces y el checkbox conservan su propio comportamiento.
+      bubble.onclick = runtime.selectedMessageIds.size
+        ? event => { if (!event.target?.closest?.('button, a, input')) toggleMessageSelected(id, !runtime.selectedMessageIds.has(id)); }
+        : null;
       const reactions = reactionFor(message);
       let reactionStrip = bubble.querySelector('.feature-reactions');
       if (reactions.length) {
@@ -2108,11 +2124,16 @@ export function installFeatureUI({
       status.value = initial.status || '';
       groupsAdd.value = initial.groupsAdd || '';
       receipts.value = initial.readReceipts || '';
-      loaded = true;
-      submit.disabled = false;
-      notice.textContent = [initial.profile, initial.lastSeen, initial.groupsAdd].includes('contact_blacklist')
-        ? 'Para cambiar las personas excluidas, usa WhatsApp en tu teléfono. Los demás ajustes se aplican a tu cuenta.'
-        : 'Estos ajustes se aplican a tu cuenta de WhatsApp.';
+      // UX 20.1: WhatsApp puede no reportar ningún valor; dejar editar a ciegas es
+      // peor que no ofrecer el panel. Sin ningún valor leído, Guardar no se activa.
+      const known = [initial.profile, initial.lastSeen, initial.online, initial.status, initial.groupsAdd, initial.readReceipts];
+      loaded = known.some(value => value !== '' && value !== null && value !== undefined);
+      submit.disabled = !loaded;
+      notice.textContent = !loaded
+        ? 'No se ha podido leer tu estado actual; cambia estos ajustes desde WhatsApp en tu teléfono.'
+        : [initial.profile, initial.lastSeen, initial.groupsAdd].includes('contact_blacklist')
+          ? 'Para cambiar las personas excluidas, usa WhatsApp en tu teléfono. Los demás ajustes se aplican a tu cuenta.'
+          : 'Estos ajustes se aplican a tu cuenta de WhatsApp.';
     } catch {
       if (isCurrent()) notice.textContent = 'No se pudieron cargar las preferencias actuales; Guardar permanece desactivado.';
     }
@@ -2407,6 +2428,7 @@ export function installFeatureUI({
     openChatMenu,
     openSidebarChatMenu,
     isChatPinned: chat => chatIsPinned(chat, prefs()),
+    isChatFavorite: chat => chatIsFavorite(chat, prefs()),
     /** Close every features dialog from the app shell (rail panels are mutually exclusive). */
     closePanels: () => { runtime.closeAttachMenu?.(); closeContactDirectory(); closeModal(); },
     setView,

@@ -61,3 +61,24 @@ test('composer Enter preference honors Shift, composition, keyboard shortcuts an
   assert.equal(shouldSubmitMessageKey(key({isComposing:true}), true, false), false);
   assert.equal(shouldSubmitMessageKey(key(), true, true), false);
 });
+
+test('el favorito se marca en la fila y Favoritos vacío explica cómo marcarlo (QA 22-10)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /featureUI\?\.isChatFavorite\?\.\(chat\)/);
+  assert.match(app, /aria-label', 'Chat en favoritos'/);
+  assert.match(app, /Aún no hay favoritos\. Marca uno desde/);
+});
+
+test('F5 restaura el chat abierto y volver a la lista lo olvida (QA 22-10 #162)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /setItem\(`wa:lastChat:\$\{state\.account\}`, chat\.id\)/);
+  assert.match(app, /removeItem\(`wa:lastChat:\$\{state\.account\}`\)/);
+  assert.match(app, /restoreLastChat\(\); \} else \$\('chat-status'\)/);
+});
+
+test('el cambio de cuenta pinta la última lista conocida y revalida (QA velocidad 22-10)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const remembered = chatCache\.get\(scope\)\?\.chats \|\| \[\]/);
+  assert.match(app, /if \(previous\.length && state\.chatListScope !== scope\) \{/);
+  assert.match(app, /chatCache\.set\(scope, \{chats\}\)/);
+});

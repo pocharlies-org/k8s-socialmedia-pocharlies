@@ -276,6 +276,13 @@ function renderChats() {
       pin.title = 'Chat fijado';
       nameRow.append(pin);
     }
+    // QA 22-10: el favorito se filtraba pero no se veía en la fila de «Todos».
+    if (featureUI?.isChatFavorite?.(chat) || chat.favorite === true || chat.isFavorite === true) {
+      const fav = node('span', 'chat-fav');
+      fav.setAttribute('aria-label', 'Chat en favoritos');
+      fav.title = 'Chat en favoritos';
+      nameRow.append(fav);
+    }
     if (chat.muted === true || chat.isMuted === true) {
       const muted = node('span', 'chat-muted', 'Silenciado');
       muted.setAttribute('aria-label', 'Chat silenciado');
@@ -304,9 +311,10 @@ function renderChats() {
     row.append(button, menu);
     $('chats').append(row);
   }
-  $('chat-status').textContent = !state.chats.length ? (filter === 'archived' ? 'No hay chats archivados.' : 'Todavía no hay chats sincronizados para esta cuenta.') : !chats.length ? 'No hay conversaciones que coincidan.' : '';
+  $('chat-status').textContent = !state.chats.length ? (filter === 'archived' ? 'No hay chats archivados.' : 'Todavía no hay chats sincronizados para esta cuenta.') : !chats.length ? (filter === 'favorites' ? 'Aún no hay favoritos. Marca uno desde «⌄» en cualquier chat.' : 'No hay conversaciones que coincidan.') : '';
 }
 const chatLoads = new Map();
+const chatCache = new Map();
 async function loadChats({background = false} = {}) {
   if (!state.account || (background && state.chatLoading)) return;
   const account = state.account;
@@ -318,7 +326,14 @@ async function loadChats({background = false} = {}) {
   const running = chatLoads.get(scope);
   if (running) return running;
   const requestToken = ++state.chatRequestToken;
-  const previous = state.chatListScope === scope ? state.chats : [];
+  // QA velocidad 22-10: cambiar de cuenta costaba ~9 s (arranque frío cada vez).
+  // Se pinta enseguida la última lista conocida de ese ámbito y se revalida.
+  const remembered = chatCache.get(scope)?.chats || [];
+  const previous = state.chatListScope === scope ? state.chats : remembered;
+  if (previous.length && state.chatListScope !== scope) {
+    state.chats = previous; state.chatListScope = scope;
+    featureUI?.chatsChanged?.(state.chats); renderChats();
+  }
   const isCurrent = () => account === state.account && requestToken === state.chatRequestToken && archivedView === (featureUI?.isFeatureView?.() === 'archived');
   const run = (async () => {
     state.chatLoading = true;
@@ -327,7 +342,7 @@ async function loadChats({background = false} = {}) {
       await loadChatPages({previous, isCurrent,
         fetchPage: cursor => api(`/api/chats?${new URLSearchParams({account, limit: '100', ...(archivedView ? {archived: 'only'} : {}), ...(cursor ? {cursor} : {})})}`),
         onPage: (chats, hasMore) => {
-          state.chats = chats; state.chatListScope = scope;
+          state.chats = chats; state.chatListScope = scope; chatCache.set(scope, {chats});
           featureUI?.chatsChanged?.(state.chats);
           renderChats();
           if (hasMore) $('chat-status').textContent = 'Cargando más conversaciones…';
@@ -671,9 +686,19 @@ async function proposeMessage() {
 }
 function mobileChatEntry() { return history.state?.socialMediaChat === true; }
 if (mobileChatEntry()) history.replaceState({...history.state, socialMediaChat: false}, '');
+function restoreLastChat() {
+  // QA 22-10 (#162): F5 caía en «Selecciona un chat» y volvía a bajar toda la lista.
+  let lastId = null;
+  try { lastId = localStorage.getItem(`wa:lastChat:${state.account}`); } catch {}
+  if (!lastId) return;
+  const chat = state.chats.find(item => item.id === lastId);
+  if (chat) void selectChat(chat, { fromHistory: true });
+}
 function closeMobileChat() {
   messageRenderer?.closeMediaViewer?.(); cancelRecording(); cameraController?.close();
   document.body.classList.remove('chat-open');
+  // QA 22-10 (#162): volver a la lista es salir del chat; si no, F5 lo reabriría.
+  try { localStorage.removeItem(`wa:lastChat:${state.account}`); } catch {}
 }
 function selectChat(chat, {fromHistory = false} = {}) {
   messageRenderer?.closeMediaViewer?.(); saveDraft(); cancelRecording(); cameraController?.close(); cancelAttachment(); state.selectedChat = chat; state.chat = chat.id; state.historyMode = false; historyNotice.hidden = true; state.version++; resetMessageHistory(); state.signature = ''; $('message').value = state.drafts.get(`${state.account}:${state.chat}`) || ''; resizeMessageInput(); $('chat-title').textContent = chat.name || chat.id;
@@ -681,6 +706,8 @@ function selectChat(chat, {fromHistory = false} = {}) {
   // tiene nadie en WhatsApp. Los grupos conservan «Grupo» (es verificable).
   $('chat-subtitle').textContent = chat.isGroup === true ? 'Grupo' : '';
   $('chat-subtitle').hidden = chat.isGroup !== true; setConversationAvatar(chat); setAgentContext(chat); $('messages').replaceChildren(node('div', 'welcome', 'Cargando mensajes…')); renderMessages(); assistant?.select(context()); document.body.classList.add('chat-open'); error(); featureUI?.chatChanged?.(chat); renderChats(); updateControls();
+  // QA 22-10 (#162): F5 perdía el chat abierto (no estaba ni en localStorage ni en la URL).
+  try { localStorage.setItem(`wa:lastChat:${state.account}`, chat.id); } catch {}
   if (!fromHistory && matchMedia('(max-width: 760px), (max-width: 1024px) and (max-height: 500px) and (pointer: coarse)').matches) {
     const entry = {...(typeof history.state === 'object' && history.state || {}), socialMediaChat: true, account: state.account, chat: state.chat};
     if (mobileChatEntry()) history.replaceState(entry, '');
@@ -756,10 +783,29 @@ async function sendOptimistic(item, path, payload) {
     result = await api(path, {account: item.account, chat: item.chat, ...body, sendToken: item.sendToken});
     if (!result.messageId) throw new Error('El servidor no confirmó el identificador del mensaje.');
   } catch (err) {
+    // QA 22-10: un 4xx de validación es determinista — no se envió nada. La burbuja
+    // optimista mentía («Entrega no confirmada») y el aviso de resultado incierto
+    // era falso. Fuera la burbuja y el texto vuelve al composer (sin adjuntos: esos
+    // conservan el flujo failed con «Adjunta de nuevo»).
+    if (err.status >= 400 && err.status < 500 && err.status !== 401 && err.outcomeUncertain !== true && !item.file && !item.fileName) {
+      state.outgoing.set(outgoingKey(item.account, item.chat), outgoingFor(item.account, item.chat).filter(entry => entry !== item));
+      persistOutbox();
+      if (current(item.ctx)) {
+        const composer = $('message');
+        composer.value = composer.value ? `${composer.value}\n${item.text}` : item.text;
+        resizeMessageInput(); saveDraft();
+        if (item.replyTo) featureUI?.restoreReply?.(item.replyTo);
+        error(err.message);
+        state.signature = '';
+        renderMessages();
+      }
+      return false;
+    }
     item.state = 'failed';
     persistOutbox();
     if (current(item.ctx)) {
-      error(`${err.message} Comprueba si llegó antes de volver a enviarlo.`);
+      const uncertain = !err.status || err.status >= 500 || err.outcomeUncertain === true;
+      error(uncertain && !err.message.includes('Comprueba') ? `${err.message} Comprueba si llegó antes de volver a enviarlo.` : err.message);
       state.signature = '';
       renderMessages();
     }
@@ -1050,7 +1096,7 @@ const mediaLibraryReady = import('./media-library-ui.mjs').then(({installMediaLi
   }, onOpen: () => closeRailPanels(['library']) });
   return mediaLibraryUI;
 }).catch(err => { error(`No se pudo cargar el contenido multimedia: ${err.message}`); return null; });
-async function init() { try { await recoveryReady; await historyReady; await rendererReady; await attachmentReady; await mediaReady; await accountRailReady; await draftReady; await uploadQualityReady; await sidebarSearchReady; await featureReady; await chatSelectionReady; await eventReady; await pinnedReady; await communitiesReady; await profileReady; await mediaLibraryReady; await novedadesReady; await assistantReady; await liveReady; } catch (err) { error(`No se pudo cargar la interfaz de mensajes: ${err.message}`); return; } updateControls(); $('chat-status').textContent = 'Cargando cuentas…'; const result = await Promise.allSettled([api('/api/accounts')]); if (result[0].status === 'fulfilled') { const data = result[0].value; restoreOutbox(data.outboxScope); state.sending = data.sendingEnabled === true; for (const account of data.accounts || []) $('account').append(new Option(account.label || account.id, account.id)); state.account = $('account').value; sidebarSearch?.accountChanged(); uploadQualityUI?.accountChanged(); assistant?.select(context()); accountRailTools.renderAccountRail($('account-rail'), data.accounts || [], state.account, switchAccount); featureUI?.accountChanged?.(state.account); communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); updateControls(); if (state.account) { await loadChats(); liveUpdates?.start(state.account); } else $('chat-status').textContent = 'No hay cuentas configuradas.'; } else { $('chat-status').textContent = 'No se pudieron cargar las cuentas.'; error(result[0].reason.message); } }
+async function init() { try { await recoveryReady; await historyReady; await rendererReady; await attachmentReady; await mediaReady; await accountRailReady; await draftReady; await uploadQualityReady; await sidebarSearchReady; await featureReady; await chatSelectionReady; await eventReady; await pinnedReady; await communitiesReady; await profileReady; await mediaLibraryReady; await novedadesReady; await assistantReady; await liveReady; } catch (err) { error(`No se pudo cargar la interfaz de mensajes: ${err.message}`); return; } updateControls(); $('chat-status').textContent = 'Cargando cuentas…'; const result = await Promise.allSettled([api('/api/accounts')]); if (result[0].status === 'fulfilled') { const data = result[0].value; restoreOutbox(data.outboxScope); state.sending = data.sendingEnabled === true; for (const account of data.accounts || []) $('account').append(new Option(account.label || account.id, account.id)); state.account = $('account').value; sidebarSearch?.accountChanged(); uploadQualityUI?.accountChanged(); assistant?.select(context()); accountRailTools.renderAccountRail($('account-rail'), data.accounts || [], state.account, switchAccount); featureUI?.accountChanged?.(state.account); communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); updateControls(); if (state.account) { await loadChats(); liveUpdates?.start(state.account); restoreLastChat(); } else $('chat-status').textContent = 'No hay cuentas configuradas.'; } else { $('chat-status').textContent = 'No se pudieron cargar las cuentas.'; error(result[0].reason.message); } }
 window.addEventListener('beforeunload', event => { if ([...state.outgoing.values()].flat().some(item => item.file && item.state !== 'confirmed')) { event.preventDefault(); event.returnValue = ''; } });
 document.addEventListener('click', event => { if (event.target.closest?.('a[href^="/auth/logout"]')) { try { sessionStorage.removeItem(OUTBOX_STORAGE_KEY); } catch {} } });
 window.addEventListener('pagehide', () => { liveUpdates?.stop(); cancelRecording(); cameraController?.close(); cancelAttachment(); });
