@@ -367,11 +367,13 @@ test('renderMessageList exposes a real document fragment and sender names are op
 
   assert.equal(direct.children.some(child => child.tagName === 'STRONG'), false);
   assert.equal(group.children.some(child => child.tagName === 'STRONG'), true);
-  // UX #10.3: color fijo por participante, estable y distinto entre autores.
-  const senderColor = message => renderMessage({ id: 'g', senderName: 'X', senderId: message, text: 't', isFirstInGroup: true }, { document: fakeDocument, showSenderNames: true })
-    .children.find(child => child.className === 'message-sender').style.color;
-  assert.notEqual(senderColor('ana@gmail.com'), senderColor('luis@gmail.com'));
-  assert.equal(senderColor('ana@gmail.com'), senderColor('ana@gmail.com'));
+  // UX #10.3/#52.2: color fijo por participante por clase de paleta (cada tema la pinta en CSS),
+  // estable y distinto entre autores.
+  const senderPalette = senderId => renderMessage({ id: 'g', senderName: 'X', senderId, text: 't', isFirstInGroup: true }, { document: fakeDocument, showSenderNames: true })
+    .children.find(child => child.className?.startsWith('message-sender')).className.split(' ')[1];
+  assert.match(senderPalette('ana@gmail.com'), /^sender-palette-[0-7]$/);
+  assert.notEqual(senderPalette('ana@gmail.com'), senderPalette('luis@gmail.com'));
+  assert.equal(senderPalette('ana@gmail.com'), senderPalette('ana@gmail.com'));
   assert.equal(rendered.fragment.tagName, '#FRAGMENT');
   assert.equal(rendered.fragment.children.filter(child => child.tagName === 'ARTICLE').length, 2);
   assert.equal(rendered.fragment.children.some(child => child.textContent === '[object Object]'), false);

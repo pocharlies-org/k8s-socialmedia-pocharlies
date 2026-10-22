@@ -690,7 +690,8 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
 
 #chat-subtitle {
   overflow: hidden;
-  color: var(--muted);
+  /* UX #52.1: --muted daba 3.88:1 a 14 px; --muted-strong (#52636c) es el gris del preview, 5.22. */
+  color: var(--muted-strong);
   font-size: 14px;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -899,6 +900,26 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
   font-weight: 500;
   line-height: 18px;
 }
+
+/* UX #52.2: paleta de emisor por índice (hash del id), AA sobre la burbuja de
+   cada tema: los valores oscuros van sobre #242626 (default) y los claros, sobre
+   blanco en tema claro. */
+.sender-palette-0 { color: #f06ab8; }
+.sender-palette-1 { color: #86aaff; }
+.sender-palette-2 { color: #ffa366; }
+.sender-palette-3 { color: #c084fc; }
+.sender-palette-4 { color: #4cc3ff; }
+.sender-palette-5 { color: #ff8080; }
+.sender-palette-6 { color: #51c56a; }
+.sender-palette-7 { color: #f59e0b; }
+body[data-theme="light"] .sender-palette-0 { color: #b02a78; }
+body[data-theme="light"] .sender-palette-1 { color: #2f5fd0; }
+body[data-theme="light"] .sender-palette-2 { color: #b25e1f; }
+body[data-theme="light"] .sender-palette-3 { color: #7c3aed; }
+body[data-theme="light"] .sender-palette-4 { color: #0b6ba8; }
+body[data-theme="light"] .sender-palette-5 { color: #c92f2f; }
+body[data-theme="light"] .sender-palette-6 { color: #1f7a33; }
+body[data-theme="light"] .sender-palette-7 { color: #a35a05; }
 
 .message time {
   display: block;

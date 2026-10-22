@@ -483,3 +483,15 @@ test('el badge de no leídos pasa AA: blanco sobre el verde (UX #51.1)', async (
   assert.match(badge, /color: #fff/);
   assert.doesNotMatch(badge, /color: #07170f/);
 });
+
+test('subtítulo de cabecera y paleta de emisor pasan AA (UX #52)', async () => {
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  const subtitle = css.match(/#chat-subtitle \{[^}]*\}/)[0];
+  assert.match(subtitle, /color: var\(--muted-strong\)/);
+  assert.doesNotMatch(subtitle, /color: var\(--muted\)/);
+  // Los claros (tema claro, sobre burbuja blanca) cumplen AA; los oscuros van en :root.
+  for (const color of ['#b02a78', '#2f5fd0', '#b25e1f', '#7c3aed', '#0b6ba8', '#c92f2f', '#1f7a33', '#a35a05']) {
+    assert.match(css, new RegExp(`body\\[data-theme="light"\\] \\.sender-palette-\\d \\{ color: ${color}; \\}`));
+  }
+  assert.match(css, /\.sender-palette-0 \{ color: #f06ab8; \}/);
+});

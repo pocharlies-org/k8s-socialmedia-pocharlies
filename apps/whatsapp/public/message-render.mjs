@@ -1059,13 +1059,14 @@ function deliveryStatus(message) {
 }
 
 // UX #10.3: WhatsApp colorea el nombre por participante; paleta fija indexada
-// por hash del id (estable entre renders y sesiones).
-const SENDER_COLORS = ['#e542a3', '#5b8cff', '#ff8c42', '#a855f7', '#00a8f3', '#ff5151', '#2f9e44', '#d97706'];
-function senderColor(message) {
+// por hash del id (estable entre renders y sesiones). UX #52.2: el color va por
+// clase en CSS, no en línea: cada tema pinta la suya (AA sobre su burbuja).
+const SENDER_PALETTE_SIZE = 8;
+function senderPaletteClass(message) {
   const key = textValue(message?.senderId || message?.senderName || message?.senderPushName);
   let hash = 0;
   for (const character of key) hash = (hash * 31 + character.codePointAt(0)) >>> 0;
-  return SENDER_COLORS[hash % SENDER_COLORS.length];
+  return `sender-palette-${hash % SENDER_PALETTE_SIZE}`;
 }
 
 function messageType(value) {
@@ -1164,9 +1165,7 @@ export function renderMessage(message, { document: documentRef = globalThis.docu
   bubble.dataset.renderSignature = messageRenderSignature(message);
   bubble.setAttribute('aria-label', fromMe ? 'Mensaje enviado' : 'Mensaje recibido');
   if (!fromMe && showSenderNames && message?.senderName && message?.isFirstInGroup !== false) {
-    const sender = makeElement(documentRef, 'strong', 'message-sender', message.senderName);
-    sender.style.color = senderColor(message);
-    bubble.append(sender);
+    bubble.append(makeElement(documentRef, 'strong', `message-sender ${senderPaletteClass(message)}`, message.senderName));
   }
   if (message?.replyToMessageId) bubble.append(replyReference(message, documentRef));
   const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
@@ -1336,7 +1335,7 @@ function syncSenderHeader(bubble, message, showSenderNames, documentRef) {
     sender.textContent = senderName;
     return;
   }
-  bubble.insertBefore(makeElement(documentRef, 'strong', 'message-sender', senderName), bubble.children?.[0] || null);
+  bubble.insertBefore(makeElement(documentRef, 'strong', `message-sender ${senderPaletteClass(message)}`, senderName), bubble.children?.[0] || null);
 }
 
 /** Reconcile message children in place so unchanged media never leaves its parent. */
