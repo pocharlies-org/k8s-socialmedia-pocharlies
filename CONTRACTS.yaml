@@ -2457,4 +2457,6 @@ contracts:
     max-age=300 (QA 14b, 22-10: el no-store del handler global re-bajaba el
     mismo avatar ausente 58 veces en media hora; un avatar que no existe no
     aparece de un render a otro, y si pone foto se ve al expirar el
-    max-age); los demas 404 y los 5xx siguen no-store.
+    max-age); los demas 404 y los 5xx siguen no-store. capabilities gana un
+    tercer flag aditivo changeSettings (announce/restrict de la ficha de grupo,
+    UX #49.2, 23-10: solo administradores; la forma del resto no cambia).
