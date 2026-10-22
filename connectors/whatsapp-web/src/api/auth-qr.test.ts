@@ -20,6 +20,7 @@ import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import { QRHandler } from '../qr-handler';
 import { createAuthQrV2Router } from './auth-qr';
 import { createRouter } from './controller';
+import { createConnectorAccess } from './access';
 
 const SECRET = 'test-connector-secret';
 
@@ -131,5 +132,31 @@ test('v2 firmado → exactamente la carga útil de v1 (200 con QR, 404 sin QR)',
     } finally {
       await close();
     }
+  }
+});
+
+// QA #29 asked whether the release opens an unauthenticated pairing QR in-cluster.
+// The route in controller.ts carries no middleware of its own; the protection is the
+// app-level gate (main.ts). Nothing composed both until now — this is that composition.
+test('compuesta como main.ts: la puerta global deja /api/v1/auth/qr anónima en 401 con reto Basic', async () => {
+  const qr = new QRHandler();
+  await qr.generateQR('2@access-gate-qr-string');
+  const app = express();
+  app.use(express.json({ limit: '15mb' }));
+  app.use(createConnectorAccess(SECRET));
+  app.use('/api/v1', createRouter({} as BaileysClient, qr, SECRET));
+  const server: Server = await new Promise(resolve => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const anonymous = await fetch(`${base}/api/v1/auth/qr`);
+    assert.equal(anonymous.status, 401);
+    assert.match(anonymous.headers.get('www-authenticate') || '', /^Basic realm=/);
+    assert.deepEqual(await anonymous.json(), { error: 'Authentication required' });
+    const ok = await fetch(`${base}/api/v1/auth/qr`, { headers: v1Signed() });
+    assert.equal(ok.status, 200);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
