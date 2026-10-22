@@ -137,3 +137,9 @@ test('QA #82: el avatar 404 de un chat se cachea y no se vuelve a pedir', async 
   assert.match(app, /avatarFailures\.has\(key\) \? null : messageRenderer\?\.safeMessageUrl/);
   assert.match(app, /avatarFailures\.add\(key\)/);
 });
+test('F5 pinta los últimos mensajes conocidos y revalida (QA velocidad #98)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const messageCacheKey = \(account, chat\) => `wa:msgs:\$\{account\}:\$\{chat\}`/);
+  assert.match(app, /paintCachedMessages\(ctx\);\s*\n\s*const result = await api\(query\('\/api\/messages'/);
+  assert.match(app, /localStorage\.setItem\(messageCacheKey\(ctx\.account, ctx\.chat\), JSON\.stringify\(messages\)\)/);
+});

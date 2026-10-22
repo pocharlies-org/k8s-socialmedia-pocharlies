@@ -566,6 +566,16 @@ test('search cursor pages tied timestamps without duplicates and stays bound to 
   assert.equal(seen.at(-1), 'wa-0');
 });
 
+test('QA #100: re-buscar el mismo término no vuelve a la BD en 60 s', async t => {
+  const { request, calls } = await fixture(t);
+  const first = await (await request('/api/search?account=personal&scope=all&q=cachetest')).json();
+  const before = calls.filter(call => /ILIKE/.test(call.sql)).length;
+  assert.ok(before >= 1, 'la primera búsqueda debe ir a la BD');
+  const second = await (await request('/api/search?account=personal&scope=all&q=cachetest')).json();
+  assert.equal(calls.filter(call => /ILIKE/.test(call.sql)).length, before, 'la repetición sale de la caché');
+  assert.deepEqual(second.results, first.results);
+});
+
 test('read clears the database badge only after provider confirmation', async t => {
   const order = [];
   const successful = await fixture(t, { fetchImpl: async (url) => { order.push(`provider:${url}`); return Response.json({ markedAsRead: true }); } });

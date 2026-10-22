@@ -2415,8 +2415,11 @@ contracts:
     revienta el statement_timeout (57014). chatName sale legible
     (readableChatName), nunca el jid crudo (QA #10). Desde QA 22-10 la
     respuesta se sirve con cache-control private, max-age=30 (re-buscar el
-    mismo término no vuelve a la BD; 30 s de antigüedad aceptables). El
-    envelope y el cursor son contrato; la cabecera de caché no lo es.
+    mismo término no vuelve a la BD; 30 s de antigüedad aceptables). Desde
+    QA #100 hay además caché de resultado en el proceso (60 s por
+    cuenta+término+ámbito+cursor): el trgm de un término común trae miles de
+    filas y el heap fetch costaba 2,9 s repetida. El envelope y el cursor son
+    contrato; la cabecera de caché no lo es.
 - id: http.whatsapp-app.chat-details.v1
   kind: http-route
   value: /api/chat-details

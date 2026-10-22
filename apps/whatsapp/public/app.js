@@ -606,16 +606,28 @@ $('messages').addEventListener('click', async event => {
   } catch (err) { if (current(ctx)) error(err.message); }
   finally { state.pollBusy.delete(key); if (current(ctx)) updatePollControls(); }
 });
+// QA velocidad #98: con F5 el chat se volvía a bajar entero (4,4 s en frío, no-store).
+// Se pinta la última página conocida y se revalida, como ya hace la lista de chats.
+const messageCacheKey = (account, chat) => `wa:msgs:${account}:${chat}`;
+function paintCachedMessages(ctx) {
+  if (state.messages.length) return;
+  try {
+    const cached = JSON.parse(localStorage.getItem(messageCacheKey(ctx.account, ctx.chat)) || 'null');
+    if (Array.isArray(cached) && cached.length) { state.messages = cached; renderMessages(); }
+  } catch { /* caché rota: se revalida como si no hubiera caché */ }
+}
 async function loadMessages() {
   if (!state.chat || state.historyMode) return;
   const ctx = context();
   const requestToken = ++state.messageRequestToken;
   try {
     await rendererReady;
+    paintCachedMessages(ctx);
     const result = await api(query('/api/messages', {chat: ctx.chat, limit: 100}));
     if (!current(ctx) || state.historyMode || requestToken !== state.messageRequestToken) return;
     const messages = Array.isArray(result.messages) ? result.messages : [];
     state.messages = mergeRecentMessages(state.messages, messages);
+    try { localStorage.setItem(messageCacheKey(ctx.account, ctx.chat), JSON.stringify(messages)); } catch { /* cuota llena: la caché es lo mejor */ }
     if (!state.historyInitialized) {
       state.historyCursor = result.nextCursor || null;
       state.historyInitialized = true;

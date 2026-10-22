@@ -41,6 +41,10 @@ const root = dirname(fileURLToPath(import.meta.url));
 const exec = promisify(execFile);
 const MAX_AVATAR_BYTES = 4 * 1024 * 1024;
 const MAX_PAGE_SIZE = 200;
+// QA #100: re-buscar el mismo término volvía a la BD (2,9 s; el trgm trae miles de
+// filas y el heap fetch manda). Una página de búsqueda no cambia en 60 s.
+const SEARCH_CACHE_TTL_MS = 60_000;
+const searchCache = new Map();
 // A change stream must speak before NPM's 240s read timeout closes it, and a
 // stalled browser must not grow the write queue without bound.
 const REALTIME_HEARTBEAT_MS = 15000;
@@ -1932,6 +1936,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const cursorScope = { account: a.accountId, chat, queryHash: createHash('sha256').update(q).digest('hex'), searchScope };
         const schema = await getDatabaseSchema(query);
         const cursor = url.searchParams.has('cursor') ? decodeSearchCursor(url.searchParams.get('cursor'), cursorScope, schema) : null;
+        const cacheKey = JSON.stringify([a.accountId, chat, q, searchScope, url.searchParams.get('cursor') || '']);
+        const cached = searchCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) return json(200, cached.body);
         const args = [a.accountId, `%${q}%`];
         const clauses = ["m.account=$1", "m.platform='whatsapp'", 'NOT m.is_deleted', MESSAGE_RETAINED_SQL, MESSAGE_VISIBLE_SQL, 'm.content ILIKE $2'];
         if (conversation) { args.push(await conversationReadIds(a, conversation)); clauses.push(`m.conversation_id=ANY($${args.length}::text[])`); }
@@ -1968,7 +1975,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         // QA 22-10: re-buscar el mismo término volvía a la BD (no-store global).
         // Una página de búsqueda no cambia en 30 s; el navegador la reutiliza.
         res.setHeader('cache-control', 'private, max-age=30');
-        return json(200, { account: a.accountId, query: q, chat, results: page.map(item => ({
+        const body = { account: a.accountId, query: q, chat, results: page.map(item => ({
           id: item.wa_message_id || item.id,
           messageId: item.wa_message_id || item.id,
           chat: item.chat_id || item.conversation_id,
@@ -1984,7 +1991,10 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           fromMe: item.direction === 'OUTBOUND',
           type: item.message_type,
           timestamp: item.wa_timestamp,
-        })), nextCursor: rows.length > limit ? encodeSearchCursor(page.at(-1), cursorScope) : null });
+        })), nextCursor: rows.length > limit ? encodeSearchCursor(page.at(-1), cursorScope) : null };
+        searchCache.set(cacheKey, { at: Date.now(), body });
+        if (searchCache.size > 200) for (const [key, entry] of searchCache) if (Date.now() - entry.at > SEARCH_CACHE_TTL_MS) searchCache.delete(key);
+        return json(200, body);
       }
       if (req.method === 'GET' && (path === '/api/chats/avatar' || /^\/api\/chats\/[^/]+\/avatar$/.test(path) || path === '/api/avatar')) {
         const a = accountParam(url.searchParams.get('account'));
