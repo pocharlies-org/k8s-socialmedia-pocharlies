@@ -1045,7 +1045,7 @@ export function installFeatureUI({
           else { image.remove(); card.prepend(node('span', 'feature-gallery-icon', 'IMG')); }
         };
         card.append(image);
-      } else card.append(node('span', 'feature-gallery-icon', kind === 'documents' ? 'DOC' : kind === 'links' ? '↗' : 'MEDIA'));
+      } else card.append(node('span', 'feature-gallery-icon', kind === 'documents' ? (item.kind === 'audio' ? 'AUDIO' : 'DOC') : kind === 'links' ? '↗' : 'MEDIA'));
       const copy = node('div', 'feature-gallery-copy');
       copy.append(node('strong', '', item.name || item.fileName || item.file_name || item.title || item.url || 'Elemento'));
       if (item.timestamp) copy.append(node('small', '', new Date(item.timestamp).toLocaleDateString('es-ES')));

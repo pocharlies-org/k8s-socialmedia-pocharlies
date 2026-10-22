@@ -2397,7 +2397,12 @@ contracts:
     item `thumbUrl` (GET /api/media/thumb/<id de mensaje>, jpegThumbnail del
     payload): la rejilla de la galería pinta el thumb y el original solo al
     abrir — 9,2 MB/45 items a cientos de KB (QA #72). Campo aditivo; el
-    envelope y el cursor no cambian.
+    envelope y el cursor no cambian. Desde QA #96 la clasificación mira el
+    adjunto: un DOCUMENT con file_type/mime de vídeo entra en la galería y sale
+    de «Documentos», y uno de audio sale con `kind: audio` (valores aditivos
+    del campo kind). En /api/messages, `attachments[].name` deriva de
+    file_type/mime + fecha cuando file_name está vacío (QA #99); los nombres
+    explícitos no cambian.
 - id: http.whatsapp-app.search.v1
   kind: http-route
   value: /api/search
