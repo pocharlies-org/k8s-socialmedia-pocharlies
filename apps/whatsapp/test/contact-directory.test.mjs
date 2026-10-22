@@ -46,7 +46,7 @@ test('a LID row never becomes a phone number and cannot start a chat', async () 
   assert.equal(contact.canStart, false);
   assert.equal(contact.canOpen, false);
   assert.equal(contact.kind, 'private');
-  assert.equal(contact.sublabel, 'LID ···678');
+  assert.equal(contact.sublabel, '');
 });
 
 test('a private chat whose wa_chat_id names the number can be opened by that chat', async () => {

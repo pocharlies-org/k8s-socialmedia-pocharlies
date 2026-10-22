@@ -115,7 +115,7 @@ test('every row says what pressing it will do', () => {
   assert.equal(contactEntryHint(open), 'Abre el chat existente');
   assert.equal(contactEntryHint({ ...open, archived: true }), 'Abre un chat archivado');
   assert.equal(contactEntryHint({ canOpen: false, canStart: true }), 'Empieza un chat sin enviar nada');
-  assert.equal(contactEntryHint({ canOpen: false, canStart: true }, { sendingEnabled: false }), 'Envío desactivado en el servidor');
+  assert.equal(contactEntryHint({ canOpen: false, canStart: true }, { sendingEnabled: false }), 'Envío desactivado');
   assert.equal(contactEntryHint({ canOpen: false, canStart: false }), 'Sin número sincronizado');
   assert.equal(contactEntryHint(null), '');
 });
@@ -134,16 +134,16 @@ test('the status line reports the real identity count and its age', () => {
   assert.equal(directoryStatusLabel(null), '');
   const grouped = /^[0-9.,\u00A0 ]*$/;
   const line = directoryStatusLabel({ sync: { identities: 1340 } });
-  assert.match(line, /^1[.,\u00A0 ]?340 identidades sincronizadas en esta cuenta\.$/);
+  assert.match(line, /^1[.,\u00A0 ]?340 contactos sincronizados en esta cuenta\.$/);
   assert.match(line.match(/^[^ ]+/)[0], grouped);
   const large = directoryStatusLabel({ sync: { identities: 12340 } });
-  assert.match(large, /^12[.,\u00A0 ]?340 identidades sincronizadas en esta cuenta\.$/);
+  assert.match(large, /^12[.,\u00A0 ]?340 contactos sincronizados en esta cuenta\.$/);
   assert.match(directoryStatusLabel({ query: 'maria', total: 2, sync: { identities: 1340 } }),
-    /^2 coincidencias entre 1[.,\u00A0 ]?340 identidades sincronizadas/);
+    /^2 coincidencias entre 1[.,\u00A0 ]?340 contactos sincronizados/);
   assert.match(directoryStatusLabel({ sync: { identities: 7, latestSyncAt: '2026-09-27T10:00:00.000Z' } }),
-    /^7 identidades sincronizadas en esta cuenta · sincronizado el \d/);
-  assert.equal(directoryStatusLabel({ sync: { identities: 7, latestSyncAt: 'not-a-date' } }), '7 identidades sincronizadas en esta cuenta.');
-  assert.equal(directoryStatusLabel({ query: '  ', sync: { identities: 0 } }), '0 identidades sincronizadas en esta cuenta.');
+    /^7 contactos sincronizados en esta cuenta · sincronizado el \d/);
+  assert.equal(directoryStatusLabel({ sync: { identities: 7, latestSyncAt: 'not-a-date' } }), '7 contactos sincronizados en esta cuenta.');
+  assert.equal(directoryStatusLabel({ query: '  ', sync: { identities: 0 } }), '0 contactos sincronizados en esta cuenta.');
 });
 
 function payload(overrides = {}) {

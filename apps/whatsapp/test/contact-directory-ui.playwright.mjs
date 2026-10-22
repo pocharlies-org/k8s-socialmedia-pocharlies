@@ -198,7 +198,7 @@ await check('one modal dialog with the real copy', async () => {
 
 await check('the page and its honest status load without any POST', async () => {
   assert.equal(await entries.count(), 60);
-  assert.match(await page1.locator('.contact-directory-status').textContent(), /61 identidades sincronizadas/);
+  assert.match(await page1.locator('.contact-directory-status').textContent(), /61 contactos sincronizados/);
   assert.deepEqual(state.posts, []);
 });
 

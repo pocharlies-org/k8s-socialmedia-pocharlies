@@ -75,7 +75,7 @@ export function contactDirectoryUrl({ account, q = '', cursor = null, limit = CO
 export function contactEntryHint(entry, { sendingEnabled = true } = {}) {
   if (!entry) return '';
   if (entry.canOpen) return entry.archived ? 'Abre un chat archivado' : 'Abre el chat existente';
-  if (entry.canStart) return sendingEnabled ? 'Empieza un chat sin enviar nada' : 'Envío desactivado en el servidor';
+  if (entry.canStart) return sendingEnabled ? 'Empieza un chat sin enviar nada' : 'Envío desactivado';
   return 'Sin número sincronizado';
 }
 
@@ -99,8 +99,8 @@ export function directoryStatusLabel(payload) {
   const stamp = when && !Number.isNaN(when.getTime())
     ? ` · sincronizado el ${new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(when)}`
     : '';
-  if (text(payload.query).trim()) return `${count(payload.total)} coincidencias entre ${identities} identidades sincronizadas${stamp}.`;
-  return `${identities} identidades sincronizadas en esta cuenta${stamp}.`;
+  if (text(payload.query).trim()) return `${count(payload.total)} coincidencias entre ${identities} contactos sincronizados${stamp}.`;
+  return `${identities} contactos sincronizados en esta cuenta${stamp}.`;
 }
 
 /**
@@ -185,7 +185,6 @@ export function installContactDirectoryUI({
     panel: null,
     query: null,
     status: null,
-    notices: null,
     list: null,
     more: null,
     opener: null,
@@ -339,12 +338,6 @@ export function installContactDirectoryUI({
         }
         setStatus(directoryStatusLabel(page));
         syncTypedRow();
-        if (state.notices) {
-          const notices = Array.isArray(page.sync.notices) ? page.sync.notices.filter(item => text(item)) : [];
-          state.notices.replaceChildren();
-          for (const notice of notices) state.notices.append(node('li', '', notice));
-          state.notices.hidden = !notices.length;
-        }
       })
       .catch(error => {
         if (requestId !== state.request || state.closed) return;
@@ -434,8 +427,6 @@ export function installContactDirectoryUI({
     retry.textContent = 'Reintentar';
     retry.hidden = true;
     retry.onclick = () => { void loadNext({ replace: true }); };
-    const notices = node('ul', 'contact-directory-notices');
-    notices.hidden = true;
     const list = node('div', 'contact-directory-list');
     const more = documentRef.createElement('button');
     more.type = 'button';
@@ -444,7 +435,7 @@ export function installContactDirectoryUI({
     more.hidden = true;
     more.onclick = () => { void loadNext(); };
 
-    panel.append(header, actions, status, retry, notices, list, more);
+    panel.append(header, actions, status, retry, list, more);
     overlay.append(panel);
     documentRef.body.append(overlay);
 
@@ -456,7 +447,6 @@ export function installContactDirectoryUI({
     state.list = list;
     state.status = status;
     state.retry = retry;
-    state.notices = notices;
     state.more = more;
     state.opener = opener;
     state.closed = false;
