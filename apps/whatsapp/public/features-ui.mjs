@@ -1533,6 +1533,8 @@ export function installFeatureUI({
     else branch('Silenciar notificaciones', [
       ['8 horas', () => perform('mute', { muted: true }, { durationMs: 8 * 60 * 60 * 1000 })],
       ['1 semana', () => perform('mute', { muted: true }, { durationMs: 7 * 24 * 60 * 60 * 1000 })],
+      // UX #26.1: sin durationMs el puente del conector silencia sin fin (controller.ts:2100).
+      ['Siempre', () => perform('mute', { muted: true })],
     ]);
     const pinned = chatIsPinned(chat, prefs());
     add(actions, pinned ? 'Desfijar chat' : 'Fijar chat', () => perform(pinned ? 'unpin' : 'pin', { pinned: !pinned }));
@@ -2300,6 +2302,7 @@ export function installFeatureUI({
       camera: ['M4 7h4l2-2h4l2 2h4v13H4z', 'M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'],
       audio: ['M9 4v12a3 3 0 1 1-2-3', 'M9 6l10-2v12a3 3 0 1 1-2-3'],
       sticker: ['M4 4h16v11l-5 5H4z', 'M15 20v-5h5'],
+      gif: ['M3 7h18v10H3z', 'M7 11v2', 'M10.5 11v2', 'M14 11v2', 'M17 11v2'],
       contact: ['M4 5h16v14H4z', 'M10 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z', 'M6.5 16c0-2 1.5-3 3.5-3s3.5 1 3.5 3', 'M16 10h2', 'M16 13h2'],
       poll: ['M5 5h3v3H5z', 'M11 6h8', 'M5 11h3v3H5z', 'M11 12h8', 'M5 17h3v3H5z', 'M11 18h8'],
       event: ['M4 5h16v16H4z', 'M4 9h16', 'M8 3v4', 'M16 3v4', 'M8 13h3', 'M8 17h3'],
@@ -2319,6 +2322,18 @@ export function installFeatureUI({
     addAttach('Encuesta', 'poll', () => openShare('poll'));
     addAttach('Evento', 'event', () => openShare('event'));
     addAttach('Nuevo sticker', 'sticker', () => openPicker('sticker'));
+    // QA #85: el conector ya acepta GIF (el server convierte gif→mp4, server.mjs:2436); faltaba la entrada.
+    addAttach('GIF', 'gif', () => {
+      const input = documentRef.createElement('input');
+      input.type = 'file'; input.accept = 'image/gif';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const sendToken = crypto.randomUUID();
+        await mutate('/api/messages/compose', { kind: 'gif', name: file.name, mimeType: 'image/gif', data: await readBase64(file), sendToken }, { refreshMessages: true, success: 'GIF enviado.' });
+      };
+      input.click();
+    });
     composer?.append(attachMenu);
     if (attachment) {
       attachment.setAttribute('aria-haspopup', 'menu'); attachment.setAttribute('aria-controls', 'feature-attach-menu'); attachment.setAttribute('aria-expanded', 'false');

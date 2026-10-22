@@ -330,3 +330,10 @@ test('la rejilla de la galería usa el thumb y pagina con «Cargar más» (QA #7
   assert.match(ui, /button\(documentRef, 'Cargar más', 'feature-button subtle'\)/);
   assert.match(ui, /kind: serverKind, limit: 60, cursor/);
 });
+test('silenciar ofrece «Siempre» y el menú de adjuntos ofrece «GIF» (UX #26.1, QA #85)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /\['Siempre', \(\) => perform\('mute', \{ muted: true \}\)\]/);
+  assert.match(ui, /addAttach\('GIF', 'gif'/);
+  assert.match(ui, /input\.accept = 'image\/gif'/);
+  assert.match(ui, /kind: 'gif', name: file\.name, mimeType: 'image\/gif'/);
+});

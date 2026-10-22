@@ -265,14 +265,16 @@ function setConversationAvatar(chat = null) {
     avatar.append(image);
   } else avatar.textContent = chatInitials(chat);
 }
+// QA #87: el servidor pliega tildes (pg_trgm); la lista debe plegar igual o «ibanez» no encuentra nada.
+const foldSearch = value => value.toLocaleLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 function renderChats() {
   const archivedView = featureUI?.isFeatureView?.() === 'archived';
   sidebarSearch?.viewChanged(archivedView);
   // UX #6.1: el buscador filtra también dentro de Archivados (antes se vaciaba).
-  const search = $('search').value.trim().toLocaleLowerCase();
+  const search = foldSearch($('search').value.trim());
   const filter = chatFilterValue();
   state.chatFilter = filter;
-  const chats = pinnedFirst(state.chats.filter(chat => chatMatchesFilter(chat, filter) && `${chat.name || ''} ${chat.preview || ''}`.toLocaleLowerCase().includes(search)));
+  const chats = pinnedFirst(state.chats.filter(chat => chatMatchesFilter(chat, filter) && foldSearch(`${chat.name || ''} ${chat.preview || ''}`).includes(search)));
   $('chat-count').textContent = String(state.chats.length);
   // QA #74: la pestaña no avisaba de los no leídos (title fijo «SocialMedia»).
   const unreadTotal = state.chats.reduce((sum, chat) => sum + (chat.unread === true ? 1 : Math.max(0, Number(chat.unread) || 0)), 0);
@@ -677,7 +679,14 @@ function resizeMessageInput() {
   input.style.height = `${height}px`;
   input.style.overflowY = input.scrollHeight > height ? 'auto' : 'hidden';
 }
-function saveDraft() { resizeMessageInput(); if (state.chat) state.drafts.set(`${state.account}:${state.chat}`, $('message').value); }
+// QA #60: el límite del servidor (20000) devolvía un 400 lejos del foco; el contador avisa antes.
+function saveDraft() {
+  resizeMessageInput();
+  const length = $('message').value.length;
+  const counter = $('char-count');
+  if (counter) { counter.hidden = length < 19000; counter.textContent = `${length}/20000`; }
+  if (state.chat) state.drafts.set(`${state.account}:${state.chat}`, $('message').value);
+}
 function setAgentContext(chat = null) { $('ai-panel-subtitle').textContent = chat ? (chat.name || chat.id) : 'Selecciona un chat para consultar'; }
 function applyDraft(text, ctx) {
   if (!current(ctx)) return false;
@@ -999,10 +1008,16 @@ document.addEventListener('paste', event => {
   stageSelectedFiles(files);
 });
 const dropZone = document.querySelector('.conversation');
+// QA #85 (menor): el drop funcionaba pero no había ninguna señal visual mientras arrastrabas.
 dropZone?.addEventListener('dragover', event => {
-  if (state.chat && state.sending && [...(event.dataTransfer?.types || [])].includes('Files')) event.preventDefault();
+  if (state.chat && state.sending && [...(event.dataTransfer?.types || [])].includes('Files')) {
+    event.preventDefault();
+    dropZone.classList.add('is-over');
+  }
 });
+dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('is-over'));
 dropZone?.addEventListener('drop', event => {
+  dropZone.classList.remove('is-over');
   if (!state.chat || !state.sending) return;
   const files = [...(event.dataTransfer?.files || [])];
   if (!files.length) return;
