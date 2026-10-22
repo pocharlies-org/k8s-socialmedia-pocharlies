@@ -627,7 +627,7 @@ export function installFeatureUI({
 
   // QA #84 (22-10): cada filtro enseña cuántos chats muestra. chatFilter es cliente (app.js),
   // así que el array cargado siempre es completo — el recuento no cuesta un refetch.
-  const VIEW_FILTERS = [['Todos', 'all'], ['No leídos', 'unread'], ['Grupos', 'groups'], ['Favoritos', 'favorites'], ['Destacados', 'starred']];
+  const VIEW_FILTERS = [['Todos', 'all'], ['No leídos', 'unread'], ['Grupos', 'groups'], ['Chats destacados', 'favorites'], ['Destacados', 'starred']];
   let filterChats = [];
 
   function updateFilterCounts() {
@@ -977,7 +977,7 @@ export function installFeatureUI({
       [chatIsArchived(info, prefs()) ? 'Desarchivar' : 'Archivar', 'archive'],
       [chatIsPinned(info, prefs()) ? 'Desfijar' : 'Fijar', 'pin'],
       [chatIsMuted(info, prefs()) ? 'Activar sonido' : 'Silenciar', 'mute'],
-      [chatIsFavorite(info, prefs()) ? 'Quitar de favoritos' : 'Añadir a favoritos', 'favorite'],
+      [chatIsFavorite(info, prefs()) ? 'Quitar chat destacado' : 'Destacar chat', 'favorite'],
       [Number(info.unread) > 0 || bool(info.unread) ? 'Marcar leído' : 'Marcar no leído', 'read'],
     ];
     for (const [label, action] of chatActions) {
@@ -1627,7 +1627,7 @@ export function installFeatureUI({
     const unread = Number(chat.unread) > 0 || chat.unread === true;
     add(actions, unread ? 'Marcar como leído' : 'Marcar como no leído', () => perform(unread ? 'read' : 'unread', { unread: unread ? 0 : 1 }));
     const favorite = chatIsFavorite(chat, prefs());
-    add(actions, favorite ? 'Quitar de favoritos' : 'Añadir a favoritos', () => perform(favorite ? 'unfavorite' : 'favorite', { favorite: !favorite }));
+    add(actions, favorite ? 'Quitar chat destacado' : 'Destacar chat', () => perform(favorite ? 'unfavorite' : 'favorite', { favorite: !favorite }));
     const lists = prefs().lists.filter(list => !list.chatIds.includes(chat.id));
     branch('Añadir a la lista', [
       ...lists.map(list => [list.name, () => perform('list', null, { list: list.name, id: chat.id }, '/api/lists')]),
@@ -1732,7 +1732,7 @@ export function installFeatureUI({
     add(chatIsArchived(runtime.selectedChat, prefs()) ? 'Desarchivar' : 'Archivar', () => openChatAction('archive'));
     add(chatIsPinned(runtime.selectedChat, prefs()) ? 'Desfijar' : 'Fijar', () => openChatAction('pin'));
     add(chatIsMuted(runtime.selectedChat, prefs()) ? 'Activar sonido' : 'Silenciar', () => openChatAction('mute'));
-    add(chatIsFavorite(runtime.selectedChat, prefs()) ? 'Quitar de favoritos' : 'Añadir a favoritos', () => openChatAction('favorite'));
+    add(chatIsFavorite(runtime.selectedChat, prefs()) ? 'Quitar chat destacado' : 'Destacar chat', () => openChatAction('favorite'));
     add('Listas', openLists);
     add('Privacidad', openPrivacy);
     add('Exportar chat', openChatExport);
@@ -1855,7 +1855,7 @@ export function installFeatureUI({
       if (!isCurrent()) return;
       container.querySelector('.feature-load-more')?.remove();
       const items = array(result.items);
-      if (!items.length && !before) { container.replaceChildren(node('p', 'feature-muted', 'No hay mensajes destacados.')); return; }
+      if (!items.length && !before) { container.replaceChildren(node('p', 'feature-muted', 'Aún no has destacado ningún mensaje. Abre el menú «⋯» de un mensaje y elige «Destacar».')); return; }
       for (const item of items) {
         const row = button(documentRef, '', 'feature-search-result');
         row.append(node('strong', '', item.chatName || item.chatId || 'Conversación'), node('span', '', messageText(item)));

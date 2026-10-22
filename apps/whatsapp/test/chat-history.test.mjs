@@ -73,8 +73,8 @@ test('hay botón «ir abajo» cuando el chat está lejos del final (QA 22-10)', 
 test('el favorito se marca en la fila y Favoritos vacío explica cómo marcarlo (QA 22-10)', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /featureUI\?\.isChatFavorite\?\.\(chat\)/);
-  assert.match(app, /aria-label', 'Chat en favoritos'/);
-  assert.match(app, /Aún no hay favoritos\. Marca uno desde/);
+  assert.match(app, /aria-label', 'Chat destacado'/);
+  assert.match(app, /Aún no has destacado ningún chat\. Toca «⌄»/);
 });
 
 test('F5 restaura el chat abierto y volver a la lista lo olvida (QA 22-10 #162)', async () => {

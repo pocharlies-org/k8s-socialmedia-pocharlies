@@ -354,7 +354,7 @@ test('QA #59: el diálogo de acciones del mensaje es un menú navegable con flec
 test('«Destacados» es una vista con estado vacío, no un diálogo (QA #89/#97)', async () => {
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(ui, /async function renderStarredView\(container\)/);
-  assert.match(ui, /No hay mensajes destacados\./);
+  assert.match(ui, /Aún no has destacado ningún mensaje\. Abre el menú «⋯» de un mensaje y elige «Destacar»\./);
   assert.match(ui, /item\.onclick = \(\) => setView\(view\);/);
   assert.match(ui, /starredView: renderStarredView,/);
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
