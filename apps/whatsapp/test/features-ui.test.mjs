@@ -318,3 +318,11 @@ test('filtrando por lista, una pestaña con su nombre queda activa y sale (QA 22
   assert.match(ui, /chip\.setAttribute\('aria-pressed', 'true'\)/);
   assert.match(ui, /chip\.onclick = \(\) => setView\('all'\)/);
 });
+
+test('la rejilla de la galería usa el thumb y pagina con «Cargar más» (QA #72)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /image\.src = item\.thumbUrl \|\| url/);
+  assert.match(ui, /\{ chat: runtime\.chat, kind: serverKind, limit: 60 \}/);
+  assert.match(ui, /button\(documentRef, 'Cargar más', 'feature-button subtle'\)/);
+  assert.match(ui, /kind: serverKind, limit: 60, cursor/);
+});
