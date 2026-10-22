@@ -161,7 +161,20 @@ function resetMessageHistory() {
   recoveryNotice.hidden = true;
 }
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
-async function api(path, data, onEvent, requestSignal) {
+const getInflight = new Map();
+// QA #14: abrir «Novedades» pedía 3 veces la misma URL de autores (la hoja, el
+// monitor de notificaciones y el re-render). GETs concurrentes a la misma ruta
+// comparten una petición; las siguientes siguen revalidando (criterio igual que
+// la coalescencia de /api/chats en la PR #302).
+function api(path, data, onEvent, requestSignal) {
+  if (data || onEvent || requestSignal) return apiOnce(path, data, onEvent, requestSignal);
+  const running = getInflight.get(path);
+  if (running) return running;
+  const run = apiOnce(path).finally(() => getInflight.delete(path));
+  getInflight.set(path, run);
+  return run;
+}
+async function apiOnce(path, data, onEvent, requestSignal) {
   const signal = requestSignal || (onEvent ? AbortSignal.timeout(240000) : undefined);
   const timeoutError = () => new Error(path === '/api/novedades/status'
     ? 'Se agotó el tiempo de espera del estado. Comprueba si se publicó antes de reintentar.'
