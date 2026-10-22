@@ -1109,22 +1109,30 @@ test('group details retain provider permissions and account-scoped saved member 
     ? { rows: [{ id: 'personal:member@s.whatsapp.net', wa_user_id: 'personal:member@s.whatsapp.net', name: 'Saved member', push_name: null }] }
     : originalQuery(sql, args);
   const upstream = [];
-  const { request } = await fixture(t, { db, fetchImpl: async url => {
+  const updateBodies = [];
+  const { request } = await fixture(t, { db, fetchImpl: async (url, init) => {
     upstream.push(url);
+    if (url.endsWith('/update')) updateBodies.push(JSON.parse(init.body));
     return Response.json(url.endsWith('/info')
-      ? { capabilities: { manageMembers: true, editInfo: false }, participants: [{ id: 'member@s.whatsapp.net', name: 'member@s.whatsapp.net' }] }
+      ? { capabilities: { manageMembers: true, editInfo: false, changeSettings: true }, announce: true, restrict: false, participants: [{ id: 'member@s.whatsapp.net', name: 'member@s.whatsapp.net' }] }
       : url.endsWith('/photo') ? { data: Buffer.from('group-photo').toString('base64') }
         : { participants: [{ id: 'member@s.whatsapp.net', name: 'member@s.whatsapp.net', isAdmin: true }] });
   } });
   const response = await request(`/api/chat-details?account=personal&chat=${encodeURIComponent(groupId)}`);
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.deepEqual(body.capabilities, { manageMembers: true, editInfo: false });
+  // UX #49.2: changeSettings sale proyectado y announce/restrict viajan en group.
+  assert.deepEqual(body.capabilities, { manageMembers: true, editInfo: false, changeSettings: true });
+  assert.equal(body.group.announce, true);
   assert.equal(body.participants[0].name, 'Saved member');
   assert.equal(body.participants[0].isAdmin, true);
   assert.deepEqual(body.participants[0].presence, { state: 'unknown', lastSeen: null, available: false });
   assert.equal((await request(`/api/chats/${encodeURIComponent(groupId)}/avatar?account=personal`)).status, 200);
   assert.equal((await request('/api/groups/action', { account: 'personal', chat: groupId, action: 'subject', value: 'New' })).status, 200);
+  // UX #49.2: action=settings llega al conector como { settings: { announce, restrict } }.
+  assert.equal((await request('/api/groups/action', { account: 'personal', chat: groupId, action: 'settings', announce: true, restrict: false })).status, 200);
+  assert.deepEqual(updateBodies.at(-1), { settings: { announce: true, restrict: false } });
+  assert.equal((await request('/api/groups/action', { account: 'personal', chat: groupId, action: 'settings' })).status, 400);
   assert.equal((await request('/api/chats?account=personal')).status, 200);
   assert.ok(upstream.some(url => url.includes(encodeURIComponent(groupId)) && url.endsWith('/info')));
   assert.ok(upstream.some(url => url.includes(encodeURIComponent(groupId)) && url.endsWith('/photo')));

@@ -41,6 +41,7 @@ export const FEATURE_CONTRACT = Object.freeze({
   groupCreate: { method: 'POST', path: '/api/groups', body: 'account, name, participants[]' },
   groupMember: { method: 'POST', path: '/api/groups/action', body: 'account, chat, action=add|remove|promote|demote, participant' },
   groupUpdate: { method: 'POST', path: '/api/groups/action', body: 'account, chat, action=subject|description, value' },
+  groupSettings: { method: 'POST', path: '/api/groups/action', body: 'account, chat, action=settings, announce?, restrict?' },
   list: { method: 'GET/POST', path: '/api/lists', response: 'GET lists[]; POST accepts action=list, list, chat|id' },
   starred: { method: 'GET', path: '/api/favorites/starred', response: 'items[] with id, messageId, chatId, text, timestamp' },
   share: { method: 'POST', path: '/api/messages/compose', body: 'account, chat, kind=contact|poll|event, payload' },
@@ -947,6 +948,23 @@ export function installFeatureUI({
           edit.append(control);
         }
         modal.body.append(edit);
+      }
+      if (bool(capabilities.changeSettings)) {
+        // UX #49.2: los dos ajustes que expone el conector (groups-update.v1: announce/restrict).
+        // La aprobación de participantes no está en el contrato del conector.
+        addSection(modal.body, 'Administración');
+        for (const [label, key] of [['Solo administradores pueden enviar mensajes', 'announce'], ['Solo administradores pueden editar la información', 'restrict']]) {
+          const row = node('label', 'feature-field');
+          const check = documentRef.createElement('input');
+          check.type = 'checkbox';
+          check.checked = info[key] === true;
+          check.onchange = async () => {
+            const result = await mutate('/api/groups/action', { action: 'settings', [key]: check.checked }, { refreshMessages: false, success: 'Ajuste actualizado.' });
+            if (!result) check.checked = !check.checked;
+          };
+          row.append(check, node('span', '', label));
+          modal.body.append(row);
+        }
       }
       addSection(modal.body, `Miembros${members.length ? ` · ${members.length}` : ''}`);
       if (!members.length) modal.body.append(node('p', 'feature-muted', 'No hay miembros disponibles para esta cuenta.'));
@@ -1910,6 +1928,15 @@ export function installFeatureUI({
     submit.type = 'submit';
     form.append(name.wrapper, members.wrapper, submit);
     const showError = formValidator(documentRef, form);
+    // UX #49.1: «Continuar» queda deshabilitado hasta nombre + ≥1 miembro (como WhatsApp);
+    // el mensaje de motivo sigue para un submit sintético.
+    const groupValid = () => {
+      const values = formData(form);
+      return Boolean(values.name?.trim()) && values.members.split(',').some(item => item.trim());
+    };
+    const syncSubmit = () => { submit.disabled = !groupValid(); };
+    form.addEventListener('input', syncSubmit);
+    syncSubmit();
     form.onsubmit = async event => {
       event.preventDefault();
       const values = formData(form);

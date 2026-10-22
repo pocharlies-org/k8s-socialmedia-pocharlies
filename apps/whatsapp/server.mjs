@@ -1836,6 +1836,8 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           const capabilities = {
             manageMembers: info?.capabilities?.manageMembers === true,
             editInfo: info?.capabilities?.editInfo === true,
+            // UX #49.2: announce/restrict son solo de administradores (groups-update.v1).
+            changeSettings: info?.capabilities?.changeSettings === true,
           };
           return json(200, { ...result, group: info, capabilities, participants: participants.map(item => ({
             id: item.id || item.jid || null,
@@ -2594,8 +2596,8 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const result = await featureConnector(a, '/groups/create', { method: 'POST', body: { subject: name, participants }, requireSending: true });
         return json(200, { account: a.accountId, confirmed: true, ...result });
       }
-      if (req.method === 'POST' && (path === '/api/groups/action' || /^\/api\/groups\/[^/]+\/(?:participants|subject|description)$/.test(path))) {
-        const body = await bodyJSON(req); const pathParts = path.match(/^\/api\/groups\/([^/]+)\/(participants|subject|description)$/);
+      if (req.method === 'POST' && (path === '/api/groups/action' || /^\/api\/groups\/[^/]+\/(?:participants|subject|description|settings)$/.test(path))) {
+        const body = await bodyJSON(req); const pathParts = path.match(/^\/api\/groups\/([^/]+)\/(participants|subject|description|settings)$/);
         const a = accountParam(body.account); const chat = safeChatId(body.chat || (pathParts ? decodeURIComponent(pathParts[1]) : null));
         const conversation = await conversationFor(a, chat); if (conversation.is_group !== true) throw fail(400, 'Conversation is not a group');
         const providerChat = providerChatId(conversation); const action = String(body.action || pathParts?.[2] || '').toLowerCase();
@@ -2610,6 +2612,14 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         } else if (action === 'subject' || action === 'description') {
           providerPath = `/groups/${encodeURIComponent(providerChat)}/update`;
           providerBody = { [action]: required(body.value || body[action], action, 4096) };
+        } else if (action === 'settings') {
+          // UX #49.2: «Quién puede enviar» (announce) y «quién puede editar la info»
+          // (restrict). La aprobación de participantes no la expone el conector.
+          const settings = {};
+          for (const name of ['announce', 'restrict']) if (body[name] !== undefined) settings[name] = body[name] === true || body[name] === 'true';
+          if (!Object.keys(settings).length) throw fail(400, 'Invalid group settings');
+          providerPath = `/groups/${encodeURIComponent(providerChat)}/update`;
+          providerBody = { settings };
         } else {
           throw fail(400, 'Invalid group action');
         }
