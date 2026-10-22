@@ -2381,7 +2381,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         } else if (action === 'edit') {
           const content = required(body.text || body.content, 'text', 20000);
           result = await featureConnector(a, '/messages/edit', { method: 'POST', body: { conversationId: target.providerChat, messageId, content }, requireSending: true });
-          await query("UPDATE messages SET content=$4, is_edited=true, edited_at=now(), updated_at=now() WHERE account=$1 AND conversation_id=$2 AND (id::text=$3 OR wa_message_id=$3)", [a.accountId, target.message.conversation_id, body.messageId || body.id, content]);
+          // QA #5: sin edited_at en el esquema vivo (42703); la hora de edición la
+          // guarda el conector en metadata->>'edited_at' y nada la lee de una columna.
+          await query("UPDATE messages SET content=$4, is_edited=true, updated_at=now() WHERE account=$1 AND conversation_id=$2 AND (id::text=$3 OR wa_message_id=$3)", [a.accountId, target.message.conversation_id, body.messageId || body.id, content]);
         } else {
           // Local deletion and remote revocation have separate connector routes.
           if (!['me', 'everyone'].includes(body.scope)) throw fail(400, 'Invalid delete scope');
