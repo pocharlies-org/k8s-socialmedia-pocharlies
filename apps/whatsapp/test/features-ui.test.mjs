@@ -330,3 +330,10 @@ test('la rejilla de la galería usa el thumb y pagina con «Cargar más» (QA #7
   assert.match(ui, /button\(documentRef, 'Cargar más', 'feature-button subtle'\)/);
   assert.match(ui, /kind: serverKind, limit: 60, cursor/);
 });
+test('QA #80: tras un compose se refresca una vez llegado el eco diferido', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /function refetchAfterEcho\(\)/);
+  assert.match(ui, /if \(result\) refetchAfterEcho\(\);/);
+  assert.match(ui, /onSent: \(\) => \{closeModal\(\); void loadMessages\(\); refetchAfterEcho\(\);\}/);
+  assert.match(ui, /if \(result\) \{ refetchAfterEcho\(\); closeModal\(\); \}/);
+});
