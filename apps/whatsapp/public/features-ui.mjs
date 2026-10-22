@@ -767,6 +767,16 @@ export function installFeatureUI({
     });
   }
 
+  // QA #80: la fila de un compose sólo existe cuando el conector ingiere su eco
+  // (asíncrono, sin evento NATS): el loadMessages inmediato no la veía.
+  function refetchAfterEcho() {
+    const context = { account: runtime.account, chat: runtime.chat, generation: runtime.generation };
+    // shortcut: 2,5 s cubre el eco medido; si se falla, subir a la ingesta real.
+    setTimeout(() => {
+      if (runtime.account === context.account && runtime.chat === context.chat && runtime.generation === context.generation) void loadMessages();
+    }, 2500);
+  }
+
   function updateChatFlags(chatId, values) {
     const chat = array(getChats()).find(item => text(item?.id) === text(chatId));
     if (chat) Object.assign(chat, values);
@@ -1960,6 +1970,7 @@ export function installFeatureUI({
           if (!isCurrent() || selectedFile !== file) return;
           sendToken ||= crypto.randomUUID();
           const result = await mutate('/api/messages/compose', { kind: 'sticker', name: file.name, mimeType: file.type, data, sendToken }, { refreshMessages: true, success: 'Sticker enviado.' });
+          if (result) refetchAfterEcho();
           if (result && isCurrent()) closeModal();
         } catch (error) {
           if (isCurrent()) toast(error.message, 'error');
@@ -1999,7 +2010,7 @@ export function installFeatureUI({
           const result = await request('/api/messages/compose', {kind: type, payload, sendToken});
           if (result.confirmed !== true && result.sent !== true) throw new Error('No se ha confirmado el envío.');
         },
-        onSent: () => {closeModal(); void loadMessages();},
+        onSent: () => {closeModal(); void loadMessages(); refetchAfterEcho();},
       }));
       return;
     }
@@ -2009,7 +2020,7 @@ export function installFeatureUI({
     submit.type = 'submit';
     for (const item of fields) form.append(item.wrapper); form.append(submit);
     let lastPayload = ''; let sendToken = '';
-    form.onsubmit = async event => { event.preventDefault(); const values = formData(form); const signature = JSON.stringify(values); if (signature !== lastPayload) { sendToken = crypto.randomUUID(); lastPayload = signature; } const result = await mutate('/api/messages/compose', { kind: type, payload: values, sendToken }, { refreshMessages: true, success: 'Contenido preparado para enviar.' }); if (result) closeModal(); };
+    form.onsubmit = async event => { event.preventDefault(); const values = formData(form); const signature = JSON.stringify(values); if (signature !== lastPayload) { sendToken = crypto.randomUUID(); lastPayload = signature; } const result = await mutate('/api/messages/compose', { kind: type, payload: values, sendToken }, { refreshMessages: true, success: 'Contenido preparado para enviar.' }); if (result) { refetchAfterEcho(); closeModal(); } };
     modal.body.append(form, node('p', 'feature-muted', 'La entrega queda confirmada por el proveedor; no se muestra como enviada antes de esa respuesta.'));
   }
 

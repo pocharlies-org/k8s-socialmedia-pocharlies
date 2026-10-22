@@ -337,6 +337,13 @@ test('silenciar ofrece «Siempre» y el menú de adjuntos ofrece «GIF» (UX #26
   assert.match(ui, /input\.accept = 'image\/gif'/);
   assert.match(ui, /kind: 'gif', name: file\.name, mimeType: 'image\/gif'/);
 });
+test('QA #80: tras un compose se refresca una vez llegado el eco diferido', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /function refetchAfterEcho\(\)/);
+  assert.match(ui, /if \(result\) refetchAfterEcho\(\);/);
+  assert.match(ui, /onSent: \(\) => \{closeModal\(\); void loadMessages\(\); refetchAfterEcho\(\);\}/);
+  assert.match(ui, /if \(result\) \{ refetchAfterEcho\(\); closeModal\(\); \}/);
+});
 test('QA #59: el diálogo de acciones del mensaje es un menú navegable con flechas', async () => {
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(ui, /setAttribute\('aria-label', 'Acciones del mensaje'\)/);
