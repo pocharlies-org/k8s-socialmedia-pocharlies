@@ -955,6 +955,11 @@ $('message').onkeydown = event => {
     $('composer').requestSubmit();
   }
 };
+// QA #111: escribir en árabe o hebreo debe empezar por la derecha, como en la oficial.
+void rendererReady.then(({ detectDirection }) => {
+  const composer = $('message');
+  composer.addEventListener('input', () => { composer.dir = detectDirection(composer.value); });
+});
 function base64(blob) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('No se pudo leer el archivo.')); reader.readAsDataURL(blob); }); }
 let pendingFiles = [];
 function renderStagedFiles() {

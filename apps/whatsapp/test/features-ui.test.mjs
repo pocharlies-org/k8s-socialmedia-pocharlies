@@ -369,3 +369,21 @@ test('un miembro con chat abierto es un botón que lo abre (QA #97)', async () =
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /button\.feature-member \{ width: 100%; border: 0;/);
 });
+
+test('los tres formularios de creación pintan el motivo en vez de callar (QA #107)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /function formValidator\(documentRef, form\) \{/);
+  assert.equal((src.match(/formValidator\(documentRef, form\)/g) || []).length, 4);
+  assert.match(src, /showError\('Indica el nombre del grupo y al menos un miembro\.'\)/);
+  assert.match(src, /name: values\.name\.trim\(\)\.slice\(0, 100\)/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.feature-form-error \{ margin: 0; color: var\(--danger\);/);
+});
+
+test('el aviso de bloqueados cuenta lo filtrado y la ficha no pinta el LID (QA #105, UX #32.1)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /coinciden con la búsqueda\./);
+  assert.match(src, /Ningún contacto bloqueado coincide con esta búsqueda\./);
+  assert.doesNotMatch(src, /node\('small', '', member\.id \|\| 'Identidad no disponible'\)/);
+  assert.match(src, /if \(!memberName && member\.id\) copy\.append\(node\('small', '', member\.id\)\)/);
+});

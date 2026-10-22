@@ -254,6 +254,8 @@ export function installNotificationSettings({
     const section = make('section', 'settings-section');
     const heading = make('h3', 'feature-section-title', NOTIFICATION_CATEGORY_LABELS[category]);
     heading.id = `notification-${category}-title`;
+    // QA #106: los tres paneles repiten nombres de control; el lector necesita el título.
+    section.setAttribute('aria-labelledby', heading.id);
     const current = preferences()[category];
     const enabledLabel = category === 'statuses' ? NOTIFICATION_ROW_LABELS.statusesEnabled : NOTIFICATION_ROW_LABELS.enabled;
     section.append(

@@ -237,3 +237,19 @@ test('unblocking stays behind the sending gate', async t => {
   assert.equal((await fixture.unblock({ account: 'a', jid: '34600111222@s.whatsapp.net', action: 'unblock' })).status, 403);
   assert.deepEqual(fixture.calls, []);
 });
+
+test('un @lid bloqueado saca su nombre del participante vinculado por teléfono (QA #105)', async () => {
+  const f = await start({
+    answer: () => blockedList('a', ['23430000000001@lid']),
+    rows: [
+      { origin: 'chat', account: 'a', jid: 'a:23430000000001@lid', name: '23430000000001@lid', waChatId: '34600112233@s.whatsapp.net' },
+      { origin: 'participant', account: 'a', jid: '34600112233@s.whatsapp.net', name: 'Ana QA', pushName: '' },
+    ],
+  });
+  try {
+    const result = await (await f.read('a')).json();
+    assert.deepEqual(result.contacts, [{ jid: '23430000000001@lid', name: 'Ana QA' }]);
+  } finally {
+    await f.close();
+  }
+});

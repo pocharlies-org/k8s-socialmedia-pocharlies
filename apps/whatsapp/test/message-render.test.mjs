@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as renderer from '../public/message-render.mjs';
+import { readFile } from 'node:fs/promises';
 import { writeMediaSettings } from '../public/settings-ui.mjs';
 import {
   decorateMessages,
@@ -687,4 +688,20 @@ test('deleted messages show the recorded instant in browser time and update when
   const invalid = renderMessage({...message, deletedAt:'<img onerror=bad>'},{document:fakeDocument});
   assert.equal(invalid.querySelector('.message-deleted-time'),null);
   assert.match(treeText(invalid.querySelector('.message-deleted')),/Fecha no disponible/);
+});
+
+test('la primera letra fuerte decide la dirección del texto (QA #111)', () => {
+  assert.equal(renderer.detectDirection('مرحبا بالعالم'), 'rtl');
+  assert.equal(renderer.detectDirection('hola qué tal'), 'ltr');
+  assert.equal(renderer.detectDirection('¡Hola! مرحبا'), 'ltr');
+  assert.equal(renderer.detectDirection('123 ???'), '');
+  assert.equal(renderer.detectDirection(''), '');
+});
+
+test('pending y failed tienen indicador en la burbuja (QA #109)', async () => {
+  const src = await readFile(new URL('../public/message-render.mjs', import.meta.url), 'utf8');
+  assert.match(src, /status === 'pending'\) return \{ symbol: '\\u23f3', label: 'Pendiente', className: 'status-pending' \}/);
+  assert.match(src, /status === 'failed'\) return \{ symbol: '!', label: 'No enviado', className: 'status-failed' \}/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.message-status\.status-failed \{ color: var\(--danger\);/);
 });

@@ -684,3 +684,9 @@ test('an activation button from a closed dialog never asks for permission again'
   await flush();
   assert.equal(shell.windowRef.Notification.requests, 0, 'closing the dialog removes the right to prompt');
 });
+
+test('cada sección de notificaciones se nombra por su título (QA #106)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../public/notification-settings.mjs', import.meta.url), 'utf8');
+  assert.match(src, /section\.setAttribute\('aria-labelledby', heading\.id\)/);
+});

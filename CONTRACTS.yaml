@@ -1365,7 +1365,7 @@ contracts:
     when none)}], count, readAt, cached}. Names read only from conversations / participants; a pairing
     client (ingest off) answers the bare identities. The path and the 200 shape are contract: changing
     either is breaking — a new `.v2` entry beside this one. Also consumed by the MCP tool social_list_blocked
-    (mcp-server/src/mcp/server.ts canonicalListBlocked; added later, surface unchanged). Also consumed by apps/whatsapp/server.mjs (GET /api/contact-block derives the per-chat state from this list; the per-chat GET the app used to call never existed on a live connector, QA #13, 22-10).'
+    (mcp-server/src/mcp/server.ts canonicalListBlocked; added later, surface unchanged). Also consumed by apps/whatsapp/server.mjs (GET /api/contact-block derives the per-chat state from this list; the per-chat GET the app used to call never existed on a live connector, QA #13, 22-10). El panel de bloqueados de la app (server.mjs storedContactNames) atribuye el nombre a un @lid bloqueado vía la fila de conversations que lo vincula a su teléfono (wa_chat_id), mismo patrón lid_map del directorio; la forma del 200 no cambia (QA #105, 22-10).'
 - id: http.whatsapp-connector.groups-invite.v1
   kind: http-route
   value: /groups/invite
@@ -2004,7 +2004,9 @@ contracts:
     contrato aqui es esa referencia y la ruta; el texto del banner, el meta
     viewport del shell y el orden del estado de carga bajo la lista no forman
     parte de esta entrada (SC-2760, 22-10); tampoco la copia de la sección
-    «Atajos» (QA #104 documenta el mapa featureShortcut). El icono es ahora de marca (burbuja
+    «Atajos» (QA #104 documenta el mapa featureShortcut), ni la redacción del switch
+    «Documentos» de descarga automática (copia del panel, QA 22-10; el valor por defecto
+    apagado es conducta del store, no de esta entrada). El icono es ahora de marca (burbuja
     verde WhatsApp, ICO multi-resolución 16/32/48); la ruta, el MIME y la
     referencia del shell no cambian. El <title> pasa a «WhatsApp» y la app lo
     reemplaza por «(N) WhatsApp» con no leídos (QA #74) — el título no es

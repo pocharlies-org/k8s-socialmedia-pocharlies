@@ -884,6 +884,8 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
 .message-status { color: var(--bubble-meta); letter-spacing: -2px; }
 
 .message-status.status-read { color: var(--accent-strong); }
+/* QA #109: un fallo de envío debe verse; el reloj pendiente usa el mutado por defecto. */
+.message-status.status-failed { color: var(--danger); letter-spacing: 0; font-weight: 700; }
 
 .message-empty { color: var(--muted); font-style: italic; }
 
@@ -1768,6 +1770,7 @@ button.feature-member { width: 100%; border: 0; padding: 0; background: none; co
 .message-link-preview-site { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .feature-form { display: grid; gap: 12px; }
+.feature-form-error { margin: 0; color: var(--danger); font-size: 13px; }
 .feature-field { display: grid; gap: 6px; color: var(--muted-strong); font-size: 12px; }
 .feature-field input, .feature-field textarea { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: var(--surface-raised); color: var(--text); padding: 9px 10px; }
 .feature-field textarea { resize: vertical; }

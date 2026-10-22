@@ -508,6 +508,19 @@ function formData(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
 
+// QA #107: los tres formularios de creación hacían `return` a secas con el
+// formulario vacío; el motivo se pinta aquí, en un punto, no en tres.
+function formValidator(documentRef, form) {
+  const error = makeElement(documentRef, 'p', 'feature-form-error');
+  error.setAttribute('role', 'alert');
+  error.hidden = true;
+  form.append(error);
+  return message => {
+    error.textContent = message || '';
+    error.hidden = !message;
+  };
+}
+
 function initials(value) {
   const parts = text(value).trim().split(/\s+/).filter(Boolean);
   return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2) || 'S').toUpperCase();
@@ -825,7 +838,11 @@ export function installFeatureUI({
     const avatar = node('span', 'feature-member-avatar');
     initialsAvatar(avatar, member.name || member.pushName || member.id, member.photoUrl || member.photo_url || member.avatarUrl);
     const copy = node('span', 'feature-member-copy');
-    copy.append(node('strong', '', member.name || member.pushName || member.id || 'Contacto'), node('small', '', member.id || 'Identidad no disponible'));
+    const memberName = member.name || member.pushName;
+    copy.append(node('strong', '', memberName || member.id || 'Contacto'));
+    // UX #32.1: sin nombre el dígito es lo único que identifica; con nombre, el
+    // JID/LID crudo sobra — la oficial nunca lo muestra.
+    if (!memberName && member.id) copy.append(node('small', '', member.id));
     if (bool(member.isAdmin) || bool(member.admin) || text(member.role).toLowerCase() === 'admin') copy.append(node('em', 'feature-admin', 'Administrador'));
     row.append(avatar, copy);
     const capabilities = info?.capabilities || {};
@@ -1819,10 +1836,12 @@ export function installFeatureUI({
     const submit = button(documentRef, 'Continuar', 'feature-button primary');
     submit.type = 'submit';
     form.append(name.wrapper, address.wrapper, submit);
+    const showError = formValidator(documentRef, form);
     form.onsubmit = async event => {
       event.preventDefault();
       const values = formData(form);
-      if (!values.name?.trim() || !values.address?.trim()) return;
+      if (!values.name?.trim() || !values.address?.trim()) { showError('Indica el nombre y el número o identificador.'); return; }
+      showError('');
       const result = await mutate('/api/contacts', { phone: values.address.trim(), displayName: values.name.trim() }, { refreshChats: true, success: 'Operación confirmada.', includeChat: false });
       if (result?.confirmed) closeModal();
     };
@@ -1833,15 +1852,17 @@ export function installFeatureUI({
     const modal = openModal('Nuevo grupo', { wide: true });
     const form = node('form', 'feature-form');
     const name = field(documentRef, 'Nombre', 'text', 'name');
-    const members = field(documentRef, 'Miembros (separados por comas)', 'text', 'members');
+    const members = field(documentRef, 'Miembros (separados por comas, p. ej. +34600112233)', 'text', 'members');
     const submit = button(documentRef, 'Continuar', 'feature-button primary');
     submit.type = 'submit';
     form.append(name.wrapper, members.wrapper, submit);
+    const showError = formValidator(documentRef, form);
     form.onsubmit = async event => {
       event.preventDefault();
       const values = formData(form);
-      const payload = { name: values.name.trim(), participants: values.members.split(',').map(item => item.trim()).filter(Boolean) };
-      if (!payload.name || !payload.participants.length) return;
+      const payload = { name: values.name.trim().slice(0, 100), participants: values.members.split(',').map(item => item.trim()).filter(Boolean) };
+      if (!payload.name || !payload.participants.length) { showError('Indica el nombre del grupo y al menos un miembro.'); return; }
+      showError('');
       const result = await mutate('/api/groups', payload, { refreshChats: true, success: 'Operación confirmada.', includeChat: false });
       const chat = result?.chat || result?.conversation;
       if (chat) { closeModal(); selectChat(chat); }
@@ -1858,10 +1879,12 @@ export function installFeatureUI({
     const submit = button(documentRef, 'Continuar', 'feature-button primary');
     submit.type = 'submit';
     form.append(subject.wrapper, description.wrapper, submit);
+    const showError = formValidator(documentRef, form);
     form.onsubmit = async event => {
       event.preventDefault();
       const values = formData(form);
-      if (!values.subject?.trim()) return;
+      if (!values.subject?.trim()) { showError('Indica el nombre de la comunidad.'); return; }
+      showError('');
       const payload = { subject: values.subject.trim().slice(0, 100) };
       if (values.description?.trim()) payload.description = values.description.trim();
       const result = await mutate('/api/communities', payload, { refreshChats: true, success: 'Comunidad creada.', includeChat: false });
@@ -2057,13 +2080,19 @@ export function installFeatureUI({
       const result = await request('/api/blocked-contacts', undefined, { account: scope.account, chat: '' });
       if (!isCurrent()) return;
       if (result.account !== scope.account || result.confirmed !== true || !Array.isArray(result.contacts)) throw new Error('Lista no confirmada por WhatsApp.');
-      notice.textContent = result.contacts.length ? `${result.contacts.length} contacto${result.contacts.length === 1 ? '' : 's'} bloqueado${result.contacts.length === 1 ? '' : 's'}.` : 'No hay contactos bloqueados.';
       search.hidden = result.contacts.length === 0;
       let visibleCount = 100;
       const render = () => {
         list.replaceChildren();
         const needle = search.value.trim().toLocaleLowerCase();
         const matches = result.contacts.filter(contact => `${text(contact?.name)} ${text(contact?.jid)}`.toLocaleLowerCase().includes(needle));
+        // QA #105: el aviso cuenta lo que se ve, no lo que hay; con filtro sin
+        // coincidencias la lista vacía necesita decirlo.
+        notice.textContent = needle
+          ? (matches.length
+            ? `${matches.length} de ${result.contacts.length} contactos bloqueados coinciden con la búsqueda.`
+            : 'Ningún contacto bloqueado coincide con esta búsqueda.')
+          : (result.contacts.length ? `${result.contacts.length} contacto${result.contacts.length === 1 ? '' : 's'} bloqueado${result.contacts.length === 1 ? '' : 's'}.` : 'No hay contactos bloqueados.');
         showMore.hidden = matches.length <= visibleCount;
         for (const contact of matches.slice(0, visibleCount)) {
         const jid = text(contact?.jid).trim();

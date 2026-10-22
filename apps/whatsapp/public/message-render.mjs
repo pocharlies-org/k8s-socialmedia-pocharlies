@@ -1021,11 +1021,24 @@ export function createAttachmentElement(attachment, { document: documentRef = gl
   return container;
 }
 
+// QA #111: la primera letra fuerte decide. Árabe, hebreo, siríaco, thaana,
+// n'ko y samaritano van a la derecha; el resto, a la izquierda. Vacío = no tocar.
+export function detectDirection(value) {
+  for (const character of String(value || '')) {
+    if (/[\u0590-\u08FF\uFB1D-\uFDCF\uFDF0-\uFDFF\uFE70-\uFEFF]/.test(character)) return 'rtl';
+    if (/[a-zA-Z\u00C0-\u024F]/.test(character)) return 'ltr';
+  }
+  return '';
+}
+
 function deliveryStatus(message) {
   const status = textValue(message?.status || message?.deliveryStatus).toLowerCase();
   if (status === 'sent') return { symbol: '\u2713', label: 'Enviado', className: 'status-sent' };
   if (status === 'delivered') return { symbol: '\u2713\u2713', label: 'Entregado', className: 'status-delivered' };
   if (['read', 'played'].includes(status)) return { symbol: '\u2713\u2713', label: status === 'played' ? 'Reproducido' : 'Le\u00eddo', className: 'status-read' };
+  // QA #109: sin estos dos estados un fallo de env\u00edo era invisible en el hilo.
+  if (status === 'pending') return { symbol: '\u23f3', label: 'Pendiente', className: 'status-pending' };
+  if (status === 'failed') return { symbol: '!', label: 'No enviado', className: 'status-failed' };
   return null;
 }
 
@@ -1215,6 +1228,8 @@ export function renderMessage(message, { document: documentRef = globalThis.docu
   if (text && !['poll', 'event'].includes(metadata.kind)) {
     const textElement = makeElement(documentRef, 'div', 'message-text');
     appendRichText(textElement, text, documentRef);
+    const direction = detectDirection(text);
+    if (direction) textElement.dir = direction;
     bubble.append(textElement);
   }
   const linkPreview = message?.linkPreview;
