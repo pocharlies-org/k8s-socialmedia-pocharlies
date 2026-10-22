@@ -1,6 +1,8 @@
+import { initialsOf } from './text-initials.mjs';
+
+// UX #45.2: iniciales por grapheme completo (una bandera no se parte).
 export function accountInitials(label) {
-  const parts = String(label || '').trim().split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2) || '?').toLocaleUpperCase();
+  return initialsOf(label, '?');
 }
 
 export function markActiveAccount(container, accountId) {

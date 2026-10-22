@@ -4,6 +4,7 @@ import { createPageFetcher, exportConversationText, ChatExportCanceled } from '.
 import { installNotificationSettings } from './notification-settings.mjs';
 import { createStatusNotificationMonitor } from './status-notifications.mjs';
 import { installContactDirectoryUI } from './contact-directory-ui.mjs';
+import { initialsOf } from './text-initials.mjs';
 import { createPollComposer } from './poll-composer.mjs';
 import { createEventComposer } from './event-composer.mjs';
 import { localDayRange } from './message-date.mjs';
@@ -524,8 +525,8 @@ function formValidator(documentRef, form) {
 }
 
 function initials(value) {
-  const parts = text(value).trim().split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2) || 'S').toUpperCase();
+  // UX #45.2: grapheme completo (public/text-initials.mjs).
+  return initialsOf(text(value), 'S');
 }
 
 function messageText(message) {
@@ -534,7 +535,7 @@ function messageText(message) {
   const attachment = array(message?.attachments)[0];
   const type = text(attachment?.type || attachment?.fileType || attachment?.file_type).toLowerCase();
   const kind = type.startsWith('video') ? 'Vídeo' : type.startsWith('audio') ? 'Audio'
-    : type === 'sticker' ? 'Sticker' : type.startsWith('image') ? 'Foto' : type === 'document' ? 'Documento' : 'Archivo adjunto';
+    : type === 'sticker' ? 'Pegatina' : type.startsWith('image') ? 'Foto' : type === 'document' ? 'Documento' : 'Archivo adjunto';
   return text(message?.text || message?.content).trim() || (array(message?.attachments).length ? kind : 'Mensaje no disponible');
 }
 
@@ -1989,7 +1990,8 @@ export function installFeatureUI({
   }
 
   function openPicker(initial = 'emoji') {
-    const modal = openModal('Emoji, GIF y stickers', { wide: true });
+    // UX #46.2: «pegatina» es el término de WhatsApp en español; se unifica en toda la app.
+    const modal = openModal('Emoji, GIF y pegatinas', { wide: true });
     const tabs = node('nav', 'feature-picker-tabs');
     const content = node('div', 'feature-picker-content');
     const context = {account: runtime.account, chat: runtime.chat, generation: runtime.generation};
@@ -1999,8 +2001,8 @@ export function installFeatureUI({
     const renderEmoji = () => { content.replaceChildren(createEmojiPicker({documentRef, account: context.account, isCurrent, onSelect: insertEmoji})); };
     const renderUpload = (kind, accept) => {
       const sticker = kind === 'sticker';
-      content.replaceChildren(node('p', 'feature-muted', kind === 'GIF' ? 'El GIF se prepara junto al mensaje para revisarlo antes de enviar.' : 'Elige una foto, edítala y revisa el sticker antes de enviarlo.'));
-      const input = documentRef.createElement('input'); input.type = 'file'; input.accept = accept; input.setAttribute('aria-label', `Subir ${kind}`);
+      content.replaceChildren(node('p', 'feature-muted', kind === 'GIF' ? 'El GIF se prepara junto al mensaje para revisarlo antes de enviar.' : 'Elige una foto, edítala y revisa la pegatina antes de enviarla.'));
+      const input = documentRef.createElement('input'); input.type = 'file'; input.accept = accept; input.setAttribute('aria-label', `Subir ${sticker ? 'pegatina' : kind}`);
       if (kind === 'GIF') {
         input.onchange = () => {
           if (!isCurrent() || !input.files?.length) return;
@@ -2010,9 +2012,9 @@ export function installFeatureUI({
         return;
       }
       const preview = node('div', 'feature-sticker-preview'); preview.hidden = true;
-      const image = documentRef.createElement('img'); image.alt = 'Vista previa del sticker';
+      const image = documentRef.createElement('img'); image.alt = 'Vista previa de la pegatina';
       preview.append(image);
-      const send = button(documentRef, 'Enviar sticker', 'feature-button primary'); send.disabled = true;
+      const send = button(documentRef, 'Enviar pegatina', 'feature-button primary'); send.disabled = true;
       let selectedFile = null;
       let previewUrl = '';
       let sendToken = '';
@@ -2023,7 +2025,7 @@ export function installFeatureUI({
         if (!source || !isCurrent()) return;
         if (!/^image\/(jpeg|png|webp)$/.test(source.type)) { toast('Elige una imagen JPEG, PNG o WebP.', 'error'); return; }
         const problem = sticker
-          ? source.size > MAX_STICKER_SOURCE_BYTES ? 'La imagen para el sticker supera los 50 MiB.' : ''
+          ? source.size > MAX_STICKER_SOURCE_BYTES ? 'La imagen para la pegatina supera los 50 MiB.' : ''
           : attachmentError(source);
         if (problem) { toast(problem, 'error'); return; }
         send.disabled = true;
@@ -2052,7 +2054,7 @@ export function installFeatureUI({
           const data = await readBase64(file);
           if (!isCurrent() || selectedFile !== file) return;
           sendToken ||= crypto.randomUUID();
-          const result = await mutate('/api/messages/compose', { kind: 'sticker', name: file.name, mimeType: file.type, data, sendToken }, { refreshMessages: true, success: 'Sticker enviado.' });
+          const result = await mutate('/api/messages/compose', { kind: 'sticker', name: file.name, mimeType: file.type, data, sendToken }, { refreshMessages: true, success: 'Pegatina enviada.' });
           if (result) refetchAfterEcho();
           if (result && isCurrent()) closeModal();
         } catch (error) {
@@ -2066,7 +2068,7 @@ export function installFeatureUI({
     const addTab = (label, render) => { const tab = button(documentRef, label, 'feature-button subtle'); tab.onclick = () => { disposeUpload(); disposeUpload = () => {}; for (const item of tabs.children) item.classList.remove('active'); tab.classList.add('active'); render(); }; tabs.append(tab); return tab; };
     const emojiTab = addTab('Emoji', renderEmoji);
     addTab('GIF local', () => renderUpload('GIF', 'image/gif'));
-    const stickerTab = addTab('Crear sticker', () => renderUpload('sticker', 'image/jpeg,image/png,image/webp'));
+    const stickerTab = addTab('Crear pegatina', () => renderUpload('sticker', 'image/jpeg,image/png,image/webp'));
     (initial === 'sticker' ? stickerTab : emojiTab).click();
     modal.body.append(tabs, content);
   }
@@ -2401,7 +2403,7 @@ export function installFeatureUI({
     const cancel = button(documentRef, 'Cancelar', 'feature-button subtle'); cancel.onclick = () => { runtime.selectedMessageIds.clear(); enhanceMessages(); };
     toolbar.append(count, forward, star, cancel); documentRef.querySelector('.conversation-header')?.after(toolbar);
     const composer = documentRef.getElementById('composer');
-    const emoji = button(documentRef, '☺', 'composer-icon'); emoji.id = 'feature-emoji'; emoji.setAttribute('aria-label', 'Emoji, GIF y stickers'); emoji.title = 'Emoji, GIF y stickers'; emoji.onclick = openPicker; composer?.prepend(emoji);
+    const emoji = button(documentRef, '☺', 'composer-icon'); emoji.id = 'feature-emoji'; emoji.setAttribute('aria-label', 'Emoji, GIF y pegatinas'); emoji.title = 'Emoji, GIF y pegatinas'; emoji.onclick = openPicker; composer?.prepend(emoji);
     const attachment = documentRef.getElementById('attach');
     const originalAttachmentClick = attachment?.onclick;
     const attachMenu = node('div', 'feature-attach-menu'); attachMenu.id = 'feature-attach-menu'; attachMenu.hidden = true; attachMenu.setAttribute('role', 'menu'); attachMenu.setAttribute('aria-label', 'Adjuntar');
@@ -2436,7 +2438,7 @@ export function installFeatureUI({
     addAttach('Contacto', 'contact', () => openShare('contact'));
     addAttach('Encuesta', 'poll', () => openShare('poll'));
     addAttach('Evento', 'event', () => openShare('event'));
-    addAttach('Nuevo sticker', 'sticker', () => openPicker('sticker'));
+    addAttach('Nueva pegatina', 'sticker', () => openPicker('sticker'));
     // QA #85: el conector ya acepta GIF (el server convierte gif→mp4, server.mjs:2436); faltaba la entrada.
     addAttach('GIF', 'gif', () => {
       const input = documentRef.createElement('input');

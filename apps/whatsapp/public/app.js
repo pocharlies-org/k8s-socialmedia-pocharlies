@@ -258,10 +258,19 @@ function chatAvatar(chat) {
   else avatar.textContent = chatInitials(chat);
   return avatar;
 }
+// UX #45.2: la inicial es un grapheme completo (una bandera son dos code points).
+// app.js es script clásico y no puede importar public/text-initials.mjs: mismo criterio aquí.
+const chatGraphemes = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('es', {granularity: 'grapheme'}) : null;
+function chatGraphemesOf(value) {
+  return chatGraphemes ? [...chatGraphemes.segment(value)].map(grapheme => grapheme.segment) : [...value];
+}
 function chatInitials(chat) {
   const value = String(chat?.name || chat?.id || 'SocialMedia').trim();
   const parts = value.split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2) || 'S').toLocaleUpperCase();
+  if (!parts.length) return 'S';
+  return (parts.length > 1
+    ? chatGraphemesOf(parts[0])[0] + chatGraphemesOf(parts[1])[0]
+    : chatGraphemesOf(parts[0]).slice(0, 2).join('')).toLocaleUpperCase();
 }
 function setConversationAvatar(chat = null) {
   const avatar = document.querySelector('.conversation-avatar');

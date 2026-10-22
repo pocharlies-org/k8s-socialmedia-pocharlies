@@ -227,7 +227,7 @@ export function renderTranscript({
     let text = typeof message.text === 'string' ? message.text : '';
     const attachments = attachmentLines(message);
     if (!text.trim() && !attachments.length) {
-      const labels = { IMAGE: 'Foto', VIDEO: 'Vídeo', AUDIO: 'Audio', VOICE: 'Nota de voz', DOCUMENT: 'Documento', STICKER: 'Sticker', POLL: 'Encuesta', LOCATION: 'Ubicación', CONTACT: 'Contacto', EVENT: 'Evento' };
+      const labels = { IMAGE: 'Foto', VIDEO: 'Vídeo', AUDIO: 'Audio', VOICE: 'Nota de voz', DOCUMENT: 'Documento', STICKER: 'Pegatina', POLL: 'Encuesta', LOCATION: 'Ubicación', CONTACT: 'Contacto', EVENT: 'Evento' };
       text = `[${labels[message.type] || 'Mensaje'}: contenido no disponible en la exportación]`;
     }
     lines.push(`[${formatTimestamp(message.timestampMs)}] ${senderLabel(message, { meLabel })}: ${text.split('\n')[0]}`.trimEnd());

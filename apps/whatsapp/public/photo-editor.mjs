@@ -148,10 +148,10 @@ export async function exportSticker(canvas) {
   square.getContext('2d').drawImage(canvas, (STICKER_SIZE - width) / 2, (STICKER_SIZE - height) / 2, width, height);
   for (const quality of [0.9, 0.8, 0.68, 0.56, 0.44, 0.32, 0.2]) {
     const blob = await new Promise(resolve => square.toBlob(resolve, 'image/webp', quality));
-    if (!blob || blob.type !== 'image/webp') throw new Error('Este navegador no puede crear stickers WebP.');
+    if (!blob || blob.type !== 'image/webp') throw new Error('Este navegador no puede crear pegatinas WebP.');
     if (blob.size <= STICKER_MAX_BYTES) return blob;
   }
-  throw new Error('El sticker supera los 100 KiB. Prueba con una imagen más sencilla.');
+  throw new Error('La pegatina supera los 100 KiB. Prueba con una imagen más sencilla.');
 }
 
 export function createPhotoEditor({getContext, isCurrent, onApply, showError, documentRef} = {}) {
@@ -620,8 +620,8 @@ export function createPhotoEditor({getContext, isCurrent, onApply, showError, do
     opener = doc.activeElement;
     currentName = file?.name || 'imagen';
     outputMode = mode === 'sticker' ? 'sticker' : 'photo';
-    title.textContent = outputMode === 'sticker' ? 'Crear sticker' : 'Editar foto';
-    apply.textContent = outputMode === 'sticker' ? 'Usar sticker' : 'Listo';
+    title.textContent = outputMode === 'sticker' ? 'Crear pegatina' : 'Editar foto';
+    apply.textContent = outputMode === 'sticker' ? 'Usar pegatina' : 'Listo';
     dialog.setAttribute('aria-label', title.textContent);
     applyHandler = onApplyOverride || onApply;
     overlay.hidden = false;
@@ -633,7 +633,7 @@ export function createPhotoEditor({getContext, isCurrent, onApply, showError, do
       const source = await loadImage(file, maxDim);
       if (token !== generation) return;
       if (source.reduced) {
-        notice.textContent = outputMode === 'sticker' ? 'El sticker se prepara a 512 × 512 px.' : editCapNotice();
+        notice.textContent = outputMode === 'sticker' ? 'La pegatina se prepara a 512 × 512 px.' : editCapNotice();
         notice.hidden = false;
       }
       paintCanvas(canvas, source.canvas);

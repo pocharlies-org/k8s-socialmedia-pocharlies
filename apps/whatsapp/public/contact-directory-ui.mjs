@@ -264,7 +264,7 @@ export function installContactDirectoryUI({
       image.addEventListener('error', () => image.remove());
       avatar.append(image);
     }
-    avatar.append(node('span', 'contact-directory-initial', [...entry.label.trim()][0]?.toUpperCase() || '?'));
+    avatar.append(node('span', 'contact-directory-initial', firstGrapheme(entry.label).toUpperCase() || '?'));
     const copy = node('span', 'contact-directory-copy');
     copy.append(node('strong', '', entry.label));
     const detail = [entry.sublabel, contactEntryHint(entry, { sendingEnabled: state.sendingEnabled })].filter(Boolean).join(' · ');

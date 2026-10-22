@@ -1,3 +1,5 @@
+import { firstGrapheme } from './text-initials.mjs';
+
 const actionCapability = Object.freeze({
   subject: 'editInfo',
   description: 'editInfo',
@@ -177,6 +179,12 @@ export function installCommunitiesUI({
     return count !== null && count !== undefined && Number.isSafeInteger(Number(count)) && Number(count) >= 0
       ? `${Number(count)} ${Number(count) === 1 ? 'participante' : 'participantes'}` : 'Comunidad';
   }
+  // UX #45.1: una comunidad es un contenedor de grupos; la oficial la subtitula
+  // por sus grupos, no por la suma de participantes.
+  function displayGroups(count) {
+    return count !== null && count !== undefined && Number.isSafeInteger(Number(count)) && Number(count) >= 0
+      ? `${Number(count)} ${Number(count) === 1 ? 'grupo' : 'grupos'}` : 'Comunidad';
+  }
   function renderList() {
     const focusedCommunity = documentRef.activeElement?.dataset?.communityId;
     listRoot.replaceChildren();
@@ -190,9 +198,9 @@ export function installCommunitiesUI({
       row.dataset.communityId = community.id;
       row.setAttribute('aria-label', community.name || community.id);
       row.setAttribute('aria-current', String(selected === community.id));
-      row.append(make('span', 'communities-avatar', (community.name || 'C').slice(0, 1).toLocaleUpperCase()));
+      row.append(make('span', 'communities-avatar', (firstGrapheme(community.name) || 'C').toLocaleUpperCase()));
       const copy = make('span', 'communities-row-copy');
-      copy.append(make('strong', '', community.name || community.id), make('small', '', displayCount(community.participantCount)));
+      copy.append(make('strong', '', community.name || community.id), make('small', '', displayGroups(community.groupCount)));
       row.append(copy);
       row.onclick = () => { void selectCommunity(community.id); };
       card.append(row);
@@ -200,7 +208,7 @@ export function installCommunitiesUI({
       if (preview) {
         for (const group of preview.linkedGroups.slice(0, 2)) {
           const subrow = button('', 'communities-preview-group');
-          subrow.append(make('span', 'communities-preview-icon', (group.name || 'G').slice(0, 1).toLocaleUpperCase()));
+          subrow.append(make('span', 'communities-preview-icon', (firstGrapheme(group.name) || 'G').toLocaleUpperCase()));
           const subcopy = make('span', 'communities-row-copy');
           subcopy.append(make('strong', '', group.name || group.id), make('small', '', displayCount(group.participantCount)));
           subrow.append(subcopy);
@@ -228,7 +236,7 @@ export function installCommunitiesUI({
     back.setAttribute('aria-label', 'Volver a comunidades');
     back.onclick = () => { selected = null; selectedDetail = null; detailGeneration += 1; renderList(); renderDetail(); };
     const copy = make('div', 'communities-detail-copy');
-    copy.append(make('h3', '', community.name || community.id), make('p', '', displayCount(community.participantCount)));
+    copy.append(make('h3', '', community.name || community.id), make('p', '', displayGroups(linkedGroups.length)));
     top.append(back, copy);
     detailRoot.append(top);
     if (community.description) detailRoot.append(make('p', 'communities-description', community.description));
@@ -252,7 +260,7 @@ export function installCommunitiesUI({
     for (const group of linkedGroups) {
       const row = make('div', 'communities-group');
       const open = button('', 'communities-group-open');
-      open.append(make('span', 'communities-group-avatar', (group.name || 'G').slice(0, 1).toLocaleUpperCase()));
+      open.append(make('span', 'communities-group-avatar', (firstGrapheme(group.name) || 'G').toLocaleUpperCase()));
       const groupCopy = make('span', 'communities-row-copy');
       groupCopy.append(make('strong', '', group.name || group.id), make('small', '', displayCount(group.participantCount)));
       open.append(groupCopy);

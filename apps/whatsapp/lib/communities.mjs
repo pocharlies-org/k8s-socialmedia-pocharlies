@@ -47,6 +47,8 @@ export function publicCommunity(value) {
   return {
     ...publicGroup(value),
     description: boundedText(value.description ?? '', 'community description', 8192, { status: 502, empty: true }),
+    // UX #45.1: una comunidad se subtitula por sus grupos, no por sus participantes.
+    groupCount: Array.isArray(value.linkedGroups) ? value.linkedGroups.length : null,
     capabilities: {
       editInfo: value.capabilities?.editInfo === true,
       manageGroups: value.capabilities?.manageGroups === true,

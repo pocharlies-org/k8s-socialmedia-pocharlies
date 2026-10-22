@@ -316,7 +316,7 @@ test('quoted messages show the real sender and excerpt without treating markup a
 });
 
 test('quoted media and empty media bubbles use a type icon and honest label', () => {
-  for (const [type, label] of Object.entries({ IMAGE: 'Foto', VIDEO: 'Vídeo', AUDIO: 'Audio', DOCUMENT: 'Documento', STICKER: 'Sticker', POLL: 'Encuesta', LOCATION: 'Ubicación' })) {
+  for (const [type, label] of Object.entries({ IMAGE: 'Foto', VIDEO: 'Vídeo', AUDIO: 'Audio', DOCUMENT: 'Documento', STICKER: 'Pegatina', POLL: 'Encuesta', LOCATION: 'Ubicación' })) {
     const quoted = renderMessage({
       id: `quote-${type}`, text: 'Respuesta', replyToMessageId: 'original',
       replyPreview: { type, text: '', senderName: 'Ana', available: true },

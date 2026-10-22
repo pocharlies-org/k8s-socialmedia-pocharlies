@@ -143,9 +143,9 @@ try {
   assert.deepEqual(await page.evaluate(() => window.__cameraTracks.map(track => track.readyState)), ['ended']);
   assert.equal(uploads.length, beforeCapture);
   await page.locator('#attach').click();
-  await page.getByRole('menuitem', {name:'Nuevo sticker'}).click();
+  await page.getByRole('menuitem', {name:'Nueva pegatina'}).click();
   await page.locator('.feature-picker-content input[accept="image/webp"]').waitFor();
-  assert.equal(await page.getByRole('button', {name:'Enviar sticker'}).isDisabled(), true);
+  assert.equal(await page.getByRole('button', {name:'Enviar pegatina'}).isDisabled(), true);
   await page.keyboard.press('Escape');
   assert.equal(uploads.length, beforeCapture);
   await page.locator('.conversation').evaluate(zone => {

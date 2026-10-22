@@ -17,7 +17,7 @@ const MESSAGE_KINDS = {
   VIDEO: { label: 'Vídeo', icon: 'video' },
   AUDIO: { label: 'Audio', icon: 'audio' },
   DOCUMENT: { label: 'Documento', icon: 'document' },
-  STICKER: { label: 'Sticker', icon: 'sticker' },
+  STICKER: { label: 'Pegatina', icon: 'sticker' },
   POLL: { label: 'Encuesta', icon: 'poll' },
   LOCATION: { label: 'Ubicación', icon: 'location' },
   CONTACT: { label: 'Contacto', icon: 'contact' },

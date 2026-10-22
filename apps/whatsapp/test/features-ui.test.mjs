@@ -432,7 +432,7 @@ test('los seis filtros del listado llevan recuento y aria-label con número (QA 
 test('el adjunto citado se nombra por tipo (nit QA 22-10)', async () => {
   const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(src, /type\.startsWith\('video'\) \? 'Vídeo'/);
-  assert.match(src, /type === 'sticker' \? 'Sticker'/);
+  assert.match(src, /type === 'sticker' \? 'Pegatina'/);
   assert.match(src, /startsWith\('image'\) \? 'Foto'/);
 });
 test('los campos de teléfono piden pad numérico y enseñan el formato (UX #42.3/#43.1)', async () => {
@@ -451,4 +451,13 @@ test('la encuesta enseña el contador del tope al acercarse (UX #44.2)', async (
   assert.match(src, /row\.label\.append\(row\.input, row\.counter\)/);
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.poll-count \{ display:block; text-align:right;/);
+});
+
+test('la pegatina es la palabra en toda la interfaz (UX #46.2)', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /addTab\('Crear pegatina'/);
+  assert.match(src, /addAttach\('Nueva pegatina'/);
+  assert.match(src, /'Enviar pegatina'/);
+  assert.doesNotMatch(src, /'Crear sticker'|'Nuevo sticker'|'Enviar sticker'|Emoji, GIF y stickers/);
 });
