@@ -1236,3 +1236,8 @@ test('QA #79/#77: la proyección normaliza la forma almacenada por el conector',
       location: { name: null, degreesLatitude: null, degreesLongitude: null }, isCancelled: true, extraGuestsAllowed: false });
   assert.equal(publicMessageMetadata({}, 'VIEWONCEMESSAGE').viewOnce, true);
 });
+
+test('el término de búsqueda escapa los comodines SQL antes del ILIKE (QA 22-10)', async () => {
+  const src = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
+  assert.match(src, /const args = \[a\.accountId, `%\$\{q\.replace\(\/\[\\\\%_\]\/g, '\\\\\$&'\)}%`\];/);
+});

@@ -1972,7 +1972,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const cacheKey = JSON.stringify([a.accountId, chat, q, searchScope, url.searchParams.get('cursor') || '']);
         const cached = searchCache.get(cacheKey);
         if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) return json(200, cached.body);
-        const args = [a.accountId, `%${q}%`];
+        // QA 22-10: % y _ del término eran comodines SQL (buscar «%» casaba con todo).
+        // El patrón va parametrizado — no es inyección — pero hay que escapar los comodines.
+        const args = [a.accountId, `%${q.replace(/[\\%_]/g, '\\$&')}%`];
         const clauses = ["m.account=$1", "m.platform='whatsapp'", 'NOT m.is_deleted', MESSAGE_RETAINED_SQL, MESSAGE_VISIBLE_SQL, 'm.content ILIKE $2'];
         if (conversation) { args.push(await conversationReadIds(a, conversation)); clauses.push(`m.conversation_id=ANY($${args.length}::text[])`); }
         if (cursor) {
