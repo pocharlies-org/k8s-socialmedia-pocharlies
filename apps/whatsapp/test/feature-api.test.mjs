@@ -551,6 +551,7 @@ test('search cursor pages tied timestamps without duplicates and stays bound to 
   do {
     const response = await request(base + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''));
     assert.equal(response.status, 200);
+    if (!cursor) assert.equal(response.headers.get('cache-control'), 'private, max-age=30', 'la búsqueda debe ser cacheable (QA 22-10)');
     const page = await response.json();
     seen.push(...page.results.map(row => row.id));
     cursor = page.nextCursor;

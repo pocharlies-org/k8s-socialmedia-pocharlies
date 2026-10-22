@@ -284,3 +284,13 @@ test('received contact, poll, event, reply and edited metadata render visible la
   assert.match(renderFixtureMessage({ ...base, metadata: { kind: 'event', description: 'Sala', startTime: 1790154000000 } }), /Evento.*Sala/);
   assert.match(renderFixtureMessage({ ...base, text: 'Respuesta', replyToMessageId: 'provider-id', isEdited: true }), /message-kind-icon.*Mensaje no disponible.*Editado/);
 });
+
+test('runScopedMutation limpia el banner de error al acertar (QA #13)', async () => {
+  const shown = [];
+  const result = await runScopedMutation({
+    request: async () => ({ ok: true }), isCurrent: () => true,
+    success: 'Enviado.', toast: () => {}, showError: message => shown.push(message),
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(shown, [''], 'el éxito debe borrar el banner dejado por un fallo anterior');
+});

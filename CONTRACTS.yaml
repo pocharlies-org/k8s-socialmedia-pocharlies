@@ -286,7 +286,10 @@ contracts:
     The WhatsApp message id is derived from (account, key) (`3EB0` + 18 hex). While the table is missing
     the key is ignored and the send goes out. The header/field names, the replay semantics, the two 409
     failureClass values and the no-key-is-legacy rule are contract: changing any is breaking — a new `.v2`
-    entry beside this one.'
+    entry beside this one. QA #49 (22-10): a failure that provably never reached the network — Baileys''
+    media upload, ''Media upload failed on all hosts'', which precedes the message post by construction —
+    moves the claimed row to ''failed'' and stays retryable; the 409 send_outcome_uncertain is reserved
+    for post-network outcomes.'
 - id: http.whatsapp-connector.messages-react.v1
   kind: http-route
   value: /messages/react
@@ -1957,7 +1960,9 @@ contracts:
     retry: each owner attempt retains its original model/effort snapshot. Model options are sent
     to the native session lock and run/completion request; default sends an empty options object
     to clear a prior explicit reasoning override. The provider may clamp reasoning levels; the
-    catalog must not claim a distinct unsupported wire level or expose credentials.'
+    catalog must not claim a distinct unsupported wire level or expose credentials. El texto
+    legible de los errores 502/503 no es contrato (copia para el usuario, traducida al castellano
+    en QA #13 22-10); lo congelado es la ruta, la autenticación y los códigos de estado.'
 - id: http.whatsapp-app.hermes-stop.v1
   kind: http-route
   value: /api/ai/stop
@@ -1979,7 +1984,9 @@ contracts:
     Settlement checks the current ledger run under the session lock so an old stop cannot overwrite
     a later retry. Failed results add sanitized error and retryable fields; only a proven unknown
     provider failure before execution permits explicit retryFailedRun on the same owner turn,
-    preserving its delivery request ID and using a separate run-submission idempotency key.'
+    preserving its delivery request ID and using a separate run-submission idempotency key. El texto
+    legible de los errores 502/503 no es contrato (copia para el usuario, traducida al castellano
+    en QA #13 22-10); lo congelado es la ruta, la autenticación y los códigos de estado.'
 - id: http.whatsapp-app.favicon.v1
   kind: http-route
   value: /favicon.ico
@@ -2391,7 +2398,10 @@ contracts:
     m.content con ILIKE y necesita el índice trigram
     idx_messages_content_trgm (migración 002); sin él es seq scan y
     revienta el statement_timeout (57014). chatName sale legible
-    (readableChatName), nunca el jid crudo (QA #10).
+    (readableChatName), nunca el jid crudo (QA #10). Desde QA 22-10 la
+    respuesta se sirve con cache-control private, max-age=30 (re-buscar el
+    mismo término no vuelve a la BD; 30 s de antigüedad aceptables). El
+    envelope y el cursor son contrato; la cabecera de caché no lo es.
 - id: http.whatsapp-app.chat-details.v1
   kind: http-route
   value: /api/chat-details

@@ -620,6 +620,7 @@ async function showHistoricalMessage(messageId) {
     const bubble = [...$('messages').querySelectorAll('[data-message-id]')].find(element => element.dataset.messageId === String(target.id));
     if (!bubble) throw new Error('No se pudo mostrar el mensaje encontrado.');
     bubble.tabIndex = -1;
+    bubble.classList.add('message-highlight');
     bubble.focus({preventScroll: true});
     bubble.scrollIntoView({block: 'center'});
     return true;

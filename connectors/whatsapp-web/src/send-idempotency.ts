@@ -362,9 +362,12 @@ export async function confirmSend(key: string, messageId: string | undefined): P
 }
 
 /**
- * Record a failed attempt. Before the claim nothing reached WhatsApp: the row
- * becomes `failed` (retryable). After it the outcome is unknown: the row stays
- * `pending` and only keeps the error text. Never throws.
+ * Record a failed attempt. The row becomes `failed` (retryable) whenever nothing
+ * could reach WhatsApp: before the claim, or after it with a pre-network failure
+ * — Baileys uploads the media before posting the message, so "Media upload
+ * failed on all hosts" (QA #49) means nothing was sent even if the row was
+ * already claimed. Otherwise the outcome is unknown: the row stays `pending`
+ * and only keeps the error text. Never throws.
  */
 export async function recordSendFailure(
   key: string,
@@ -372,14 +375,17 @@ export async function recordSendFailure(
   error: unknown
 ): Promise<void> {
   const text = describeError(error).slice(0, 1000);
+  // shortcut: clasificación por mensaje — Baileys lanza un Error plano aquí;
+  // subir a tipo propio si Baileys llega a exportarlo.
+  const preNetwork = !claimed || /Media upload failed on all hosts/i.test(text);
   try {
     await getPool().query(
-      claimed
-        ? `UPDATE whatsapp_send_attempts SET error = $3, updated_at = NOW()
-            WHERE account = $1 AND key_hash = $2 AND status = 'pending'`
-        : `UPDATE whatsapp_send_attempts SET status = 'failed', error = $3, updated_at = NOW()
-            WHERE account = $1 AND key_hash = $2 AND status = 'prepared'`,
-      [connectorAccount(), idempotencyKeyHash(key), text]
+      preNetwork
+        ? `UPDATE whatsapp_send_attempts SET status = 'failed', error = $3, updated_at = NOW()
+            WHERE account = $1 AND key_hash = $2 AND status = $4`
+        : `UPDATE whatsapp_send_attempts SET error = $3, updated_at = NOW()
+            WHERE account = $1 AND key_hash = $2 AND status = 'pending'`,
+      [connectorAccount(), idempotencyKeyHash(key), text, claimed ? 'pending' : 'prepared']
     );
   } catch (recordError) {
     console.warn(`send idempotency failure record failed: ${describeError(recordError)}`);

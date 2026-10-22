@@ -769,6 +769,13 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
   line-height: 19px;
 }
 
+/* QA #13: «Ir» de la búsqueda no dejaba señal visual del mensaje destino */
+.message.message-highlight { animation: message-highlight 1.8s ease-out; }
+@keyframes message-highlight {
+  from { box-shadow: 0 0 0 3px rgba(37, 211, 102, .85); }
+  to { box-shadow: 0 0 0 3px rgba(37, 211, 102, 0); }
+}
+
 .message::before {
   position: absolute;
   top: 0;
