@@ -272,6 +272,11 @@ function renderChats() {
     details.append(nameRow, messageRenderer ? messageRenderer.renderChatPreview(chat) : node('span', 'chat-preview', chat.preview || 'Sin mensajes disponibles'));
     button.append(details);
     if (Number(chat.unread) > 0 || chat.unread === true) button.append(node('span', 'badge', String(chat.unread === true ? '' : chat.unread)));
+    // UX #4.5: el nombre accesible de la fila se derivaba del DOM y la elipsis CSS
+    // no oculta el texto al lector de pantalla: filas con mensajes largos =
+    // etiquetas de párrafos enteros. Nombre + previsualización truncados a 120.
+    const rowLabel = `${chat.name || chat.id}: ${chat.preview || 'Sin mensajes disponibles'}`;
+    button.setAttribute('aria-label', rowLabel.length > 120 ? `${rowLabel.slice(0, 120)}…` : rowLabel);
     button.onclick = () => selectChat(chat);
     const row = node('div', 'chat-row');
     const menu = node('button', 'chat-row-menu', '⌄');

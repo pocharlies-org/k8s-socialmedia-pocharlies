@@ -1178,7 +1178,7 @@ export function installFeatureUI({
         action.setAttribute('aria-label', 'Acciones del mensaje');
         bubble.append(action);
       }
-      action.onclick = event => { event.stopPropagation(); openMessageActions(message); };
+      action.onclick = event => { event.stopPropagation(); openMessageActions(message, event); };
       const quoted = bubble.querySelector('.message-reply-reference[data-reply-to-message-id]');
       if (quoted) quoted.onclick = async event => {
         event.stopPropagation();
@@ -1342,8 +1342,11 @@ export function installFeatureUI({
     modal.close.focus();
   }
 
-  function openMessageActions(message) {
-    const modal = openModal('Acciones del mensaje', { opener: documentRef.activeElement, variant: 'menu' });
+  function openMessageActions(message, event) {
+    // UX #3.1: el anclaje leía document.activeElement, que no siempre era el
+    // botón (un re-render lo sustituía y el menú salía sobre la lista de chats).
+    // Se ancla al botón del evento; activeElement queda de respaldo.
+    const modal = openModal('Acciones del mensaje', { opener: event?.currentTarget ?? documentRef.activeElement, variant: 'menu' });
     const actions = node('div', 'feature-action-grid');
     const add = (label, handler, className = 'feature-button subtle') => { const item = button(documentRef, label, className); item.onclick = () => handler(message); actions.append(item); };
     add('Responder', item => { closeModal(); replyTo(item); });
@@ -1562,9 +1565,9 @@ export function installFeatureUI({
     };
   }
 
-  function openChatMenu() {
+  function openChatMenu(event) {
     if (!runtime.chat) return;
-    const modal = openModal('Opciones de conversación', { opener: documentRef.activeElement, variant: 'menu' });
+    const modal = openModal('Opciones de conversación', { opener: event?.currentTarget ?? documentRef.activeElement, variant: 'menu' });
     const actions = node('div', 'feature-action-grid');
     const add = (label, action) => { const item = button(documentRef, label, 'feature-button subtle'); item.onclick = () => { closeModal(); action(); }; actions.append(item); };
     add('Información', openInfo);
