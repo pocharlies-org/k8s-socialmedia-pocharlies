@@ -1962,6 +1962,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           args
         );
         const page = rows.slice(0, limit);
+        // QA 22-10: re-buscar el mismo término volvía a la BD (no-store global).
+        // Una página de búsqueda no cambia en 30 s; el navegador la reutiliza.
+        res.setHeader('cache-control', 'private, max-age=30');
         return json(200, { account: a.accountId, query: q, chat, results: page.map(item => ({
           id: item.wa_message_id || item.id,
           messageId: item.wa_message_id || item.id,
