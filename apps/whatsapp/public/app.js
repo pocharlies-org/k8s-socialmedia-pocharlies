@@ -7,12 +7,13 @@ const recoveryReady = import('./history-recovery.mjs').then(module => {
   historyRecoveryWaitMs = module.HISTORY_RECOVERY_WAIT_MS;
 });
 let mergeMessages;
+let compareMessages;
 let mergeRecentMessages;
 let pinnedFirst;
 let shouldSubmitMessageKey;
 let visibleOutgoingMessages;
 const historyReady = import('./chat-history.mjs').then(module => {
-  ({mergeMessages, mergeRecentMessages, pinnedFirst, shouldSubmitMessageKey, visibleOutgoingMessages} = module);
+  ({mergeMessages, compareMessages, mergeRecentMessages, pinnedFirst, shouldSubmitMessageKey, visibleOutgoingMessages} = module);
 });
 const $ = id => document.getElementById(id);
 function safeLocalStorage() { try { return globalThis.localStorage; } catch { return null; } }
@@ -229,7 +230,16 @@ function query(path, extra = {}) { return `${path}?${new URLSearchParams({accoun
 function context() { return {account: state.account, chat: state.chat, version: state.version}; }
 function current(ctx) { return ctx.version === state.version && ctx.account === state.account && ctx.chat === state.chat; }
 function updateControls() { const disabled = !state.account || !state.chat || !state.sending; for (const id of ['message', 'attach', 'record', 'send']) $(id).disabled = disabled; const emoji = $('feature-emoji'); if (emoji) emoji.disabled = disabled; const suggest = $('suggest'); suggest.disabled = !state.account || !state.chat || state.suggesting || state.busy; suggest.setAttribute('aria-busy', String(state.suggesting)); suggest.classList.toggle('is-busy', state.suggesting); $('record').disabled ||= state.busy || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder; $('sending-notice').hidden = state.sending; }
-function setTheme(value) { const theme = value === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value; document.body.dataset.theme = theme; try { localStorage.setItem('wa-theme', value); } catch {} }
+// QA #108: data-theme también en <html> (la scrollbar y los controles nativos se pintan por el
+// root; body{color-scheme} no llega ahí) y el meta theme-color sigue al tema (en móvil claro la
+// barra del navegador salía oscura sobre una app beige).
+function setTheme(value) {
+  const theme = value === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+  document.body.dataset.theme = document.documentElement.dataset.theme = theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === 'light' ? '#efeae2' : '#161717';
+  try { localStorage.setItem('wa-theme', value); } catch {}
+}
 try { const storedTheme = localStorage.getItem('wa-theme'); $('theme').value = ['dark', 'light', 'system'].includes(storedTheme) ? storedTheme : 'dark'; } catch { $('theme').value = 'dark'; }
 setTheme($('theme').value); $('theme').onchange = () => setTheme($('theme').value); matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTheme($('theme').value));
 function chatFilterValue() { return state.chatFilter; }
@@ -485,7 +495,9 @@ function renderMessages() {
   // QA #113: el pendiente se pintaba sin adjunto (la proyección no llevaba attachments).
   // Ahora la tarjeta «Enviando…» del renderer muestra el nombre; el texto del pie no
   // duplica el nombre (antes caía a item.file.name como texto).
-  const visible = remote.concat(pending.map(item => ({id: item.id, text: item.text || '', fromMe: true, timestamp: item.timestamp, replyToMessageId: item.replyTo || null, ...(item.file || item.fileName ? {attachments: [{name: item.file?.name || item.fileName, mimeType: item.file?.type || '', size: item.file?.size, pending: true}]} : {})})));
+  // QA 22-10: sort con compareMessages — un pendiente/fallido del outbox no debe quedar colgado
+  // por debajo de mensajes posteriores (se añadía al final sin mirar su timestamp).
+  const visible = remote.concat(pending.map(item => ({id: item.id, text: item.text || '', fromMe: true, timestamp: item.timestamp, replyToMessageId: item.replyTo || null, ...(item.file || item.fileName ? {attachments: [{name: item.file?.name || item.fileName, mimeType: item.file?.type || '', size: item.file?.size, pending: true}]} : {})}))).sort(compareMessages);
   const signature = JSON.stringify([visible, pending.map(item => [item.id, item.state])]);
   if (signature === state.signature) return;
   state.signature = signature;

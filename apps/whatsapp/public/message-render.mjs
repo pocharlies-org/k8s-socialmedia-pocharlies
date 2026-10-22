@@ -1241,6 +1241,7 @@ export function renderMessage(message, { document: documentRef = globalThis.docu
   const text = textValue(message?.text ?? message?.content);
   if (text && !['poll', 'event'].includes(metadata.kind)) {
     const textElement = makeElement(documentRef, 'div', 'message-text');
+    textElement.setAttribute('dir', 'auto'); // QA #111: el navegador decide por el primer carácter fuerte.
     appendRichText(textElement, text, documentRef);
     const direction = detectDirection(text);
     if (direction) textElement.dir = direction;

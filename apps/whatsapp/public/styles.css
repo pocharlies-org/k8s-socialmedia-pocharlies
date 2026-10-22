@@ -47,6 +47,7 @@
   src: url("/fonts/roboto-latin-wght-normal.woff2") format("woff2");
 }
 
+html[data-theme="light"],
 body[data-theme="light"] {
   color-scheme: light;
   --bg: #efeae2;
@@ -1585,6 +1586,10 @@ body[data-theme="light"] .ai-panel-avatar { background: #d8e0e3; color: #34464f;
 .message:focus-within .feature-message-action { opacity: 1; }
 
 .feature-message-action:hover { background: var(--accent); color: #07170f; }
+
+/* QA #94 (22-10): el círculo visual es de 26 px pero el área de toque ha de llegar a 44 (Apple);
+   pseudo-elemento = área mayor sin agrandar el glifo. */
+.feature-message-action::after { content: ''; position: absolute; inset: -9px; }
 
 .feature-message-select { position: absolute; top: 8px; left: 8px; z-index: 2; accent-color: var(--accent); }
 

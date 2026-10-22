@@ -144,3 +144,21 @@ test('F5 pinta los últimos mensajes conocidos y revalida (QA velocidad #98)', a
   assert.match(app, /paintCachedMessages\(ctx\);\s*\n\s*const result = await api\(query\('\/api\/messages'/);
   assert.match(app, /localStorage\.setItem\(messageCacheKey\(ctx\.account, ctx\.chat\), JSON\.stringify\(messages\)\)/);
 });
+
+test('el outbox se ordena por timestamp y el texto decide su dirección (QA #113 extra, QA #111)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /\}\)\)\)\.sort\(compareMessages\)/);
+  assert.match(app, /import\('\.\/chat-history\.mjs'\)\.then\(module => \{\n\s*\(\{mergeMessages, compareMessages/);
+  const render = await readFile(new URL('../public/message-render.mjs', import.meta.url), 'utf8');
+  assert.match(render, /textElement\.setAttribute\('dir', 'auto'\)/);
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<textarea id="message"[^>]*dir="auto"/);
+});
+
+test('el tema se aplica al root y el theme-color le sigue (QA #108)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /document\.body\.dataset\.theme = document\.documentElement\.dataset\.theme = theme/);
+  assert.match(app, /meta\.content = theme === 'light' \? '#efeae2' : '#161717'/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /html\[data-theme="light"\],\s*\nbody\[data-theme="light"\] \{\n  color-scheme: light;/);
+});

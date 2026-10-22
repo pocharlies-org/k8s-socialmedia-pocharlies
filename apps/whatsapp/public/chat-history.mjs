@@ -10,7 +10,7 @@ function messageTime(message) {
   return Number.isFinite(time) ? time : 0;
 }
 
-function compareMessages(left, right) {
+export function compareMessages(left, right) {
   return messageTime(left) - messageTime(right) || String(left.id).localeCompare(String(right.id));
 }
 
