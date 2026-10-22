@@ -721,6 +721,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       rows = await query(MESSAGE_LIST_SQL, [account.accountId, readIds]);
       rows = rows.slice(0, size);
     }
+    // QA #99: file_name llega vacío en ~98 % de los adjuntos; el nombre de descarga se deriva del tipo.
+    const downloadNames = { PHOTO: 'foto', IMAGE: 'foto', VIDEO: 'video', VOICE: 'audio', AUDIO: 'audio', STICKER: 'sticker', DOCUMENT: 'documento' };
+    const downloadExts = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'application/pdf': 'pdf' };
     const ids = rows.map(row => row.id).filter(Boolean);
     const providerIds = rows.map(row => row.waMessageId).filter(Boolean);
     let reactionRows = [];
@@ -812,7 +815,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         id: String(item.id),
         url: `/api/media/${encodeURIComponent(item.id)}?account=${encodeURIComponent(account.accountId)}&chat=${encodeURIComponent(chat)}`,
         mimeType: item.mime_type || 'application/octet-stream',
-        name: item.file_name || 'attachment',
+        name: item.file_name || `${downloadNames[item.file_type] || 'archivo'}-${new Date(row.timestamp).toISOString().slice(0, 10)}.${downloadExts[(item.mime_type || '').toLowerCase()] || 'bin'}`,
         type: item.file_type || null,
         size: item.file_size || null,
         caption: item.caption || null,
@@ -1893,14 +1896,16 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           clauses.push(`m.wa_timestamp < $${args.length}::timestamptz`);
         }
         if (['image', 'video'].includes(kind)) { args.push(kind.toUpperCase()); clauses.push(`m.message_type=$${args.length}`); }
-        if (kind === 'gallery') { clauses.push("m.message_type IN ('IMAGE','VIDEO')"); }
-        if (['document', 'documents'].includes(kind)) clauses.push("m.message_type='DOCUMENT'");
+        // QA #96: un vídeo o un audio mandado como documento es vídeo/audio, no DOC (file_type manda, mime de respaldo).
+        const videoDoc = "(m.message_type='DOCUMENT' AND (a.file_type='VIDEO' OR a.mime_type LIKE 'video/%'))";
+        if (kind === 'gallery') { clauses.push(`(m.message_type IN ('IMAGE','VIDEO') OR ${videoDoc})`); }
+        if (['document', 'documents'].includes(kind)) clauses.push(`m.message_type='DOCUMENT' AND NOT ${videoDoc}`);
         if (['link', 'links'].includes(kind)) clauses.push("m.content ~* 'https?://[^[:space:]]+'");
         args.push(limit + 1);
         const rows = await query(
           `SELECT m.id,m.wa_message_id,m.content,m.message_type,m.wa_timestamp,
                   m.wa_timestamp::text AS cursor_timestamp,
-                  a.id AS attachment_id,a.mime_type,a.file_name,a.file_size,a.file_url,a.caption
+                  a.id AS attachment_id,a.mime_type,a.file_name,a.file_type,a.file_size,a.file_url,a.caption
              FROM messages m LEFT JOIN attachments a ON a.message_id=m.id
             WHERE ${clauses.join(' AND ')}
             ORDER BY m.wa_timestamp DESC, m.id DESC, a.id DESC NULLS LAST
@@ -1914,7 +1919,11 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           id: String(lastRow.id), attachment: lastRow.attachment_id ? String(lastRow.attachment_id) : '',
         })).toString('base64url') : null;
         return json(200, { account: a.accountId, chat, kind, items: page.map(item => {
-          const itemKind = item.message_type === 'DOCUMENT' ? 'document' : item.message_type === 'IMAGE' || item.message_type === 'VIDEO' || item.message_type === 'AUDIO' || item.message_type === 'STICKER' ? 'media' : 'link';
+          // QA #96: documento con file_type/mime de vídeo → galería; de audio → kind 'audio' (glifo AUDIO en el panel).
+          const itemKind = (item.message_type === 'DOCUMENT' && (item.file_type === 'VIDEO' || (item.mime_type || '').startsWith('video/')))
+            || item.message_type === 'IMAGE' || item.message_type === 'VIDEO' || item.message_type === 'AUDIO' || item.message_type === 'STICKER' ? 'media'
+            : item.message_type === 'DOCUMENT' && (item.file_type === 'VOICE' || item.file_type === 'AUDIO' || (item.mime_type || '').startsWith('audio/')) ? 'audio'
+            : item.message_type === 'DOCUMENT' ? 'document' : 'link';
           const link = itemKind === 'link'
             ? item.content?.match(/https?:\/\/[^\s<]+/i)?.[0]?.replace(/[),.!?;:]+$/, '') || null
             : null;

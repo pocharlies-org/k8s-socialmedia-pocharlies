@@ -286,11 +286,13 @@ function fixtureDatabase(calls) {
         let rows = (Array.isArray(args[1]) ? args[1] : [args[1]]).flatMap(id => messages[id] || [])
           .filter(row => conversations[row.conversation_id]?.account === args[0] && row.is_deleted !== true)
           .flatMap(row => (attachments[row.id] || [{}]).map(att => ({ ...row, attKey: att.id || '', attachment_id: att.id || null,
-            mime_type: att.mime_type || null, file_name: att.file_name || null, file_size: att.file_size ?? null, caption: att.caption || null })));
+            mime_type: att.mime_type || null, file_name: att.file_name || null, file_type: att.file_type || null, file_size: att.file_size ?? null, caption: att.caption || null })));
         const typeArg = sql.match(/m\.message_type=\$(\d+)/);
         if (typeArg) rows = rows.filter(row => row.message_type === args[Number(typeArg[1]) - 1]);
-        if (/m\.message_type IN \('IMAGE','VIDEO'\)/.test(sql)) rows = rows.filter(row => ['IMAGE', 'VIDEO'].includes(row.message_type));
-        if (/m\.message_type='DOCUMENT'/.test(sql)) rows = rows.filter(row => row.message_type === 'DOCUMENT');
+        const isVideoDoc = row => row.file_type === 'VIDEO' || (row.mime_type || '').startsWith('video/');
+        if (/m\.message_type IN \('IMAGE','VIDEO'\)/.test(sql)) rows = rows.filter(row => ['IMAGE', 'VIDEO'].includes(row.message_type) || (row.message_type === 'DOCUMENT' && isVideoDoc(row)));
+        if (/m\.message_type='DOCUMENT'/.test(sql) && !/m\.message_type IN \('IMAGE','VIDEO'\)/.test(sql)) rows = rows.filter(row => row.message_type === 'DOCUMENT'
+          && (/NOT \(m\.message_type='DOCUMENT'/.test(sql) ? !isVideoDoc(row) : true));
         if (/m\.content ~\* 'https\?/.test(sql)) rows = rows.filter(row => /https?:\/\/\S+/i.test(row.content || ''));
         const keyset = sql.match(/\(m\.wa_timestamp, m\.id\) < \(\$(\d+)::timestamptz, \$(\d+)::(?:uuid|bigint)\)/);
         if (keyset) {
@@ -322,6 +324,11 @@ function fixtureDatabase(calls) {
       }
       if (/FROM whatsapp_message_reactions/.test(sql)) return { rows: [] };
       if (/FROM messages m/.test(sql) && /m\.id,/.test(sql)) return { rows: (Array.isArray(args[1]) ? args[1] : [args[1]]).flatMap(id => messages[id] || []) };
+      if (/FROM attachments a JOIN messages m/.test(sql)) {
+        const ids = new Set(args[2] || []);
+        return { rows: Object.entries(attachments).filter(([messageId]) => ids.has(messageId))
+          .flatMap(([messageId, atts]) => atts.map(att => ({ ...att, message_id: messageId }))) };
+      }
       if (/FROM attachments/.test(sql)) return { rows: [] };
       return { rows: [] };
     },
@@ -719,6 +726,35 @@ test('media pages walk equal timestamps and split attachments without loss or du
   }
   const twoEach = await collectMediaPages(request, 'account=personal&chat=personal-chat&kind=gallery&limit=2');
   assert.deepEqual(twoEach.pages, [2, 2, 2, 1]);
+});
+
+test('QA #96: vídeo y audio mandados como documento salen de «Documentos» con su clase', async t => {
+  const { request, database } = await fixture(t);
+  database.messages['personal-chat'].push(
+    { id: mediaUuid(40), conversation_id: 'personal-chat', content: 'clip', direction: 'INBOUND', message_type: 'DOCUMENT', is_deleted: false, wa_timestamp: mediaTimestamp(41) },
+    { id: mediaUuid(41), conversation_id: 'personal-chat', content: 'chiste', direction: 'INBOUND', message_type: 'DOCUMENT', is_deleted: false, wa_timestamp: mediaTimestamp(42) },
+  );
+  database.attachments[mediaUuid(40)] = [{ id: mediaUuid(140), mime_type: 'video/mp4', file_name: 'dashboard.mp4', file_type: 'VIDEO', file_size: 10, file_url: null, caption: null }];
+  database.attachments[mediaUuid(41)] = [{ id: mediaUuid(141), mime_type: 'audio/ogg', file_name: 'ricard.ogg', file_type: 'VOICE', file_size: 10, file_url: null, caption: null }];
+  const gallery = (await (await request('/api/chats/media?account=personal&chat=personal-chat&kind=gallery')).json()).items;
+  assert.deepEqual(gallery.filter(item => item.messageId === mediaUuid(40)).map(item => item.kind), ['media']);
+  const docs = (await (await request('/api/chats/media?account=personal&chat=personal-chat&kind=documents')).json()).items;
+  assert.ok(!docs.some(item => item.messageId === mediaUuid(40)), 'el vídeo no es un documento');
+  assert.deepEqual(docs.filter(item => item.messageId === mediaUuid(41)).map(item => item.kind), ['audio']);
+});
+
+test('QA #99: adjunto sin file_name descarga con nombre derivado del tipo y la fecha', async t => {
+  const { request, database } = await fixture(t);
+  database.messages['personal-chat'].push(
+    { id: mediaUuid(50), conversation_id: 'personal-chat', content: '', direction: 'INBOUND', message_type: 'IMAGE', is_deleted: false, wa_timestamp: mediaTimestamp(45) },
+    { id: mediaUuid(51), conversation_id: 'personal-chat', content: '', direction: 'INBOUND', message_type: 'DOCUMENT', is_deleted: false, wa_timestamp: mediaTimestamp(46) },
+  );
+  database.attachments[mediaUuid(50)] = [{ id: mediaUuid(150), mime_type: 'image/jpeg', file_name: '', file_type: 'PHOTO', file_size: 5, file_url: null, caption: null }];
+  database.attachments[mediaUuid(51)] = [{ id: mediaUuid(151), mime_type: 'application/pdf', file_name: '', file_type: 'DOCUMENT', file_size: 5, file_url: null, caption: null }];
+  const messages = (await (await request('/api/messages?account=personal&chat=personal-chat')).json()).messages;
+  const names = messages.flatMap(message => message.attachments || []).map(item => item.name);
+  assert.ok(names.some(name => /^foto-\d{4}-\d{2}-\d{2}\.jpg$/.test(name)), names.join());
+  assert.ok(names.some(name => /^documento-\d{4}-\d{2}-\d{2}\.pdf$/.test(name)), names.join());
 });
 
 test('media cursors are versioned, scoped, and reject malformed pagination input', async t => {
