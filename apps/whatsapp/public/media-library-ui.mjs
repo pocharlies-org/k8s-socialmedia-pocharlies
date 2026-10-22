@@ -441,10 +441,12 @@ export function installMediaLibraryUI({
     } else {
       const previewable = Boolean(item.url) && item.kind !== 'document';
       const tile = previewable ? control('media-library-tile') : make('div', 'media-library-tile is-static');
+      // UX #28.1: la etiqueta era el texto del mensaje entero (400+ chars); un lector de pantalla no debe deletrearlo.
+      const tileLabel = [`Ver ${KIND_LABEL[item.kind] || 'archivo'}`, formatDate(item.timestamp)].filter(Boolean).join(', ');
       if (item.kind === 'image' && item.url) {
         const image = make('img');
         image.src = item.url;
-        image.alt = titleFor(item);
+        image.alt = tileLabel;
         image.loading = 'lazy';
         image.decoding = 'async';
         image.onerror = () => { image.remove(); tile.append(glyphFor('image')); };
@@ -454,7 +456,7 @@ export function installMediaLibraryUI({
         if (item.kind === 'video' || item.kind === 'audio') tile.append(make('span', 'media-library-kind', KIND_LABEL[item.kind]));
       }
       if (previewable) {
-        tile.setAttribute('aria-label', `Ver ${titleFor(item)}`);
+        tile.setAttribute('aria-label', tileLabel);
         tile.onclick = () => openPreview(item);
       } else if (!item.url) tile.append(make('span', 'media-library-unavailable', 'Aún no disponible'));
       element.append(tile);
@@ -481,7 +483,8 @@ export function installMediaLibraryUI({
       for (const child of element.children) child.inert = true;
       const toggle = control('media-library-select');
       const chosen = selected.has(item.id);
-      toggle.setAttribute('aria-label', `${chosen ? 'Deseleccionar' : 'Seleccionar'} ${titleFor(item)}`);
+      // UX #28.1: título truncado — el nombre puede ser el mensaje entero.
+      toggle.setAttribute('aria-label', `${chosen ? 'Deseleccionar' : 'Seleccionar'} ${titleFor(item).slice(0, 60)}`);
       toggle.setAttribute('aria-pressed', String(chosen));
       toggle.disabled = acting;
       toggle.onclick = () => {

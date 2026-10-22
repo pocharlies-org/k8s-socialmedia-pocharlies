@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {
   createMediaLibraryClient,
   mediaAssetUrl,
@@ -124,4 +125,11 @@ test('pages normalize with the requested account and never invent a cursor', asy
   const empty = await clientWith('personal', async () => ok('personal', [], undefined))
     .page({});
   assert.deepEqual([empty.items.length, empty.nextCursor], [0, null]);
+});
+// UX #28.1: la etiqueta de la miniatura era «Ver <texto del mensaje entero>» (400+ chars leídos por el lector).
+test('la miniatura se anuncia con tipo y fecha, no con el mensaje entero', async () => {
+  const src = await readFile(new URL('../public/media-library-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /const tileLabel = \[`Ver \$\{KIND_LABEL\[item\.kind\] \|\| 'archivo'\}`, formatDate\(item\.timestamp\)\]\.filter\(Boolean\)\.join\(', '\)/);
+  assert.match(src, /tile\.setAttribute\('aria-label', tileLabel\)/);
+  assert.match(src, /image\.alt = tileLabel/);
 });
