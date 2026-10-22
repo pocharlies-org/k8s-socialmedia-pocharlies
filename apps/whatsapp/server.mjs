@@ -872,6 +872,18 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     res.end(avatar.bytes);
   }
   async function avatarResponse(req, res, account, chat) {
+    try { await avatarSource(req, res, account, chat); }
+    catch (error) {
+      // QA #14b: el handler global contesta los 404 con no-store y cada
+      // re-render re-bajaba el mismo avatar ausente (58 peticiones en media
+      // hora). Un avatar que no existe no aparece de un render a otro: el 404
+      // se cachea 5 min en el navegador; si pone foto, se ve al expirar.
+      if (error?.code !== 'AVATAR_UNAVAILABLE') throw error;
+      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, max-age=300' });
+      res.end(JSON.stringify({ error: error.message, code: error.code }));
+    }
+  }
+  async function avatarSource(req, res, account, chat) {
     const conversation = await conversationFor(account, chat);
     const providerChat = providerChatId(conversation);
     const source = conversation.avatar_url

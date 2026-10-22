@@ -2401,4 +2401,8 @@ contracts:
     cabecera del chat abierto. Los 200 de avatar (chats y contacts) salen con
     cache-control private max-age=86400 + ETag y responden 304 a
     if-none-match (QA velocidad 3, 22-10: el no-store global hacia bajar 7,6 MB
-    de avatares en cada apertura); los 404/5xx siguen no-store.
+    de avatares en cada apertura); los 404 de avatar salen con private
+    max-age=300 (QA 14b, 22-10: el no-store del handler global re-bajaba el
+    mismo avatar ausente 58 veces en media hora; un avatar que no existe no
+    aparece de un render a otro, y si pone foto se ve al expirar el
+    max-age); los demas 404 y los 5xx siguen no-store.

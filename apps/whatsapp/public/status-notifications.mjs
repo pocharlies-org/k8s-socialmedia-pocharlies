@@ -72,7 +72,13 @@ export function createStatusNotificationMonitor({
         }
       }
       baseline = next;
-    } catch { /* A failed read preserves the last confirmed baseline. */ }
+    } catch (error) {
+      // QA #14: un 404 es permanente (la ruta no existe en el build desplegado):
+      // sondearlo cada 30 s son ~180 peticiones/hora por pestaña. Se deja de
+      // sondear hasta el cambio de cuenta (start) o recarga. Otros fallos
+      // conservan el último baseline confirmado y reintentan en el próximo tick.
+      if (error?.status === 404) stop();
+    }
     finally { if (pendingGeneration === currentGeneration) pendingGeneration = -1; }
   }
 

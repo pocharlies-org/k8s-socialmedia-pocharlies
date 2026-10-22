@@ -141,6 +141,36 @@ test('pagehide cancels a hidden-tab check before Safari aborts its request', asy
   assert.equal(windowHandlers.size, 0);
 });
 
+test('a 404 stops the poll forever; other failures retry on the next tick', async () => {
+  let reads = 0;
+  let failing = 0;
+  const timers = new Set();
+  const monitor = createStatusNotificationMonitor({
+    documentRef: { hidden: false, addEventListener() {}, removeEventListener() {} },
+    getAccount: () => 'personal', permission: () => 'granted',
+    loadAuthors: async () => {
+      reads += 1;
+      if (failing) { const error = new Error('read failed'); error.status = failing; throw error; }
+      return { account: 'personal', authors: [] };
+    },
+    onStatus() {},
+    setIntervalRef: callback => { timers.add(callback); return callback; },
+    clearIntervalRef: callback => timers.delete(callback),
+  });
+  monitor.start('personal');
+  await new Promise(resolve => setImmediate(resolve));
+  failing = 500;
+  await monitor.check();
+  assert.equal(timers.size, 1, 'a transient failure keeps the poll alive');
+  failing = 404;
+  await monitor.check();
+  assert.equal(timers.size, 0, 'a permanent 404 stops the poll (QA #14: 189 peticiones/hora)');
+  const readsAtStop = reads;
+  await monitor.check();
+  assert.equal(reads, readsAtStop, 'stopped means no more requests');
+  monitor.destroy();
+});
+
 test('a new unseen status with the same provider timestamp notifies once', async () => {
   const h = harness();
   const timestamp = '2026-09-29T10:00:00Z';

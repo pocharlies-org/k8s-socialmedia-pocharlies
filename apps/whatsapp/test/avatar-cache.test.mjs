@@ -167,6 +167,9 @@ test('unavailable avatars use a short negative cache and retry after its TTL', a
   release();
   const first = await firstPromise;
   assert.ok(first.every(response => response.status === 404));
+  // QA #14b: el 404 debe ser cacheable por el navegador (no-store lo re-bajaba
+  // en cada re-render: 58 peticiones del mismo avatar ausente en media hora).
+  assert.equal(first[0].headers.get('cache-control'), 'private, max-age=300');
   assert.equal(calls, 1);
   assert.equal((await request('/api/chats/same-chat/avatar?account=personal')).status, 404);
   assert.equal(calls, 1);
