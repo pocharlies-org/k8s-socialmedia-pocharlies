@@ -792,7 +792,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       } : {}),
       ...(row.replyToMessageId ? { replyPreview: projectReplyPreview({ replyToMessageId: row.replyToMessageId, replyType, replyText, replySenderName, replyAvailable, replyLocallyDeleted }, metadata, conversation) } : {}),
       metadata: {
-        ...publicMessageMetadata(metadata),
+        ...publicMessageMetadata(metadata, row.type),
         ...(row.type === 'POLL' && pollResults.has(optionalProviderMessageId(row.waMessageId))
           ? { results: pollResults.get(optionalProviderMessageId(row.waMessageId)) } : {}),
       },

@@ -2341,7 +2341,12 @@ contracts:
     casa, linaje NAS) por id para usar el índice — el cast por texto sobre
     80k filas de un grupo pasaba de los 10 s del statement_timeout en frío
     (57014, medido 20-10) —; con ids uuid (el desplegador original) por
-    texto (42883 si se fija un tipo, medido 20-10).
+    texto (42883 si se fija un tipo, medido 20-10). Desde 22-10 la
+    proyección de metadata normaliza la forma almacenada por el conector
+    (claves en singular contact/poll/event → {kind,…}, phones[0] → phone,
+    isCanceled → isCancelled) y deriva viewOnce del message_type
+    (QA #79/#77): aditivo, filas que antes salían con metadata {} salen
+    ahora con su payload.
 - id: http.whatsapp-app.messages-delete.v1
   kind: http-route
   value: /api/messages/delete

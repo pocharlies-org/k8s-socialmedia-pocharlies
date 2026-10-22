@@ -1177,3 +1177,14 @@ test('/api/chats/media enseña thumbUrl para que la galería no baje originales 
   assert.match(src, /thumbUrl: item\.message_type === 'IMAGE'/);
   assert.match(src, /\/api\/media\/thumb\/\$\{encodeURIComponent\(item\.id\)\}\?account=/);
 });
+
+test('QA #79/#77: la proyección normaliza la forma almacenada por el conector', () => {
+  assert.deepEqual(publicMessageMetadata({ contact: { displayName: 'Ana', contacts: [{ displayName: 'Ana', phones: ['+34600111222'], waids: ['waid'] }] } }),
+    { kind: 'contact', contacts: [{ displayName: 'Ana', phone: '+34600111222', email: null, organization: null }] });
+  assert.deepEqual(publicMessageMetadata({ poll: { question: 'Menú?', options: ['A', 'B'], selectableCount: 1 } }),
+    { kind: 'poll', options: ['A', 'B'], selectableCount: 1 });
+  assert.deepEqual(publicMessageMetadata({ event: { name: 'Comida', description: '14:00', startTime: 1790000000000, endTime: 1790003600000, isCanceled: true } }),
+    { kind: 'event', description: '14:00', startTime: 1790000000000, endTime: 1790003600000,
+      location: { name: null, degreesLatitude: null, degreesLongitude: null }, isCancelled: true, extraGuestsAllowed: false });
+  assert.equal(publicMessageMetadata({}, 'VIEWONCEMESSAGE').viewOnce, true);
+});
