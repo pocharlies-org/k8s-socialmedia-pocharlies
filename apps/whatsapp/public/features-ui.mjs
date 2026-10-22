@@ -731,6 +731,17 @@ export function installFeatureUI({
     if (heading) heading.hidden = !archived;
     const hint = documentRef.getElementById('feature-archived-hint');
     if (hint) hint.hidden = !archived;
+    // QA 22-10: dentro de una lista no había pestaña activa ni forma de saber en cuál
+    // se estaba. La lista filtrada se pinta como pestaña con su nombre; pulsarla sale.
+    documentRef.getElementById('feature-list-chip')?.remove();
+    const listView = text(runtime.currentView).startsWith('list:') ? findList(prefs(), runtime.currentView.slice(5)) : null;
+    if (listView) {
+      const chip = button(documentRef, `Lista: ${listView.name}`, 'feature-view-button');
+      chip.id = 'feature-list-chip'; chip.dataset.featureView = runtime.currentView;
+      chip.setAttribute('aria-pressed', 'true'); chip.title = 'Salir de la lista';
+      chip.onclick = () => setView('all');
+      documentRef.querySelector('.feature-view-nav')?.append(chip);
+    }
   }
 
   function matchesChat(chat, view = runtime.currentView) {

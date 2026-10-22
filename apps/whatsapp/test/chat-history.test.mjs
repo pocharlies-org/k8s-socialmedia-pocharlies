@@ -68,3 +68,10 @@ test('el favorito se marca en la fila y Favoritos vacío explica cómo marcarlo 
   assert.match(app, /aria-label', 'Chat en favoritos'/);
   assert.match(app, /Aún no hay favoritos\. Marca uno desde/);
 });
+
+test('F5 restaura el chat abierto y volver a la lista lo olvida (QA 22-10 #162)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /setItem\(`wa:lastChat:\$\{state\.account\}`, chat\.id\)/);
+  assert.match(app, /removeItem\(`wa:lastChat:\$\{state\.account\}`\)/);
+  assert.match(app, /restoreLastChat\(\); \} else \$\('chat-status'\)/);
+});

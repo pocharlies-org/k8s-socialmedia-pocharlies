@@ -32,3 +32,7 @@ test('recents and tones are isolated by account, bounded and tolerate broken sto
   assert.deepEqual(readEmojiPreferences(broken, 'a'), {tone: 0, recents: []});
   assert.doesNotThrow(() => writeEmojiPreferences(broken, 'a', a));
 });
+test('tras insertar, el foco no vuelve al botón del emoji (QA 22-10)', async () => {
+  const ui = await readFile(new URL('../public/emoji-picker.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /const ae = documentRef\.activeElement; if \(!ae \|\| ae === documentRef\.body\) opener\?\.focus\(\)/);
+});

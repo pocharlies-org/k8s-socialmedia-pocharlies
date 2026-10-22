@@ -678,9 +678,19 @@ async function proposeMessage() {
 }
 function mobileChatEntry() { return history.state?.socialMediaChat === true; }
 if (mobileChatEntry()) history.replaceState({...history.state, socialMediaChat: false}, '');
+function restoreLastChat() {
+  // QA 22-10 (#162): F5 caía en «Selecciona un chat» y volvía a bajar toda la lista.
+  let lastId = null;
+  try { lastId = localStorage.getItem(`wa:lastChat:${state.account}`); } catch {}
+  if (!lastId) return;
+  const chat = state.chats.find(item => item.id === lastId);
+  if (chat) void selectChat(chat, { fromHistory: true });
+}
 function closeMobileChat() {
   messageRenderer?.closeMediaViewer?.(); cancelRecording(); cameraController?.close();
   document.body.classList.remove('chat-open');
+  // QA 22-10 (#162): volver a la lista es salir del chat; si no, F5 lo reabriría.
+  try { localStorage.removeItem(`wa:lastChat:${state.account}`); } catch {}
 }
 function selectChat(chat, {fromHistory = false} = {}) {
   messageRenderer?.closeMediaViewer?.(); saveDraft(); cancelRecording(); cameraController?.close(); cancelAttachment(); state.selectedChat = chat; state.chat = chat.id; state.historyMode = false; historyNotice.hidden = true; state.version++; resetMessageHistory(); state.signature = ''; $('message').value = state.drafts.get(`${state.account}:${state.chat}`) || ''; resizeMessageInput(); $('chat-title').textContent = chat.name || chat.id;
@@ -688,6 +698,8 @@ function selectChat(chat, {fromHistory = false} = {}) {
   // tiene nadie en WhatsApp. Los grupos conservan «Grupo» (es verificable).
   $('chat-subtitle').textContent = chat.isGroup === true ? 'Grupo' : '';
   $('chat-subtitle').hidden = chat.isGroup !== true; setConversationAvatar(chat); setAgentContext(chat); $('messages').replaceChildren(node('div', 'welcome', 'Cargando mensajes…')); renderMessages(); assistant?.select(context()); document.body.classList.add('chat-open'); error(); featureUI?.chatChanged?.(chat); renderChats(); updateControls();
+  // QA 22-10 (#162): F5 perdía el chat abierto (no estaba ni en localStorage ni en la URL).
+  try { localStorage.setItem(`wa:lastChat:${state.account}`, chat.id); } catch {}
   if (!fromHistory && matchMedia('(max-width: 760px), (max-width: 1024px) and (max-height: 500px) and (pointer: coarse)').matches) {
     const entry = {...(typeof history.state === 'object' && history.state || {}), socialMediaChat: true, account: state.account, chat: state.chat};
     if (mobileChatEntry()) history.replaceState(entry, '');
@@ -1076,7 +1088,7 @@ const mediaLibraryReady = import('./media-library-ui.mjs').then(({installMediaLi
   }, onOpen: () => closeRailPanels(['library']) });
   return mediaLibraryUI;
 }).catch(err => { error(`No se pudo cargar el contenido multimedia: ${err.message}`); return null; });
-async function init() { try { await recoveryReady; await historyReady; await rendererReady; await attachmentReady; await mediaReady; await accountRailReady; await draftReady; await uploadQualityReady; await sidebarSearchReady; await featureReady; await chatSelectionReady; await eventReady; await pinnedReady; await communitiesReady; await profileReady; await mediaLibraryReady; await novedadesReady; await assistantReady; await liveReady; } catch (err) { error(`No se pudo cargar la interfaz de mensajes: ${err.message}`); return; } updateControls(); $('chat-status').textContent = 'Cargando cuentas…'; const result = await Promise.allSettled([api('/api/accounts')]); if (result[0].status === 'fulfilled') { const data = result[0].value; restoreOutbox(data.outboxScope); state.sending = data.sendingEnabled === true; for (const account of data.accounts || []) $('account').append(new Option(account.label || account.id, account.id)); state.account = $('account').value; sidebarSearch?.accountChanged(); uploadQualityUI?.accountChanged(); assistant?.select(context()); accountRailTools.renderAccountRail($('account-rail'), data.accounts || [], state.account, switchAccount); featureUI?.accountChanged?.(state.account); communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); updateControls(); if (state.account) { await loadChats(); liveUpdates?.start(state.account); } else $('chat-status').textContent = 'No hay cuentas configuradas.'; } else { $('chat-status').textContent = 'No se pudieron cargar las cuentas.'; error(result[0].reason.message); } }
+async function init() { try { await recoveryReady; await historyReady; await rendererReady; await attachmentReady; await mediaReady; await accountRailReady; await draftReady; await uploadQualityReady; await sidebarSearchReady; await featureReady; await chatSelectionReady; await eventReady; await pinnedReady; await communitiesReady; await profileReady; await mediaLibraryReady; await novedadesReady; await assistantReady; await liveReady; } catch (err) { error(`No se pudo cargar la interfaz de mensajes: ${err.message}`); return; } updateControls(); $('chat-status').textContent = 'Cargando cuentas…'; const result = await Promise.allSettled([api('/api/accounts')]); if (result[0].status === 'fulfilled') { const data = result[0].value; restoreOutbox(data.outboxScope); state.sending = data.sendingEnabled === true; for (const account of data.accounts || []) $('account').append(new Option(account.label || account.id, account.id)); state.account = $('account').value; sidebarSearch?.accountChanged(); uploadQualityUI?.accountChanged(); assistant?.select(context()); accountRailTools.renderAccountRail($('account-rail'), data.accounts || [], state.account, switchAccount); featureUI?.accountChanged?.(state.account); communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); updateControls(); if (state.account) { await loadChats(); liveUpdates?.start(state.account); restoreLastChat(); } else $('chat-status').textContent = 'No hay cuentas configuradas.'; } else { $('chat-status').textContent = 'No se pudieron cargar las cuentas.'; error(result[0].reason.message); } }
 window.addEventListener('beforeunload', event => { if ([...state.outgoing.values()].flat().some(item => item.file && item.state !== 'confirmed')) { event.preventDefault(); event.returnValue = ''; } });
 document.addEventListener('click', event => { if (event.target.closest?.('a[href^="/auth/logout"]')) { try { sessionStorage.removeItem(OUTBOX_STORAGE_KEY); } catch {} } });
 window.addEventListener('pagehide', () => { liveUpdates?.stop(); cancelRecording(); cameraController?.close(); cancelAttachment(); });
