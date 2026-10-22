@@ -17,6 +17,9 @@ test('block uses authenticated account/chat scope and confirms provider state wi
         ?[{id:args[1],wa_chat_id:args[1]==='group-a'?'123@g.us':'123@c.us',is_group:args[1]==='group-a'}]:[]};
     }},
     fetchImpl:async(url,options)=>{calls.push({url,method:options.method,body:options.body?JSON.parse(options.body):null});
+      if(url.includes('/contacts/blocklist'))return Response.json(confirmed
+        ?{account:'a',readAt:'2026-10-22T00:00:00Z',cached:false,blocked:[{id:'123@c.us',jids:['123@c.us'],blockedJids:['123@c.us'],phone:null,name:null,pushName:null,conversationId:null}]}
+        :{blocked:[],confirmed:false});
       return Response.json({ok:true,blocked:options.body?JSON.parse(options.body).blocked:false,confirmed});},
   });
   await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));t.after(()=>app.close());
@@ -30,8 +33,9 @@ test('block uses authenticated account/chat scope and confirms provider state wi
   assert.equal((await read('b','chat-a')).status,404);
   const providerRead=await read('a','chat-a');
   assert.equal(providerRead.status,200);
-  assert.deepEqual(await providerRead.json(),{account:'a',chat:'chat-a',blocked:false,confirmed:true,source:'provider'});
-  assert.deepEqual(calls,[{url:'http://connector-a/api/v1/chats/123%40c.us/block',method:'GET',body:null}]);
+  // QA #13: el estado se deriva del listado (no existe lectura por-chat en el conector).
+  assert.deepEqual(await providerRead.json(),{account:'a',chat:'chat-a',blocked:true,confirmed:true,source:'provider'});
+  assert.deepEqual(calls,[{url:'http://connector-a/api/v1/contacts/blocklist',method:'GET',body:null}]);
   calls.length=0;
   assert.equal((await request(body,{authorization:''})).status,401);
   assert.equal((await request(body,{origin:'https://evil.example'})).status,403);

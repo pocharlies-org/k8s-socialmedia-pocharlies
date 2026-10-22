@@ -2142,9 +2142,13 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const conversation = await conversationFor(a, chat);
         const providerChat = providerChatId(conversation);
         if (conversation.is_group || !/^\d+@(c\.us|s\.whatsapp\.net|lid)$/.test(providerChat)) throw fail(400, 'A direct contact is required');
-        const result = await featureConnector(a, `/chats/${encodeURIComponent(providerChat)}/block`, { method: 'GET' });
-        if (typeof result.blocked !== 'boolean' || result.confirmed !== true) throw fail(502, 'Contact block state was not confirmed');
-        return json(200, { account: a.accountId, chat, blocked: result.blocked, confirmed: true, source: 'provider' });
+        // QA #13: no existe una lectura por-chat en el conector (era 501 y el botón se
+        // ocultaba); el estado se deriva del listado, que sí está desplegado. Los dígitos
+        // casan @c.us/@s.whatsapp.net/@lid: Baileys bloquea la persona bajo ambas identidades.
+        const blockedJids = await providerBlocklist(a);
+        const digits = providerChat.match(/^(\d+)@/)?.[1];
+        const blocked = blockedJids.some(jid => jid === providerChat || jid.startsWith(`${digits}@`));
+        return json(200, { account: a.accountId, chat, blocked, confirmed: true, source: 'provider' });
       }
       if (req.method === 'GET' && path === '/api/blocked-contacts') {
         const a = accountParam(url.searchParams.get('account'));

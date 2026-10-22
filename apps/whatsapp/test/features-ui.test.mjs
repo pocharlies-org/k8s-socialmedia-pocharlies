@@ -337,3 +337,10 @@ test('silenciar ofrece «Siempre» y el menú de adjuntos ofrece «GIF» (UX #26
   assert.match(ui, /input\.accept = 'image\/gif'/);
   assert.match(ui, /kind: 'gif', name: file\.name, mimeType: 'image\/gif'/);
 });
+test('QA #59: el diálogo de acciones del mensaje es un menú navegable con flechas', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /setAttribute\('aria-label', 'Acciones del mensaje'\)/);
+  assert.match(ui, /item\.setAttribute\('role', 'menuitem'\); item\.tabIndex = -1; item\.onclick = \(\) => handler\(message\)/);
+  assert.match(ui, /actions\.firstElementChild\?\.focus\(\)/);
+  assert.match(ui, /event\.key === 'ArrowDown' \? \(index \+ 1\) % items\.length : event\.key === 'ArrowUp'/);
+});

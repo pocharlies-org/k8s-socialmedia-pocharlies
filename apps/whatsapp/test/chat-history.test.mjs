@@ -123,3 +123,9 @@ test('arrastrar ficheros se señala mientras dura el arrastre (QA #85)', async (
   assert.match(src, /dropZone\.classList\.add\('is-over'\)/);
   assert.match(src, /addEventListener\('dragleave', \(\) => dropZone\.classList\.remove\('is-over'\)\)/);
 });
+test('QA #82: el avatar 404 de un chat se cachea y no se vuelve a pedir', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const avatarFailures = new Set\(\)/);
+  assert.match(app, /avatarFailures\.has\(key\) \? null : messageRenderer\?\.safeMessageUrl/);
+  assert.match(app, /avatarFailures\.add\(key\)/);
+});

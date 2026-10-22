@@ -1363,7 +1363,7 @@ contracts:
     when none)}], count, readAt, cached}. Names read only from conversations / participants; a pairing
     client (ingest off) answers the bare identities. The path and the 200 shape are contract: changing
     either is breaking — a new `.v2` entry beside this one. Also consumed by the MCP tool social_list_blocked
-    (mcp-server/src/mcp/server.ts canonicalListBlocked; added later, surface unchanged).'
+    (mcp-server/src/mcp/server.ts canonicalListBlocked; added later, surface unchanged). Also consumed by apps/whatsapp/server.mjs (GET /api/contact-block derives the per-chat state from this list; the per-chat GET the app used to call never existed on a live connector, QA #13, 22-10).'
 - id: http.whatsapp-connector.groups-invite.v1
   kind: http-route
   value: /groups/invite
