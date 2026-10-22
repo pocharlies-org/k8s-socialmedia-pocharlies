@@ -98,3 +98,9 @@ test('la fila de chat tiene acciones rápidas fijar/silenciar/archivar (UX 21.2)
   assert.match(css, /\.chat-row:hover \.chat-quick/);
   assert.match(css, /@media \(hover: none\) \{ \.chat-quick \{ display: none; \}/);
 });
+test('la pestaña avisa de los no leídos (QA #74)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /document\.title = unreadTotal \? `\(\$\{unreadTotal > 99 \? '99\+' : unreadTotal\}\) WhatsApp` : 'WhatsApp'/);
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<title>WhatsApp<\/title>/);
+});

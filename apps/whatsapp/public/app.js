@@ -274,6 +274,9 @@ function renderChats() {
   state.chatFilter = filter;
   const chats = pinnedFirst(state.chats.filter(chat => chatMatchesFilter(chat, filter) && `${chat.name || ''} ${chat.preview || ''}`.toLocaleLowerCase().includes(search)));
   $('chat-count').textContent = String(state.chats.length);
+  // QA #74: la pestaña no avisaba de los no leídos (title fijo «SocialMedia»).
+  const unreadTotal = state.chats.reduce((sum, chat) => sum + (chat.unread === true ? 1 : Math.max(0, Number(chat.unread) || 0)), 0);
+  document.title = unreadTotal ? `(${unreadTotal > 99 ? '99+' : unreadTotal}) WhatsApp` : 'WhatsApp';
   $('chats').replaceChildren();
   for (const chat of chats) {
     const button = node('button', `chat-item${chat.isGroup === true ? ' is-group' : ''}`);
