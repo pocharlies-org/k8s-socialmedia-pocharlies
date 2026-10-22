@@ -81,7 +81,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 	function te(e, t) {
 		return typeof e == "object" && e && e.key != null ? ee("" + e.key) : t.toString(36);
 	}
-	function ne(e) {
+	function j(e) {
 		switch (e.status) {
 			case "fulfilled": return e.value;
 			case "rejected": throw e.reason;
@@ -96,7 +96,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		}
 		throw e;
 	}
-	function j(e, r, i, a, o) {
+	function M(e, r, i, a, o) {
 		var s = typeof e;
 		(s === "undefined" || s === "boolean") && (e = null);
 		var c = !1;
@@ -112,26 +112,26 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 				case n:
 					c = !0;
 					break;
-				case d: return c = e._init, j(c(e._payload), r, i, a, o);
+				case d: return c = e._init, M(c(e._payload), r, i, a, o);
 			}
 		}
-		if (c) return o = o(e), c = a === "" ? "." + te(e, 0) : a, C(o) ? (i = "", c != null && (i = c.replace(A, "$&/") + "/"), j(o, r, i, "", function(e) {
+		if (c) return o = o(e), c = a === "" ? "." + te(e, 0) : a, C(o) ? (i = "", c != null && (i = c.replace(A, "$&/") + "/"), M(o, r, i, "", function(e) {
 			return e;
 		})) : o != null && (k(o) && (o = O(o, i + (o.key == null || e && e.key === o.key ? "" : ("" + o.key).replace(A, "$&/") + "/") + c)), r.push(o)), 1;
 		c = 0;
 		var l = a === "" ? "." : a + ":";
-		if (C(e)) for (var u = 0; u < e.length; u++) a = e[u], s = l + te(a, u), c += j(a, r, i, s, o);
-		else if (u = h(e), typeof u == "function") for (e = u.call(e), u = 0; !(a = e.next()).done;) a = a.value, s = l + te(a, u++), c += j(a, r, i, s, o);
+		if (C(e)) for (var u = 0; u < e.length; u++) a = e[u], s = l + te(a, u), c += M(a, r, i, s, o);
+		else if (u = h(e), typeof u == "function") for (e = u.call(e), u = 0; !(a = e.next()).done;) a = a.value, s = l + te(a, u++), c += M(a, r, i, s, o);
 		else if (s === "object") {
-			if (typeof e.then == "function") return j(ne(e), r, i, a, o);
+			if (typeof e.then == "function") return M(j(e), r, i, a, o);
 			throw r = String(e), Error("Objects are not valid as a React child (found: " + (r === "[object Object]" ? "object with keys {" + Object.keys(e).join(", ") + "}" : r) + "). If you meant to render a collection of children, use an array instead.");
 		}
 		return c;
 	}
-	function M(e, t, n) {
+	function ne(e, t, n) {
 		if (e == null) return e;
 		var r = [], i = 0;
-		return j(e, r, "", "", function(e) {
+		return M(e, r, "", "", function(e) {
 			return t.call(n, e, i++);
 		}), r;
 	}
@@ -182,20 +182,20 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		} else P(ie.bind(null, e));
 	}
 	var ae = {
-		map: M,
+		map: ne,
 		forEach: function(e, t, n) {
-			M(e, function() {
+			ne(e, function() {
 				t.apply(this, arguments);
 			}, n);
 		},
 		count: function(e) {
 			var t = 0;
-			return M(e, function() {
+			return ne(e, function() {
 				t++;
 			}), t;
 		},
 		toArray: function(e) {
-			return M(e, function(e) {
+			return ne(e, function(e) {
 				return e;
 			}) || [];
 		},
@@ -821,7 +821,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		}
 		return null;
 	}
-	var D = Object.assign, O = Symbol.for("react.element"), k = Symbol.for("react.transitional.element"), ee = Symbol.for("react.portal"), A = Symbol.for("react.fragment"), te = Symbol.for("react.strict_mode"), ne = Symbol.for("react.profiler"), j = Symbol.for("react.consumer"), M = Symbol.for("react.context"), re = Symbol.for("react.forward_ref"), N = Symbol.for("react.suspense"), P = Symbol.for("react.suspense_list"), ie = Symbol.for("react.memo"), ae = Symbol.for("react.lazy"), oe = Symbol.for("react.activity"), se = Symbol.for("react.legacy_hidden"), ce = Symbol.for("react.memo_cache_sentinel"), le = Symbol.for("react.view_transition"), ue = Symbol.for("react.recoverable"), de = Symbol.iterator;
+	var D = Object.assign, O = Symbol.for("react.element"), k = Symbol.for("react.transitional.element"), ee = Symbol.for("react.portal"), A = Symbol.for("react.fragment"), te = Symbol.for("react.strict_mode"), j = Symbol.for("react.profiler"), M = Symbol.for("react.consumer"), ne = Symbol.for("react.context"), re = Symbol.for("react.forward_ref"), N = Symbol.for("react.suspense"), P = Symbol.for("react.suspense_list"), ie = Symbol.for("react.memo"), ae = Symbol.for("react.lazy"), oe = Symbol.for("react.activity"), se = Symbol.for("react.legacy_hidden"), ce = Symbol.for("react.memo_cache_sentinel"), le = Symbol.for("react.view_transition"), ue = Symbol.for("react.recoverable"), de = Symbol.iterator;
 	function fe(e) {
 		return typeof e != "object" || !e ? null : (e = de && e[de] || e["@@iterator"], typeof e == "function" ? e : null);
 	}
@@ -832,7 +832,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		if (typeof e == "string") return e;
 		switch (e) {
 			case A: return "Fragment";
-			case ne: return "Profiler";
+			case j: return "Profiler";
 			case te: return "StrictMode";
 			case N: return "Suspense";
 			case P: return "SuspenseList";
@@ -841,8 +841,8 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		}
 		if (typeof e == "object") switch (e.$$typeof) {
 			case ee: return "Portal";
-			case M: return e.displayName || "Context";
-			case j: return (e._context.displayName || "Context") + ".Consumer";
+			case ne: return e.displayName || "Context";
+			case M: return (e._context.displayName || "Context") + ".Consumer";
 			case re:
 				var t = e.render;
 				return e = e.displayName, e ||= (e = t.displayName || t.name || "", e === "" ? "ForwardRef" : "ForwardRef(" + e + ")"), e;
@@ -2181,7 +2181,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 			case te:
 				s = 8, a |= 24;
 				break;
-			case ne: return e = Ai(12, n, t, a | 2), e.elementType = ne, e.lanes = o, e;
+			case j: return e = Ai(12, n, t, a | 2), e.elementType = j, e.lanes = o, e;
 			case N: return e = Ai(13, n, t, a), e.elementType = N, e.lanes = o, e;
 			case P: return e = Ai(19, n, t, a), e.elementType = P, e.lanes = o, e;
 			case se:
@@ -2193,10 +2193,10 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 			}, e;
 			default:
 				if (typeof r == "object" && r) switch (r.$$typeof) {
-					case M:
+					case ne:
 						s = 10;
 						break a;
-					case j:
+					case M:
 						s = 9;
 						break a;
 					case re:
@@ -2464,7 +2464,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 			});
 		};
 	}, Ea = t.unstable_scheduleCallback, Da = t.unstable_NormalPriority, Oa = {
-		$$typeof: M,
+		$$typeof: ne,
 		Consumer: null,
 		Provider: null,
 		_currentValue: null,
@@ -2672,7 +2672,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 				}
 				if (he(t) || fe(t)) return t = Fi(t, e.mode, n, null), t.return = e, t;
 				if (typeof t.then == "function") return f(e, io(t), n);
-				if (t.$$typeof === M) return f(e, Ca(e, t), n);
+				if (t.$$typeof === ne) return f(e, Ca(e, t), n);
 				oo(e, t);
 			}
 			return null;
@@ -2688,7 +2688,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 				}
 				if (he(n) || fe(n)) return i === null ? d(e, t, n, r, null) : null;
 				if (typeof n.then == "function") return p(e, t, io(n), r);
-				if (n.$$typeof === M) return p(e, t, Ca(e, n), r);
+				if (n.$$typeof === ne) return p(e, t, Ca(e, n), r);
 				oo(e, n);
 			}
 			return null;
@@ -2703,7 +2703,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 				}
 				if (he(r) || fe(r)) return e = e.get(n) || null, d(t, e, r, i, null);
 				if (typeof r.then == "function") return m(e, t, n, io(r), i);
-				if (r.$$typeof === M) return m(e, t, n, Ca(t, r), i);
+				if (r.$$typeof === ne) return m(e, t, n, Ca(t, r), i);
 				oo(t, r);
 			}
 			return null;
@@ -2797,7 +2797,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 					return o = l.call(o), g(e, r, o, c);
 				}
 				if (typeof o.then == "function") return _(e, r, io(o), c);
-				if (o.$$typeof === M) return _(e, r, Ca(e, o), c);
+				if (o.$$typeof === ne) return _(e, r, Ca(e, o), c);
 				oo(e, o);
 			}
 			return typeof o == "string" && o !== "" || typeof o == "number" || typeof o == "bigint" ? (o = "" + o, r !== null && r.tag === 6 ? (n(e, r.sibling), c = a(r, o), c.return = e, e = c) : (n(e, r), c = Ii(o, e.mode, c), c.return = e, e = c), s(e)) : n(e, r);
@@ -3116,7 +3116,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		if (typeof e == "object" && e) {
 			if (typeof e.then == "function") return ss(e);
 			if (e.$$typeof === ue) return;
-			if (e.$$typeof === M) return Sa(e);
+			if (e.$$typeof === ne) return Sa(e);
 		}
 		throw Error(i(438, String(e)));
 	}
@@ -4419,7 +4419,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 								t.tag = 14, t = Fc(null, t, e, r, n);
 								break a;
 							}
-							if (a === M) {
+							if (a === ne) {
 								t.tag = 10, t.type = e, t = sl(null, t, n);
 								break a;
 							}
@@ -8629,7 +8629,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		}
 	}
 	var uh = {
-		$$typeof: M,
+		$$typeof: ne,
 		Provider: null,
 		Consumer: null,
 		_currentValue: ge,
@@ -9089,7 +9089,7 @@ function x() {
 	return v;
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/helpers/env.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/env.js
 var S = typeof process < "u" && !1, C = (e) => ({
 	version: 0,
 	committedVersion: 0,
@@ -9164,10 +9164,10 @@ var S = typeof process < "u" && !1, C = (e) => ({
 	}
 	let i = n.index++, a = r[i];
 	return a === void 0 ? (a = A(t), r[i] = a) : S && a.length !== t && console.error(`Expected a constant size argument for each invocation of c(). The previous cache was allocated with size ${a.length} but size ${t} was requested.`), a;
-}, ne = (e) => te(b(), e), j = /* @__PURE__ */ l(d(), 1), M = j.default.__COMPILER_RUNTIME?.c ?? ((e) => (0, j.useMemo)(() => {
+}, j = (e) => te(b(), e), M = /* @__PURE__ */ l(d(), 1), ne = M.default.__COMPILER_RUNTIME?.c ?? ((e) => (0, M.useMemo)(() => {
 	let t = A(e);
 	return t[ee] = !0, t;
-}, [])), re = () => x() !== null, N = (e) => re() ? ne(e) : M(e), P = (e, ...t) => Object.assign(Object.create(null), e, ...t), ie = () => {
+}, [])), re = () => x() !== null, N = (e) => re() ? j(e) : ne(e), P = (e, ...t) => Object.assign(Object.create(null), e, ...t), ie = () => {
 	throw Error("Rendered more hooks than during the previous render. Hooks must be called in the exact same order in every render.");
 }, ae = () => {
 	throw Error("Hook order changed between renders");
@@ -9187,7 +9187,7 @@ function se(e, t) {
 	});
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/hooks/utils/depsShallowEqual.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/utils/depsShallowEqual.js
 var ce = (e, t) => {
 	S && e.length !== t.length && console.error(`The final argument passed to a hook changed size between renders. The order and size of this array must remain constant.
 
@@ -9221,12 +9221,12 @@ Previous: [${e.join(", ")}]\nIncoming: [${t.join(", ")}]`);
 	})), le(n, a), o;
 };
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/react-hooks/useRef.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useRef.js
 function de(e) {
 	return ue(() => ({ current: e }), []);
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/context.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/context.js
 var fe = Symbol("tap.Context.defaultValue"), pe = (e) => e, me = /* @__PURE__ */ new Map(), he = /* @__PURE__ */ new Set(), F = () => new Map(me), I = (e, t) => {
 	let n = me;
 	me = e;
@@ -9352,16 +9352,16 @@ function je(e, t, n) {
 	return Ae(e, t, n, !1);
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/react-hooks/useState.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useState.js
 var Me = (e, t) => typeof t == "function" ? t(e) : t, Ne = (e) => e === void 0 ? void 0 : typeof e == "function" ? e() : e;
 function Pe(e) {
 	return Ae(Me, e, Ne, !0);
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/react-hooks/useCallback.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useCallback.js
 var Fe = (e, t) => ue(() => e, t);
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/react-hooks/useEffectEvent.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useEffectEvent.js
 function Ie(e) {
 	let t = b(), n = de(e);
 	return n.current !== e && D(t, () => {
@@ -9372,7 +9372,7 @@ function Ie(e) {
 	}), []);
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/helpers/thenable.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/thenable.js
 var Le = (e) => typeof e == "object" && !!e && typeof e.then == "function", Re = () => {}, ze = (e) => {
 	let t = e;
 	switch (typeof t.status == "string" ? t.status !== "fulfilled" && t.status !== "rejected" && e.then(Re, Re) : (t.status = "pending", e.then((e) => {
@@ -9421,21 +9421,21 @@ var Le = (e) => typeof e == "object" && !!e && typeof e.then == "function", Re =
 		};
 	};
 	n == null ? se(r) : se(r, [...n, e]);
-}, qe = j.default;
+}, qe = M.default;
 function Je(e) {
-	let t = (0, j.useRef)(e);
-	return (0, j.useInsertionEffect)(() => {
+	let t = (0, M.useRef)(e);
+	return (0, M.useInsertionEffect)(() => {
 		t.current = e;
-	}), (0, j.useCallback)(((...e) => t.current(...e)), []);
+	}), (0, M.useCallback)(((...e) => t.current(...e)), []);
 }
-var Ye = qe.useEffectEvent ?? Je, Xe = () => x() !== null, R = j.default, Ze = (e) => Xe() ? Pe(e) : R.useState(e), Qe = (e, t, n) => Xe() ? je(e, t, n) : R.useReducer(e, t, n), $e = (e) => Xe() ? de(e) : R.useRef(e), et = (e, t) => Xe() ? ue(e, t) : R.useMemo(e, t), tt = (e, t) => Xe() ? Fe(e, t) : R.useCallback(e, t), z = (e, t) => Xe() ? se(e, t) : R.useEffect(e, t), nt = (e, t) => Xe() ? se(e, t) : R.useLayoutEffect(e, t), rt = (e) => Xe() ? Ie(e) : Ye(e), it = (e, t, n) => Xe() ? He(e, t, n) : R.useSyncExternalStore(e, t, n), at = (e, t) => Xe() ? void 0 : R.useDebugValue(e, t), ot = (e, t) => Xe() ? se(e, t) : R.useInsertionEffect(e, t), st = (e, t, n) => Xe() ? Ke(e, t, n) : R.useImperativeHandle(e, t, n), ct = (e) => R.forwardRef(e), lt = (e, t) => R.memo(e, t), ut = R.Fragment, dt = (...e) => R.createElement(...e), ft = (...e) => R.cloneElement(...e), pt = (e) => R.isValidElement(e);
+var Ye = qe.useEffectEvent ?? Je, Xe = () => x() !== null, R = M.default, Ze = (e) => Xe() ? Pe(e) : R.useState(e), Qe = (e, t, n) => Xe() ? je(e, t, n) : R.useReducer(e, t, n), $e = (e) => Xe() ? de(e) : R.useRef(e), et = (e, t) => Xe() ? ue(e, t) : R.useMemo(e, t), tt = (e, t) => Xe() ? Fe(e, t) : R.useCallback(e, t), z = (e, t) => Xe() ? se(e, t) : R.useEffect(e, t), nt = (e, t) => Xe() ? se(e, t) : R.useLayoutEffect(e, t), rt = (e) => Xe() ? Ie(e) : Ye(e), it = (e, t, n) => Xe() ? He(e, t, n) : R.useSyncExternalStore(e, t, n), at = (e, t) => Xe() ? void 0 : R.useDebugValue(e, t), ot = (e, t) => Xe() ? se(e, t) : R.useInsertionEffect(e, t), st = (e, t, n) => Xe() ? Ke(e, t, n) : R.useImperativeHandle(e, t, n), ct = (e) => R.forwardRef(e), lt = (e, t) => R.memo(e, t), ut = R.Fragment, dt = (...e) => R.createElement(...e), ft = (...e) => R.cloneElement(...e), pt = (e) => R.isValidElement(e);
 R.Children, R.Suspense;
 var mt = (e) => {
 	let t = R.createContext(e);
 	return ge(t, e), t;
 }, ht = (e) => Xe() && ye(e) ? Be(e) : R.use(e), gt = (e) => Xe() && ye(e) ? Be(e) : R.useContext(e);
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/resource.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/resource.js
 function _t(e) {
 	return (...t) => ({
 		hook: e,
@@ -9443,7 +9443,7 @@ function _t(e) {
 	});
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/withKey.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/withKey.js
 function vt(e, t, n) {
 	return typeof t == "function" ? (...n) => vt(e, t(...n)) : n ? {
 		...t,
@@ -9455,7 +9455,7 @@ function vt(e, t, n) {
 	};
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/helpers/throwAggregated.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/throwAggregated.js
 var yt = (e, t) => {
 	if (e.length !== 0) {
 		if (e.length === 1) throw e[0];
@@ -9553,7 +9553,7 @@ var Et = (e) => {
 	}
 };
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/helpers/commit.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/commit.js
 function jt(e) {
 	let t = [];
 	for (let n = 0; n < e.length; n++) try {
@@ -9603,7 +9603,7 @@ function Ft(e) {
 	yt(t, "Errors during cleanup");
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/react-dispatcher.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/react-dispatcher.js
 var It = {
 	useState: Pe,
 	useReducer: je,
@@ -9620,8 +9620,8 @@ var It = {
 	useDebugValue: Ue,
 	useId: Ge,
 	useImperativeHandle: Ke,
-	useMemoCache: ne
-}, Lt = j.default, Rt = Lt.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE ?? Lt.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, zt = Rt == null ? null : "H" in Rt ? {
+	useMemoCache: j
+}, Lt = M.default, Rt = Lt.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE ?? Lt.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, zt = Rt == null ? null : "H" in Rt ? {
 	get current() {
 		return Rt.H;
 	},
@@ -9647,7 +9647,7 @@ function Bt(e) {
 	}
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/core/ResourceFiber.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/ResourceFiber.js
 function Vt(e, t, n = void 0, r) {
 	return {
 		hook: e,
@@ -9702,7 +9702,7 @@ function B(e) {
 	e.isMounted = !0, e.isNeverMounted = !1, t !== null && (e.contextDeps = e.wipContextDeps, w(e.root), e.memoCache.workInProgress !== null && (e.memoCache.current = e.memoCache.workInProgress, e.memoCache.workInProgress = null), jt(t)), n && (Pt(e), Ft(e)), Pt(e);
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/hooks/utils/useDevStrictMode.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/utils/useDevStrictMode.js
 var Gt = () => {
 	let e = b();
 	return e.devStrictMode ? e.isFirstRender ? "child" : "root" : null;
@@ -9835,7 +9835,7 @@ var Gt = () => {
 	}), !n && i.currentDeps && ce(i.currentDeps, t) ? i.current : (i.wipDeps = t, i.wip = e(), i.wip);
 };
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/hooks/useResource.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/useResource.js
 function an(e) {
 	let { version: t, createFiber: n } = nn(), r = et(() => n(e.hook, e.key), [
 		e.hook,
@@ -9851,7 +9851,7 @@ function an(e) {
 	}, [r, i]), i.value;
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/hooks/useResources.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/useResources.js
 var on = (e, t) => {
 	let n = e.get(t);
 	n && (n.isDirty = !0);
@@ -9916,7 +9916,7 @@ function ln(e) {
 	}, [a, t]), a;
 }
 //#endregion
-//#region node_modules/@assistant-ui/tap/dist/hooks/useTapHost.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/useTapHost.js
 var un = (e) => e(), dn = (e) => {
 	let { createFiber: t } = nn(), n = et(() => t(un, void 0), [t]), r = Wt(n, [e]);
 	z(() => () => {
@@ -9970,7 +9970,7 @@ function pn() {
 	};
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/model-context/types.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/model-context/types.js
 var mn = (e) => {
 	if (!e.overwrite) return e;
 	let { overwrite: t, ...n } = e;
@@ -10166,7 +10166,7 @@ function qn(e) {
 	return e[Gn];
 }
 //#endregion
-//#region node_modules/@assistant-ui/store/dist/types/events.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/types/events.js
 var Jn = (e) => typeof e == "string" ? {
 	scope: e.split(".")[0],
 	event: e
@@ -10270,7 +10270,7 @@ function mr() {
 	return new AbortController();
 }
 //#endregion
-//#region node_modules/@assistant-ui/store/dist/useClientResource.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/useClientResource.js
 var hr = Symbol("assistant-ui.store.getValue"), gr = (e) => {
 	let t = e[hr];
 	if (!t) throw Error("Client scope contains a non-client resource. Ensure your Derived get() returns a client created with useClientResource(), not a plain resource.");
@@ -10589,7 +10589,7 @@ function qr(e) {
 	return !Dr(t);
 }
 //#endregion
-//#region node_modules/@assistant-ui/store/dist/utils/proxied-assistant-state.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/utils/proxied-assistant-state.js
 var Jr = (e) => {
 	let t;
 	class n extends bn {
@@ -10673,7 +10673,7 @@ function ri(e) {
 	return vt($r(e), xr(e), e.deps);
 }
 //#endregion
-//#region node_modules/@assistant-ui/store/dist/utils/viewport-scroll.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/utils/viewport-scroll.js
 var ii = (e, t = 0) => t === 0 ? Math.abs(e.scrollHeight - e.scrollTop - e.clientHeight) <= 1 || e.scrollHeight <= e.clientHeight : e.scrollHeight - t - e.scrollTop - e.clientHeight <= 1 || e.scrollHeight - t <= e.clientHeight, ai = (e, t = 0) => t === 0 ? e.scrollHeight > e.clientHeight + 1 : e.scrollHeight - t > e.clientHeight + 1, oi = (e, t) => e.scrollTop > t.scrollTop && e.scrollHeight === t.scrollHeight, si = Symbol("skip-update"), ci = (e, ...t) => {
 	let n = [];
 	for (let r of e) try {
@@ -10996,7 +10996,7 @@ function Ai(e, t) {
 	return e[n] = s, e;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/store/runtime-clients/useSubscribable.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/store/runtime-clients/useSubscribable.js
 var ji = (e) => it(e.subscribe, e.getState, e.getServerSnapshot), Mi = Symbol.for("assistant-ui.silent-runtime-action"), Ni = (e) => typeof e == "object" && !!e && Mi in e, Pi = (e, t) => {
 	let n = t();
 	return n.catch((t) => {
@@ -11139,7 +11139,7 @@ function zi() {
 	throw Error("beginEdit is not supported in this runtime");
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/store/runtime-clients/liveRef.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/store/runtime-clients/liveRef.js
 var Bi = (e) => ({ get current() {
 	return e();
 } }), Vi = _t((e) => {
@@ -11229,10 +11229,10 @@ var Bi = (e) => ({ get current() {
 	t[38] === n ? ee = t[39] : (ee = () => n.delete(), t[38] = n, t[39] = ee);
 	let A, te;
 	t[40] !== h || t[41] !== n ? (A = (e) => (h("message.reload"), n.reload(e)), te = () => (h("message.speak"), n.speak()), t[40] = h, t[41] = n, t[42] = A, t[43] = te) : (A = t[42], te = t[43]);
-	let ne, j;
-	t[44] === n ? (ne = t[45], j = t[46]) : (ne = () => n.stopSpeaking(), j = (e) => n.submitFeedback(e), t[44] = n, t[45] = ne, t[46] = j);
-	let M;
-	t[47] !== h || t[48] !== n ? (M = (e) => (h("message.branchSwitched"), n.switchToBranch(e)), t[47] = h, t[48] = n, t[49] = M) : M = t[49];
+	let j, M;
+	t[44] === n ? (j = t[45], M = t[46]) : (j = () => n.stopSpeaking(), M = (e) => n.submitFeedback(e), t[44] = n, t[45] = j, t[46] = M);
+	let ne;
+	t[47] !== h || t[48] !== n ? (ne = (e) => (h("message.branchSwitched"), n.switchToBranch(e)), t[47] = h, t[48] = n, t[49] = ne) : ne = t[49];
 	let re;
 	t[50] === n ? re = t[51] : (re = () => n.unstable_getCopyText(), t[50] = n, t[51] = re);
 	let P;
@@ -11246,22 +11246,22 @@ var Bi = (e) => ({ get current() {
 	let oe;
 	t[58] === n ? oe = t[59] : (oe = () => n, t[58] = n, t[59] = oe);
 	let se;
-	return t[60] !== O || t[61] !== k || t[62] !== ee || t[63] !== A || t[64] !== te || t[65] !== ne || t[66] !== j || t[67] !== M || t[68] !== re || t[69] !== P || t[70] !== ie || t[71] !== ae || t[72] !== oe ? (se = {
+	return t[60] !== O || t[61] !== k || t[62] !== ee || t[63] !== A || t[64] !== te || t[65] !== j || t[66] !== M || t[67] !== ne || t[68] !== re || t[69] !== P || t[70] !== ie || t[71] !== ae || t[72] !== oe ? (se = {
 		getState: O,
 		composer: k,
 		delete: ee,
 		reload: A,
 		speak: te,
-		stopSpeaking: ne,
-		submitFeedback: j,
-		switchToBranch: M,
+		stopSpeaking: j,
+		submitFeedback: M,
+		switchToBranch: ne,
 		getCopyText: re,
 		part: P,
 		attachment: ie,
 		setIsCopied: ae,
 		setIsHovering: u,
 		__internal_getRuntime: oe
-	}, t[60] = O, t[61] = k, t[62] = ee, t[63] = A, t[64] = te, t[65] = ne, t[66] = j, t[67] = M, t[68] = re, t[69] = P, t[70] = ie, t[71] = ae, t[72] = oe, t[73] = se) : se = t[73], se;
+	}, t[60] = O, t[61] = k, t[62] = ee, t[63] = A, t[64] = te, t[65] = j, t[66] = M, t[67] = ne, t[68] = re, t[69] = P, t[70] = ie, t[71] = ae, t[72] = oe, t[73] = se) : se = t[73], se;
 }), Gi = (e) => {
 	let t = et(() => ({}), []), n = t.state, r = [];
 	e.suggestions.forEach((e) => {
@@ -11302,7 +11302,7 @@ function Xi(e) {
 	};
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/utils/normalizePartStatus.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/normalizePartStatus.js
 var Zi = Object.freeze({ type: "complete" }), Qi = Object.freeze({ type: "running" }), $i = Object.freeze({
 	cancelled: Object.freeze({
 		type: "incomplete",
@@ -11494,20 +11494,20 @@ var Zi = Object.freeze({ type: "complete" }), Qi = Object.freeze({ type: "runnin
 		}
 		n.append(e);
 	}, t[54] = i, t[55] = f, t[56] = n, t[57] = te) : te = t[57];
-	let ne;
-	t[58] !== u || t[59] !== n || t[60] !== r.isRunning ? (ne = () => {
-		r.isRunning && u("thread.cancelRun"), n.cancelRun();
-	}, t[58] = u, t[59] = n, t[60] = r.isRunning, t[61] = ne) : ne = t[61];
 	let j;
-	t[62] !== u || t[63] !== n ? (j = () => {
-		n.connectVoice(), u("thread.voiceStarted");
-	}, t[62] = u, t[63] = n, t[64] = j) : j = t[64];
+	t[58] !== u || t[59] !== n || t[60] !== r.isRunning ? (j = () => {
+		r.isRunning && u("thread.cancelRun"), n.cancelRun();
+	}, t[58] = u, t[59] = n, t[60] = r.isRunning, t[61] = j) : j = t[61];
 	let M;
-	t[65] === w ? M = t[66] : (M = (e) => "id" in e ? w.get({ key: e.id }) : w.get(e), t[65] = w, t[66] = M);
+	t[62] !== u || t[63] !== n ? (M = () => {
+		n.connectVoice(), u("thread.voiceStarted");
+	}, t[62] = u, t[63] = n, t[64] = M) : M = t[64];
+	let ne;
+	t[65] === w ? ne = t[66] : (ne = (e) => "id" in e ? w.get({ key: e.id }) : w.get(e), t[65] = w, t[66] = ne);
 	let re;
 	t[67] === n ? re = t[68] : (re = () => n, t[67] = n, t[68] = re);
 	let P;
-	return t[69] !== n.deleteMessage || t[70] !== n.disconnectVoice || t[71] !== n.export || t[72] !== n.getModelContext || t[73] !== n.getVoiceVolume || t[74] !== n.import || t[75] !== n.importExternalState || t[76] !== n.muteVoice || t[77] !== n.reset || t[78] !== n.resumeRun || t[79] !== n.startRun || t[80] !== n.stopSpeaking || t[81] !== n.subscribeVoiceVolume || t[82] !== n.unmuteVoice || t[83] !== O || t[84] !== k || t[85] !== ee || t[86] !== A || t[87] !== te || t[88] !== ne || t[89] !== j || t[90] !== M || t[91] !== re ? (P = {
+	return t[69] !== n.deleteMessage || t[70] !== n.disconnectVoice || t[71] !== n.export || t[72] !== n.getModelContext || t[73] !== n.getVoiceVolume || t[74] !== n.import || t[75] !== n.importExternalState || t[76] !== n.muteVoice || t[77] !== n.reset || t[78] !== n.resumeRun || t[79] !== n.startRun || t[80] !== n.stopSpeaking || t[81] !== n.subscribeVoiceVolume || t[82] !== n.unmuteVoice || t[83] !== O || t[84] !== k || t[85] !== ee || t[86] !== A || t[87] !== te || t[88] !== j || t[89] !== M || t[90] !== ne || t[91] !== re ? (P = {
 		getState: O,
 		composer: k,
 		suggestions: ee,
@@ -11517,21 +11517,21 @@ var Zi = Object.freeze({ type: "complete" }), Qi = Object.freeze({ type: "runnin
 		startRun: n.startRun,
 		resumeRun: n.resumeRun,
 		importExternalState: n.importExternalState,
-		cancelRun: ne,
+		cancelRun: j,
 		getModelContext: n.getModelContext,
 		export: n.export,
 		import: n.import,
 		reset: n.reset,
 		stopSpeaking: n.stopSpeaking,
-		connectVoice: j,
+		connectVoice: M,
 		disconnectVoice: n.disconnectVoice,
 		getVoiceVolume: n.getVoiceVolume,
 		subscribeVoiceVolume: n.subscribeVoiceVolume,
 		muteVoice: n.muteVoice,
 		unmuteVoice: n.unmuteVoice,
-		message: M,
+		message: ne,
 		__internal_getRuntime: re
-	}, t[69] = n.deleteMessage, t[70] = n.disconnectVoice, t[71] = n.export, t[72] = n.getModelContext, t[73] = n.getVoiceVolume, t[74] = n.import, t[75] = n.importExternalState, t[76] = n.muteVoice, t[77] = n.reset, t[78] = n.resumeRun, t[79] = n.startRun, t[80] = n.stopSpeaking, t[81] = n.subscribeVoiceVolume, t[82] = n.unmuteVoice, t[83] = O, t[84] = k, t[85] = ee, t[86] = A, t[87] = te, t[88] = ne, t[89] = j, t[90] = M, t[91] = re, t[92] = P) : P = t[92], P;
+	}, t[69] = n.deleteMessage, t[70] = n.disconnectVoice, t[71] = n.export, t[72] = n.getModelContext, t[73] = n.getVoiceVolume, t[74] = n.import, t[75] = n.importExternalState, t[76] = n.muteVoice, t[77] = n.reset, t[78] = n.resumeRun, t[79] = n.startRun, t[80] = n.stopSpeaking, t[81] = n.subscribeVoiceVolume, t[82] = n.unmuteVoice, t[83] = O, t[84] = k, t[85] = ee, t[86] = A, t[87] = te, t[88] = j, t[89] = M, t[90] = ne, t[91] = re, t[92] = P) : P = t[92], P;
 });
 function da(e) {
 	return vt(aa(e), ca({ task: e }), [e]);
@@ -11540,7 +11540,7 @@ function fa(e) {
 	return e.type === "text" ? e.text : "";
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/store/runtime-clients/handle-thread-list-action.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/store/runtime-clients/handle-thread-list-action.js
 var pa = (e, t) => Pi(`thread list ${e}`, t), ma = _t((e) => {
 	let t = N(35), { runtime: n, mainThreadIsRunning: r } = e, i = r !== void 0 && r, a = ji(n), o;
 	bb0: {
@@ -11703,7 +11703,7 @@ Kn(ya, (e, t) => {
 	va(e, t), !e.tools && t.tools.source === null && (e.tools = Di({})), !e.dataRenderers && t.dataRenderers.source === null && (e.dataRenderers = fn());
 });
 //#endregion
-//#region node_modules/react/cjs/react-jsx-runtime.production.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/react/cjs/react-jsx-runtime.production.js
 var xa = /* @__PURE__ */ o(((e) => {
 	var t = Symbol.for("react.transitional.element"), n = Symbol.for("react.fragment");
 	function r(e, n, r) {
@@ -11797,7 +11797,7 @@ var Oa = (e) => {
 	}), t[0] = o, t[1] = a, t[2] = i, t[3] = n, t[4] = s) : s = t[4], s;
 });
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/utils/json/is-json.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/json/is-json.js
 function Na(e) {
 	return typeof e == "object" && !!e && !Array.isArray(e);
 }
@@ -11805,7 +11805,7 @@ function Pa(e, t = 0) {
 	return t > 100 ? !1 : e === null || typeof e == "string" || typeof e == "boolean" ? !0 : typeof e == "number" ? !Number.isNaN(e) && Number.isFinite(e) : Array.isArray(e) ? e.every((e) => Pa(e, t + 1)) : Na(e) ? Object.entries(e).every(([e, n]) => typeof e == "string" && Pa(n, t + 1)) : !1;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/utils/json/is-json-equal.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/json/is-json-equal.js
 var Fa = 100, Ia = (e, t, n) => {
 	if (e === t) return !0;
 	if (n > Fa || e == null || t == null) return !1;
@@ -12196,7 +12196,7 @@ function oo(e = {}) {
 	return [ao((e) => (r = e, r.__internal_subscribeToClose(t), n), e), r];
 }
 //#endregion
-//#region node_modules/assistant-stream/dist/core/utils/stream/PipeableTransformStream.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/core/utils/stream/PipeableTransformStream.js
 var so = class extends TransformStream {
 	constructor(e) {
 		super();
@@ -12504,7 +12504,7 @@ function fo(e) {
 	return [d, a];
 }
 //#endregion
-//#region node_modules/assistant-stream/dist/utils/json/parse-partial-json-object.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/utils/json/parse-partial-json-object.js
 var po = /* @__PURE__ */ l(co(), 1), mo = Symbol("aui.parse-partial-json-object.meta"), ho = (e) => e?.[mo], go = (e) => {
 	if (e.length === 0) return { [mo]: {
 		state: "partial",
@@ -12548,7 +12548,7 @@ var po = /* @__PURE__ */ l(co(), 1), mo = Symbol("aui.parse-partial-json-object.
 	return _o(e, n, t.map(String));
 };
 //#endregion
-//#region node_modules/assistant-stream/dist/utils/AsyncIterableStream.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/utils/AsyncIterableStream.js
 async function* yo() {
 	let e = this.getReader(), t = !0;
 	try {
@@ -12578,7 +12578,7 @@ function bo(e) {
 	return e[Symbol.asyncIterator] ??= yo, e;
 }
 //#endregion
-//#region node_modules/assistant-stream/dist/core/utils/withPromiseOrValue.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/core/utils/withPromiseOrValue.js
 function xo(e, t, n) {
 	try {
 		let r = e();
@@ -12589,7 +12589,7 @@ function xo(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/assistant-stream/dist/core/tool/ToolCallReader.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/core/tool/ToolCallReader.js
 function So(e, t) {
 	let n = e;
 	for (let e of t) {
@@ -13036,7 +13036,7 @@ function Ho(e, t, n, r) {
 	});
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/model-context/interactable-composer-metadata.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/model-context/interactable-composer-metadata.js
 function Uo(e) {
 	let t = e.metadata;
 	if (!t || typeof t != "object") return;
@@ -13219,7 +13219,7 @@ function ts(e, t) {
 	return Object.keys(i).length ? i : void 0;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/runtimes/useRuntimeAdapters.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/runtimes/useRuntimeAdapters.js
 var ns = mt(null), rs = () => gt(ns), is = Symbol("innerMessage"), as = Symbol("innerMessages"), os = [], ss = (e, t) => {
 	is in e || (e[is] = t);
 }, cs = (e) => {
@@ -13227,7 +13227,7 @@ var ns = mt(null), rs = () => gt(ns), is = Symbol("innerMessage"), as = Symbol("
 	return n ? Array.isArray(n) ? n : (t[as] = [n], t[as]) : os;
 }, ls = "__external_store_fallback_", us = no("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 7);
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/utils/data-url.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/data-url.js
 function ds(e) {
 	let t = e.match(/^data:([^;,]+)(?:;[^;,]+)*;base64,(.*)$/i);
 	return t ? {
@@ -13236,7 +13236,7 @@ function ds(e) {
 	} : null;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/runtime/utils/thread-message-like.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/runtime/utils/thread-message-like.js
 var fs = (e, t) => {
 	if (e.startsWith("data-")) return {
 		type: "data",
@@ -13472,7 +13472,7 @@ function Is() {
 	throw Error("Not supported");
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/utils/getGroupStatus.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/getGroupStatus.js
 var Ls = (e) => {
 	for (let t of e) if (t?.status.type === "running") return Qi;
 	return e.at(-1)?.status ?? Zi;
@@ -13535,7 +13535,7 @@ function Vs(e) {
 	return e.message.parts;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/providers/SuggestionByIndexProvider.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/providers/SuggestionByIndexProvider.js
 var Hs = (e) => {
 	let t = N(6), { index: n, children: r } = e, i = Gr(), a;
 	t[0] === n ? a = t[1] : (a = _n({ suggestion: Qr({
@@ -14794,7 +14794,7 @@ var Hs = (e) => {
 	}
 }, Vc = Object.freeze([]);
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/runtime/utils/tool-call-tree.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/runtime/utils/tool-call-tree.js
 function* Hc(e) {
 	for (let t of e) if (t?.role === "assistant" && Array.isArray(t.content)) for (let e of t.content) e && e.type === "tool-call" && (yield {
 		part: e,
@@ -14802,7 +14802,7 @@ function* Hc(e) {
 	}, e.messages?.length && (yield* Hc(e.messages)));
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/adapters/attachment.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/adapters/attachment.js
 function Uc(e, t) {
 	if (t === "*") return !0;
 	let n = t.split(",").map((e) => e.trim().toLowerCase()), r = e.name.toLowerCase(), i = e.type.split(";", 1)[0].trim().toLowerCase();
@@ -14851,7 +14851,7 @@ function Gc(e) {
 	return t;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/types/attachment.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/types/attachment.js
 var Kc = (e) => "content" in e && !("lastModified" in e), qc = (e) => e.status.type === "complete", Jc = class {
 	operations = /* @__PURE__ */ new Set();
 	start() {
@@ -16624,7 +16624,7 @@ function Dl(e) {
 	return e.message.composer.isEditing;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/utils/getMessageQuote.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/utils/getMessageQuote.js
 var Ol = (e) => {
 	let t = e.message.metadata;
 	if (t && typeof t == "object") return t.custom?.quote;
@@ -16677,7 +16677,7 @@ function Fl(e) {
 	return t?.type === "generative-ui" ? t.spec : void 0;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/primitives/message/MessageParts.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/message/MessageParts.js
 var Il = (e) => {
 	let t = -1;
 	return {
@@ -17121,7 +17121,7 @@ function yu(e) {
 	return e.message.parts.length;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/utils/groupParts.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/utils/groupParts.js
 var bu = Symbol.for("@assistant-ui/groupBy.memoKey"), xu = (e) => {
 	let t = e.nextChildIdx++;
 	return e.nodeKey === "" ? String(t) : `${e.nodeKey}.${t}`;
@@ -17228,7 +17228,7 @@ var Ou = lt((e) => {
 });
 Ou.displayName = "MessagePrimitive.Quote";
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/primitives/message/MessageAttachments.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/message/MessageAttachments.js
 var ku = (e, t) => {
 	switch (t.type) {
 		case "image": return e?.Image ?? e?.Attachment;
@@ -17283,7 +17283,7 @@ function Pu(e) {
 	return e.attachment;
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/primitives/messagePart/MessagePartInProgress.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/messagePart/MessagePartInProgress.js
 var Fu = (e) => {
 	let { children: t } = e;
 	return V(Iu) ? t : null;
@@ -17293,7 +17293,7 @@ function Iu(e) {
 	return e.part.status.type === "running";
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/primitives/thread/ThreadSuggestions.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/thread/ThreadSuggestions.js
 var Lu = (e) => {
 	let t = N(2), { components: n } = e, r = n.Suggestion, i;
 	return t[0] === r ? i = t[1] : (i = /* @__PURE__ */ (0, U.jsx)(r, {}), t[0] = r, t[1] = i), i;
@@ -17363,7 +17363,7 @@ function Gu(e) {
 	return e.trim();
 }
 //#endregion
-//#region node_modules/@assistant-ui/core/dist/react/primitive-hooks/useMessageError.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitive-hooks/useMessageError.js
 var Ku = () => V(Uu), qu = (e) => {
 	let { cloud: t, initialMessages: n, maxSteps: r, adapters: i, unstable_humanToolNames: a, unstable_enableMessageQueue: o, unstable_queueClearOnRewind: s, unstable_queueClearOnCancel: c, ...l } = e;
 	return {
@@ -17381,7 +17381,7 @@ var Ku = () => V(Uu), qu = (e) => {
 	};
 };
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/context/react/utils/createContextHook.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/context/react/utils/createContextHook.js
 function Ju(e, t) {
 	function n(n) {
 		let r = gt(e);
@@ -17391,7 +17391,7 @@ function Ju(e, t) {
 	return n;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/context/react/utils/createContextStoreHook.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/context/react/utils/createContextStoreHook.js
 function Yu(e, t) {
 	function n(n) {
 		let r = e(n);
@@ -17409,7 +17409,7 @@ function Yu(e, t) {
 	};
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/context/react/ThreadViewportContext.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/context/react/ThreadViewportContext.js
 var Xu = mt(null), { useThreadViewport: Zu, useThreadViewportStore: Qu } = Yu(Ju(Xu, "ThreadPrimitive.Viewport"), "useThreadViewport"), $u = (e) => {
 	let t, n = /* @__PURE__ */ new Set(), r = (e, r) => {
 		let i = typeof e == "function" ? e(t) : e;
@@ -17426,8 +17426,8 @@ var Xu = mt(null), { useThreadViewport: Zu, useThreadViewportStore: Qu } = Yu(Ju
 	return a;
 }, ed = ((e) => e ? $u(e) : $u), td = (e) => e;
 function K(e, t = td) {
-	let n = j.useSyncExternalStore(e.subscribe, j.useCallback(() => t(e.getState()), [e, t]), j.useCallback(() => t(e.getInitialState()), [e, t]));
-	return j.useDebugValue(n), n;
+	let n = M.useSyncExternalStore(e.subscribe, M.useCallback(() => t(e.getState()), [e, t]), M.useCallback(() => t(e.getInitialState()), [e, t]));
+	return M.useDebugValue(n), n;
 }
 var q = (e) => {
 	let t = ed(e), n = (e) => K(t, e);
@@ -17581,33 +17581,33 @@ function pd(...e) {
 }
 dd(pd, "composeRefs");
 function md(...e) {
-	return j.useCallback(pd(...e), e);
+	return M.useCallback(pd(...e), e);
 }
 dd(md, "useComposedRefs");
 //#endregion
-//#region node_modules/@radix-ui/react-slot/dist/index.mjs
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@radix-ui/react-slot/dist/index.mjs
 var hd = Object.defineProperty, gd = (e, t) => hd(e, "name", {
 	value: t,
 	configurable: !0
 });
 // @__NO_SIDE_EFFECTS__
 function _d(e) {
-	let t = j.forwardRef((t, n) => {
+	let t = M.forwardRef((t, n) => {
 		let { children: r, ...i } = t, a = null, o = !1, s = [];
-		Ed(r) && typeof Ad == "function" && (r = Ad(r._payload)), j.Children.forEach(r, (e) => {
+		Ed(r) && typeof Ad == "function" && (r = Ad(r._payload)), M.Children.forEach(r, (e) => {
 			if (wd(e)) {
 				o = !0;
 				let t = e, n = "child" in t.props ? t.props.child : t.props.children;
 				Ed(n) && typeof Ad == "function" && (n = Ad(n._payload)), a = xd(t, n), s.push(a?.props?.children);
 			} else s.push(e);
-		}), a ? a = j.cloneElement(a, void 0, s) : !o && j.Children.count(r) === 1 && j.isValidElement(r) && (a = r);
+		}), a ? a = M.cloneElement(a, void 0, s) : !o && M.Children.count(r) === 1 && M.isValidElement(r) && (a = r);
 		let c = a ? Cd(a) : void 0, l = md(n, c);
 		if (!a) {
 			if (r || r === 0) throw Error(o ? kd(e) : Od(e));
 			return r;
 		}
 		let u = Sd(i, a.props ?? {});
-		return a.type !== j.Fragment && (u.ref = n ? l : c), j.cloneElement(a, u);
+		return a.type !== M.Fragment && (u.ref = n ? l : c), M.cloneElement(a, u);
 	});
 	return t.displayName = `${e}.Slot`, t;
 }
@@ -17622,9 +17622,9 @@ gd(bd, "createSlottable");
 var xd = /* @__PURE__ */ gd((e, t) => {
 	if ("child" in e.props) {
 		let t = e.props.child;
-		return j.isValidElement(t) ? j.cloneElement(t, void 0, e.props.children(t.props.children)) : null;
+		return M.isValidElement(t) ? M.cloneElement(t, void 0, e.props.children(t.props.children)) : null;
 	}
-	return j.isValidElement(t) ? t : null;
+	return M.isValidElement(t) ? t : null;
 }, "getSlottableElementFromSlottable");
 function Sd(e, t) {
 	let n = { ...t };
@@ -17650,7 +17650,7 @@ function Cd(e) {
 }
 gd(Cd, "getElementRef");
 function wd(e) {
-	return j.isValidElement(e) && typeof e.type == "function" && "__radixId" in e.type && e.type.__radixId === yd;
+	return M.isValidElement(e) && typeof e.type == "function" && "__radixId" in e.type && e.type.__radixId === yd;
 }
 gd(wd, "isSlottable");
 var Td = Symbol.for("react.lazy");
@@ -17662,7 +17662,7 @@ function Dd(e) {
 	return typeof e == "object" && !!e && "then" in e;
 }
 gd(Dd, "isPromiseLike");
-var Od = /* @__PURE__ */ gd((e) => `${e} failed to slot onto its children. Expected a single React element child or \`Slottable\`.`, "createSlotError"), kd = /* @__PURE__ */ gd((e) => `${e} failed to slot onto its \`Slottable\`. Expected \`Slottable\` to receive a single React element child.`, "createSlottableError"), Ad = j.use, jd = /* @__PURE__ */ l(h(), 1), Md = Object.defineProperty, Nd = (e, t) => Md(e, "name", {
+var Od = /* @__PURE__ */ gd((e) => `${e} failed to slot onto its children. Expected a single React element child or \`Slottable\`.`, "createSlotError"), kd = /* @__PURE__ */ gd((e) => `${e} failed to slot onto its \`Slottable\`. Expected \`Slottable\` to receive a single React element child.`, "createSlottableError"), Ad = M.use, jd = /* @__PURE__ */ l(h(), 1), Md = Object.defineProperty, Nd = (e, t) => Md(e, "name", {
 	value: t,
 	configurable: !0
 }), Pd = [
@@ -17684,7 +17684,7 @@ var Od = /* @__PURE__ */ gd((e) => `${e} failed to slot onto its children. Expec
 	"svg",
 	"ul"
 ].reduce((e, t) => {
-	let n = /* @__PURE__ */ _d(`Primitive.${t}`), r = j.forwardRef((e, r) => {
+	let n = /* @__PURE__ */ _d(`Primitive.${t}`), r = M.forwardRef((e, r) => {
 		let { asChild: i, ...a } = e, o = i ? n : t;
 		return typeof window < "u" && (window[Symbol.for("radix-ui")] = !0), /* @__PURE__ */ (0, U.jsx)(o, {
 			...a,
@@ -17701,7 +17701,7 @@ function Fd(e, t) {
 }
 Nd(Fd, "dispatchDiscreteCustomEvent");
 //#endregion
-//#region node_modules/@radix-ui/primitive/dist/index.mjs
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@radix-ui/primitive/dist/index.mjs
 var Id = Object.defineProperty, Ld = (e, t) => Id(e, "name", {
 	value: t,
 	configurable: !0
@@ -17741,24 +17741,24 @@ function Ud(e) {
 }
 Ld(Ud, "isFrame");
 //#endregion
-//#region node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs
 var Wd = Object.defineProperty, Gd = (e, t) => Wd(e, "name", {
 	value: t,
 	configurable: !0
 });
 function Kd(e) {
-	let t = j.useRef(e);
-	return j.useEffect(() => {
+	let t = M.useRef(e);
+	return M.useEffect(() => {
 		t.current = e;
-	}), j.useMemo(() => ((...e) => t.current?.(...e)), []);
+	}), M.useMemo(() => ((...e) => t.current?.(...e)), []);
 }
 Gd(Kd, "useCallbackRef");
 //#endregion
-//#region node_modules/radix-ui/dist/internal.mjs
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/radix-ui/dist/internal.mjs
 var qd = Pd;
 qd.dispatchDiscreteCustomEvent = Fd, qd.Root = Pd;
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/_virtual/_rolldown/runtime.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/_virtual/_rolldown/runtime.js
 var Jd = Object.defineProperty, Yd = (e, t) => {
 	let n = {};
 	for (var r in e) Jd(n, r, {
@@ -17848,7 +17848,7 @@ function sf(e) {
 	return e.onScrollToBottom;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/utils/hooks/useMediaQuery.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/hooks/useMediaQuery.js
 var cf = () => !1, lf = () => {}, uf = (e) => {
 	let t = N(4), n;
 	t[0] === e ? n = t[1] : (n = (t) => {
@@ -17867,7 +17867,7 @@ function mf(e) {
 	return e.part.type !== "text" && e.part.type !== "reasoning" ? ff : e.part;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/utils/smooth/SmoothContext.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/smooth/SmoothContext.js
 var hf = mt(null), gf = (e) => ({ useSmoothStatus: nd(() => e) }), _f = (e) => {
 	let t = N(6), { children: n } = e, r;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = { optional: !0 }, t[0] = r) : r = t[0];
@@ -17999,7 +17999,7 @@ function jf(e) {
 	return e.part.type === "image" ? e.part : kf;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartText.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartText.js
 var Mf = ct(({ smooth: e = !0, component: t = tf.span, render: n, ...r }, i) => {
 	let { text: a, status: o } = Df(pf(), e), s = {
 		"data-status": o.type,
@@ -18013,7 +18013,7 @@ var Mf = ct(({ smooth: e = !0, component: t = tf.span, render: n, ...r }, i) => 
 });
 Mf.displayName = "MessagePartPrimitive.Text";
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartImage.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartImage.js
 var Nf = ct((e, t) => {
 	let n = N(4), { image: r } = Af(), i;
 	return n[0] !== t || n[1] !== r || n[2] !== e ? (i = /* @__PURE__ */ (0, U.jsx)(tf.img, {
@@ -18024,7 +18024,7 @@ var Nf = ct((e, t) => {
 });
 Nf.displayName = "MessagePartPrimitive.Image";
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/utils/hooks/useManagedRef.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/hooks/useManagedRef.js
 var Pf = (e) => {
 	let t = N(2), n = $e(void 0), r;
 	return t[0] === e ? r = t[1] : (r = (t) => {
@@ -18134,7 +18134,7 @@ function Xf(e) {
 	return e.message.id;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/message/MessageParts.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessageParts.js
 var Zf = {
 	...Hl,
 	Text: () => /* @__PURE__ */ (0, U.jsxs)("p", {
@@ -18167,7 +18167,7 @@ var Zf = {
 };
 Qf.displayName = "MessagePrimitive.Parts";
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/message/MessageIf.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessageIf.js
 var $f = (e) => {
 	let t = N(12), n;
 	return t[0] !== e.assistant || t[1] !== e.copied || t[2] !== e.hasAttachments || t[3] !== e.hasBranches || t[4] !== e.hasContent || t[5] !== e.last || t[6] !== e.lastOrHover || t[7] !== e.speaking || t[8] !== e.submittedFeedback || t[9] !== e.system || t[10] !== e.user ? (n = (t) => {
@@ -18180,14 +18180,14 @@ var $f = (e) => {
 };
 ep.displayName = "MessagePrimitive.If";
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/message/MessageError.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessageError.js
 var tp = (e) => {
 	let { children: t } = e;
 	return Ku() === void 0 ? null : t;
 };
 tp.displayName = "MessagePrimitive.Error";
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/message/MessagePartsGrouped.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessagePartsGrouped.js
 var np = (e) => {
 	let t = /* @__PURE__ */ new Map();
 	for (let n = 0; n < e.length; n++) {
@@ -18396,7 +18396,7 @@ function _p(e) {
 	return e.message.parts.length;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/message.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message.js
 var vp = /* @__PURE__ */ Yd({
 	AttachmentByIndex: () => ju,
 	Attachments: () => Nu,
@@ -18433,7 +18433,7 @@ function bp(e) {
 	return e.type !== "attributes" || e.attributeName !== "style";
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/thread/useThreadViewportAutoScroll.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/useThreadViewportAutoScroll.js
 var xp = ({ autoScroll: e, scrollToBottomOnRunStart: t = !0, scrollToBottomOnInitialize: n = !0, scrollToBottomOnThreadSwitch: r = !0 }) => {
 	let i = $e(null), a = V((e) => e.thread.messages.length > 0), o = V((e) => e.thread.isRunning), s = $e(!1), c = $e(null), l = Qu();
 	e === void 0 && (e = l.getState().turnAnchor !== "top");
@@ -18534,7 +18534,7 @@ var xp = ({ autoScroll: e, scrollToBottomOnRunStart: t = !0, scrollToBottomOnIni
 });
 Sp.displayName = "ThreadPrimitive.Root";
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/thread/ThreadEmpty.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/ThreadEmpty.js
 var Cp = (e) => {
 	let { children: t } = e;
 	return V(wp) ? t : null;
@@ -18544,7 +18544,7 @@ function wp(e) {
 	return e.thread.isEmpty;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/thread/ThreadIf.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/ThreadIf.js
 var Tp = (e) => {
 	let t = N(4), n;
 	return t[0] !== e.disabled || t[1] !== e.empty || t[2] !== e.running ? (n = (t) => !(e.empty === !0 && !t.thread.isEmpty || e.empty === !1 && t.thread.isEmpty || e.running === !0 && !t.thread.isRunning || e.running === !1 && t.thread.isRunning || e.disabled === !0 && !t.thread.isDisabled || e.disabled === !1 && t.thread.isDisabled), t[0] = e.disabled, t[1] = e.empty, t[2] = e.running, t[3] = n) : n = t[3], V(n);
@@ -18554,7 +18554,7 @@ var Tp = (e) => {
 };
 Ep.displayName = "ThreadPrimitive.If";
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/utils/hooks/useSizeHandle.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/hooks/useSizeHandle.js
 var Dp = (e, t) => {
 	let n = N(3), r;
 	return n[0] !== t || n[1] !== e ? (r = (n) => {
@@ -18762,7 +18762,7 @@ function Yp(e) {
 	return e.topAnchorTurn;
 }
 //#endregion
-//#region node_modules/@assistant-ui/react/dist/primitives/thread/ThreadViewportFooter.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/ThreadViewportFooter.js
 var Xp = ct((e, t) => {
 	let n = N(3), r = md(t, Dp(Zu(Zp), Qp)), i;
 	return n[0] !== e || n[1] !== r ? (i = /* @__PURE__ */ (0, U.jsx)(tf.div, {
@@ -18838,7 +18838,7 @@ var tm = nf("ThreadPrimitive.Suggestion", (e) => {
 		return r;
 	};
 	return JSON.stringify(n(e.properties)) === JSON.stringify(n(t.properties)) && im(e.children, t.children);
-}, om = (e, t) => am(e.node, t.node), sm = (0, j.createContext)(null), cm = () => (0, j.useContext)(sm) !== null, lm = (0, j.memo)(({ children: e, fallbackPre: t, ...n }) => n.node?.children.some((e) => e.type === "element" && e.tagName === "code") ?? !0 ? /* @__PURE__ */ (0, U.jsx)(sm.Provider, {
+}, om = (e, t) => am(e.node, t.node), sm = (0, M.createContext)(null), cm = () => (0, M.useContext)(sm) !== null, lm = (0, M.memo)(({ children: e, fallbackPre: t, ...n }) => n.node?.children.some((e) => e.type === "element" && e.tagName === "code") ?? !0 ? /* @__PURE__ */ (0, U.jsx)(sm.Provider, {
 	value: n,
 	children: e
 }) : /* @__PURE__ */ (0, U.jsx)(t, {
@@ -18848,7 +18848,7 @@ var tm = nf("ThreadPrimitive.Suggestion", (e) => {
 	node: e,
 	children: r
 }) }), pm = () => null, mm = (e) => /language-([^\s]+)/.exec(e ?? "")?.[1] ?? "", hm = ({ node: e, components: { Pre: t, Code: n, SyntaxHighlighter: r, CodeHeader: i }, language: a, code: o }) => {
-	let s = (0, j.useMemo)(() => ({
+	let s = (0, M.useMemo)(() => ({
 		Pre: t,
 		Code: n
 	}), [t, n]);
@@ -18894,7 +18894,7 @@ var tm = nf("ThreadPrimitive.Suggestion", (e) => {
 	...r
 });
 //#endregion
-//#region node_modules/@assistant-ui/react-markdown/dist/overrides/CodeOverride.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react-markdown/dist/overrides/CodeOverride.js
 function vm(e) {
 	if (typeof e == "string") return e;
 	if (Array.isArray(e)) {
@@ -18902,10 +18902,10 @@ function vm(e) {
 		for (let n of e) t += vm(n);
 		return t;
 	}
-	return (0, j.isValidElement)(e) ? vm(e.props.children) : "";
+	return (0, M.isValidElement)(e) ? vm(e.props.children) : "";
 }
 var ym = ({ node: e, components: { Pre: t, Code: n, SyntaxHighlighter: r, CodeHeader: i }, componentsByLanguage: a = {}, children: o, ...s }) => {
-	let c = _m((0, j.useContext)(sm)), l = Kd((e) => /* @__PURE__ */ (0, U.jsx)(t, { ...c(e) })), u = _m(s), d = Kd((e) => /* @__PURE__ */ (0, U.jsx)(n, { ...u(e) })), f = mm(s.className), p = a[f]?.SyntaxHighlighter ?? r, m = a[f]?.CodeHeader ?? i;
+	let c = _m((0, M.useContext)(sm)), l = Kd((e) => /* @__PURE__ */ (0, U.jsx)(t, { ...c(e) })), u = _m(s), d = Kd((e) => /* @__PURE__ */ (0, U.jsx)(n, { ...u(e) })), f = mm(s.className), p = a[f]?.SyntaxHighlighter ?? r, m = a[f]?.CodeHeader ?? i;
 	return o != null && typeof o != "string" ? /* @__PURE__ */ (0, U.jsxs)(U.Fragment, { children: [/* @__PURE__ */ (0, U.jsx)(m, {
 		node: e,
 		language: f,
@@ -18944,21 +18944,21 @@ var ym = ({ node: e, components: { Pre: t, Code: n, SyntaxHighlighter: r, CodeHe
 		if (n !== i && (!n || !i || n.SyntaxHighlighter !== i.SyntaxHighlighter || n.CodeHeader !== i.CodeHeader)) return !1;
 	}
 	return !0;
-}, Sm = (0, j.memo)(bm, (e, t) => e.components === t.components && xm(e.componentsByLanguage, t.componentsByLanguage) && om(e, t));
+}, Sm = (0, M.memo)(bm, (e, t) => e.components === t.components && xm(e.componentsByLanguage, t.componentsByLanguage) && om(e, t));
 //#endregion
-//#region node_modules/comma-separated-tokens/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/comma-separated-tokens/index.js
 function Cm(e, t) {
 	let n = t || {};
 	return (e[e.length - 1] === "" ? [...e, ""] : e).join((n.padRight ? " " : "") + "," + (n.padLeft === !1 ? "" : " ")).trim();
 }
 //#endregion
-//#region node_modules/estree-util-is-identifier-name/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/estree-util-is-identifier-name/lib/index.js
 var wm = /^[$_\p{ID_Start}][$_\u{200C}\u{200D}\p{ID_Continue}]*$/u, Tm = /^[$_\p{ID_Start}][-$_\u{200C}\u{200D}\p{ID_Continue}]*$/u, Em = {};
 function Dm(e, t) {
 	return ((t || Em).jsx ? Tm : wm).test(e);
 }
 //#endregion
-//#region node_modules/hast-util-whitespace/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/hast-util-whitespace/lib/index.js
 var Om = /[ \t\n\f\r]/g;
 function km(e) {
 	return typeof e == "object" ? e.type === "text" && Am(e.value) : Am(e);
@@ -18967,7 +18967,7 @@ function Am(e) {
 	return e.replace(Om, "") === "";
 }
 //#endregion
-//#region node_modules/property-information/lib/util/schema.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/schema.js
 var jm = class {
 	constructor(e, t, n) {
 		this.normal = t, this.property = e, n && (this.space = n);
@@ -18975,19 +18975,19 @@ var jm = class {
 };
 jm.prototype.normal = {}, jm.prototype.property = {}, jm.prototype.space = void 0;
 //#endregion
-//#region node_modules/property-information/lib/util/merge.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/merge.js
 function Mm(e, t) {
 	let n = {}, r = {};
 	for (let t of e) Object.assign(n, t.property), Object.assign(r, t.normal);
 	return new jm(n, r, t);
 }
 //#endregion
-//#region node_modules/property-information/lib/normalize.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/normalize.js
 function Nm(e) {
 	return e.toLowerCase();
 }
 //#endregion
-//#region node_modules/property-information/lib/util/info.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/info.js
 var Pm = class {
 	constructor(e, t) {
 		this.attribute = t, this.property = e;
@@ -18995,7 +18995,7 @@ var Pm = class {
 };
 Pm.prototype.attribute = "", Pm.prototype.booleanish = !1, Pm.prototype.boolean = !1, Pm.prototype.commaOrSpaceSeparated = !1, Pm.prototype.commaSeparated = !1, Pm.prototype.defined = !1, Pm.prototype.mustUseProperty = !1, Pm.prototype.number = !1, Pm.prototype.overloadedBoolean = !1, Pm.prototype.property = "", Pm.prototype.spaceSeparated = !1, Pm.prototype.space = void 0;
 //#endregion
-//#region node_modules/property-information/lib/util/types.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/types.js
 var Fm = /* @__PURE__ */ s({
 	boolean: () => Y,
 	booleanish: () => Lm,
@@ -19009,7 +19009,7 @@ function Hm() {
 	return 2 ** ++Im;
 }
 //#endregion
-//#region node_modules/property-information/lib/util/defined-info.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/defined-info.js
 var Um = Object.keys(Fm), Wm = class extends Pm {
 	constructor(e, t, n, r) {
 		let i = -1;
@@ -19024,7 +19024,7 @@ function Gm(e, t, n) {
 	n && (e[t] = n);
 }
 //#endregion
-//#region node_modules/property-information/lib/util/create.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/create.js
 function Km(e) {
 	let t = {}, n = {};
 	for (let [r, i] of Object.entries(e.properties)) {
@@ -19034,7 +19034,7 @@ function Km(e) {
 	return new jm(t, n, e.space);
 }
 //#endregion
-//#region node_modules/property-information/lib/aria.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/aria.js
 var qm = Km({
 	properties: {
 		ariaActiveDescendant: null,
@@ -19092,17 +19092,17 @@ var qm = Km({
 	}
 });
 //#endregion
-//#region node_modules/property-information/lib/util/case-sensitive-transform.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/case-sensitive-transform.js
 function Jm(e, t) {
 	return t in e ? e[t] : t;
 }
 //#endregion
-//#region node_modules/property-information/lib/util/case-insensitive-transform.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/case-insensitive-transform.js
 function Ym(e, t) {
 	return Jm(e, t.toLowerCase());
 }
 //#endregion
-//#region node_modules/property-information/lib/html.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/html.js
 var Xm = Km({
 	attributes: {
 		acceptcharset: "accept-charset",
@@ -20055,7 +20055,7 @@ function sh(e) {
 	return e.charAt(1).toUpperCase();
 }
 //#endregion
-//#region node_modules/property-information/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/index.js
 var ch = Mm([
 	qm,
 	Xm,
@@ -20070,12 +20070,12 @@ var ch = Mm([
 	eh
 ], "svg");
 //#endregion
-//#region node_modules/space-separated-tokens/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/space-separated-tokens/index.js
 function uh(e) {
 	return e.join(" ").trim();
 }
 //#endregion
-//#region node_modules/inline-style-parser/cjs/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/inline-style-parser/cjs/index.js
 var dh = /* @__PURE__ */ o(((e, t) => {
 	var n = /\/\*[^*]*\*+([^/*][^*]*\*+)*\//g, r = /\n/g, i = /^\s*/, a = /^(\*?[-#/*\\\w]+(\[[0-9a-z_-]+\])?)\s*/, o = /^:\s*/, s = /^((?:'(?:\\'|.)*?'|"(?:\\"|.)*?"|\([^)]*?\)|[^};])+)/, c = /^[;\s]*/, l = /^\s+|\s+$/g;
 	function u(e, t) {
@@ -20219,7 +20219,7 @@ function vh(e) {
 	};
 }
 //#endregion
-//#region node_modules/unist-util-stringify-position/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-stringify-position/lib/index.js
 function yh(e) {
 	return !e || typeof e != "object" ? "" : "position" in e || "type" in e ? xh(e.position) : "start" in e || "end" in e ? xh(e) : "line" in e || "column" in e ? bh(e) : "";
 }
@@ -20233,7 +20233,7 @@ function Sh(e) {
 	return e && typeof e == "number" ? e : 1;
 }
 //#endregion
-//#region node_modules/vfile-message/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile-message/lib/index.js
 var Ch = class extends Error {
 	constructor(e, t, n) {
 		super(), typeof t == "string" && (n = t, t = void 0);
@@ -20255,7 +20255,7 @@ var Ch = class extends Error {
 };
 Ch.prototype.file = "", Ch.prototype.name = "", Ch.prototype.reason = "", Ch.prototype.message = "", Ch.prototype.stack = "", Ch.prototype.column = void 0, Ch.prototype.line = void 0, Ch.prototype.ancestors = void 0, Ch.prototype.cause = void 0, Ch.prototype.fatal = void 0, Ch.prototype.place = void 0, Ch.prototype.ruleId = void 0, Ch.prototype.source = void 0;
 //#endregion
-//#region node_modules/hast-util-to-jsx-runtime/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/hast-util-to-jsx-runtime/lib/index.js
 var wh = /* @__PURE__ */ l(mh(), 1), Th = {}.hasOwnProperty, Eh = /* @__PURE__ */ new Map(), Dh = /[A-Z]/g, Oh = /* @__PURE__ */ new Set([
 	"table",
 	"tbody",
@@ -20497,7 +20497,7 @@ function Qh(e) {
 	return "-" + e.toLowerCase();
 }
 //#endregion
-//#region node_modules/html-url-attributes/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/html-url-attributes/lib/index.js
 var $h = {
 	action: ["form"],
 	cite: [
@@ -20552,7 +20552,7 @@ function ig(e) {
 	return !!(e && typeof e == "object");
 }
 //#endregion
-//#region node_modules/decode-named-character-reference/index.dom.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/decode-named-character-reference/index.dom.js
 var ag = document.createElement("i");
 function og(e) {
 	let t = "&" + e + ";";
@@ -20561,7 +20561,7 @@ function og(e) {
 	return n.charCodeAt(n.length - 1) === 59 && e !== "semi" ? !1 : n !== t && n;
 }
 //#endregion
-//#region node_modules/micromark-util-chunked/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-chunked/index.js
 function sg(e, t, n, r) {
 	let i = e.length, a = 0, o;
 	if (t = t < 0 ? -t > i ? 0 : i + t : t > i ? i : t, n = n > 0 ? n : 0, r.length < 1e4) o = Array.from(r), o.unshift(t, n), e.splice(...o);
@@ -20571,7 +20571,7 @@ function cg(e, t) {
 	return e.length > 0 ? (sg(e, e.length, 0, t), e) : t;
 }
 //#endregion
-//#region node_modules/micromark-util-combine-extensions/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-combine-extensions/index.js
 var lg = {}.hasOwnProperty;
 function ug(e) {
 	let t = {}, n = -1;
@@ -20595,18 +20595,18 @@ function fg(e, t) {
 	sg(e, 0, 0, r);
 }
 //#endregion
-//#region node_modules/micromark-util-decode-numeric-character-reference/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-decode-numeric-character-reference/index.js
 function pg(e, t) {
 	let n = Number.parseInt(e, t);
 	return n < 9 || n === 11 || n > 13 && n < 32 || n > 126 && n < 160 || n > 55295 && n < 57344 || n > 64975 && n < 65008 || (n & 65535) == 65535 || (n & 65535) == 65534 || n > 1114111 ? "�" : String.fromCodePoint(n);
 }
 //#endregion
-//#region node_modules/micromark-util-normalize-identifier/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-normalize-identifier/index.js
 function mg(e) {
 	return e.replace(/[\t\n\r ]+/g, " ").replace(/^ | $/g, "").toLowerCase().toUpperCase();
 }
 //#endregion
-//#region node_modules/micromark-util-character/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-character/index.js
 var hg = Tg(/[A-Za-z]/), gg = Tg(/[\dA-Za-z]/), _g = Tg(/[#-'*+\--9=?A-Z^-~]/);
 function vg(e) {
 	return e !== null && (e < 32 || e === 127);
@@ -20629,7 +20629,7 @@ function Tg(e) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-util-sanitize-uri/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-sanitize-uri/index.js
 function Eg(e) {
 	let t = [], n = -1, r = 0, i = 0;
 	for (; ++n < e.length;) {
@@ -20645,7 +20645,7 @@ function Eg(e) {
 	return t.join("") + e.slice(r);
 }
 //#endregion
-//#region node_modules/micromark-factory-space/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-space/index.js
 function $(e, t, n, r) {
 	let i = r ? r - 1 : Infinity, a = 0;
 	return o;
@@ -20657,7 +20657,7 @@ function $(e, t, n, r) {
 	}
 }
 //#endregion
-//#region node_modules/micromark/lib/initialize/content.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/content.js
 var Dg = { tokenize: Og };
 function Og(e) {
 	let t = e.attempt(this.parser.constructs.contentInitial, r, i), n;
@@ -20688,7 +20688,7 @@ function Og(e) {
 	}
 }
 //#endregion
-//#region node_modules/micromark/lib/initialize/document.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/document.js
 var kg = { tokenize: jg }, Ag = { tokenize: Mg };
 function jg(e) {
 	let t = this, n = [], r = 0, i, a, o;
@@ -20786,13 +20786,13 @@ function Mg(e, t, n) {
 	return $(e, e.attempt(this.parser.constructs.document, t, n), "linePrefix", this.parser.constructs.disable.null.includes("codeIndented") ? void 0 : 4);
 }
 //#endregion
-//#region node_modules/micromark-util-classify-character/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-classify-character/index.js
 function Ng(e) {
 	if (e === null || Sg(e) || wg(e)) return 1;
 	if (Cg(e)) return 2;
 }
 //#endregion
-//#region node_modules/micromark-util-resolve-all/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-resolve-all/index.js
 function Pg(e, t, n) {
 	let r = [], i = -1;
 	for (; ++i < e.length;) {
@@ -20802,7 +20802,7 @@ function Pg(e, t, n) {
 	return t;
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/attention.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/attention.js
 var Fg = {
 	name: "attention",
 	resolveAll: Ig,
@@ -20912,7 +20912,7 @@ function Rg(e, t) {
 	e.column += t, e.offset += t, e._bufferIndex += t;
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/autolink.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/autolink.js
 var zg = {
 	name: "autolink",
 	tokenize: Bg
@@ -20953,7 +20953,7 @@ function Bg(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/blank-line.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/blank-line.js
 var Vg = {
 	partial: !0,
 	tokenize: Hg
@@ -20968,7 +20968,7 @@ function Hg(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/block-quote.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/block-quote.js
 var Ug = {
 	continuation: { tokenize: Gg },
 	exit: Kg,
@@ -21003,7 +21003,7 @@ function Kg(e) {
 	e.exit("blockQuote");
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/character-escape.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/character-escape.js
 var qg = {
 	name: "characterEscape",
 	tokenize: Jg
@@ -21018,7 +21018,7 @@ function Jg(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/character-reference.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/character-reference.js
 var Yg = {
 	name: "characterReference",
 	tokenize: Xg
@@ -21044,7 +21044,7 @@ function Xg(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/code-fenced.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/code-fenced.js
 var Zg = {
 	partial: !0,
 	tokenize: e_
@@ -21130,7 +21130,7 @@ function e_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/code-indented.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/code-indented.js
 var t_ = {
 	name: "codeIndented",
 	tokenize: r_
@@ -21170,7 +21170,7 @@ function i_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/code-text.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/code-text.js
 var a_ = {
 	name: "codeText",
 	previous: s_,
@@ -21211,7 +21211,7 @@ function c_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-util-subtokenize/lib/splice-buffer.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-subtokenize/lib/splice-buffer.js
 var l_ = class {
 	constructor(e) {
 		this.left = e ? [...e] : [], this.right = [];
@@ -21269,7 +21269,7 @@ function u_(e, t) {
 	else for (; n < t.length;) e.push(...t.slice(n, n + 1e4)), n += 1e4;
 }
 //#endregion
-//#region node_modules/micromark-util-subtokenize/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-subtokenize/index.js
 function d_(e) {
 	let t = {}, n = -1, r, i, a, o, s, c, l, u = new l_(e);
 	for (; ++n < u.length;) {
@@ -21301,7 +21301,7 @@ function f_(e, t) {
 	return l;
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/content.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/content.js
 var p_ = {
 	resolve: h_,
 	tokenize: g_
@@ -21344,7 +21344,7 @@ function __(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-factory-destination/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-destination/index.js
 function v_(e, t, n, r, i, a, o, s, c) {
 	let l = c || Infinity, u = 0;
 	return d;
@@ -21368,7 +21368,7 @@ function v_(e, t, n, r, i, a, o, s, c) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-factory-label/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-label/index.js
 function y_(e, t, n, r, i, a) {
 	let o = this, s = 0, c;
 	return l;
@@ -21388,7 +21388,7 @@ function y_(e, t, n, r, i, a) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-factory-title/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-title/index.js
 function b_(e, t, n, r, i, a) {
 	let o;
 	return s;
@@ -21409,7 +21409,7 @@ function b_(e, t, n, r, i, a) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-factory-whitespace/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-whitespace/index.js
 function x_(e, t) {
 	let n;
 	return r;
@@ -21418,7 +21418,7 @@ function x_(e, t) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/definition.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/definition.js
 var S_ = {
 	name: "definition",
 	tokenize: w_
@@ -21470,7 +21470,7 @@ function T_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/hard-break-escape.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/hard-break-escape.js
 var E_ = {
 	name: "hardBreakEscape",
 	tokenize: D_
@@ -21485,7 +21485,7 @@ function D_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/heading-atx.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/heading-atx.js
 var O_ = {
 	name: "headingAtx",
 	resolve: k_,
@@ -21548,7 +21548,7 @@ function A_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-util-html-tag-name/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-html-tag-name/index.js
 var j_ = /* @__PURE__ */ "address.article.aside.base.basefont.blockquote.body.caption.center.col.colgroup.dd.details.dialog.dir.div.dl.dt.fieldset.figcaption.figure.footer.form.frame.frameset.h1.h2.h3.h4.h5.h6.head.header.hr.html.iframe.legend.li.link.main.menu.menuitem.nav.noframes.ol.optgroup.option.p.param.search.section.summary.table.tbody.td.tfoot.th.thead.title.tr.track.ul".split("."), M_ = [
 	"pre",
 	"script",
@@ -21636,7 +21636,7 @@ function L_(e, t, n) {
 		return t === null || Z(t) ? O(t) : Q(t) ? (e.consume(t), D) : n(t);
 	}
 	function O(t) {
-		return t === 45 && i === 2 ? (e.consume(t), te) : t === 60 && i === 1 ? (e.consume(t), ne) : t === 62 && i === 4 ? (e.consume(t), N) : t === 63 && i === 3 ? (e.consume(t), re) : t === 93 && i === 5 ? (e.consume(t), M) : Z(t) && (i === 6 || i === 7) ? (e.exit("htmlFlowData"), e.check(P_, P, k)(t)) : t === null || Z(t) ? (e.exit("htmlFlowData"), k(t)) : (e.consume(t), O);
+		return t === 45 && i === 2 ? (e.consume(t), te) : t === 60 && i === 1 ? (e.consume(t), j) : t === 62 && i === 4 ? (e.consume(t), N) : t === 63 && i === 3 ? (e.consume(t), re) : t === 93 && i === 5 ? (e.consume(t), ne) : Z(t) && (i === 6 || i === 7) ? (e.exit("htmlFlowData"), e.check(P_, P, k)(t)) : t === null || Z(t) ? (e.exit("htmlFlowData"), k(t)) : (e.consume(t), O);
 	}
 	function k(t) {
 		return e.check(F_, ee, P)(t);
@@ -21650,17 +21650,17 @@ function L_(e, t, n) {
 	function te(t) {
 		return t === 45 ? (e.consume(t), re) : O(t);
 	}
-	function ne(t) {
-		return t === 47 ? (e.consume(t), o = "", j) : O(t);
-	}
 	function j(t) {
+		return t === 47 ? (e.consume(t), o = "", M) : O(t);
+	}
+	function M(t) {
 		if (t === 62) {
 			let n = o.toLowerCase();
 			return M_.includes(n) ? (e.consume(t), N) : O(t);
 		}
-		return hg(t) && o.length < 8 ? (e.consume(t), o += String.fromCharCode(t), j) : O(t);
+		return hg(t) && o.length < 8 ? (e.consume(t), o += String.fromCharCode(t), M) : O(t);
 	}
-	function M(t) {
+	function ne(t) {
 		return t === 93 ? (e.consume(t), re) : O(t);
 	}
 	function re(t) {
@@ -21690,7 +21690,7 @@ function z_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/html-text.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/html-text.js
 var B_ = {
 	name: "htmlText",
 	tokenize: V_
@@ -21711,7 +21711,7 @@ function V_(e, t, n) {
 		return t === 45 ? (e.consume(t), p) : n(t);
 	}
 	function d(t) {
-		return t === null ? n(t) : t === 45 ? (e.consume(t), f) : Z(t) ? (o = d, ne(t)) : (e.consume(t), d);
+		return t === null ? n(t) : t === 45 ? (e.consume(t), f) : Z(t) ? (o = d, j(t)) : (e.consume(t), d);
 	}
 	function f(t) {
 		return t === 45 ? (e.consume(t), p) : d(t);
@@ -21723,7 +21723,7 @@ function V_(e, t, n) {
 		return t === "CDATA[".charCodeAt(a++) ? (e.consume(t), a === 6 ? h : m) : n(t);
 	}
 	function h(t) {
-		return t === null ? n(t) : t === 93 ? (e.consume(t), g) : Z(t) ? (o = h, ne(t)) : (e.consume(t), h);
+		return t === null ? n(t) : t === 93 ? (e.consume(t), g) : Z(t) ? (o = h, j(t)) : (e.consume(t), h);
 	}
 	function g(t) {
 		return t === 93 ? (e.consume(t), _) : h(t);
@@ -21732,10 +21732,10 @@ function V_(e, t, n) {
 		return t === 62 ? te(t) : t === 93 ? (e.consume(t), _) : h(t);
 	}
 	function v(t) {
-		return t === null || t === 62 ? te(t) : Z(t) ? (o = v, ne(t)) : (e.consume(t), v);
+		return t === null || t === 62 ? te(t) : Z(t) ? (o = v, j(t)) : (e.consume(t), v);
 	}
 	function y(t) {
-		return t === null ? n(t) : t === 63 ? (e.consume(t), b) : Z(t) ? (o = y, ne(t)) : (e.consume(t), y);
+		return t === null ? n(t) : t === 63 ? (e.consume(t), b) : Z(t) ? (o = y, j(t)) : (e.consume(t), y);
 	}
 	function b(e) {
 		return e === 62 ? te(e) : y(e);
@@ -21747,25 +21747,25 @@ function V_(e, t, n) {
 		return t === 45 || gg(t) ? (e.consume(t), S) : C(t);
 	}
 	function C(t) {
-		return Z(t) ? (o = C, ne(t)) : Q(t) ? (e.consume(t), C) : te(t);
+		return Z(t) ? (o = C, j(t)) : Q(t) ? (e.consume(t), C) : te(t);
 	}
 	function w(t) {
 		return t === 45 || gg(t) ? (e.consume(t), w) : t === 47 || t === 62 || Sg(t) ? T(t) : n(t);
 	}
 	function T(t) {
-		return t === 47 ? (e.consume(t), te) : t === 58 || t === 95 || hg(t) ? (e.consume(t), E) : Z(t) ? (o = T, ne(t)) : Q(t) ? (e.consume(t), T) : te(t);
+		return t === 47 ? (e.consume(t), te) : t === 58 || t === 95 || hg(t) ? (e.consume(t), E) : Z(t) ? (o = T, j(t)) : Q(t) ? (e.consume(t), T) : te(t);
 	}
 	function E(t) {
 		return t === 45 || t === 46 || t === 58 || t === 95 || gg(t) ? (e.consume(t), E) : D(t);
 	}
 	function D(t) {
-		return t === 61 ? (e.consume(t), O) : Z(t) ? (o = D, ne(t)) : Q(t) ? (e.consume(t), D) : T(t);
+		return t === 61 ? (e.consume(t), O) : Z(t) ? (o = D, j(t)) : Q(t) ? (e.consume(t), D) : T(t);
 	}
 	function O(t) {
-		return t === null || t === 60 || t === 61 || t === 62 || t === 96 ? n(t) : t === 34 || t === 39 ? (e.consume(t), i = t, k) : Z(t) ? (o = O, ne(t)) : Q(t) ? (e.consume(t), O) : (e.consume(t), ee);
+		return t === null || t === 60 || t === 61 || t === 62 || t === 96 ? n(t) : t === 34 || t === 39 ? (e.consume(t), i = t, k) : Z(t) ? (o = O, j(t)) : Q(t) ? (e.consume(t), O) : (e.consume(t), ee);
 	}
 	function k(t) {
-		return t === i ? (e.consume(t), i = void 0, A) : t === null ? n(t) : Z(t) ? (o = k, ne(t)) : (e.consume(t), k);
+		return t === i ? (e.consume(t), i = void 0, A) : t === null ? n(t) : Z(t) ? (o = k, j(t)) : (e.consume(t), k);
 	}
 	function ee(t) {
 		return t === null || t === 34 || t === 39 || t === 60 || t === 61 || t === 96 ? n(t) : t === 47 || t === 62 || Sg(t) ? T(t) : (e.consume(t), ee);
@@ -21776,18 +21776,18 @@ function V_(e, t, n) {
 	function te(r) {
 		return r === 62 ? (e.consume(r), e.exit("htmlTextData"), e.exit("htmlText"), t) : n(r);
 	}
-	function ne(t) {
-		return e.exit("htmlTextData"), e.enter("lineEnding"), e.consume(t), e.exit("lineEnding"), j;
-	}
 	function j(t) {
-		return Q(t) ? $(e, M, "linePrefix", r.parser.constructs.disable.null.includes("codeIndented") ? void 0 : 4)(t) : M(t);
+		return e.exit("htmlTextData"), e.enter("lineEnding"), e.consume(t), e.exit("lineEnding"), M;
 	}
 	function M(t) {
+		return Q(t) ? $(e, ne, "linePrefix", r.parser.constructs.disable.null.includes("codeIndented") ? void 0 : 4)(t) : ne(t);
+	}
+	function ne(t) {
 		return e.enter("htmlTextData"), o(t);
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/label-end.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/label-end.js
 var H_ = {
 	name: "labelEnd",
 	resolveAll: K_,
@@ -21936,7 +21936,7 @@ function Z_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/label-start-image.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/label-start-image.js
 var Q_ = {
 	name: "labelStartImage",
 	resolveAll: H_.resolveAll,
@@ -21957,7 +21957,7 @@ function $_(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/label-start-link.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/label-start-link.js
 var ev = {
 	name: "labelStartLink",
 	resolveAll: H_.resolveAll,
@@ -21975,7 +21975,7 @@ function tv(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/line-ending.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/line-ending.js
 var nv = {
 	name: "lineEnding",
 	tokenize: rv
@@ -21987,7 +21987,7 @@ function rv(e, t) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/thematic-break.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/thematic-break.js
 var iv = {
 	name: "thematicBreak",
 	tokenize: av
@@ -22009,7 +22009,7 @@ function av(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/list.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/list.js
 var ov = {
 	continuation: { tokenize: uv },
 	exit: fv,
@@ -22082,7 +22082,7 @@ function pv(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-core-commonmark/lib/setext-underline.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/setext-underline.js
 var mv = {
 	name: "setextUnderline",
 	resolveTo: hv,
@@ -22138,7 +22138,7 @@ function gv(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark/lib/initialize/flow.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/flow.js
 var _v = { tokenize: vv };
 function vv(e) {
 	let t = this, n = e.attempt(Vg, r, e.attempt(this.parser.constructs.flowInitial, i, $(e, e.attempt(this.parser.constructs.flow, i, e.attempt(p_, i)), "linePrefix")));
@@ -22159,7 +22159,7 @@ function vv(e) {
 	}
 }
 //#endregion
-//#region node_modules/micromark/lib/initialize/text.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/text.js
 var yv = { resolveAll: Cv() }, bv = Sv("string"), xv = Sv("text");
 function Sv(e) {
 	return {
@@ -22244,7 +22244,7 @@ function wv(e, t) {
 	return e;
 }
 //#endregion
-//#region node_modules/micromark/lib/constructs.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/constructs.js
 var Tv = /* @__PURE__ */ s({
 	attentionMarkers: () => Nv,
 	contentInitial: () => Dv,
@@ -22301,7 +22301,7 @@ var Tv = /* @__PURE__ */ s({
 	96: a_
 }, Mv = { null: [Fg, yv] }, Nv = { null: [42, 95] }, Pv = { null: [] };
 //#endregion
-//#region node_modules/micromark/lib/create-tokenizer.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/create-tokenizer.js
 function Fv(e, t, n) {
 	let r = {
 		_bufferIndex: -1,
@@ -22474,7 +22474,7 @@ function Lv(e, t) {
 	return r.join("");
 }
 //#endregion
-//#region node_modules/micromark/lib/parse.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/parse.js
 function Rv(e) {
 	let t = {
 		constructs: ug([Tv, ...(e || {}).extensions || []]),
@@ -22495,13 +22495,13 @@ function Rv(e) {
 	}
 }
 //#endregion
-//#region node_modules/micromark/lib/postprocess.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/postprocess.js
 function zv(e) {
 	for (; !d_(e););
 	return e;
 }
 //#endregion
-//#region node_modules/micromark/lib/preprocess.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/preprocess.js
 var Bv = /[\0\t\n\r]/g;
 function Vv() {
 	let e = 1, t = "", n = !0, r;
@@ -22532,7 +22532,7 @@ function Vv() {
 	}
 }
 //#endregion
-//#region node_modules/micromark-util-decode-string/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-decode-string/index.js
 var Hv = /\\([!-/:-@[-`{-~])|&(#(?:\d{1,7}|x[\da-f]{1,6})|[\da-z]{1,31});/gi;
 function Uv(e) {
 	return e.replace(Hv, Wv);
@@ -22546,7 +22546,7 @@ function Wv(e, t, n) {
 	return og(n) || e;
 }
 //#endregion
-//#region node_modules/mdast-util-from-markdown/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-from-markdown/lib/index.js
 var Gv = {}.hasOwnProperty;
 function Kv(e, t, n) {
 	return t && typeof t == "object" && (n = t, t = void 0), qv(n)(zv(Rv(n).document().write(Vv()(e, t, !0))));
@@ -22636,9 +22636,9 @@ function qv(e) {
 			htmlFlowData: E,
 			htmlText: c(ee),
 			htmlTextData: E,
-			image: c(ne),
-			label: M,
-			labelText: j,
+			image: c(j),
+			label: ne,
+			labelText: M,
 			lineEnding: D,
 			link: c(te),
 			listItem: c(),
@@ -22882,7 +22882,7 @@ function qv(e) {
 		} else delete e.identifier, delete e.label;
 		this.data.referenceType = void 0;
 	}
-	function ne() {
+	function j() {
 		let e = this.stack[this.stack.length - 1];
 		if (this.data.inReference) {
 			let t = this.data.referenceType || "shortcut";
@@ -22890,11 +22890,11 @@ function qv(e) {
 		} else delete e.identifier, delete e.label;
 		this.data.referenceType = void 0;
 	}
-	function j(e) {
+	function M(e) {
 		let t = this.sliceSerialize(e), n = this.stack[this.stack.length - 2];
 		n.label = Uv(t), n.identifier = mg(t).toLowerCase();
 	}
-	function M() {
+	function ne() {
 		let e = this.stack[this.stack.length - 1], t = this.resume(), n = this.stack[this.stack.length - 1];
 		this.data.inReference = !0, n.type === "link" ? n.children = e.children : n.alt = t;
 	}
@@ -23093,7 +23093,7 @@ function Zv(e, t) {
 	}) + ") is still open");
 }
 //#endregion
-//#region node_modules/remark-parse/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/remark-parse/lib/index.js
 function Qv(e) {
 	let t = this;
 	t.parser = n;
@@ -23107,7 +23107,7 @@ function Qv(e) {
 	}
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/blockquote.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/blockquote.js
 function $v(e, t) {
 	let n = {
 		type: "element",
@@ -23118,7 +23118,7 @@ function $v(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/break.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/break.js
 function ey(e, t) {
 	let n = {
 		type: "element",
@@ -23132,7 +23132,7 @@ function ey(e, t) {
 	}];
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/code.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/code.js
 function ty(e, t) {
 	let n = t.value ? t.value + "\n" : "", r = {}, i = t.lang ? t.lang.split(/\s+/) : [];
 	i.length > 0 && (r.className = ["language-" + i[0]]);
@@ -23153,7 +23153,7 @@ function ty(e, t) {
 	}, e.patch(t, a), a;
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/delete.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/delete.js
 function ny(e, t) {
 	let n = {
 		type: "element",
@@ -23164,7 +23164,7 @@ function ny(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/emphasis.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/emphasis.js
 function ry(e, t) {
 	let n = {
 		type: "element",
@@ -23175,7 +23175,7 @@ function ry(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/footnote-reference.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/footnote-reference.js
 function iy(e, t) {
 	let n = typeof e.options.clobberPrefix == "string" ? e.options.clobberPrefix : "user-content-", r = String(t.identifier).toUpperCase(), i = Eg(r.toLowerCase()), a = e.footnoteOrder.indexOf(r), o, s = e.footnoteCounts.get(r);
 	s === void 0 ? (s = 0, e.footnoteOrder.push(r), o = e.footnoteOrder.length) : o = a + 1, s += 1, e.footnoteCounts.set(r, s);
@@ -23203,7 +23203,7 @@ function iy(e, t) {
 	return e.patch(t, l), e.applyData(t, l);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/heading.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/heading.js
 function ay(e, t) {
 	let n = {
 		type: "element",
@@ -23214,7 +23214,7 @@ function ay(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/html.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/html.js
 function oy(e, t) {
 	if (e.options.allowDangerousHtml) {
 		let n = {
@@ -23225,7 +23225,7 @@ function oy(e, t) {
 	}
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/revert.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/revert.js
 function sy(e, t) {
 	let n = t.referenceType, r = "]";
 	if (n === "collapsed" ? r += "[]" : n === "full" && (r += "[" + (t.label || t.identifier) + "]"), t.type === "imageReference") return [{
@@ -23244,7 +23244,7 @@ function sy(e, t) {
 	}), i;
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/image-reference.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/image-reference.js
 function cy(e, t) {
 	let n = String(t.identifier).toUpperCase(), r = e.definitionById.get(n);
 	if (!r) return sy(e, t);
@@ -23262,7 +23262,7 @@ function cy(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/image.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/image.js
 function ly(e, t) {
 	let n = { src: Eg(t.url) };
 	t.alt !== null && t.alt !== void 0 && (n.alt = t.alt), t.title !== null && t.title !== void 0 && (n.title = t.title);
@@ -23275,7 +23275,7 @@ function ly(e, t) {
 	return e.patch(t, r), e.applyData(t, r);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/inline-code.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/inline-code.js
 function uy(e, t) {
 	let n = {
 		type: "text",
@@ -23291,7 +23291,7 @@ function uy(e, t) {
 	return e.patch(t, r), e.applyData(t, r);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/link-reference.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/link-reference.js
 function dy(e, t) {
 	let n = String(t.identifier).toUpperCase(), r = e.definitionById.get(n);
 	if (!r) return sy(e, t);
@@ -23306,7 +23306,7 @@ function dy(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/link.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/link.js
 function fy(e, t) {
 	let n = { href: Eg(t.url) };
 	t.title !== null && t.title !== void 0 && (n.title = t.title);
@@ -23319,7 +23319,7 @@ function fy(e, t) {
 	return e.patch(t, r), e.applyData(t, r);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/list-item.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/list-item.js
 function py(e, t, n) {
 	let r = e.all(t), i = n ? my(n) : hy(t), a = {}, o = [];
 	if (typeof t.checked == "boolean") {
@@ -23377,7 +23377,7 @@ function hy(e) {
 	return e.spread ?? e.children.length > 1;
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/list.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/list.js
 function gy(e, t) {
 	let n = {}, r = e.all(t), i = -1;
 	for (typeof t.start == "number" && t.start !== 1 && (n.start = t.start); ++i < r.length;) {
@@ -23396,7 +23396,7 @@ function gy(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/paragraph.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/paragraph.js
 function _y(e, t) {
 	let n = {
 		type: "element",
@@ -23407,7 +23407,7 @@ function _y(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/root.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/root.js
 function vy(e, t) {
 	let n = {
 		type: "root",
@@ -23416,7 +23416,7 @@ function vy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/strong.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/strong.js
 function yy(e, t) {
 	let n = {
 		type: "element",
@@ -23427,7 +23427,7 @@ function yy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/table.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/table.js
 function by(e, t) {
 	let n = e.all(t), r = n.shift(), i = [];
 	if (r) {
@@ -23460,7 +23460,7 @@ function by(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/table-row.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/table-row.js
 function xy(e, t, n) {
 	let r = n ? n.children : void 0, i = (r ? r.indexOf(t) : 1) === 0 ? "th" : "td", a = n && n.type === "table" ? n.align : void 0, o = a ? a.length : t.children.length, s = -1, c = [];
 	for (; ++s < o;) {
@@ -23483,7 +23483,7 @@ function xy(e, t, n) {
 	return e.patch(t, l), e.applyData(t, l);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/table-cell.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/table-cell.js
 function Sy(e, t) {
 	let n = {
 		type: "element",
@@ -23494,7 +23494,7 @@ function Sy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/trim-lines/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/trim-lines/index.js
 var Cy = 9, wy = 32;
 function Ty(e) {
 	let t = String(e), n = /\r?\n|\r/g, r = n.exec(t), i = 0, a = [];
@@ -23514,7 +23514,7 @@ function Ey(e, t, n) {
 	return i > r ? e.slice(r, i) : "";
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/text.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/text.js
 function Dy(e, t) {
 	let n = {
 		type: "text",
@@ -23523,7 +23523,7 @@ function Dy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/thematic-break.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/thematic-break.js
 function Oy(e, t) {
 	let n = {
 		type: "element",
@@ -23534,7 +23534,7 @@ function Oy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/handlers/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/index.js
 var ky = {
 	blockquote: $v,
 	break: ey,
@@ -23566,7 +23566,7 @@ var ky = {
 };
 function Ay() {}
 //#endregion
-//#region node_modules/@ungap/structured-clone/esm/deserialize.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@ungap/structured-clone/esm/deserialize.js
 var { defineProperty: jy } = Object, My = typeof self == "object" ? self : globalThis, Ny = (e, t) => {
 	switch (e) {
 		case "Function":
@@ -23727,7 +23727,7 @@ var { defineProperty: jy } = Object, My = typeof self == "object" ? self : globa
 /* c8 ignore start */
 (e, t) => t && ("json" in t || "lossy" in t) ? Fy(Uy(e, t)) : structuredClone(e) : (e, t) => Fy(Uy(e, t));
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/footer.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/footer.js
 function Gy(e, t) {
 	let n = [{
 		type: "text",
@@ -23827,7 +23827,7 @@ function qy(e) {
 	};
 }
 //#endregion
-//#region node_modules/unist-util-is/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-is/lib/index.js
 var Jy = (function(e) {
 	if (e == null) return $y;
 	if (typeof e == "function") return Qy(e);
@@ -23873,12 +23873,12 @@ function eb(e) {
 	return typeof e == "object" && !!e && "type" in e;
 }
 //#endregion
-//#region node_modules/unist-util-visit-parents/lib/color.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-visit-parents/lib/color.js
 function tb(e) {
 	return e;
 }
 //#endregion
-//#region node_modules/unist-util-visit-parents/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-visit-parents/lib/index.js
 var nb = [];
 function rb(e, t, n, r) {
 	let i;
@@ -23911,7 +23911,7 @@ function ib(e) {
 	return Array.isArray(e) ? e : typeof e == "number" ? [!0, e] : e == null ? nb : [e];
 }
 //#endregion
-//#region node_modules/unist-util-visit/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-visit/lib/index.js
 function ab(e, t, n, r) {
 	let i, a, o;
 	typeof t == "function" && typeof n != "function" ? (a = void 0, o = t, i = n) : (a = t, o = n, i = r), rb(e, a, s, i);
@@ -23921,7 +23921,7 @@ function ab(e, t, n, r) {
 	}
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/state.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/state.js
 var ob = {}.hasOwnProperty, sb = {};
 function cb(e, t) {
 	let n = t || sb, r = /* @__PURE__ */ new Map(), i = /* @__PURE__ */ new Map(), a = {
@@ -24024,7 +24024,7 @@ function pb(e) {
 	return e.slice(t);
 }
 //#endregion
-//#region node_modules/mdast-util-to-hast/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/index.js
 function mb(e, t) {
 	let n = cb(e, t), r = n.one(e, void 0), i = qy(n), a = Array.isArray(r) ? {
 		type: "root",
@@ -24039,7 +24039,7 @@ function mb(e, t) {
 	}, i)), a;
 }
 //#endregion
-//#region node_modules/remark-rehype/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/remark-rehype/lib/index.js
 function hb(e, t) {
 	return e && "run" in e ? async function(n, r) {
 		let i = mb(n, {
@@ -24055,12 +24055,12 @@ function hb(e, t) {
 	};
 }
 //#endregion
-//#region node_modules/bail/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/bail/index.js
 function gb(e) {
 	if (e) throw e;
 }
 //#endregion
-//#region node_modules/extend/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/extend/index.js
 var _b = /* @__PURE__ */ o(((e, t) => {
 	var n = Object.prototype.hasOwnProperty, r = Object.prototype.toString, i = Object.defineProperty, a = Object.getOwnPropertyDescriptor, o = function(e) {
 		return typeof Array.isArray == "function" ? Array.isArray(e) : r.call(e) === "[object Array]";
@@ -24097,14 +24097,14 @@ var _b = /* @__PURE__ */ o(((e, t) => {
 	};
 }));
 //#endregion
-//#region node_modules/is-plain-obj/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/is-plain-obj/index.js
 function vb(e) {
 	if (typeof e != "object" || !e) return !1;
 	let t = Object.getPrototypeOf(e);
 	return (t === null || t === Object.prototype || Object.getPrototypeOf(t) === null) && !(Symbol.toStringTag in e) && !(Symbol.iterator in e);
 }
 //#endregion
-//#region node_modules/trough/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/trough/lib/index.js
 function yb() {
 	let e = [], t = {
 		run: n,
@@ -24153,7 +24153,7 @@ function bb(e, t) {
 	}
 }
 //#endregion
-//#region node_modules/vfile/lib/minpath.browser.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minpath.browser.js
 var xb = {
 	basename: Sb,
 	dirname: Cb,
@@ -24253,18 +24253,18 @@ function Ob(e) {
 	if (typeof e != "string") throw TypeError("Path must be a string. Received " + JSON.stringify(e));
 }
 //#endregion
-//#region node_modules/vfile/lib/minproc.browser.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minproc.browser.js
 var kb = { cwd: Ab };
 function Ab() {
 	return "/";
 }
 //#endregion
-//#region node_modules/vfile/lib/minurl.shared.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minurl.shared.js
 function jb(e) {
 	return !!(typeof e == "object" && e && "href" in e && e.href && "protocol" in e && e.protocol && e.auth === void 0);
 }
 //#endregion
-//#region node_modules/vfile/lib/minurl.browser.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minurl.browser.js
 function Mb(e) {
 	if (typeof e == "string") e = new URL(e);
 	else if (!jb(e)) {
@@ -24293,7 +24293,7 @@ function Nb(e) {
 	return decodeURIComponent(t);
 }
 //#endregion
-//#region node_modules/vfile/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/index.js
 var Pb = [
 	"history",
 	"path",
@@ -24376,7 +24376,7 @@ function zb(e) {
 	return !!(e && typeof e == "object" && "byteLength" in e && "byteOffset" in e);
 }
 //#endregion
-//#region node_modules/unified/lib/callable-instance.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unified/lib/callable-instance.js
 var Bb = (function(e) {
 	let t = this.constructor.prototype, n = t[e], r = function() {
 		return n.apply(r, arguments);
@@ -24538,7 +24538,7 @@ function Qb(e) {
 	return !!(e && typeof e == "object" && "byteLength" in e && "byteOffset" in e);
 }
 //#endregion
-//#region node_modules/react-markdown/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/react-markdown/lib/index.js
 var $b = [], ex = { allowDangerousHtml: !0 }, tx = /^(https?|ircs?|mailto|xmpp)$/i, nx = [
 	{
 		from: "astPlugins",
@@ -24667,14 +24667,14 @@ function sx(e) {
 	return t === -1 || i !== -1 && t > i || n !== -1 && t > n || r !== -1 && t > r || tx.test(e.slice(0, t)) ? e : "";
 }
 //#endregion
-//#region node_modules/@assistant-ui/react-markdown/dist/primitives/MarkdownText.js
-var { useSmooth: cx, useSmoothStatus: lx, withSmoothContextProvider: ux } = rm, dx = (0, j.memo)(({ text: e, overrideVersion: t, ...n }) => /* @__PURE__ */ (0, U.jsx)(rx, {
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react-markdown/dist/primitives/MarkdownText.js
+var { useSmooth: cx, useSmoothStatus: lx, withSmoothContextProvider: ux } = rm, dx = (0, M.memo)(({ text: e, overrideVersion: t, ...n }) => /* @__PURE__ */ (0, U.jsx)(rx, {
 	...n,
 	children: e
 }));
 dx.displayName = "MarkdownRenderer";
 var fx = ({ text: e, ...t }) => {
-	let n = (0, j.useDeferredValue)(e);
+	let n = (0, M.useDeferredValue)(e);
 	return /* @__PURE__ */ (0, U.jsx)(dx, {
 		text: n,
 		...t
@@ -24694,15 +24694,15 @@ var fx = ({ text: e, ...t }) => {
 	return !1;
 };
 function hx(e, t) {
-	let n = (0, j.useRef)(e);
+	let n = (0, M.useRef)(e);
 	return mx(e, n.current, t) || (n.current = e), n.current;
 }
 function gx(e) {
-	let t = (0, j.useRef)(e), n = (e, t) => e[t], r = Object.keys(e), i = Object.keys(t.current);
+	let t = (0, M.useRef)(e), n = (e, t) => e[t], r = Object.keys(e), i = Object.keys(t.current);
 	return r.length === i.length && r.every((r) => Object.hasOwn(t.current, r) && mx(n(e, r), n(t.current, r))) || (t.current = e), t.current;
 }
 var _x = ({ components: e, componentsByLanguage: t, smooth: n = !0, defer: r = !1, preprocess: i, ...a }) => {
-	let { text: o } = cx(pf(), n), s = (0, j.useMemo)(() => i ? i(o) : o, [i, o]), { pre: c = um, code: l = dm, SyntaxHighlighter: u = fm, CodeHeader: d = pm } = e ?? {}, f = (0, j.useMemo)(() => ({
+	let { text: o } = cx(pf(), n), s = (0, M.useMemo)(() => i ? i(o) : o, [i, o]), { pre: c = um, code: l = dm, SyntaxHighlighter: u = fm, CodeHeader: d = pm } = e ?? {}, f = (0, M.useMemo)(() => ({
 		Pre: c,
 		Code: l,
 		SyntaxHighlighter: u,
@@ -24719,7 +24719,7 @@ var _x = ({ components: e, componentsByLanguage: t, smooth: n = !0, defer: r = !
 	})), m = Kd((e) => /* @__PURE__ */ (0, U.jsx)(lm, {
 		fallbackPre: c,
 		...e
-	})), h = gx((0, j.useMemo)(() => {
+	})), h = gx((0, M.useMemo)(() => {
 		let { pre: t, code: n, SyntaxHighlighter: r, CodeHeader: i, ...a } = e ?? {};
 		return {
 			...a,
@@ -24730,7 +24730,7 @@ var _x = ({ components: e, componentsByLanguage: t, smooth: n = !0, defer: r = !
 		p,
 		m,
 		e
-	])), g = hx((0, j.useMemo)(() => ({
+	])), g = hx((0, M.useMemo)(() => ({
 		components: f,
 		componentsByLanguage: t
 	}), [f, t]), 3), _ = r ? fx : dx, v = gx(a);
@@ -24740,7 +24740,7 @@ var _x = ({ components: e, componentsByLanguage: t, smooth: n = !0, defer: r = !
 		overrideVersion: g,
 		...v
 	});
-}, vx = (0, j.forwardRef)(({ className: e, containerProps: t, containerComponent: n = "div", ...r }, i) => {
+}, vx = (0, M.forwardRef)(({ className: e, containerProps: t, containerComponent: n = "div", ...r }, i) => {
 	let a = lx();
 	return /* @__PURE__ */ (0, U.jsx)(n, {
 		"data-status": a.type,
@@ -24753,7 +24753,7 @@ var _x = ({ components: e, componentsByLanguage: t, smooth: n = !0, defer: r = !
 vx.displayName = "MarkdownTextPrimitive";
 var yx = ux(vx);
 //#endregion
-//#region node_modules/ccount/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/ccount/index.js
 function bx(e, t) {
 	let n = String(e);
 	if (typeof t != "string") throw TypeError("Expected character");
@@ -24762,13 +24762,13 @@ function bx(e, t) {
 	return r;
 }
 //#endregion
-//#region node_modules/escape-string-regexp/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/escape-string-regexp/index.js
 function xx(e) {
 	if (typeof e != "string") throw TypeError("Expected a string");
 	return e.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&").replace(/-/g, "\\x2d");
 }
 //#endregion
-//#region node_modules/mdast-util-find-and-replace/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-find-and-replace/lib/index.js
 function Sx(e, t, n) {
 	let r = Jy((n || {}).ignore || []), i = Cx(t), a = -1;
 	for (; ++a < i.length;) rb(e, "text", o);
@@ -24825,7 +24825,7 @@ function Tx(e) {
 	};
 }
 //#endregion
-//#region node_modules/mdast-util-gfm-autolink-literal/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-autolink-literal/lib/index.js
 var Ex = "phrasing", Dx = [
 	"autolink",
 	"link",
@@ -24949,7 +24949,7 @@ function Vx(e, t) {
 	return (e.index === 0 || wg(n) || Cg(n)) && (!t || n !== 47);
 }
 //#endregion
-//#region node_modules/mdast-util-gfm-footnote/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-footnote/lib/index.js
 Zx.peek = Xx;
 function Hx() {
 	this.buffer();
@@ -25043,7 +25043,7 @@ function tS(e, t, n) {
 	return (n ? "" : "    ") + e;
 }
 //#endregion
-//#region node_modules/mdast-util-gfm-strikethrough/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-strikethrough/lib/index.js
 var nS = [
 	"autolink",
 	"destinationLiteral",
@@ -25091,7 +25091,7 @@ function cS() {
 	return "~";
 }
 //#endregion
-//#region node_modules/markdown-table/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/markdown-table/index.js
 function lS(e) {
 	return e.length;
 }
@@ -25149,7 +25149,7 @@ function fS(e) {
 	return t === 67 || t === 99 ? 99 : t === 76 || t === 108 ? 108 : t === 82 || t === 114 ? 114 : 0;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/blockquote.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/blockquote.js
 function pS(e, t, n, r) {
 	let i = n.enter("blockquote"), a = n.createTracker(r);
 	a.move("> "), a.shift(2);
@@ -25160,7 +25160,7 @@ function mS(e, t, n) {
 	return ">" + (n ? "" : " ") + e;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/pattern-in-scope.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/pattern-in-scope.js
 function hS(e, t) {
 	return gS(e, t.inConstruct, !0) && !gS(e, t.notInConstruct, !1);
 }
@@ -25171,14 +25171,14 @@ function gS(e, t, n) {
 	return !1;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/break.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/break.js
 function _S(e, t, n, r) {
 	let i = -1;
 	for (; ++i < n.unsafe.length;) if (n.unsafe[i].character === "\n" && hS(n.stack, n.unsafe[i])) return /[ \t]/.test(r.before) ? "" : " ";
 	return "\\\n";
 }
 //#endregion
-//#region node_modules/longest-streak/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/longest-streak/index.js
 function vS(e, t) {
 	let n = String(e), r = n.indexOf(t), i = r, a = 0, o = 0;
 	if (typeof t != "string") throw TypeError("Expected substring");
@@ -25186,19 +25186,19 @@ function vS(e, t) {
 	return o;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/format-code-as-indented.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/format-code-as-indented.js
 function yS(e, t) {
 	return !(t.options.fences !== !1 || !e.value || e.lang || !/[^ \r\n]/.test(e.value) || /^[\t ]*(?:[\r\n]|$)|(?:^|[\r\n])[\t ]*$/.test(e.value));
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-fence.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-fence.js
 function bS(e) {
 	let t = e.options.fence || "`";
 	if (t !== "`" && t !== "~") throw Error("Cannot serialize code with `" + t + "` for `options.fence`, expected `` ` `` or `~`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/code.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/code.js
 function xS(e, t, n, r) {
 	let i = bS(n), a = e.value || "", o = i === "`" ? "GraveAccent" : "Tilde";
 	if (yS(e, n)) {
@@ -25230,14 +25230,14 @@ function SS(e, t, n) {
 	return (n ? "" : "    ") + e;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-quote.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-quote.js
 function CS(e) {
 	let t = e.options.quote || "\"";
 	if (t !== "\"" && t !== "'") throw Error("Cannot serialize title with `" + t + "` for `options.quote`, expected `\"`, or `'`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/definition.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/definition.js
 function wS(e, t, n, r) {
 	let i = CS(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.enter("definition"), s = n.enter("label"), c = n.createTracker(r), l = c.move("[");
 	return l += c.move(n.safe(n.associationId(e), {
@@ -25259,19 +25259,19 @@ function wS(e, t, n, r) {
 	})), l += c.move(i), s()), o(), l;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-emphasis.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-emphasis.js
 function TS(e) {
 	let t = e.options.emphasis || "*";
 	if (t !== "*" && t !== "_") throw Error("Cannot serialize emphasis with `" + t + "` for `options.emphasis`, expected `*`, or `_`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/encode-character-reference.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/encode-character-reference.js
 function ES(e) {
 	return "&#x" + e.toString(16).toUpperCase() + ";";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/encode-info.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/encode-info.js
 function DS(e, t, n) {
 	let r = Ng(e), i = Ng(t);
 	return r === void 0 ? i === void 0 ? n === "_" ? {
@@ -25307,7 +25307,7 @@ function DS(e, t, n) {
 	};
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/emphasis.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/emphasis.js
 OS.peek = kS;
 function OS(e, t, n, r) {
 	let i = TS(n), a = n.enter("emphasis"), o = n.createTracker(r), s = o.move(i), c = o.move(n.containerPhrasing(e, {
@@ -25328,7 +25328,7 @@ function kS(e, t, n) {
 	return n.options.emphasis || "*";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/format-heading-as-setext.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/format-heading-as-setext.js
 function AS(e, t) {
 	let n = !1;
 	return ab(e, function(e) {
@@ -25336,7 +25336,7 @@ function AS(e, t) {
 	}), !!((!e.depth || e.depth < 3) && tg(e) && (t.options.setext || n));
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/heading.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/heading.js
 function jS(e, t, n, r) {
 	let i = Math.max(Math.min(6, e.depth || 1), 1), a = n.createTracker(r);
 	if (AS(e, n)) {
@@ -25357,7 +25357,7 @@ function jS(e, t, n, r) {
 	return /^[\t ]/.test(l) && (l = ES(l.charCodeAt(0)) + l.slice(1)), l = l ? o + " " + l : o, n.options.closeAtx && (l += " " + o), c(), s(), l;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/html.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/html.js
 MS.peek = NS;
 function MS(e) {
 	return e.value || "";
@@ -25366,7 +25366,7 @@ function NS() {
 	return "<";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/image.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/image.js
 PS.peek = FS;
 function PS(e, t, n, r) {
 	let i = CS(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.enter("image"), s = n.enter("label"), c = n.createTracker(r), l = c.move("![");
@@ -25392,7 +25392,7 @@ function FS() {
 	return "!";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/image-reference.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/image-reference.js
 IS.peek = LS;
 function IS(e, t, n, r) {
 	let i = e.referenceType, a = n.enter("imageReference"), o = n.enter("label"), s = n.createTracker(r), c = s.move("!["), l = n.safe(e.alt, {
@@ -25414,7 +25414,7 @@ function LS() {
 	return "!";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/inline-code.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/inline-code.js
 RS.peek = zS;
 function RS(e, t, n) {
 	let r = e.value || "", i = "`", a = -1;
@@ -25432,13 +25432,13 @@ function zS() {
 	return "`";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/format-link-as-autolink.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/format-link-as-autolink.js
 function BS(e, t) {
 	let n = tg(e);
 	return !(t.options.resourceLink || !e.url || e.title || !e.children || e.children.length !== 1 || e.children[0].type !== "text" || n !== e.url && "mailto:" + n !== e.url || !/^[a-z][a-z+.-]+:/i.test(e.url) || /[\0- <>\u007F]/.test(e.url));
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/link.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/link.js
 VS.peek = HS;
 function VS(e, t, n, r) {
 	let i = CS(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.createTracker(r), s, c;
@@ -25476,7 +25476,7 @@ function HS(e, t, n) {
 	return BS(e, n) ? "<" : "[";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/link-reference.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/link-reference.js
 US.peek = WS;
 function US(e, t, n, r) {
 	let i = e.referenceType, a = n.enter("linkReference"), o = n.enter("label"), s = n.createTracker(r), c = s.move("["), l = n.containerPhrasing(e, {
@@ -25498,14 +25498,14 @@ function WS() {
 	return "[";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-bullet.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-bullet.js
 function GS(e) {
 	let t = e.options.bullet || "*";
 	if (t !== "*" && t !== "+" && t !== "-") throw Error("Cannot serialize items with `" + t + "` for `options.bullet`, expected `*`, `+`, or `-`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-bullet-other.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-bullet-other.js
 function KS(e) {
 	let t = GS(e), n = e.options.bulletOther;
 	if (!n) return t === "*" ? "-" : "*";
@@ -25514,21 +25514,21 @@ function KS(e) {
 	return n;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-bullet-ordered.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-bullet-ordered.js
 function qS(e) {
 	let t = e.options.bulletOrdered || ".";
 	if (t !== "." && t !== ")") throw Error("Cannot serialize items with `" + t + "` for `options.bulletOrdered`, expected `.` or `)`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-rule.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-rule.js
 function JS(e) {
 	let t = e.options.rule || "*";
 	if (t !== "*" && t !== "-" && t !== "_") throw Error("Cannot serialize rules with `" + t + "` for `options.rule`, expected `*`, `-`, or `_`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/list.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/list.js
 function YS(e, t, n, r) {
 	let i = n.enter("list"), a = n.bulletCurrent, o = e.ordered ? qS(n) : GS(n), s = e.ordered ? o === "." ? ")" : "." : KS(n), c = t && n.bulletLastUsed ? o === n.bulletLastUsed : !1;
 	if (!e.ordered) {
@@ -25549,14 +25549,14 @@ function YS(e, t, n, r) {
 	return n.bulletLastUsed = o, n.bulletCurrent = a, i(), l;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-list-item-indent.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-list-item-indent.js
 function XS(e) {
 	let t = e.options.listItemIndent || "one";
 	if (t !== "tab" && t !== "one" && t !== "mixed") throw Error("Cannot serialize items with `" + t + "` for `options.listItemIndent`, expected `tab`, `one`, or `mixed`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/list-item.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/list-item.js
 function ZS(e, t, n, r) {
 	let i = XS(n), a = n.bulletCurrent || GS(n);
 	t && t.type === "list" && t.ordered && (a = (typeof t.start == "number" && t.start > -1 ? t.start : 1) + (n.options.incrementListMarker === !1 ? 0 : t.children.indexOf(e)) + a);
@@ -25571,13 +25571,13 @@ function ZS(e, t, n, r) {
 	}
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/paragraph.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/paragraph.js
 function QS(e, t, n, r) {
 	let i = n.enter("paragraph"), a = n.enter("phrasing"), o = n.containerPhrasing(e, r);
 	return a(), i(), o;
 }
 //#endregion
-//#region node_modules/mdast-util-phrasing/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-phrasing/lib/index.js
 var $S = Jy([
 	"break",
 	"delete",
@@ -25597,21 +25597,21 @@ var $S = Jy([
 	"textDirective"
 ]);
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/root.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/root.js
 function eC(e, t, n, r) {
 	return (e.children.some(function(e) {
 		return $S(e);
 	}) ? n.containerPhrasing : n.containerFlow).call(n, e, r);
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-strong.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-strong.js
 function tC(e) {
 	let t = e.options.strong || "*";
 	if (t !== "*" && t !== "_") throw Error("Cannot serialize strong with `" + t + "` for `options.strong`, expected `*`, or `_`");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/strong.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/strong.js
 nC.peek = rC;
 function nC(e, t, n, r) {
 	let i = tC(n), a = n.enter("strong"), o = n.createTracker(r), s = o.move(i + i), c = o.move(n.containerPhrasing(e, {
@@ -25632,25 +25632,25 @@ function rC(e, t, n) {
 	return n.options.strong || "*";
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/text.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/text.js
 function iC(e, t, n, r) {
 	return n.safe(e.value, r);
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/util/check-rule-repetition.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-rule-repetition.js
 function aC(e) {
 	let t = e.options.ruleRepetition || 3;
 	if (t < 3) throw Error("Cannot serialize rules with repetition `" + t + "` for `options.ruleRepetition`, expected `3` or more");
 	return t;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/thematic-break.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/thematic-break.js
 function oC(e, t, n) {
 	let r = (JS(n) + (n.options.ruleSpaces ? " " : "")).repeat(aC(n));
 	return n.options.ruleSpaces ? r.slice(0, -1) : r;
 }
 //#endregion
-//#region node_modules/mdast-util-to-markdown/lib/handle/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/index.js
 var sC = {
 	blockquote: pS,
 	break: _S,
@@ -25674,7 +25674,7 @@ var sC = {
 	thematicBreak: oC
 };
 //#endregion
-//#region node_modules/mdast-util-gfm-table/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-table/lib/index.js
 function cC() {
 	return {
 		enter: {
@@ -25807,7 +25807,7 @@ function gC(e) {
 	}
 }
 //#endregion
-//#region node_modules/mdast-util-gfm-task-list-item/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-task-list-item/lib/index.js
 function _C() {
 	return { exit: {
 		taskListCheckValueChecked: yC,
@@ -25862,7 +25862,7 @@ function xC(e, t, n, r) {
 	}
 }
 //#endregion
-//#region node_modules/mdast-util-gfm/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm/lib/index.js
 function SC() {
 	return [
 		Ox(),
@@ -25882,7 +25882,7 @@ function CC(e) {
 	] };
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm-autolink-literal/lib/syntax.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-autolink-literal/lib/syntax.js
 var wC = {
 	tokenize: RC,
 	partial: !0
@@ -26054,7 +26054,7 @@ function qC(e) {
 	return e.length > 0 && !n && (e[e.length - 1][1]._gfmAutolinkLiteralWalkedInto = !0), n;
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm-footnote/lib/syntax.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-footnote/lib/syntax.js
 var JC = {
 	tokenize: nw,
 	partial: !0
@@ -26242,7 +26242,7 @@ function nw(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm-strikethrough/lib/syntax.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-strikethrough/lib/syntax.js
 function rw(e) {
 	let t = (e || {}).singleTilde, n = {
 		name: "strikethrough",
@@ -26334,7 +26334,7 @@ function rw(e) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm-table/lib/edit-map.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-table/lib/edit-map.js
 var iw = class {
 	constructor() {
 		this.map = [], this.index = /* @__PURE__ */ new Map();
@@ -26374,7 +26374,7 @@ function aw(e, t, n, r) {
 	e.map.push(a), e.index.set(t, a);
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm-table/lib/infer.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-table/lib/infer.js
 function ow(e, t) {
 	let n = !1, r = [];
 	for (; t < e.length;) {
@@ -26393,7 +26393,7 @@ function ow(e, t) {
 	return r;
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm-table/lib/syntax.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-table/lib/syntax.js
 function sw() {
 	return { flow: { null: {
 		name: "table",
@@ -26589,7 +26589,7 @@ function fw(e, t) {
 	return n[1][r];
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm-task-list-item/lib/syntax.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-task-list-item/lib/syntax.js
 var pw = {
 	name: "tasklistCheck",
 	tokenize: hw
@@ -26620,7 +26620,7 @@ function gw(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-extension-gfm/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm/index.js
 function _w(e) {
 	return ug([
 		NC(),
@@ -26631,7 +26631,7 @@ function _w(e) {
 	]);
 }
 //#endregion
-//#region node_modules/remark-gfm/lib/index.js
+//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/remark-gfm/lib/index.js
 var vw = {};
 function yw(e) {
 	let t = this, n = e || vw, r = t.data(), i = r.micromarkExtensions ||= [], a = r.fromMarkdownExtensions ||= [], o = r.toMarkdownExtensions ||= [];
@@ -26684,7 +26684,7 @@ function ww() {
 	});
 }
 function Tw() {
-	let e = V((e) => e.message.role), t = V((e) => e.message.status?.type === "incomplete"), n = V((e) => e.message.status?.reason === "cancelled"), r = V((e) => e.message.content), [i, a] = (0, j.useState)(!1), [o, s] = (0, j.useState)(""), c = r.some((e) => e.type === "image" || e.type === "text" && e.text), l = r.filter((e) => e.type === "text").map((e) => e.text).join("\n");
+	let e = V((e) => e.message.role), t = V((e) => e.message.status?.type === "incomplete"), n = V((e) => e.message.status?.reason === "cancelled"), r = V((e) => e.message.content), [i, a] = (0, M.useState)(!1), [o, s] = (0, M.useState)(""), c = r.some((e) => e.type === "image" || e.type === "text" && e.text), l = r.filter((e) => e.type === "text").map((e) => e.text).join("\n");
 	return c ? /* @__PURE__ */ (0, U.jsxs)(vp.Root, {
 		className: e === "user" ? "ai-bubble ai-bubble-out" : "ai-bubble ai-bubble-in",
 		children: [
@@ -26718,14 +26718,14 @@ function Tw() {
 	}) : null;
 }
 function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a, draftLabel: o }) {
-	let [s, c] = (0, j.useState)([]), [l, u] = (0, j.useState)(!1), [d, f] = (0, j.useState)(!1), [p, m] = (0, j.useState)(""), [h, g] = (0, j.useState)(""), [_, v] = (0, j.useState)(null), [y, b] = (0, j.useState)([]), [x, S] = (0, j.useState)([]), [C, w] = (0, j.useState)(!1), [T, E] = (0, j.useState)(!1), [D, O] = (0, j.useState)(!1), k = (0, j.useRef)(null), ee = (0, j.useRef)(null), [A, te] = (0, j.useState)(null), [ne, M] = (0, j.useState)([]), [re, N] = (0, j.useState)(""), P = (0, j.useRef)(0), ie = (0, j.useRef)("chat"), ae = (0, j.useRef)(null), oe = (0, j.useRef)(!1), se = (0, j.useRef)(!1), ce = (0, j.useRef)(A);
-	ce.current = A;
-	let le = (0, j.useRef)(null), ue = (0, j.useRef)(!0), de = (0, j.useRef)(r);
-	de.current = r;
-	let fe = (0, j.useRef)(Promise.resolve()), pe = (0, j.useRef)(!1), me = (0, j.useRef)(!0), he = (0, j.useRef)(null), F = (0, j.useRef)(null);
-	(0, j.useEffect)(() => () => {
-		ue.current = !1;
-	}, []), (0, j.useEffect)(() => {
+	let [s, c] = (0, M.useState)([]), [l, u] = (0, M.useState)(!1), [d, f] = (0, M.useState)(!1), [p, m] = (0, M.useState)(""), [h, g] = (0, M.useState)(""), [_, v] = (0, M.useState)(null), [y, b] = (0, M.useState)([]), [x, S] = (0, M.useState)([]), [C, w] = (0, M.useState)(!1), [T, E] = (0, M.useState)(!1), [D, O] = (0, M.useState)(!1), [k, ee] = (0, M.useState)(null), [A, te] = (0, M.useState)(!1), [j, ne] = (0, M.useState)(!1), [re, N] = (0, M.useState)(""), P = (0, M.useRef)(0), ie = (0, M.useRef)(null), ae = (0, M.useRef)(!1), oe = (0, M.useRef)(null), se = (0, M.useRef)(null), [ce, le] = (0, M.useState)(null), [ue, de] = (0, M.useState)([]), [fe, pe] = (0, M.useState)(""), me = (0, M.useRef)(0), he = (0, M.useRef)("chat"), F = (0, M.useRef)(null), I = (0, M.useRef)(!1), ge = (0, M.useRef)(!1), _e = (0, M.useRef)(ce);
+	_e.current = ce;
+	let ve = (0, M.useRef)(null), ye = (0, M.useRef)(!0), be = (0, M.useRef)(r);
+	be.current = r;
+	let L = (0, M.useRef)(Promise.resolve()), xe = (0, M.useRef)(!1), Se = (0, M.useRef)(!0), Ce = (0, M.useRef)(null), we = (0, M.useRef)(null);
+	(0, M.useEffect)(() => () => {
+		ye.current = !1;
+	}, []), (0, M.useEffect)(() => {
 		i.hasDraft = !!(p || x.length || C);
 	}, [
 		i,
@@ -26733,74 +26733,145 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 		x.length,
 		C
 	]);
-	let I = (0, j.useCallback)((e) => a && e === a && o ? o : e, [o, a]), ge = (0, j.useCallback)(async () => {
-		if (!e.account || !e.chat) return;
-		let n = ++P.current, r = await t(`/api/ai/proposals?${new URLSearchParams({
-			account: e.account,
-			chat: e.chat
-		})}`);
-		n === P.current && M((r.proposals || []).filter((e) => typeof e.id == "string" && typeof e.text == "string"));
+	let Te = (0, M.useCallback)((e) => a && e === a && o ? o : e, [o, a]), Ee = (0, M.useCallback)(async () => {
+		if (!e.account || !e.chat || ie.current) return;
+		let n = ++P.current;
+		te(!0), N("");
+		try {
+			let r = await t(`/api/ai/settings?${new URLSearchParams({
+				account: e.account,
+				chat: e.chat
+			})}`);
+			ye.current && n === P.current && (ee(r), ae.current = !1);
+		} catch (e) {
+			ye.current && n === P.current && N(e.message);
+		} finally {
+			ye.current && n === P.current && te(!1);
+		}
 	}, [
 		e.account,
 		e.chat,
 		t
-	]), _e = (0, j.useCallback)((n = !1) => {
-		if (ae.current && (!n || oe.current || i.pending || ce.current)) return ae.current;
+	]);
+	(0, M.useEffect)(() => (r && Ee(), () => {
+		P.current++;
+	}), [
+		r,
+		e.version,
+		Ee
+	]);
+	let De = (n, r) => {
+		if (ie.current || i.pending || d || ce || l || A) return;
+		P.current++, ne(!0), N("");
+		let a = t("/api/ai/settings", {
+			account: e.account,
+			chat: e.chat,
+			model: n,
+			reasoningEffort: r
+		}).then((e) => {
+			ae.current = !1, ye.current && ee(e);
+		}).catch((e) => {
+			throw ae.current = !0, ye.current && N(e.message), e;
+		}).finally(() => {
+			ie.current = null, ye.current && ne(!1);
+		});
+		ie.current = a, a.catch(() => {});
+	}, Oe = (0, M.useCallback)(async () => {
+		if (!e.account || !e.chat) return;
+		let n = ++me.current, r = await t(`/api/ai/proposals?${new URLSearchParams({
+			account: e.account,
+			chat: e.chat
+		})}`);
+		n === me.current && de((r.proposals || []).filter((e) => typeof e.id == "string" && typeof e.text == "string"));
+	}, [
+		e.account,
+		e.chat,
+		t
+	]), ke = (0, M.useCallback)((n = !1, r = !1) => {
+		if (F.current && (!n || I.current || !r && (i.pending || _e.current))) return F.current;
 		if (!e.account || !e.chat) return Promise.resolve();
-		let r = ae.current;
-		oe.current = !0, u(!0);
-		let a = t(`/api/ai/session?${new URLSearchParams({
+		let a = F.current;
+		I.current = !0, u(!0);
+		let o = t(`/api/ai/session?${new URLSearchParams({
 			account: e.account,
 			chat: e.chat
 		})}`).then((e) => {
-			if (!ue.current) return;
-			ie.current = e.sessionId || "chat";
+			if (!ye.current) return;
+			he.current = e.sessionId || "chat";
 			let t = (e.messages || []).filter((e) => ["user", "assistant"].includes(e.role) && (typeof e.content == "string" || Array.isArray(e.content))).map((e, t) => ({
-				id: `${ie.current}-${t}`,
+				id: e.turnId && e.role === "user" ? `user-${e.turnId}` : e.turnId && e.role === "assistant" ? `answer-user-${e.turnId}` : `${he.current}-${t}`,
 				role: e.role,
 				...e.role === "assistant" && (e.cancelled || ["cancelled", "interrupted"].includes(e.status)) ? { status: {
 					type: "incomplete",
 					reason: "cancelled"
 				} } : {},
-				content: typeof e.content == "string" ? [{
+				...e.role === "assistant" && e.status === "failed" ? { status: {
+					type: "incomplete",
+					reason: "error"
+				} } : {},
+				content: e.role === "assistant" && e.status === "failed" ? [{
 					type: "text",
-					text: I(e.content)
+					text: e.error || "El agente no pudo completar la respuesta."
+				}] : typeof e.content == "string" ? [{
+					type: "text",
+					text: Te(e.content)
 				}] : e.content.flatMap((e) => e.type === "text" ? [{
 					type: "text",
-					text: I(e.text || "")
+					text: Te(e.text || "")
 				}] : e.type === "image_url" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(e.image_url?.url || "") ? [{
 					type: "image",
 					image: e.image_url.url
 				}] : [])
-			})), n = se.current;
-			se.current = !0;
-			let r = le.current;
+			})), n = ge.current;
+			ge.current = !0;
+			let r = ve.current;
 			c((e) => [...t, ...n ? e.filter((e) => e.id === r) : e]);
+			let i = e.messages?.at(-1);
+			if (!r && i?.role === "assistant" && i.status === "failed") {
+				let t = e.messages.find((e) => e.role === "user" && e.turnId === i.turnId), n = typeof t?.content == "string" ? [{
+					type: "text",
+					text: t.content
+				}] : t?.content || [], r = n.filter((e) => e.type === "text").map((e) => e.text || "").join(""), a = n.filter((e) => e.type === "image_url"), o = Array.isArray(i.retryImageNames) ? i.retryImageNames : [], s = o.length === a.length && o.every((e) => typeof e == "string" && e), c = s ? a.map((e, t) => ({
+					name: o[t],
+					url: e.image_url?.url
+				})) : [];
+				le({
+					text: r,
+					retryable: !!(t && i.turnId && i.retryable === !0 && s),
+					options: {
+						userId: `user-${i.turnId}`,
+						images: c,
+						allowSend: i.allowSend === !0,
+						allowPropose: i.allowPropose === !0,
+						retryFailedRun: !0
+					}
+				}), g(`${i.error || "El agente no pudo completar la respuesta."}${s ? "" : " No se conservaron los datos originales de las imágenes. Adjúntalas de nuevo en un mensaje nuevo."}`), v(null), b([]);
+			}
 		}).catch((e) => {
-			throw ae.current = r, e;
+			throw F.current = a, e;
 		}).finally(() => {
-			oe.current = !1, ue.current && u(!1);
+			I.current = !1, ye.current && u(!1);
 		});
-		return ae.current = a, a;
+		return F.current = o, o;
 	}, [
 		i,
 		e.account,
 		e.chat,
 		t,
-		I
+		Te
 	]);
-	(0, j.useEffect)(() => {
-		r && _e(!0).catch((e) => {
-			ue.current && g(e.message);
+	(0, M.useEffect)(() => {
+		r && ke(!0).catch((e) => {
+			ye.current && g(e.message);
 		});
 	}, [
 		r,
 		e.version,
-		_e
-	]), (0, j.useEffect)(() => {
+		ke
+	]), (0, M.useEffect)(() => {
 		if (!r || !e.chat) return;
 		let t = !0;
-		return ge().catch((e) => {
+		return Oe().catch((e) => {
 			t && g(e.message);
 		}), () => {
 			t = !1;
@@ -26808,56 +26879,63 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 	}, [
 		r,
 		e.chat,
-		ge
+		Oe
 	]);
-	let ve = (0, j.useCallback)(() => de.current ? ge() : Promise.resolve(), [ge]), ye = async (n, r) => {
-		if (!re) {
-			N(n), g("");
+	let Ae = (0, M.useCallback)(() => be.current ? Oe() : Promise.resolve(), [Oe]), je = async (n, r) => {
+		if (!fe) {
+			pe(n), g("");
 			try {
 				await t("/api/ai/proposal", {
 					account: e.account,
 					chat: e.chat,
 					id: n,
 					action: r
-				}), M((e) => e.filter((e) => e.id !== n)), await ve().catch((e) => g(`No se pudieron actualizar las propuestas: ${e.message}`));
+				}), de((e) => e.filter((e) => e.id !== n)), await Ae().catch((e) => g(`No se pudieron actualizar las propuestas: ${e.message}`));
 			} catch (e) {
-				g(e.message), ve().catch(() => {});
+				g(e.message), Ae().catch(() => {});
 			} finally {
-				N("");
+				pe("");
 			}
 		}
-	}, be = (0, j.useCallback)(() => {
-		let e = he.current?.querySelector(".ai-history");
-		e && me.current && (e.scrollTop = e.scrollHeight);
-	}, []), L = (0, j.useCallback)(async (n, { allowPropose: r = !0, allowSend: i = !0, userId: a = `user-${crypto.randomUUID()}`, images: o = [] } = {}) => {
-		let s = String(n || "").trim();
-		if (!s && !o.length) return "";
+	}, Me = (0, M.useCallback)(() => {
+		let e = Ce.current?.querySelector(".ai-history");
+		e && Se.current && (e.scrollTop = e.scrollHeight);
+	}, []), Ne = (0, M.useCallback)(async (n, { allowPropose: r = !0, allowSend: i = !0, userId: a = `user-${crypto.randomUUID()}`, images: o = [], retryFailedRun: s = !1 } = {}) => {
+		let l = String(n || "").trim();
+		if (!l && !o.length) return "";
 		if (!e.account || !e.chat) throw Error("Selecciona una conversación para consultar.");
-		let l = `answer-${a}`;
-		le.current = a;
-		let u = {
+		let u = `answer-${a}`;
+		ve.current = a;
+		let d = {
 			userId: a,
+			text: l,
+			options: {
+				allowPropose: r,
+				allowSend: i,
+				userId: a,
+				images: o
+			},
 			cancelled: !1,
 			dispatched: !1,
 			controller: new AbortController()
 		};
-		k.current = u, b([]), O(!1), me.current = !0, te(null), v({
+		oe.current = d, b([]), O(!1), Se.current = !0, le(null), v({
 			phase: "thinking",
 			label: "Pensando"
-		}), c((e) => e.some((e) => e.id === a) ? e.filter((e) => e.id !== l) : [...e, {
+		}), c((e) => e.some((e) => e.id === a) ? e.filter((e) => e.id !== u) : [...e, {
 			id: a,
 			role: "user",
 			content: [{
 				type: "text",
-				text: I(s)
+				text: Te(l)
 			}, ...o.map((e) => ({
 				type: "image",
 				image: e.url
 			}))]
 		}]);
-		let d = (e, t = !1) => {
+		let f = (e, t = !1) => {
 			let n = {
-				id: l,
+				id: u,
 				role: "assistant",
 				content: [{
 					type: "text",
@@ -26868,57 +26946,78 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 					reason: "stop"
 				} : { type: "running" }
 			};
-			c((e) => e.some((e) => e.id === l) ? e.map((e) => e.id === l ? n : e) : [...e, n]);
-		}, f = "";
+			c((e) => e.some((e) => e.id === u) ? e.map((e) => e.id === u ? n : e) : [...e, n]);
+		}, p = "";
 		try {
-			if (await _e(), u.cancelled) return "";
-			u.dispatched = !0;
+			if (await ie.current, ae.current) throw Error("Recarga la configuración del agente antes de enviar.");
+			if (await ke(), d.cancelled) return "";
+			d.dispatched = !0;
 			let n = await t("/api/ai/chat", {
 				account: e.account,
 				chat: e.chat,
-				message: s,
+				message: l,
 				images: o,
 				allowPropose: r,
 				allowSend: i,
 				stream: !0,
-				turnId: a.replace(/^user-/, "")
+				turnId: a.replace(/^user-/, ""),
+				...s ? { retryFailedRun: !0 } : {}
 			}, (e, t) => {
-				u.cancelled || (e === "activity" && t && typeof t.label == "string" && (v(t), b((e) => [...e.slice(-49), {
+				d.cancelled || (e === "activity" && t && typeof t.label == "string" && (v(t), b((e) => [...e.slice(-49), {
 					phase: t.phase,
 					label: t.label,
 					tool: t.tool,
 					status: t.status
-				}])), e === "delta" && typeof t.text == "string" && (f += t.text, v({
+				}])), e === "delta" && typeof t.text == "string" && (p += t.text, v({
 					phase: "writing",
 					label: "Escribiendo"
-				}), d(f)), e === "result" && (v(null), (t.status === "cancelled" || t.cancelled) && (u.cancelled = !0, O(!0), te(null), c((e) => e.map((e) => e.id === l ? {
+				}), f(p)), e === "result" && (v(null), (t.status === "cancelled" || t.cancelled) && (d.cancelled = !0, O(!0), le(null), c((e) => e.map((e) => e.id === u ? {
 					...e,
 					status: {
 						type: "incomplete",
 						reason: "cancelled"
 					}
 				} : e)))));
-			}, AbortSignal.any([u.controller.signal, AbortSignal.timeout(24e4)]));
-			if (u.cancelled || n.cancelled || ["cancelled", "interrupted"].includes(n.status)) return u.cancelled = !0, O(!0), c((e) => e.map((e) => e.id === l ? {
+			}, AbortSignal.any([d.controller.signal, AbortSignal.timeout(24e4)]));
+			if (n.sessionId && (he.current = n.sessionId), n.status === "failed") return le({
+				text: l,
+				retryable: n.retryable === !0,
+				options: {
+					allowPropose: r,
+					allowSend: i,
+					userId: a,
+					images: o,
+					retryFailedRun: !0
+				}
+			}), g(n.error || "El agente no pudo completar la respuesta."), b([]), c((e) => e.map((e) => e.id === u ? {
+				...e,
+				status: {
+					type: "incomplete",
+					reason: "error"
+				}
+			} : e)), "";
+			if (d.cancelled || n.cancelled || ["cancelled", "interrupted"].includes(n.status)) return d.cancelled = !0, O(!0), c((e) => e.map((e) => e.id === u ? {
 				...e,
 				status: {
 					type: "incomplete",
 					reason: "cancelled"
 				}
 			} : e)), "";
-			let p = typeof n.text == "string" ? n.text : "";
-			return d(p, !0), v(null), ve().catch((e) => g(`No se pudieron actualizar las propuestas: ${e.message}`)), p;
+			let m = typeof n.text == "string" ? n.text : "";
+			return f(m, !0), v(null), Ae().catch((e) => g(`No se pudieron actualizar las propuestas: ${e.message}`)), m;
 		} catch (e) {
-			if (u.cancelled || e.code === "cancelled") return "";
-			throw te({
-				text: s,
+			if (d.cancelled || e.code === "cancelled") return "";
+			throw d.uncertain = d.dispatched, le({
+				text: l,
+				retryable: !0,
+				uncertain: d.uncertain,
 				options: {
 					allowPropose: r,
 					allowSend: i,
 					userId: a,
 					images: o
 				}
-			}), g(e.message), f && c((e) => e.map((e) => e.id === l ? {
+			}), g(e.message), p && c((e) => e.map((e) => e.id === u ? {
 				...e,
 				status: {
 					type: "incomplete",
@@ -26926,39 +27025,39 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 				}
 			} : e)), e;
 		} finally {
-			k.current === u && (k.current = null), le.current = null, v(null);
+			oe.current === d && !d.uncertain && (oe.current = null), ve.current = null, v(null);
 		}
 	}, [
 		e.account,
 		e.chat,
-		_e,
-		ve,
+		ke,
+		Ae,
 		t,
-		I
-	]), xe = (0, j.useCallback)((e) => {
+		Te
+	]), Pe = (0, M.useCallback)((e) => {
 		i.pending = (i.pending || 0) + 1;
-		let t = () => (f(!0), g(""), Promise.resolve().then(e).finally(() => f(!1))), n = fe.current.then(t, t).finally(() => {
+		let t = () => (f(!0), g(""), Promise.resolve().then(e).finally(() => f(!1))), n = L.current.then(t, t).finally(() => {
 			i.pending--;
 		});
-		return fe.current = n.then(() => {}, () => {}), n;
-	}, [i]), Se = (0, j.useCallback)((e, t) => xe(() => L(e, t)), [xe, L]);
-	(0, j.useEffect)(() => (i.ask = Se, i.onReady?.(), delete i.onReady, () => {
-		i.ask === Se && (i.ask = null);
-	}), [i, Se]);
-	let Ce = (0, j.useCallback)((e) => {
+		return L.current = n.then(() => {}, () => {}), n;
+	}, [i]), Fe = (0, M.useCallback)((e, t) => Pe(() => Ne(e, t)), [Pe, Ne]);
+	(0, M.useEffect)(() => (i.ask = Fe, i.onReady?.(), delete i.onReady, () => {
+		i.ask === Fe && (i.ask = null);
+	}), [i, Fe]);
+	let Ie = (0, M.useCallback)((e) => {
 		let t = e.content.filter((e) => e.type === "text").map((e) => e.text).join("").trim();
-		if (!t && !x.length || pe.current) return Promise.resolve();
-		pe.current = !0;
+		if (!t && !x.length || xe.current || _e.current?.uncertain) return Promise.resolve();
+		xe.current = !0;
 		let n = x;
-		return S([]), m(""), F.current?.focus(), xe(() => L(t, { images: n })).catch((e) => (g(e.message), Promise.reject(e))).finally(() => {
-			pe.current = !1;
+		return S([]), m(""), we.current?.focus(), Pe(() => Ne(t, { images: n })).catch((e) => (g(e.message), Promise.reject(e))).finally(() => {
+			xe.current = !1;
 		});
 	}, [
-		xe,
-		L,
+		Pe,
+		Ne,
 		x
-	]), we = (0, j.useCallback)(async () => {
-		let n = k.current;
+	]), Le = (0, M.useCallback)(async () => {
+		let n = oe.current;
 		if (n && !T) {
 			E(!0);
 			try {
@@ -26966,13 +27065,35 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 					account: e.account,
 					chat: e.chat,
 					turnId: n.userId.replace(/^user-/, ""),
-					sessionId: ie.current
+					sessionId: he.current
 				}) : {
 					stopped: !0,
 					status: "cancelled"
 				};
+				if (r.stopped === !0 && r.status === "completed") {
+					n.cancelled = !0, n.controller.abort(), oe.current = null, ve.current = null, le(null), g(""), v(null), b([]), await ke(!0, !0);
+					return;
+				}
+				if (r.status === "failed") {
+					n.cancelled = !0, n.controller.abort(), oe.current = null, le({
+						text: n.text,
+						uncertain: !1,
+						retryable: r.retryable === !0,
+						options: {
+							...n.options,
+							retryFailedRun: !0
+						}
+					}), g(r.error || "El agente no pudo completar la respuesta."), v(null), b([]), c((e) => e.map((e) => e.id === `answer-${n.userId}` ? {
+						...e,
+						status: {
+							type: "incomplete",
+							reason: "error"
+						}
+					} : e));
+					return;
+				}
 				if (r.stopped !== !0) throw Error("No se pudo confirmar la detencion del agente.");
-				["cancelled", "interrupted"].includes(r.status) && (n.cancelled = !0, n.controller.abort(), O(!0), te(null), g(""), v(null), c((e) => e.map((e) => e.id === `answer-${n.userId}` ? {
+				["cancelled", "interrupted"].includes(r.status) && (n.cancelled = !0, n.controller.abort(), O(!0), le(null), oe.current = null, g(""), v(null), c((e) => e.map((e) => e.id === `answer-${n.userId}` ? {
 					...e,
 					status: {
 						type: "incomplete",
@@ -26988,9 +27109,10 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 	}, [
 		e.account,
 		e.chat,
+		ke,
 		t,
 		T
-	]), Te = async (e) => {
+	]), Re = async (e) => {
 		if (C) return;
 		let t = Array.from(e);
 		if (t.some((e) => ![
@@ -26999,11 +27121,11 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 			"image/webp",
 			"image/gif"
 		].includes(e.type))) {
-			g("Adjunta imagenes PNG, JPEG, WebP o GIF.");
+			g("Adjunta imágenes PNG, JPEG, WebP o GIF.");
 			return;
 		}
 		if (x.length + t.length > 4 || x.reduce((e, t) => e + t.size, 0) + t.reduce((e, t) => e + t.size, 0) > 8388608) {
-			g("Maximo 4 imagenes y 8 MiB en total.");
+			g("Máximo 4 imágenes y 8 MiB en total.");
 			return;
 		}
 		w(!0);
@@ -27022,62 +27144,117 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 		} finally {
 			w(!1);
 		}
-	}, Ee = pl({
+	}, ze = pl({
 		messages: s,
-		onNew: Ce,
-		onCancel: we,
+		onNew: Ie,
+		onCancel: Le,
 		convertMessage: (e) => e,
 		isRunning: d,
-		isSendDisabled: !e.chat || l || d
-	}), De = [...s].reverse().find((e) => e.role === "assistant"), Oe = De?.status?.type === "incomplete" ? "" : De?.content[0]?.text || "", ke = () => {
-		!A || pe.current || d || (pe.current = !0, Se(A.text, A.options).catch(() => {}).finally(() => {
-			pe.current = !1;
+		isSendDisabled: !e.chat || l || j || ae.current || d || ce?.uncertain
+	}), Be = [...s].reverse().find((e) => e.role === "assistant"), Ve = Be?.status?.type === "incomplete" ? "" : Be?.content[0]?.text || "", He = () => {
+		!ce?.retryable || xe.current || d || (xe.current = !0, Fe(ce.text, ce.options).catch(() => {}).finally(() => {
+			xe.current = !1;
 		}));
-	}, Ae = (e) => {
+	}, Ue = (e) => {
 		e.preventDefault();
 		let t = p.trim();
-		(t || x.length) && !C && !d && !l && Ce({
+		(t || x.length) && !C && !d && !l && !ie.current && !ae.current && Ie({
 			role: "user",
 			content: [{
 				type: "text",
 				text: t
 			}]
 		}).catch(() => {});
-	}, je = (e) => {
+	}, We = (e) => {
 		e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), e.currentTarget.form?.requestSubmit());
 	};
-	(0, j.useEffect)(() => {
-		let e = F.current;
+	(0, M.useEffect)(() => {
+		let e = we.current;
 		e && (e.style.height = "auto", e.style.height = `${Math.min(e.scrollHeight, 160)}px`);
 	}, [
 		p,
 		r,
 		e.chat
-	]), (0, j.useEffect)(() => {
-		r && be();
+	]), (0, M.useEffect)(() => {
+		r && Me();
 	}, [
 		r,
 		s,
 		_,
 		d,
 		l,
-		be
+		Me
 	]);
-	let Me = e.chat ? "Escribe para consultar sobre esta conversación." : "Selecciona una conversación para empezar.";
+	let Ge = e.chat ? "Escribe para consultar sobre esta conversación." : "Selecciona una conversación para empezar.", Ke = k?.models || [], qe = Ke.find((e) => e.id === k?.model)?.reasoningEfforts || [], Je = !e.chat || !k || l || A || j || d || !!ce;
 	return /* @__PURE__ */ (0, U.jsx)(ld, {
-		runtime: Ee,
+		runtime: ze,
 		children: /* @__PURE__ */ (0, U.jsx)("div", {
 			className: "ai-thread",
-			ref: he,
+			ref: Ce,
 			children: /* @__PURE__ */ (0, U.jsxs)(nm.Root, {
 				className: "ai-conversation",
 				children: [
+					/* @__PURE__ */ (0, U.jsxs)("div", {
+						className: "ai-settings",
+						"aria-label": "Configuración del agente",
+						"aria-busy": A || j,
+						children: [
+							/* @__PURE__ */ (0, U.jsxs)("label", { children: ["Modelo", /* @__PURE__ */ (0, U.jsxs)("select", {
+								"aria-label": "Modelo",
+								value: k?.model || "",
+								disabled: Je || !Ke.length,
+								onChange: (e) => {
+									let t = Ke.find((t) => t.id === e.target.value)?.reasoningEfforts.some((e) => e.value === k.reasoningEffort) ? k.reasoningEffort : "default";
+									De(e.target.value, t);
+								},
+								children: [!Ke.length && /* @__PURE__ */ (0, U.jsx)("option", {
+									value: "",
+									children: A ? "Cargando…" : "No disponible"
+								}), Ke.map((e) => /* @__PURE__ */ (0, U.jsx)("option", {
+									value: e.id,
+									children: e.label || e.id
+								}, e.id))]
+							})] }),
+							/* @__PURE__ */ (0, U.jsxs)("label", { children: ["Thinking", /* @__PURE__ */ (0, U.jsxs)("select", {
+								"aria-label": "Thinking",
+								value: k?.reasoningEffort || "default",
+								disabled: Je || qe.length < 2,
+								onChange: (e) => De(k.model, e.target.value),
+								children: [!qe.length && /* @__PURE__ */ (0, U.jsx)("option", {
+									value: "default",
+									children: "Predeterminado"
+								}), qe.map((e) => /* @__PURE__ */ (0, U.jsx)("option", {
+									value: e.value,
+									children: e.label
+								}, e.value))]
+							})] }),
+							(A || j) && /* @__PURE__ */ (0, U.jsx)("span", {
+								className: "ai-settings-status",
+								role: "status",
+								children: j ? "Guardando…" : "Cargando…"
+							}),
+							re && /* @__PURE__ */ (0, U.jsxs)("div", {
+								className: "ai-settings-error",
+								role: "alert",
+								children: [
+									re,
+									" ",
+									/* @__PURE__ */ (0, U.jsx)("button", {
+										type: "button",
+										disabled: j || A,
+										onClick: () => void Ee(),
+										children: "Recargar"
+									})
+								]
+							})
+						]
+					}),
 					/* @__PURE__ */ (0, U.jsxs)(nm.Viewport, {
 						className: "ai-history",
 						"aria-label": "Conversación con Social Media Agent",
 						onScroll: (e) => {
 							let t = e.currentTarget;
-							me.current = t.scrollHeight - t.scrollTop - t.clientHeight < 80;
+							Se.current = t.scrollHeight - t.scrollTop - t.clientHeight < 80;
 						},
 						children: [
 							l ? /* @__PURE__ */ (0, U.jsx)("p", {
@@ -27086,7 +27263,7 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 								children: "Cargando conversación…"
 							}) : s.length === 0 ? /* @__PURE__ */ (0, U.jsx)("p", {
 								className: "ai-note",
-								children: Me
+								children: Ge
 							}) : null,
 							/* @__PURE__ */ (0, U.jsx)(nm.Messages, { components: { Message: Tw } }),
 							d && _ && /* @__PURE__ */ (0, U.jsxs)("div", {
@@ -27136,28 +27313,28 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 							h && /* @__PURE__ */ (0, U.jsxs)("div", {
 								className: "ai-error",
 								role: "alert",
-								children: [/* @__PURE__ */ (0, U.jsx)("p", { children: h }), A && !d && /* @__PURE__ */ (0, U.jsx)("button", {
+								children: [/* @__PURE__ */ (0, U.jsx)("p", { children: h }), ce?.retryable && !d && /* @__PURE__ */ (0, U.jsx)("button", {
 									type: "button",
-									onClick: ke,
+									onClick: He,
 									children: "Reintentar"
 								})]
 							}),
-							Oe && !d && !A && /* @__PURE__ */ (0, U.jsx)("button", {
+							Ve && !d && !ce && /* @__PURE__ */ (0, U.jsx)("button", {
 								id: "ai-use-draft",
 								type: "button",
 								disabled: !e.chat,
-								onClick: () => n(Oe, e),
+								onClick: () => n(Ve, e),
 								children: "Usar como borrador"
 							})
 						]
 					}),
-					ne.length > 0 && /* @__PURE__ */ (0, U.jsxs)("section", {
+					ue.length > 0 && /* @__PURE__ */ (0, U.jsxs)("section", {
 						className: "ai-proposals",
 						"aria-label": "Propuestas pendientes",
 						children: [
 							/* @__PURE__ */ (0, U.jsx)("h3", { children: "Propuestas pendientes" }),
 							/* @__PURE__ */ (0, U.jsx)("p", { children: "Revisa el texto exacto antes de aprobar su envío por WhatsApp." }),
-							ne.map((e) => /* @__PURE__ */ (0, U.jsxs)("article", {
+							ue.map((e) => /* @__PURE__ */ (0, U.jsxs)("article", {
 								className: "ai-proposal",
 								children: [/* @__PURE__ */ (0, U.jsx)("div", {
 									className: "ai-proposal-text",
@@ -27166,14 +27343,14 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 									className: "ai-proposal-actions",
 									children: [/* @__PURE__ */ (0, U.jsx)("button", {
 										type: "button",
-										disabled: !!re,
-										onClick: () => ye(e.id, "reject"),
+										disabled: !!fe,
+										onClick: () => je(e.id, "reject"),
 										children: "Descartar"
 									}), /* @__PURE__ */ (0, U.jsx)("button", {
 										type: "button",
 										className: "primary",
-										disabled: !!re,
-										onClick: () => ye(e.id, "approve"),
+										disabled: !!fe,
+										onClick: () => je(e.id, "approve"),
 										children: "Aprobar y enviar"
 									})]
 								})]
@@ -27182,7 +27359,7 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 					}),
 					x.length > 0 && /* @__PURE__ */ (0, U.jsx)("div", {
 						className: "ai-attachments",
-						"aria-label": "Imagenes adjuntas",
+						"aria-label": "Imágenes adjuntas",
 						children: x.map((e, t) => /* @__PURE__ */ (0, U.jsxs)("div", {
 							className: "ai-attachment",
 							children: [/* @__PURE__ */ (0, U.jsx)("img", {
@@ -27198,16 +27375,16 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 					}),
 					/* @__PURE__ */ (0, U.jsxs)("form", {
 						className: "ai-composer",
-						onSubmit: Ae,
+						onSubmit: Ue,
 						children: [
 							/* @__PURE__ */ (0, U.jsx)("input", {
 								type: "file",
-								ref: ee,
+								ref: se,
 								hidden: !0,
 								accept: "image/png,image/jpeg,image/webp,image/gif",
 								multiple: !0,
 								onChange: (e) => {
-									Te(e.target.files), e.target.value = "";
+									Re(e.target.files), e.target.value = "";
 								}
 							}),
 							/* @__PURE__ */ (0, U.jsx)("button", {
@@ -27215,7 +27392,7 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 								className: "ai-send ai-attach",
 								"aria-label": "Adjuntar imágenes",
 								disabled: !e.chat || l || C,
-								onClick: () => ee.current?.click(),
+								onClick: () => se.current?.click(),
 								children: "+"
 							}),
 							/* @__PURE__ */ (0, U.jsx)("label", {
@@ -27225,31 +27402,31 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 							}),
 							/* @__PURE__ */ (0, U.jsx)("textarea", {
 								id: "ai-prompt",
-								ref: F,
+								ref: we,
 								value: p,
 								onChange: (e) => m(e.target.value),
-								onKeyDown: je,
+								onKeyDown: We,
 								onPaste: (e) => {
 									let t = Array.from(e.clipboardData?.files || []);
-									t.length && (e.preventDefault(), Te(t));
+									t.length && (e.preventDefault(), Re(t));
 								},
 								placeholder: "Escribe un mensaje",
 								rows: "1",
 								disabled: !e.chat || l
 							}),
-							d ? /* @__PURE__ */ (0, U.jsx)("button", {
+							d || ce?.uncertain ? /* @__PURE__ */ (0, U.jsx)("button", {
 								id: "ai-stop",
 								className: "ai-send ai-stop",
 								type: "button",
 								disabled: T,
-								onClick: we,
+								onClick: Le,
 								"aria-label": "Detener respuesta",
 								children: T ? "…" : "■"
 							}) : /* @__PURE__ */ (0, U.jsx)("button", {
 								id: "ai-send",
 								className: "ai-send",
 								type: "submit",
-								disabled: !e.chat || l || d || C || !p.trim() && !x.length,
+								disabled: !e.chat || l || j || ae.current || d || C || !p.trim() && !x.length,
 								"aria-label": "Enviar mensaje",
 								children: /* @__PURE__ */ (0, U.jsx)("svg", {
 									viewBox: "0 0 24 24",

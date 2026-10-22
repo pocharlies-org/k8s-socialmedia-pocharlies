@@ -94,7 +94,7 @@ export function createEmojiPicker({documentRef = document, account, onSelect, is
       : selectedGroup === 'recent' ? preferences.recents.map(emoji => allVariants.get(emoji)).filter(Boolean)
       : filterEmojis(catalog.items, '', selectedGroup);
     for (const category of categories.children) category.setAttribute('aria-pressed', String(!query && category.dataset.group === String(selectedGroup)));
-    status.textContent = items.length ? `${items.length} emojis` : query ? 'No se encontraron emojis.' : 'Todav\u00eda no has usado emojis en esta cuenta.';
+    status.textContent = items.length ? `${items.length} ${items.length === 1 ? 'emoji' : 'emojis'}` : query ? 'Ning\u00fan emoji.' : 'Todav\u00eda no has usado emojis en esta cuenta.';
     for (const item of items) {
       const displayed = selectedGroup === 'recent' && !query ? item : emojiVariant(item, preferences.tone);
       const element = emojiButton(displayed);
