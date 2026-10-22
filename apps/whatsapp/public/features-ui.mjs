@@ -1019,7 +1019,13 @@ export function installFeatureUI({
       copy.append(node('strong', '', item.name || item.fileName || item.file_name || item.title || item.url || 'Elemento'));
       if (item.timestamp) copy.append(node('small', '', new Date(item.timestamp).toLocaleDateString('es-ES')));
       card.append(copy);
-      if (url) { card.setAttribute('role', 'link'); card.tabIndex = 0; card.onclick = () => windowRef?.open?.(url, '_blank', 'noopener,noreferrer'); }
+      // shortcut: role=link sin <a> no da click medio ni «abrir en pestaña»;
+      // el teclado sí queda cubierto. Si se pide, migrar la tarjeta a <a href>.
+      if (url) {
+        const open = () => windowRef?.open?.(url, '_blank', 'noopener,noreferrer');
+        card.setAttribute('role', 'link'); card.tabIndex = 0; card.onclick = open;
+        card.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
+      }
       list.append(card);
     }
     modal.body.querySelector('.feature-loading')?.remove();
