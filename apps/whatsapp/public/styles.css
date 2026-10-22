@@ -1868,3 +1868,7 @@ body[data-theme="light"] .event-composer > .primary { color: #fff; }
 .feature-search-date { display:flex; flex-wrap:wrap; align-items:end; gap:10px; padding:12px 0; border-bottom:1px solid var(--line); }
 .feature-search-date .feature-field { flex:1; min-width:160px; }
 .feature-search-date [role="status"] { flex-basis:100%; margin:0; }
+/* QA #60: contador de caracteres junto al límite del composer. */
+#char-count { display:block; text-align:right; font-size:11px; color:inherit; opacity:.6; }
+/* QA #85 (menor): señal visual mientras se arrastran ficheros a la conversación. */
+.conversation.is-over { outline:2px dashed var(--accent); outline-offset:-8px; }

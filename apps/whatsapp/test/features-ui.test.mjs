@@ -55,13 +55,6 @@ test('sidebar has one feature filter row without the old duplicate controls', as
   assert.doesNotMatch(ui, /\['Archivados', 'archived'\]/);
 });
 
-test('the starred chip shows active while its dialog is open (QA #17)', async () => {
-  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
-  // No pasa por setView (vaciaría la lista: matchesChat('starred') es false); marca y restaura.
-  assert.match(ui, /paint\('starred'\)/);
-  assert.match(ui, /modal\.onClose = \(\) => paint\(runtime\.currentView\)/);
-});
-
 test('feature preferences normalize invalid entries and persist per account', () => {
   const calls = new Map();
   const storage = {
@@ -337,10 +330,33 @@ test('la rejilla de la galería usa el thumb y pagina con «Cargar más» (QA #7
   assert.match(ui, /button\(documentRef, 'Cargar más', 'feature-button subtle'\)/);
   assert.match(ui, /kind: serverKind, limit: 60, cursor/);
 });
+test('silenciar ofrece «Siempre» y el menú de adjuntos ofrece «GIF» (UX #26.1, QA #85)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /\['Siempre', \(\) => perform\('mute', \{ muted: true \}\)\]/);
+  assert.match(ui, /addAttach\('GIF', 'gif'/);
+  assert.match(ui, /input\.accept = 'image\/gif'/);
+  assert.match(ui, /kind: 'gif', name: file\.name, mimeType: 'image\/gif'/);
+});
+test('QA #80: tras un compose se refresca una vez llegado el eco diferido', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /function refetchAfterEcho\(\)/);
+  assert.match(ui, /if \(result\) refetchAfterEcho\(\);/);
+  assert.match(ui, /onSent: \(\) => \{closeModal\(\); void loadMessages\(\); refetchAfterEcho\(\);\}/);
+  assert.match(ui, /if \(result\) \{ refetchAfterEcho\(\); closeModal\(\); \}/);
+});
 test('QA #59: el diálogo de acciones del mensaje es un menú navegable con flechas', async () => {
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(ui, /setAttribute\('aria-label', 'Acciones del mensaje'\)/);
   assert.match(ui, /item\.setAttribute\('role', 'menuitem'\); item\.tabIndex = -1; item\.onclick = \(\) => handler\(message\)/);
   assert.match(ui, /actions\.firstElementChild\?\.focus\(\)/);
   assert.match(ui, /event\.key === 'ArrowDown' \? \(index \+ 1\) % items\.length : event\.key === 'ArrowUp'/);
+});
+test('«Destacados» es una vista con estado vacío, no un diálogo (QA #89/#97)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /async function renderStarredView\(container\)/);
+  assert.match(ui, /No hay mensajes destacados\./);
+  assert.match(ui, /item\.onclick = \(\) => setView\(view\);/);
+  assert.match(ui, /starredView: renderStarredView,/);
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /featureUI\.starredView\?\.\(\$\('chats'\)\)/);
 });

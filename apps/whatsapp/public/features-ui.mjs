@@ -767,6 +767,16 @@ export function installFeatureUI({
     });
   }
 
+  // QA #80: la fila de un compose sólo existe cuando el conector ingiere su eco
+  // (asíncrono, sin evento NATS): el loadMessages inmediato no la veía.
+  function refetchAfterEcho() {
+    const context = { account: runtime.account, chat: runtime.chat, generation: runtime.generation };
+    // shortcut: 2,5 s cubre el eco medido; si se falla, subir a la ingesta real.
+    setTimeout(() => {
+      if (runtime.account === context.account && runtime.chat === context.chat && runtime.generation === context.generation) void loadMessages();
+    }, 2500);
+  }
+
   function updateChatFlags(chatId, values) {
     const chat = array(getChats()).find(item => text(item?.id) === text(chatId));
     if (chat) Object.assign(chat, values);
@@ -1545,6 +1555,8 @@ export function installFeatureUI({
     else branch('Silenciar notificaciones', [
       ['8 horas', () => perform('mute', { muted: true }, { durationMs: 8 * 60 * 60 * 1000 })],
       ['1 semana', () => perform('mute', { muted: true }, { durationMs: 7 * 24 * 60 * 60 * 1000 })],
+      // UX #26.1: sin durationMs el puente del conector silencia sin fin (controller.ts:2100).
+      ['Siempre', () => perform('mute', { muted: true })],
     ]);
     const pinned = chatIsPinned(chat, prefs());
     add(actions, pinned ? 'Desfijar chat' : 'Fijar chat', () => perform(pinned ? 'unpin' : 'pin', { pinned: !pinned }));
@@ -1761,29 +1773,28 @@ export function installFeatureUI({
 
   function cryptoRandom() { return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
-  async function openStarred() {
-    const modal = openModal('Mensajes destacados', { wide: true });
-    // El chip «Destacados» abre un diálogo, no filtra la lista (matchesChat('starred') es false),
-    // así que no pasa por setView: se marca activo mientras el diálogo vive y se restaura al cerrar.
-    const paint = active => { for (const chip of documentRef.querySelectorAll('[data-feature-view]')) chip.setAttribute('aria-pressed', String(chip.dataset.featureView === active)); };
-    paint('starred');
-    modal.onClose = () => paint(runtime.currentView);
+  // QA #89/#97: «Destacados» es una vista de mensajes (no un diálogo): renderiza en la lista lateral.
+  let starredToken = 0;
+  async function renderStarredView(container) {
+    const token = ++starredToken;
     const account = runtime.account;
+    const isCurrent = () => token === starredToken && runtime.account === account && runtime.currentView === 'starred';
+    container.replaceChildren(node('p', 'feature-muted', 'Cargando mensajes destacados…'));
     const loadPage = async before => {
       let result;
       try { result = await request('/api/favorites/starred', undefined, { limit: '100', ...(before ? { before } : {}) }); }
-      catch (error) { if (runtime.modal?.body === modal.body) modal.body.append(node('p', 'feature-muted', error.message || 'No se pudieron cargar los mensajes destacados.')); return; }
-      if (runtime.account !== account || runtime.modal?.body !== modal.body) return;
-      modal.body.querySelector('.feature-load-more')?.remove();
+      catch (error) { if (isCurrent()) container.replaceChildren(node('p', 'feature-muted', error.message || 'No se pudieron cargar los mensajes destacados.')); return; }
+      if (!isCurrent()) return;
+      container.querySelector('.feature-load-more')?.remove();
       const items = array(result.items);
-      if (!items.length && !before) { modal.body.append(node('p', 'feature-muted', 'No hay mensajes destacados.')); return; }
+      if (!items.length && !before) { container.replaceChildren(node('p', 'feature-muted', 'No hay mensajes destacados.')); return; }
       for (const item of items) {
         const row = button(documentRef, '', 'feature-search-result');
         row.append(node('strong', '', item.chatName || item.chatId || 'Conversación'), node('span', '', messageText(item)));
-        row.onclick = () => { const id = text(item.chatId); if (!id) return; const chat = array(getChats()).find(candidate => text(candidate.id) === id) || { id, name: item.chatName || id }; closeModal(); selectChat(chat); };
-        modal.body.append(row);
+        row.onclick = () => { const id = text(item.chatId); if (!id) return; const chat = array(getChats()).find(candidate => text(candidate.id) === id) || { id, name: item.chatName || id }; selectChat(chat); };
+        container.append(row);
       }
-      if (result.nextCursor) { const more = button(documentRef, 'Mostrar más', 'feature-button subtle feature-load-more'); more.onclick = () => loadPage(text(result.nextCursor)); modal.body.append(more); }
+      if (result.nextCursor) { const more = button(documentRef, 'Mostrar más', 'feature-button subtle feature-load-more'); more.onclick = () => loadPage(text(result.nextCursor)); container.append(more); }
     };
     await loadPage('');
   }
@@ -1958,6 +1969,7 @@ export function installFeatureUI({
           if (!isCurrent() || selectedFile !== file) return;
           sendToken ||= crypto.randomUUID();
           const result = await mutate('/api/messages/compose', { kind: 'sticker', name: file.name, mimeType: file.type, data, sendToken }, { refreshMessages: true, success: 'Sticker enviado.' });
+          if (result) refetchAfterEcho();
           if (result && isCurrent()) closeModal();
         } catch (error) {
           if (isCurrent()) toast(error.message, 'error');
@@ -1997,7 +2009,7 @@ export function installFeatureUI({
           const result = await request('/api/messages/compose', {kind: type, payload, sendToken});
           if (result.confirmed !== true && result.sent !== true) throw new Error('No se ha confirmado el envío.');
         },
-        onSent: () => {closeModal(); void loadMessages();},
+        onSent: () => {closeModal(); void loadMessages(); refetchAfterEcho();},
       }));
       return;
     }
@@ -2007,7 +2019,7 @@ export function installFeatureUI({
     submit.type = 'submit';
     for (const item of fields) form.append(item.wrapper); form.append(submit);
     let lastPayload = ''; let sendToken = '';
-    form.onsubmit = async event => { event.preventDefault(); const values = formData(form); const signature = JSON.stringify(values); if (signature !== lastPayload) { sendToken = crypto.randomUUID(); lastPayload = signature; } const result = await mutate('/api/messages/compose', { kind: type, payload: values, sendToken }, { refreshMessages: true, success: 'Contenido preparado para enviar.' }); if (result) closeModal(); };
+    form.onsubmit = async event => { event.preventDefault(); const values = formData(form); const signature = JSON.stringify(values); if (signature !== lastPayload) { sendToken = crypto.randomUUID(); lastPayload = signature; } const result = await mutate('/api/messages/compose', { kind: type, payload: values, sendToken }, { refreshMessages: true, success: 'Contenido preparado para enviar.' }); if (result) { refetchAfterEcho(); closeModal(); } };
     modal.body.append(form, node('p', 'feature-muted', 'La entrega queda confirmada por el proveedor; no se muestra como enviada antes de esa respuesta.'));
   }
 
@@ -2270,7 +2282,7 @@ export function installFeatureUI({
     const search = documentRef.querySelector('.chat-sidebar > .search');
     const views = node('nav', 'feature-view-nav'); views.setAttribute('aria-label', 'Vistas de conversaciones');
     for (const [label, view] of [['Todos', 'all'], ['No leídos', 'unread'], ['Grupos', 'groups'], ['Favoritos', 'favorites'], ['Destacados', 'starred']]) {
-      const item = button(documentRef, label, 'feature-view-button'); item.dataset.featureView = view; item.setAttribute('aria-pressed', String(runtime.currentView === view)); item.onclick = () => view === 'starred' ? openStarred() : setView(view); views.append(item);
+      const item = button(documentRef, label, 'feature-view-button'); item.dataset.featureView = view; item.setAttribute('aria-pressed', String(runtime.currentView === view)); item.onclick = () => setView(view); views.append(item);
     }
     search?.after(views);
     const archiveTitle = node('header', 'feature-archive-title'); archiveTitle.id = 'feature-archived-title'; archiveTitle.hidden = true;
@@ -2312,6 +2324,7 @@ export function installFeatureUI({
       camera: ['M4 7h4l2-2h4l2 2h4v13H4z', 'M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'],
       audio: ['M9 4v12a3 3 0 1 1-2-3', 'M9 6l10-2v12a3 3 0 1 1-2-3'],
       sticker: ['M4 4h16v11l-5 5H4z', 'M15 20v-5h5'],
+      gif: ['M3 7h18v10H3z', 'M7 11v2', 'M10.5 11v2', 'M14 11v2', 'M17 11v2'],
       contact: ['M4 5h16v14H4z', 'M10 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z', 'M6.5 16c0-2 1.5-3 3.5-3s3.5 1 3.5 3', 'M16 10h2', 'M16 13h2'],
       poll: ['M5 5h3v3H5z', 'M11 6h8', 'M5 11h3v3H5z', 'M11 12h8', 'M5 17h3v3H5z', 'M11 18h8'],
       event: ['M4 5h16v16H4z', 'M4 9h16', 'M8 3v4', 'M16 3v4', 'M8 13h3', 'M8 17h3'],
@@ -2331,6 +2344,18 @@ export function installFeatureUI({
     addAttach('Encuesta', 'poll', () => openShare('poll'));
     addAttach('Evento', 'event', () => openShare('event'));
     addAttach('Nuevo sticker', 'sticker', () => openPicker('sticker'));
+    // QA #85: el conector ya acepta GIF (el server convierte gif→mp4, server.mjs:2436); faltaba la entrada.
+    addAttach('GIF', 'gif', () => {
+      const input = documentRef.createElement('input');
+      input.type = 'file'; input.accept = 'image/gif';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const sendToken = crypto.randomUUID();
+        await mutate('/api/messages/compose', { kind: 'gif', name: file.name, mimeType: 'image/gif', data: await readBase64(file), sendToken }, { refreshMessages: true, success: 'GIF enviado.' });
+      };
+      input.click();
+    });
     composer?.append(attachMenu);
     if (attachment) {
       attachment.setAttribute('aria-haspopup', 'menu'); attachment.setAttribute('aria-controls', 'feature-attach-menu'); attachment.setAttribute('aria-expanded', 'false');
@@ -2494,6 +2519,7 @@ export function installFeatureUI({
     closePanels: () => { runtime.closeAttachMenu?.(); closeContactDirectory(); closeModal(); },
     setView,
     isFeatureView: () => runtime.currentView,
+    starredView: renderStarredView,
     getState: () => ({ ...runtime, selectedMessageIds: new Set(runtime.selectedMessageIds) }),
   };
 }
