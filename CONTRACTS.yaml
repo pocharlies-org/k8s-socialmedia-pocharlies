@@ -286,7 +286,10 @@ contracts:
     The WhatsApp message id is derived from (account, key) (`3EB0` + 18 hex). While the table is missing
     the key is ignored and the send goes out. The header/field names, the replay semantics, the two 409
     failureClass values and the no-key-is-legacy rule are contract: changing any is breaking — a new `.v2`
-    entry beside this one.'
+    entry beside this one. QA #49 (22-10): a failure that provably never reached the network — Baileys''
+    media upload, ''Media upload failed on all hosts'', which precedes the message post by construction —
+    moves the claimed row to ''failed'' and stays retryable; the 409 send_outcome_uncertain is reserved
+    for post-network outcomes.'
 - id: http.whatsapp-connector.messages-react.v1
   kind: http-route
   value: /messages/react
