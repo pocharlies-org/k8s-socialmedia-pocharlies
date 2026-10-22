@@ -100,7 +100,6 @@ export async function readMediaLibrary({ account, params, query }) {
       ${isLinks ? ', p.message_payload->\'extendedTextMessage\' AS preview_payload' : `, a.mime_type, a.file_name, a.file_size${durationColumns.map(column => `, a.${column}`).join('')}`}
     FROM messages m JOIN conversations c ON c.id=m.conversation_id AND c.account=m.account
     ${options.q ? 'LEFT JOIN participants sender ON sender.id=m.sender_wa_id AND sender.account=m.account' : ''}
-    // UX #38.1: el título del preview vive en el payload duradero (misma guarda de tamaño que /api/link-thumb).
     ${isLinks ? 'LEFT JOIN whatsapp_message_payloads p ON p.wa_message_id=m.wa_message_id AND p.account=m.account AND pg_column_size(p.message_payload->\'extendedTextMessage\') <= 300000' : ''}
     ${isLinks ? '' : 'LEFT JOIN attachments a ON a.message_id=m.id'}
     WHERE ${where.join(' AND ')}

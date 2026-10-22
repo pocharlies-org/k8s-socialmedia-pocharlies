@@ -4,6 +4,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {
   CONTACT_DIRECTORY_ACTIONS,
   CONTACT_DIRECTORY_LIMIT,
@@ -257,4 +258,9 @@ test('la misma página repetida sale de la caché sin re-pedir (QA #103)', async
   assert.equal(calls, 1);
   await client.page({ q: 'bea' });
   assert.equal(calls, 2);
+});
+test('open({query}) prellena el buscador del directorio (QA #125)', async () => {
+  const src = await readFile(new URL('../public/contact-directory-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /function open\(\{ opener = null, query = '' \} = \{\}\)/);
+  assert.match(src, /if \(state\.queryInput\) input\.value = state\.queryInput;/);
 });

@@ -286,9 +286,15 @@ function renderChats() {
   sidebarSearch?.viewChanged(archivedView);
   // UX #6.1: el buscador filtra también dentro de Archivados (antes se vaciaba).
   const search = foldSearch($('search').value.trim());
+  // QA #125 (22-10): un término todo dígitos busca también por el número del chat
+  // (id de conversación o waChatId), no solo por el texto pintado.
+  const term = $('search').value.trim();
+  const digits = term.replace(/\D/g, '');
+  const numeric = /^\+?[\d\s]{5,}$/.test(term);
+  const numberMatches = chat => numeric && [chat.id, chat.waChatId].some(value => String(value ?? '').replace(/\D/g, '').includes(digits));
   const filter = chatFilterValue();
   state.chatFilter = filter;
-  const chats = pinnedFirst(state.chats.filter(chat => chatMatchesFilter(chat, filter) && foldSearch(`${chat.name || ''} ${chat.preview || ''}`).includes(search)));
+  const chats = pinnedFirst(state.chats.filter(chat => chatMatchesFilter(chat, filter) && (foldSearch(`${chat.name || ''} ${chat.preview || ''}`).includes(search) || numberMatches(chat))));
   $('chat-count').textContent = String(state.chats.length);
   // QA #74: la pestaña no avisaba de los no leídos (title fijo «SocialMedia»).
   const unreadTotal = state.chats.reduce((sum, chat) => sum + (chat.unread === true ? 1 : Math.max(0, Number(chat.unread) || 0)), 0);
@@ -329,7 +335,9 @@ function renderChats() {
     // UX #4.5: el nombre accesible de la fila se derivaba del DOM y la elipsis CSS
     // no oculta el texto al lector de pantalla: filas con mensajes largos =
     // etiquetas de párrafos enteros. Nombre + previsualización truncados a 120.
-    const rowLabel = `${chat.name || chat.id}: ${chat.preview || 'Sin mensajes disponibles'}`;
+    // QA #101 (22-10): el aria-label del botón manda sobre el badge interior, así que
+    // el silencio debe ir en la etiqueta de la fila o un lector la lee igual que una normal.
+    const rowLabel = `${chat.name || chat.id}: ${chat.preview || 'Sin mensajes disponibles'}${chat.muted === true || chat.isMuted === true ? ' · Silenciado' : ''}`;
     button.setAttribute('aria-label', rowLabel.length > 120 ? `${rowLabel.slice(0, 120)}…` : rowLabel);
     // QA #75: click con ratón (detail ≥1) no roba foco; Enter/espacio (detail 0)
     // abre y deja el cursor en el composer, como la oficial.
@@ -360,6 +368,15 @@ function renderChats() {
     }
     row.append(button, menu, ...quicks);
     $('chats').append(row);
+  }
+  // QA #125: un número sin coincidencia en el listado no es un callejón — ofrece abrir
+  // el chat con ese número (el directorio ya sabe empezar chats por teléfono).
+  if (numeric && !chats.length && state.chats.length) {
+    const offer = node('button', 'chat-item');
+    offer.type = 'button';
+    offer.textContent = `Chatear con +${digits}`;
+    offer.onclick = () => featureUI?.openNewChat?.('chat', digits);
+    $('chats').append(offer);
   }
   // UX #39.2: cada filtro vacío enseña qué le falta y dónde se marca (la oficial).
   const emptyFilters = {favorites: 'Aún no has destacado ningún chat. Toca «⌄» en cualquier chat y elige «Destacar chat».', unread: 'No tienes chats sin leer.', groups: 'Todavía no compartes ningún grupo.'};

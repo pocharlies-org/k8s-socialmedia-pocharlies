@@ -24,6 +24,7 @@ for (const type of ['uuid', 'bigint']) {
         message_type text, wa_timestamp timestamptz, metadata jsonb DEFAULT '{}');
       CREATE TABLE attachments (id ${type} PRIMARY KEY, message_id ${type} REFERENCES messages(id),
         mime_type text, file_name text, file_size bigint, duration_seconds integer${type === 'uuid' ? ', duration integer' : ''});
+      CREATE TABLE whatsapp_message_payloads (account text, wa_message_id text, message_payload jsonb);
       INSERT INTO conversations VALUES ('chat@g.us', 'a', 'Group'), ('other@g.us', 'b', 'Other');`);
     const ids = type === 'uuid' ? [uuid(2), uuid(10), uuid(11), uuid(12)]
       : ['2', '10', '9007199254740992', '9007199254740993'];

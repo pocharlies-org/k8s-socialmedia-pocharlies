@@ -404,7 +404,8 @@ export function installContactDirectoryUI({
     if (restoreFocus && state.opener?.isConnected !== false) state.opener.focus?.();
   }
 
-  function open({ opener = null } = {}) {
+  // QA #125: query prellena el buscador (la lista llega filtrada por ese número).
+  function open({ opener = null, query = '' } = {}) {
     if (!state.closed) close({ restoreFocus: false });
     const overlay = node('div', 'contact-directory-overlay');
     overlay.setAttribute('role', 'presentation');
@@ -472,7 +473,8 @@ export function installContactDirectoryUI({
 
     state.root = overlay;
     state.panel = panel;
-    state.queryInput = '';
+    state.queryInput = text(query);
+    if (state.queryInput) input.value = state.queryInput;
     state.entries = [];
     state.nextCursor = null;
     state.list = list;

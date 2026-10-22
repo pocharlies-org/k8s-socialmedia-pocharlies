@@ -1619,6 +1619,8 @@ export function installFeatureUI({
     else branch('Silenciar notificaciones', [
       ['8 horas', () => perform('mute', { muted: true }, { durationMs: 8 * 60 * 60 * 1000 })],
       ['1 semana', () => perform('mute', { muted: true }, { durationMs: 7 * 24 * 60 * 60 * 1000 })],
+      // QA #101 (22-10): la oficial da 8 h / 1 semana / 1 año; faltaba la larga.
+      ['1 año', () => perform('mute', { muted: true }, { durationMs: 365 * 24 * 60 * 60 * 1000 })],
       // UX #26.1: sin durationMs el puente del conector silencia sin fin (controller.ts:2100).
       ['Siempre', () => perform('mute', { muted: true })],
     ]);
@@ -1971,11 +1973,11 @@ export function installFeatureUI({
     return runtime.contactDirectory;
   }
 
-  function openNewChat(initialType = 'chat') {
+  function openNewChat(initialType = 'chat', query = '') {
     closeModal();
     if (initialType === 'group') { newGroupForm(); return; }
     if (initialType === 'contact') { newContactForm(); return; }
-    contactDirectory()?.open({ opener: documentRef.activeElement });
+    contactDirectory()?.open({ opener: documentRef.activeElement, query });
   }
 
   function openPicker(initial = 'emoji') {
@@ -2603,6 +2605,8 @@ export function installFeatureUI({
     setView,
     isFeatureView: () => runtime.currentView,
     starredView: renderStarredView,
+    // QA #125: la lista ofrece «Chatear con +NNN» y aterriza en el directorio filtrado.
+    openNewChat,
     getState: () => ({ ...runtime, selectedMessageIds: new Set(runtime.selectedMessageIds) }),
   };
 }

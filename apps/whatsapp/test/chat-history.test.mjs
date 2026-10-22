@@ -162,3 +162,17 @@ test('el tema se aplica al root y el theme-color le sigue (QA #108)', async () =
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /html\[data-theme="light"\],\s*\nbody\[data-theme="light"\] \{\n  color-scheme: light;/);
 });
+test('el buscador casa números contra el id del chat y ofrece chatear si nada (QA #125)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.ok(src.includes("const numeric = /^\\+?[\\d\\s]{5,}$/.test(term)"));
+  assert.match(src, /numberMatches\(chat\)/);
+  assert.match(src, /Chatear con \+\$\{digits\}/);
+  assert.match(src, /featureUI\?\.openNewChat\?\.\('chat', digits\)/);
+});
+
+test('la fila silenciada lo dice en el aria-label y el submenú da 1 año (QA #101)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /\? ' · Silenciado' : ''\}/);
+  const features = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(features, /\['1 año', \(\) => perform\('mute', \{ muted: true \}, \{ durationMs: 365 \* 24 \* 60 \* 60 \* 1000 \}\)\]/);
+});
