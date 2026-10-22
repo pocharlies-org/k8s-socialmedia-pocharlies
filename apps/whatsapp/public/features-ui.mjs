@@ -1426,8 +1426,12 @@ export function installFeatureUI({
     // botón (un re-render lo sustituía y el menú salía sobre la lista de chats).
     // Se ancla al botón del evento; activeElement queda de respaldo.
     const modal = openModal('Acciones del mensaje', { opener: event?.currentTarget ?? documentRef.activeElement, variant: 'menu' });
+    // QA #59: patrón de menú igual que el menú de chat (role=menu + flechas).
+    modal.dialog.setAttribute('role', 'menu');
+    modal.dialog.setAttribute('aria-label', 'Acciones del mensaje');
+    modal.dialog.removeAttribute('aria-labelledby');
     const actions = node('div', 'feature-action-grid');
-    const add = (label, handler, className = 'feature-button subtle') => { const item = button(documentRef, label, className); item.onclick = () => handler(message); actions.append(item); };
+    const add = (label, handler, className = 'feature-button subtle') => { const item = button(documentRef, label, className); item.setAttribute('role', 'menuitem'); item.tabIndex = -1; item.onclick = () => handler(message); actions.append(item); };
     add('Responder', item => { closeModal(); replyTo(item); });
     if (text(message.text ?? message.content).trim()) add('Copiar texto', async item => {
       const context = { account: runtime.account, chat: runtime.chat, generation: runtime.generation };
@@ -1459,6 +1463,14 @@ export function installFeatureUI({
       add('Eliminar', item => { closeModal(); openDelete(item); }, 'feature-button danger');
     }
     modal.body.append(actions);
+    actions.firstElementChild?.focus();
+    modal.dialog.addEventListener('keydown', event => {
+      if (event.key === 'Tab') { closeModal(); return; }
+      const items = [...actions.children].filter(item => item.getAttribute('role') === 'menuitem');
+      const index = items.indexOf(documentRef.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowDown' ? (index + 1) % items.length : event.key === 'ArrowUp' ? (index + items.length - 1) % items.length : -1;
+      if (next >= 0) { event.preventDefault(); items[next]?.focus(); }
+    });
   }
 
   async function openChatAction(action, desiredValue = null) {
