@@ -953,7 +953,7 @@ function updateMessageComposerHint(enabled = enterToSendEnabled()) {
 updateMessageComposerHint();
 document.addEventListener('wa:enter-to-send-change', event => updateMessageComposerHint(event.detail?.enabled ?? enterToSendEnabled()));
 $('message').onkeydown = event => {
-  if (event.keyCode !== 229 && shouldSubmitMessageKey(event, enterToSendEnabled(), false)) {
+  if (event.keyCode !== 229 && shouldSubmitMessageKey(event, enterToSendEnabled())) {
     event.preventDefault();
     $('composer').requestSubmit();
   }

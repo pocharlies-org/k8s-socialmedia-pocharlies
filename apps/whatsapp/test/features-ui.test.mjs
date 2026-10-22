@@ -409,3 +409,8 @@ test('el clic derecho en una burbuja abre el menú del mensaje (QA #59 addendum)
   const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(src, /bubble\.oncontextmenu = event => \{ event\.preventDefault\(\); openMessageActions\(message, event\); \};/);
 });
+
+test('reenviar al chat abierto refresca el transcript (QA #116)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /if \(sent && targetChat === source\.chat\) refetchAfterEcho\(\);/);
+});

@@ -1370,6 +1370,9 @@ export function installFeatureUI({
         if (!result) return;
         sent += 1;
       }
+      // QA #116: reenviar al chat abierto no refrescaba el transcript (solo el eco SSE
+      // tardío lo traía); el refresco diferido de la casa (QA #80) lo pinta en ~2,5 s.
+      if (sent && targetChat === source.chat) refetchAfterEcho();
       if (sent) { toast(`${sent} mensaje${sent === 1 ? '' : 's'} reenviado${sent === 1 ? '' : 's'}.`, 'success'); runtime.selectedMessageIds.clear(); closeModal(); enhanceMessages(); }
     };
     modal.body.append(form, node('p', 'feature-muted', 'La entrega depende de la confirmación del proveedor.'));

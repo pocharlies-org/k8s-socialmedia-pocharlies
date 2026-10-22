@@ -51,15 +51,16 @@ test('an early provider echo replaces exactly one optimistic bubble', () => {
   assert.equal(visibleOutgoingMessages([echo], [{...outgoing[0], messageId:'wa-1', state:'confirmed'}]).length, 0);
 });
 
-test('composer Enter preference honors Shift, composition, keyboard shortcuts and touch screens', () => {
+test('composer Enter preference honors Shift, composition and keyboard shortcuts', () => {
   const key = overrides => ({key:'Enter', shiftKey:false, ctrlKey:false, metaKey:false, isComposing:false, ...overrides});
-  assert.equal(shouldSubmitMessageKey(key(), true, false), true);
-  assert.equal(shouldSubmitMessageKey(key(), false, false), false);
-  assert.equal(shouldSubmitMessageKey(key({ctrlKey:true}), false, false), true);
-  assert.equal(shouldSubmitMessageKey(key({metaKey:true}), false, true), true);
-  assert.equal(shouldSubmitMessageKey(key({shiftKey:true}), true, false), false);
-  assert.equal(shouldSubmitMessageKey(key({isComposing:true}), true, false), false);
-  assert.equal(shouldSubmitMessageKey(key(), true, true), false);
+  assert.equal(shouldSubmitMessageKey(key(), true), true);
+  assert.equal(shouldSubmitMessageKey(key(), false), false);
+  assert.equal(shouldSubmitMessageKey(key({ctrlKey:true}), false), true);
+  assert.equal(shouldSubmitMessageKey(key({metaKey:true}), false), true);
+  assert.equal(shouldSubmitMessageKey(key({shiftKey:true}), true), false);
+  assert.equal(shouldSubmitMessageKey(key({isComposing:true}), true), false);
+  // QA 22-10: el caso coarse=true se fue con el parámetro (nadie lo pasaba; en móvil
+  // enterKeyHint="send" manda: Enter SÍ envía).
 });
 
 test('hay botón «ir abajo» cuando el chat está lejos del final (QA 22-10)', async () => {

@@ -51,8 +51,10 @@ export function visibleOutgoingMessages(remote, outgoing) {
   return outgoing.filter(item => !hidden.has(item));
 }
 
-export function shouldSubmitMessageKey(event, enterToSend, coarsePointer) {
+// QA 22-10: sin coarsePointer — el único llamador pasaba false fijo, y un móvil con
+// enterKeyHint="send" debe enviar con Enter (como la oficial), no dejar de hacerlo.
+export function shouldSubmitMessageKey(event, enterToSend) {
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return false;
   if (event.ctrlKey || event.metaKey) return true;
-  return enterToSend && !coarsePointer;
+  return enterToSend;
 }
