@@ -1723,6 +1723,7 @@ body[data-theme="light"] .ai-panel-avatar { background: #d8e0e3; color: #34464f;
 .feature-presence { color: var(--accent-strong); font-size: 14px; }
 
 .feature-member { display: flex; align-items: center; gap: 10px; min-height: 48px; }
+button.feature-member { width: 100%; border: 0; padding: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
 .feature-member-avatar { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; overflow: hidden; border-radius: 50%; background: #3c4543; color: #e9f0ed; font-size: 13px; }
 .feature-member-copy { display: grid; min-width: 0; flex: 1; gap: 1px; }
 .feature-member-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

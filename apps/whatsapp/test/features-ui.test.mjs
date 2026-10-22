@@ -360,3 +360,12 @@ test('«Destacados» es una vista con estado vacío, no un diálogo (QA #89/#97)
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /featureUI\.starredView\?\.\(\$\('chats'\)\)/);
 });
+
+test('un miembro con chat abierto es un botón que lo abre (QA #97)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /const known = member\.id \? array\(getChats\(\)\)\.find\(chat => text\(chat\.id\) === member\.id\) : null/);
+  assert.match(src, /node\(known \? 'button' : 'div', 'feature-member'\)/);
+  assert.match(src, /row\.onclick = \(\) => \{ closeModal\(\); selectChat\(known\); \}/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /button\.feature-member \{ width: 100%; border: 0;/);
+});

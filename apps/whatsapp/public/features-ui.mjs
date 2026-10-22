@@ -812,7 +812,16 @@ export function installFeatureUI({
   }
 
   function renderMember(member, info, parent) {
-    const row = node('div', 'feature-member');
+    // Un miembro con chat abierto es accesible: el botón lo abre igual que la
+    // fila del directorio (QA #97). Sin chat conocido queda como div: no hay
+    // nada que abrir y un botón falso mentiría.
+    const known = member.id ? array(getChats()).find(chat => text(chat.id) === member.id) : null;
+    const row = node(known ? 'button' : 'div', 'feature-member');
+    if (known) {
+      row.type = 'button';
+      row.setAttribute('aria-label', `Abrir el chat con ${member.name || member.pushName || member.id}`);
+      row.onclick = () => { closeModal(); selectChat(known); };
+    }
     const avatar = node('span', 'feature-member-avatar');
     initialsAvatar(avatar, member.name || member.pushName || member.id, member.photoUrl || member.photo_url || member.avatarUrl);
     const copy = node('span', 'feature-member-copy');
