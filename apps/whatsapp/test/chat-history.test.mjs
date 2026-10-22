@@ -90,6 +90,23 @@ test('el cambio de cuenta pinta la última lista conocida y revalida (QA velocid
   assert.match(app, /chatCache\.set\(scope, \{chats\}\)/);
 });
 
+test('Enter en la fila abre el chat con el foco en el composer (QA #75)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /selectChat\(chat, \{ focusComposer: event\?\.detail === 0 \}\)/);
+  assert.match(src, /if \(focusComposer\) \$\('message'\)\.focus\(\)/);
+});
+
+test('el fallo al saltar a un mensaje recarga la ventana en vez de clavarse (QA #73)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /\+\+state\.messageRequestToken;\s*\n\s*\$\('messages'\)\.replaceChildren/);
+});
+test('la pestaña avisa de los no leídos (QA #74)', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /document\.title = unreadTotal \? `\(\$\{unreadTotal > 99 \? '99\+' : unreadTotal\}\) WhatsApp` : 'WhatsApp'/);
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<title>WhatsApp<\/title>/);
+});
+
 test('la fila de chat tiene acciones rápidas fijar/silenciar/archivar (UX 21.2)', async () => {
   const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(src, /chat-quick chat-quick-\$\{action\}/);
@@ -97,10 +114,4 @@ test('la fila de chat tiene acciones rápidas fijar/silenciar/archivar (UX 21.2)
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.chat-row:hover \.chat-quick/);
   assert.match(css, /@media \(hover: none\) \{ \.chat-quick \{ display: none; \}/);
-});
-test('la pestaña avisa de los no leídos (QA #74)', async () => {
-  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(src, /document\.title = unreadTotal \? `\(\$\{unreadTotal > 99 \? '99\+' : unreadTotal\}\) WhatsApp` : 'WhatsApp'/);
-  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  assert.match(html, /<title>WhatsApp<\/title>/);
 });

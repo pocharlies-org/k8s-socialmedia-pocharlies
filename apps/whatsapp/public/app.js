@@ -315,7 +315,9 @@ function renderChats() {
     // etiquetas de párrafos enteros. Nombre + previsualización truncados a 120.
     const rowLabel = `${chat.name || chat.id}: ${chat.preview || 'Sin mensajes disponibles'}`;
     button.setAttribute('aria-label', rowLabel.length > 120 ? `${rowLabel.slice(0, 120)}…` : rowLabel);
-    button.onclick = () => selectChat(chat);
+    // QA #75: click con ratón (detail ≥1) no roba foco; Enter/espacio (detail 0)
+    // abre y deja el cursor en el composer, como la oficial.
+    button.onclick = event => selectChat(chat, { focusComposer: event?.detail === 0 });
     const row = node('div', 'chat-row');
     const menu = node('button', 'chat-row-menu', '⌄');
     menu.type = 'button';
@@ -672,7 +674,13 @@ async function showHistoricalMessage(messageId) {
     bubble.scrollIntoView({block: 'center'});
     return true;
   } catch (err) {
-    if (current(ctx) && requestToken === state.messageRequestToken) { state.historyMode = false; historyNotice.hidden = true; resetMessageHistory(); $('messages').replaceChildren(node('div', 'welcome', 'Cargando mensajes…')); void loadMessages(); }
+    // QA #73: loadMessages() sube el token y el guard se quedaba atrás → el
+    // «Cargando mensajes…» de aquí no lo sustituía nunca la respuesta.
+    if (current(ctx) && requestToken === state.messageRequestToken) {
+      state.historyMode = false; historyNotice.hidden = true; resetMessageHistory();
+      ++state.messageRequestToken;
+      $('messages').replaceChildren(node('div', 'welcome', 'Cargando mensajes…')); void loadMessages();
+    }
     throw err;
   }
 }
@@ -732,7 +740,7 @@ function closeMobileChat() {
   // QA 22-10 (#162): volver a la lista es salir del chat; si no, F5 lo reabriría.
   try { localStorage.removeItem(`wa:lastChat:${state.account}`); } catch {}
 }
-function selectChat(chat, {fromHistory = false} = {}) {
+function selectChat(chat, {fromHistory = false, focusComposer = false} = {}) {
   messageRenderer?.closeMediaViewer?.(); saveDraft(); cancelRecording(); cameraController?.close(); cancelAttachment(); state.selectedChat = chat; state.chat = chat.id; state.historyMode = false; historyNotice.hidden = true; state.version++; resetMessageHistory(); state.signature = ''; $('message').value = state.drafts.get(`${state.account}:${state.chat}`) || ''; resizeMessageInput(); $('chat-title').textContent = chat.name || chat.id;
   // UX #2.4: sin dato real de estado no hay subtítulo; «Contacto» fijo no lo
   // tiene nadie en WhatsApp. Los grupos conservan «Grupo» (es verificable).
@@ -745,6 +753,9 @@ function selectChat(chat, {fromHistory = false} = {}) {
     if (mobileChatEntry()) history.replaceState(entry, '');
     else history.pushState(entry, '');
   }
+  // QA #75: con Enter en la fila el foco se quedaba en la fila; el teclado
+  // esperaba un tab más para poder escribir.
+  if (focusComposer) $('message').focus();
   return loadMessages();
 }
 window.addEventListener('popstate', event => {

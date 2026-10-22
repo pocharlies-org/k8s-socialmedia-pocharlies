@@ -1250,7 +1250,9 @@ export function installFeatureUI({
         const targetId = text(original?.id || originalId);
         if (original && targetId !== id) {
           const target = [...documentRef.querySelectorAll('#messages [data-message-id]')].find(item => item.dataset.messageId === targetId);
-          if (target) { target.tabIndex = -1; target.scrollIntoView?.({ block: 'center' }); target.focus?.({ preventScroll: true }); return; }
+          // QA 22-10: el salto por cita no iluminaba el destino (message-highlight
+          // es el flash de app.js:638; aquí faltaba).
+          if (target) { target.tabIndex = -1; target.classList.add('message-highlight'); target.scrollIntoView?.({ block: 'center' }); target.focus?.({ preventScroll: true }); return; }
         }
         try {
           const found = await showHistoricalMessage(originalId);

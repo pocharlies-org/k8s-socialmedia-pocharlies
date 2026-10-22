@@ -326,6 +326,10 @@ test('quickChatAction reutiliza chat-actions con refresco de fila (UX 21.2)', as
   assert.match(ui, /updateChatFlags\(chat\.id, \{ \[action === 'archive' \? 'archived'/);
 });
 
+test('saltar a una cita ilumina el destino con message-highlight (QA 22-10)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /target\.classList\.add\('message-highlight'\)/);
+});
 test('la rejilla de la galería usa el thumb y pagina con «Cargar más» (QA #72)', async () => {
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(ui, /image\.src = item\.thumbUrl \|\| url/);
