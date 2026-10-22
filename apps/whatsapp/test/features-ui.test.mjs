@@ -443,3 +443,12 @@ test('los campos de teléfono piden pad numérico y enseñan el formato (UX #42.
   assert.match(src, /'members', '', '\+34600112233, \+34600112244'/);
   assert.doesNotMatch(src, /'Número o identificador', 'text'/);
 });
+test('la encuesta enseña el contador del tope al acercarse (UX #44.2)', async () => {
+  const src = await readFile(new URL('../public/poll-composer.mjs', import.meta.url), 'utf8');
+  assert.match(src, /span\.hidden = input\.value\.length < max - 25/);
+  assert.match(src, /counter\(question, 255\)/);
+  assert.match(src, /counter: counter\(input, 100\)/);
+  assert.match(src, /row\.label\.append\(row\.input, row\.counter\)/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.poll-count \{ display:block; text-align:right;/);
+});

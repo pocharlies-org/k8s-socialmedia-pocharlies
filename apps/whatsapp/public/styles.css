@@ -1857,6 +1857,7 @@ button.message-poll-option:hover, .message-poll-option.is-selected { border-colo
 .poll-option-row { display: flex; gap: .5rem; align-items: end; min-width: 0; }
 .poll-option-row > label { flex: 1; min-width: 0; }
 .poll-option-row input { width: 100%; min-width: 0; box-sizing: border-box; }
+.poll-count { display:block; text-align:right; font-size:11px; color:inherit; opacity:.6; }
 .poll-option-controls { display: flex; gap: .25rem; padding-bottom: .1rem; }
 .poll-option-controls button { padding: .5rem; min-width: 2rem; }
 .poll-multiple { display: flex; align-items: center; gap: .75rem; padding-block: .75rem; border-top: 1px solid var(--line); }

@@ -13,6 +13,13 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
     return element;
   };
   const form = node('form', 'poll-composer feature-form');
+  // UX #44.2: el tope ya lo pone maxLength; el contador lo hace visible al
+  // acercarse, como el del composer (QA #60).
+  const counter = (input, max) => {
+    const span = node('span', 'poll-count'); span.hidden = true;
+    input.addEventListener('input', () => { span.hidden = input.value.length < max - 25; span.textContent = `${input.value.length}/${max}`; });
+    return span;
+  };
   // La validación nativa (required) bloqueaba el submit sin mensaje visible
   // dentro del diálogo: pollDraft ya valida y su error llega al status (QA #13).
   form.noValidate = true;
@@ -22,7 +29,7 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
   question.maxLength = 255; question.required = true; question.placeholder = 'Haz una pregunta';
   // QA #78: el placeholder no es nombre accesible; el label envuelto no bastaba.
   question.setAttribute('aria-label', 'Pregunta de la encuesta');
-  questionLabel.append(question);
+  questionLabel.append(question, counter(question, 255));
   const heading = node('h3', '', 'Opciones');
   const list = node('div', 'poll-option-list');
   const rows = [];
@@ -50,7 +57,7 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
     list.replaceChildren();
     rows.forEach((row, index) => {
       row.label.textContent = `Opci\u00f3n ${index + 1}`;
-      row.label.append(row.input);
+      row.label.append(row.input, row.counter);
       row.up.disabled = index === 0; row.down.disabled = index === rows.length - 1;
       row.remove.disabled = rows.length <= 2;
       row.up.setAttribute('aria-label', `Subir opci\u00f3n ${index + 1}`);
@@ -70,7 +77,7 @@ export function createPollComposer({documentRef = globalThis.document, submit, i
     input.setAttribute('aria-label', 'Texto de la opci\u00f3n');
     const up = button('\u2191'); const down = button('\u2193'); const remove = button('\u00d7');
     const controls = node('div', 'poll-option-controls'); controls.append(up, down, remove);
-    const row = {element, label, input, up, down, remove};
+    const row = {element, label, input, up, down, remove, counter: counter(input, 100)};
     element.append(label, controls); rows.push(row);
     function move(delta) {
       if (pending) return;
