@@ -68,3 +68,10 @@ test('F5 restaura el chat abierto y volver a la lista lo olvida (QA 22-10 #162)'
   assert.match(app, /removeItem\(`wa:lastChat:\$\{state\.account\}`\)/);
   assert.match(app, /restoreLastChat\(\); \} else \$\('chat-status'\)/);
 });
+
+test('el cambio de cuenta pinta la última lista conocida y revalida (QA velocidad 22-10)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const remembered = chatCache\.get\(scope\)\?\.chats \|\| \[\]/);
+  assert.match(app, /if \(previous\.length && state\.chatListScope !== scope\) \{/);
+  assert.match(app, /chatCache\.set\(scope, \{chats\}\)/);
+});
