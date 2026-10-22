@@ -2347,6 +2347,9 @@ contracts:
     edit, delete y alias): el espejo de edicion escribe content,
     is_edited y updated_at, nunca edited_at como columna (42703, QA #5
     22-10); la hora de edicion vive en metadata->>'edited_at'.
+    Un rechazo 4xx del conector sigue respondiendo 502 (la accion no quedo
+    confirmada) pero con su motivo y failureClass en el cuerpo (QA #10,
+    22-10): sin ello el navegador solo veia "Upstream returned HTTP 400".
 - id: http.whatsapp-app.logout.v1
   kind: http-route
   value: /auth/logout
