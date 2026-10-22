@@ -1028,11 +1028,6 @@ export function installFeatureUI({
     modal.body.append(form);
   }
 
-  function localGallery(kind) {
-    if (kind === 'links') return extractLinks(runtime.currentMessages);
-    return attachmentItems(runtime.currentMessages, kind);
-  }
-
   async function openGallery(kind) {
     const labels = { media: 'Fotos y vídeos', links: 'Enlaces', documents: 'Documentos' };
     const modal = openModal(labels[kind] || 'Galería', { wide: true });
@@ -1045,22 +1040,35 @@ export function installFeatureUI({
     modal.body.append(tabs, node('p', 'feature-loading', 'Cargando…'));
     let items = [];
     let cursor = null;
+    let loadError = null;
     const serverKind = kind === 'media' ? 'gallery' : kind;
     try {
       // QA #72: antes se pintaban los originales (9,2 MB/45 items) de una sola vez.
       const result = await request('/api/chats/media', undefined, { chat: runtime.chat, kind: serverKind, limit: 60 });
       items = array(result.items || result.media || result.results);
       cursor = result.nextCursor || null;
-    } catch {
-      items = localGallery(kind);
+    } catch (err) {
+      // QA #114: antes caía a localGallery (los mensajes cargados en pantalla) sin
+      // aviso → un 500 se parecía a «este chat tiene estos 4 elementos». Vacío + aviso.
+      loadError = err;
     }
     if (!runtime.modal || runtime.modal.body !== modal.body) return;
+    modal.body.querySelector('.feature-loading')?.remove();
+    if (loadError) {
+      modal.body.append(node('p', 'feature-muted', loadError.message || 'No se pudo cargar la galería.'));
+      const retry = button(documentRef, 'Reintentar', 'feature-button subtle');
+      retry.onclick = () => { closeModal(); openGallery(kind); };
+      modal.body.append(retry);
+      return;
+    }
     const list = node('div', `feature-gallery-grid ${kind === 'links' ? 'links' : ''}`);
     list.replaceChildren();
     if (!items.length) list.append(node('p', 'feature-muted', 'No hay elementos disponibles en este chat.'));
     const renderCard = item => {
-      const card = node('article', 'feature-gallery-card');
       const url = kind === 'links' ? safeWebUrl(item.url || item.href) : mediaUrl(item, windowRef?.location?.href || 'http://localhost/');
+      // QA #115.1: <a href> real → click medio, «copiar dirección» y destino en la barra
+      // de estado gratis; el Enter nativo cubre lo que hacía el role=link (QA #152).
+      const card = url ? node('a', 'feature-gallery-card') : node('article', 'feature-gallery-card');
       if (kind === 'media' && url && text(item.mimeType || item.mime_type).startsWith('image/')) {
         const image = node('img', '', text(item.name || 'Imagen'));
         // La rejilla usa el thumb (jpegThumbnail del payload); el original solo
@@ -1076,13 +1084,7 @@ export function installFeatureUI({
       copy.append(node('strong', '', item.name || item.fileName || item.file_name || item.title || item.url || 'Elemento'));
       if (item.timestamp) copy.append(node('small', '', new Date(item.timestamp).toLocaleDateString('es-ES')));
       card.append(copy);
-      // shortcut: role=link sin <a> no da click medio ni «abrir en pestaña»;
-      // el teclado sí queda cubierto. Si se pide, migrar la tarjeta a <a href>.
-      if (url) {
-        const open = () => windowRef?.open?.(url, '_blank', 'noopener,noreferrer');
-        card.setAttribute('role', 'link'); card.tabIndex = 0; card.onclick = open;
-        card.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
-      }
+      if (url) { card.href = url; card.target = '_blank'; card.rel = 'noopener noreferrer'; }
       list.append(card);
     };
     items.forEach(renderCard);
@@ -1277,6 +1279,8 @@ export function installFeatureUI({
         bubble.append(action);
       }
       action.onclick = event => { event.stopPropagation(); openMessageActions(message, event); };
+      // QA #59 addendum: clic derecho en la burbuja → el mismo menú (la oficial).
+      bubble.oncontextmenu = event => { event.preventDefault(); openMessageActions(message, event); };
       const quoted = bubble.querySelector('.message-reply-reference[data-reply-to-message-id]');
       if (quoted) quoted.onclick = async event => {
         event.stopPropagation();
@@ -1739,7 +1743,9 @@ export function installFeatureUI({
   }
 
   function openLists() {
-    const modal = openModal('Favoritos y listas', { wide: true });
+    // UX #33.1: el panel solo contiene listas; los mensajes destacados tienen su
+    // propia vista (chip «Destacados»). «Favoritos» era una promesa vacía.
+    const modal = openModal('Listas', { wide: true });
     const account = runtime.account;
     const current = prefs();
     const form = node('form', 'feature-form');
@@ -1763,12 +1769,14 @@ export function installFeatureUI({
       } catch (error) { if (runtime.account === account) showError(error); }
       finally { if (runtime.account === account && runtime.modal?.body === modal.body) submit.disabled = false; }
     };
-    modal.body.append(form, node('p', 'feature-muted', 'Las listas se guardan para esta cuenta en SocialMedia.'));
-    const refresh = button(documentRef, 'Actualizar listas', 'feature-button subtle');
-    refresh.onclick = async () => { await refreshLists(account); if (runtime.account === account && runtime.modal?.body === modal.body) { closeModal(); openLists(); } };
-    modal.body.append(refresh);
+    // UX #33.2: la frase interpolada se leía cortada; el nombre de la app va entre paréntesis.
+    modal.body.append(form, node('p', 'feature-muted', 'Las listas se guardan en esta cuenta (SocialMedia).'));
     addSection(modal.body, 'Listas guardadas');
     if (!current.lists.length) modal.body.append(node('p', 'feature-muted', 'Todavía no hay listas.'));
+    // UX #33.3: el refresco manual va discreto, al final, sin competir con «Crear lista».
+    const refresh = button(documentRef, 'Actualizar', 'feature-button subtle');
+    refresh.onclick = async () => { await refreshLists(account); if (runtime.account === account && runtime.modal?.body === modal.body) { closeModal(); openLists(); } };
+    modal.body.append(refresh);
     for (const list of current.lists) {
       const row = node('div', 'feature-list-row'); row.append(node('strong', '', list.name), node('span', 'feature-muted', `${list.chatIds.length} chats`));
       const show = button(documentRef, 'Ver', 'feature-button subtle');
@@ -2315,7 +2323,7 @@ export function installFeatureUI({
     const sidebarHeader = documentRef.querySelector('.chat-sidebar-header');
     const sidebarActions = node('div', 'chat-sidebar-actions');
     const newChat = button(documentRef, '+', 'sidebar-action sidebar-action-new'); newChat.id = 'feature-new-chat'; newChat.setAttribute('aria-label', 'Nuevo chat'); newChat.title = 'Nuevo chat'; newChat.onclick = () => openNewChat();
-    const lists = button(documentRef, '☆', 'sidebar-action sidebar-action-favorites'); lists.id = 'feature-lists'; lists.setAttribute('aria-label', 'Favoritos y listas'); lists.title = 'Favoritos y listas'; lists.onclick = openLists;
+    const lists = button(documentRef, '☆', 'sidebar-action sidebar-action-favorites'); lists.id = 'feature-lists'; lists.setAttribute('aria-label', 'Listas'); lists.title = 'Listas'; lists.onclick = openLists;
     sidebarActions.append(newChat, lists); sidebarHeader?.append(sidebarActions);
     const search = documentRef.querySelector('.chat-sidebar > .search');
     const views = node('nav', 'feature-view-nav'); views.setAttribute('aria-label', 'Vistas de conversaciones');

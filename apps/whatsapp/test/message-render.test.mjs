@@ -266,6 +266,14 @@ test('attachment rendering falls back safely when URL data is absent or unsafe',
   assert.equal(missing.children.some(child => child.tagName === 'IMG' || child.tagName === 'A'), false);
 });
 
+test('a pending outbox attachment shows its name and «Enviando…», never the error (QA #113)', () => {
+  const container = createAttachmentElement({ name: 'informe.pdf', mimeType: 'application/pdf', size: 2048, pending: true }, { document: fakeDocument });
+  assert.match(treeText(container), /informe\.pdf/);
+  assert.match(treeText(container), /Enviando…/);
+  assert.equal(container.querySelector('.attachment-error'), null);
+  assert.equal(container.children.some(child => child.tagName === 'A'), false);
+});
+
 test('sent image attachment remains visible with its caption', () => {
   const mediaPolicy = stubPolicy({ enabled: () => true, cachedUrl: () => 'blob:sent-photo' });
   const sent = renderMessage({

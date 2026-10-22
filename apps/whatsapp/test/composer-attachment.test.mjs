@@ -90,3 +90,9 @@ test('el diálogo de adjuntos no filtra por extensión (QA #91)', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /\$\('attachment'\)\.accept = '';/);
 });
+// QA #113: la proyección del outbox lleva el adjunto (antes el pendiente se pintaba sin él).
+test('el pendiente del outbox proyecta su adjunto (QA #113)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /attachments: \[\{name: item\.file\?\.name \|\| item\.fileName, mimeType: item\.file\?\.type \|\| '', size: item\.file\?\.size, pending: true\}\]/);
+  assert.match(app, /text: item\.text \|\| ''/);
+});

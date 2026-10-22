@@ -2402,7 +2402,10 @@ contracts:
     item `thumbUrl` (GET /api/media/thumb/<id de mensaje>, jpegThumbnail del
     payload): la rejilla de la galería pinta el thumb y el original solo al
     abrir — 9,2 MB/45 items a cientos de KB (QA #72). Campo aditivo; el
-    envelope y el cursor no cambian.
+    envelope y el cursor no cambian. content-disposition: inline para
+    image/jpeg|png|gif|webp, application/pdf (se ve, como la oficial, QA
+    #115.2), audio/* y video/*; attachment para el resto (svg y html pueden
+    ejecutar guion con el type servido).
 - id: http.whatsapp-app.search.v1
   kind: http-route
   value: /api/search

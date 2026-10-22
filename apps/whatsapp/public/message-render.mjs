@@ -828,6 +828,20 @@ export function createAttachmentElement(attachment, { document: documentRef = gl
   const url = safeMessageUrl(attachmentUrl(attachment), baseUrl);
   const name = attachmentName(attachment);
   if (!url) {
+    // QA #113: un adjunto pendiente (fuera del outbox, aún sin fila en el servidor) no
+    // tiene URL; se pinta la tarjeta con el nombre y «Enviando…» en vez del error.
+    if (attachment?.pending) {
+      const card = makeElement(documentRef, 'div', 'attachment-document');
+      const icon = makeElement(documentRef, 'span', 'document-icon', MEDIA_PENDING_BADGES[getAttachmentKind(attachment)]);
+      icon.setAttribute('aria-hidden', 'true');
+      const details = makeElement(documentRef, 'span', 'document-details');
+      details.append(makeElement(documentRef, 'strong', 'document-name', name));
+      const size = attachmentSizeBytes(attachment);
+      details.append(makeElement(documentRef, 'span', 'document-size', size ? `${formatMediaSize(size)} · Enviando…` : 'Enviando…'));
+      card.append(icon, details);
+      container.append(card);
+      return container;
+    }
     appendAttachmentError(container, documentRef, 'Adjunto no disponible.');
     return container;
   }

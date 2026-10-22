@@ -387,3 +387,25 @@ test('el aviso de bloqueados cuenta lo filtrado y la ficha no pinta el LID (QA #
   assert.doesNotMatch(src, /node\('small', '', member\.id \|\| 'Identidad no disponible'\)/);
   assert.match(src, /if \(!memberName && member\.id\) copy\.append\(node\('small', '', member\.id\)\)/);
 });
+
+test('la galería usa <a href> reales y el panel de listas se llama «Listas» (QA #115.1, UX #33)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /const card = url \? node\('a', 'feature-gallery-card'\)/);
+  assert.match(src, /card\.href = url; card\.target = '_blank'; card\.rel = 'noopener noreferrer';/);
+  assert.doesNotMatch(src, /card\.setAttribute\('role', 'link'\)/);
+  assert.match(src, /openModal\('Listas'/);
+  assert.match(src, /'Las listas se guardan en esta cuenta \(SocialMedia\)\.'/);
+  assert.doesNotMatch(src, /Actualizar listas/);
+});
+
+test('la galería avisa y ofrece reintentar cuando el servidor falla (QA #114)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /loadError = err;/);
+  assert.match(src, /'Reintentar', 'feature-button subtle'\)/);
+  assert.doesNotMatch(src, /items = localGallery\(kind\)/);
+});
+
+test('el clic derecho en una burbuja abre el menú del mensaje (QA #59 addendum)', async () => {
+  const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(src, /bubble\.oncontextmenu = event => \{ event\.preventDefault\(\); openMessageActions\(message, event\); \};/);
+});

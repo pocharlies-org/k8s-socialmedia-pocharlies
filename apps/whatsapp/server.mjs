@@ -1778,7 +1778,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         // política de borrado lo exige, bajar a max-age=0 + etag.
         if (response.status === 200 || response.status === 206) res.setHeader('cache-control', 'private, max-age=86400, immutable');
         if (!response.headers.get('content-encoding') && response.headers.has('content-length')) res.setHeader('content-length', response.headers.get('content-length'));
-        const safeInline = /^(image\/(jpeg|png|gif|webp)|audio\/|video\/)/.test(media.mime_type || '');
+        // QA #115.2: el PDF se ve (como la oficial); svg/html siguen attachment, pueden
+        // ejecutar guion con el type servido.
+        const safeInline = /^(image\/(jpeg|png|gif|webp)|application\/pdf|audio\/|video\/)/.test(media.mime_type || '');
         res.setHeader('content-type', safeInline ? media.mime_type : 'application/octet-stream');
         res.setHeader('content-disposition', `${safeInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(media.file_name || 'attachment')}`);
         if (response.body) await pipeline(Readable.fromWeb(response.body), res);

@@ -482,7 +482,10 @@ function renderMessages() {
   const first = !state.signature;
   const remote = state.messages;
   const pending = visibleOutgoingMessages(remote, outgoingFor(state.account, state.chat));
-  const visible = remote.concat(pending.map(item => ({id: item.id, text: item.text || item.file?.name || item.fileName || '', fromMe: true, timestamp: item.timestamp, replyToMessageId: item.replyTo || null})));
+  // QA #113: el pendiente se pintaba sin adjunto (la proyección no llevaba attachments).
+  // Ahora la tarjeta «Enviando…» del renderer muestra el nombre; el texto del pie no
+  // duplica el nombre (antes caía a item.file.name como texto).
+  const visible = remote.concat(pending.map(item => ({id: item.id, text: item.text || '', fromMe: true, timestamp: item.timestamp, replyToMessageId: item.replyTo || null, ...(item.file || item.fileName ? {attachments: [{name: item.file?.name || item.fileName, mimeType: item.file?.type || '', size: item.file?.size, pending: true}]} : {})})));
   const signature = JSON.stringify([visible, pending.map(item => [item.id, item.state])]);
   if (signature === state.signature) return;
   state.signature = signature;
