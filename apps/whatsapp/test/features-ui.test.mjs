@@ -318,3 +318,8 @@ test('filtrando por lista, una pestaña con su nombre queda activa y sale (QA 22
   assert.match(ui, /chip\.setAttribute\('aria-pressed', 'true'\)/);
   assert.match(ui, /chip\.onclick = \(\) => setView\('all'\)/);
 });
+
+test('saltar a una cita ilumina el destino con message-highlight (QA 22-10)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /target\.classList\.add\('message-highlight'\)/);
+});

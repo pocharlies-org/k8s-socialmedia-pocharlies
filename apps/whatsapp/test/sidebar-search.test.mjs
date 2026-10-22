@@ -291,3 +291,9 @@ test('retry after a failed first page keeps focus through loading and completion
     });
   }
 });
+
+test('en archivados la pestaña dice que no se busca ahí (QA 22-10)', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const src = await readFile(new URL('../public/sidebar-search.mjs', import.meta.url), 'utf8');
+  assert.match(src, /'Mensajes \(no se busca en archivados\)'/);
+});
