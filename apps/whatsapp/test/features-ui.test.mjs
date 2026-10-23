@@ -426,7 +426,7 @@ test('el clic derecho en una burbuja abre el menú del mensaje (QA #59 addendum)
 
 test('reenviar al chat abierto refresca el transcript (QA #116)', async () => {
   const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
-  assert.match(src, /if \(sent && targetChat === source\.chat\) refetchAfterEcho\(\);/);
+  assert.match(src, /if \(sent && targets\.includes\(source\.chat\)\) refetchAfterEcho\(\);/);
 });
 
 test('los mensajes ajenos ofrecen «Eliminar para mí» con el alcance único (UX #36.1)', async () => {
@@ -510,4 +510,15 @@ test('ficha de contacto: sin nombre útil pinta «Grupo»/«Contacto», nunca el
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(ui, /const title = info\.name \|\| profile\.name \|\| \(isGroup \? 'Grupo' : 'Contacto'\);/);
   assert.doesNotMatch(ui, /node\('h3', '', info\.name \|\| profile\.name \|\| runtime\.chat\)/);
+});
+
+test('reenviar: buscador + hasta 5 destinos con contador, sin <select> de 1034 (UX #57 / QA #92)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(ui, /select\.name = 'targetChat'/);
+  assert.match(ui, /search\.setAttribute\('aria-label', 'Buscar conversación de destino'\)/);
+  assert.match(ui, /chosen\.size >= 5/);
+  assert.match(ui, /`Reenviar a \$\{chosen\.size\}`/);
+  assert.match(ui, /'Contacto sin nombre'/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.feature-forward-row \{[^}]*min-height: 44px/);
 });

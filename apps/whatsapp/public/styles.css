@@ -1641,6 +1641,21 @@ body[data-theme="light"] .ai-panel-avatar { background: #d8e0e3; color: #34464f;
   cursor: pointer;
 }
 
+/* UX #57: lista de destinos del reenvío — filas táctiles ≥44 px (QA #94). */
+.feature-forward-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.feature-forward-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 4px;
+}
+
 .feature-reply-quote {
   position: relative;
   z-index: 2;
