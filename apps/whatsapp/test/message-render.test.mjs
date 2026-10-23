@@ -715,3 +715,13 @@ test('pending y failed tienen indicador en la burbuja (QA #109)', async () => {
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.message-status\.status-failed \{ color: var\(--danger\);/);
 });
+
+test('documento sin caption no repite el nombre y muestra tamaño (UX #53)', () => {
+  const doc = { fileName: 'qa-doc.pdf', url: '/api/media/123?account=personal', size: 12345 };
+  const bubble = renderer.renderMessage({ id: 'd', type: 'DOCUMENT', text: 'qa-doc.pdf', attachments: [doc] }, { document: fakeDocument });
+  assert.equal(bubble.querySelector('.message-text'), null);
+  assert.equal(bubble.querySelector('.document-name').textContent, 'qa-doc.pdf');
+  assert.equal(bubble.querySelector('.document-size').textContent, '13 KB');
+  const captioned = renderer.renderMessage({ id: 'e', type: 'DOCUMENT', text: 'el informe', attachments: [{ ...doc, caption: 'el informe' }] }, { document: fakeDocument });
+  assert.equal(treeText(captioned.querySelector('.message-text')), 'el informe');
+});

@@ -670,8 +670,9 @@ function createDocumentCard(attachment, url, name, documentRef) {
   icon.setAttribute('aria-hidden', 'true');
   const details = makeElement(documentRef, 'span', 'document-details');
   details.append(makeElement(documentRef, 'strong', 'document-name', name));
-  const size = Number(attachment?.fileSize ?? attachment?.file_size);
-  if (Number.isFinite(size) && size >= 0) details.append(makeElement(documentRef, 'span', 'document-size', `${Math.ceil(size / 1024)} KB`));
+  // UX #53.2: el tamaño, con el mismo helper de la biblioteca (cubría solo fileSize).
+  const size = attachmentSizeBytes(attachment);
+  if (size) details.append(makeElement(documentRef, 'span', 'document-size', formatMediaSize(size)));
   const link = makeDownloadLink(url, name, documentRef);
   card.append(icon, details, link);
   return card;
@@ -1240,7 +1241,14 @@ export function renderMessage(message, { document: documentRef = globalThis.docu
     bubble.append(card);
   }
   const text = textValue(message?.text ?? message?.content);
-  if (text && !['poll', 'event'].includes(metadata.kind)) {
+  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+  // UX #53.1: un documento sin caption llega con el nombre de fichero como texto;
+  // la tarjeta ya lo muestra — no se repite en la burbuja (con caption, sí va).
+  const documentNameEcho = Boolean(text) && attachments.length === 1
+    && getAttachmentKind(attachments[0]) === 'document'
+    && !textValue(attachments[0]?.caption).trim()
+    && text.trim() === attachmentName(attachments[0]);
+  if (text && !['poll', 'event'].includes(metadata.kind) && !documentNameEcho) {
     const textElement = makeElement(documentRef, 'div', 'message-text');
     textElement.setAttribute('dir', 'auto'); // QA #111: el navegador decide por el primer carácter fuerte.
     appendRichText(textElement, text, documentRef);
@@ -1269,7 +1277,6 @@ export function renderMessage(message, { document: documentRef = globalThis.docu
     card.append(details);
     bubble.insertBefore(card, bubble.querySelector('.message-text'));
   }
-  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
   for (const attachment of attachments) {
     const shownAttachment = text.trim() && text.trim() === textValue(attachment?.caption).trim()
       ? { ...attachment, caption: '' }
