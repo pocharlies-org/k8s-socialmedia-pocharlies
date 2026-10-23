@@ -2,6 +2,7 @@ packages:
   - 'connectors/whatsapp-web'
   - 'connectors/whatsapp-cloud'
   - 'connectors/whatsapp-synapse-bridge'
+  - 'connectors/correo-bridge'
   - 'connectors/telegram'
   - 'connectors/instagram'
   - 'workers/*'

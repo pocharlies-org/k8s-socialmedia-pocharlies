@@ -1,0 +1,59 @@
+{
+ "fuente": "correo-core origin/DGX-1234-a1 correo_core/hmac.py firmar() (DGX-1235 B1, hallazgo 12): mismos vectores a los dos lados; secretos inventados",
+ "vectores": [
+  {
+   "clave_id": "wa-professional",
+   "secreto": "secreto-de-prueba-wa",
+   "ts": "1792745000",
+   "metodo": "GET",
+   "objetivo": "/hilos/34600111222@c.us?limite=30",
+   "cuerpo": "",
+   "firma": "be1529f32db24c359344402ec8b4aab93e9fca3ef94d9dd898277e2c977bc99c"
+  },
+  {
+   "clave_id": "wa-professional",
+   "secreto": "secreto-de-prueba-wa",
+   "ts": "1792745000",
+   "metodo": "GET",
+   "objetivo": "/mensajes/3EB0A1B2C3D4E5F60001",
+   "cuerpo": "",
+   "firma": "4777c946be671e3d50a5670cc8e7e2803bfeef868df05802d1fbed84f0355394"
+  },
+  {
+   "clave_id": "wa-professional",
+   "secreto": "secreto-de-prueba-wa",
+   "ts": "1792745000",
+   "metodo": "GET",
+   "objetivo": "/hilos/123456789012345@lid",
+   "cuerpo": "",
+   "firma": "c5982f0da3f2c7ba50e0afb8b1c8407c0a59338a2ab52ce258bb29e6f126f6a8"
+  },
+  {
+   "clave_id": "tg-professional",
+   "secreto": "secreto-de-prueba-tg",
+   "ts": "1792745001",
+   "metodo": "GET",
+   "objetivo": "/hilos/tg:777000111?limite=5",
+   "cuerpo": "",
+   "firma": "74642352e94a1160b97d57d86d12d38382362733fe371be638f47b8879a611d8"
+  },
+  {
+   "clave_id": "tg-professional",
+   "secreto": "secreto-de-prueba-tg",
+   "ts": "1792745001",
+   "metodo": "GET",
+   "objetivo": "/mensajes/tg:4242",
+   "cuerpo": "",
+   "firma": "ffeedda47e0fe37dc4f18d076a92e9f37b14f329b7d4313c448365ce90dade57"
+  },
+  {
+   "clave_id": "correo-bridge",
+   "secreto": "secreto-de-prueba-productor",
+   "ts": "1792745002",
+   "metodo": "POST",
+   "objetivo": "/v2/mensajes/wa-professional",
+   "cuerpo": "{\"ref\":\"3EB0A1B2C3D4E5F60001\",\"hilo_ref\":\"34600111222@c.us\",\"direccion\":\"entrante\",\"ts\":\"2026-10-23T09:00:00Z\",\"identidad\":{\"canal\":\"whatsapp\",\"valor\":\"34600111222@c.us\"}}",
+   "firma": "71cd9084bec9dc153607542c051fe11f84287e94137c393fbb2b80dcefcd1f9e"
+  }
+ ]
+}
