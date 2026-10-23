@@ -124,7 +124,7 @@ spec:
         # dead code); spelled out here now that the block dropped the name.
         # Same digest as the live pod — zero rollout.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.105@sha256:8b104e5bf672e735610ac32313b024710e6c166c34fbf6435240e3a8a5bc4cae
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.130@sha256:8814cdaf92a99447e15ca1b7ec5af6a27f33d15e3212c3937232601c0a4ea912
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -139,7 +139,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.105@sha256:8b104e5bf672e735610ac32313b024710e6c166c34fbf6435240e3a8a5bc4cae
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.130@sha256:8814cdaf92a99447e15ca1b7ec5af6a27f33d15e3212c3937232601c0a4ea912
 ---
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints

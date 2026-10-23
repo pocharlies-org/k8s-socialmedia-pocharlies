@@ -163,11 +163,18 @@ spec:
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
       containers:
         - name: minio
-          image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-          # Digest-pinned: declare the policy explicitly. Git never set it, so
-          # ArgoCD never owned the field and a stale `Always` (inherited from an
-          # old tag-based deploy) survived forever, re-pulling docker.io on every
-          # reschedule -> anonymous Docker Hub rate-limit on the OVH egress.
+          # SC-2842 (22-10): el pin a docker.io (minio/minio@sha256:14cea493…) quedó
+          # sin poder tirar: docker.io ya no sirve pull anónimo y MinIO pasó a
+          # distribución solo-fuente (no hay imágenes públicas tras la última release
+          # community, RELEASE.2025-04-22T22-12-26Z — ver .github/workflows/ci.yml,
+          # s3-tests). El PVC whatsapp-mcp-minio-data (los ~15.308 adjuntos legacy del
+          # bucket socialmedia-media) NO se toca: mismo PVC, servidor espejado en
+          # Harbor. RELEASE.2025-04-22 es la última imagen community publicada, así
+          # que es >= al release que escribió los datos (la regla de SC-2842); un
+          # servidor más nuevo lee el formato de los anteriores, y si no, MinIO se
+          # niega a arrancar sin corromper (guarda de formato). Digest comprobado con
+          # crane en Harbor (23-10).
+          image: harbor.e-dani.com/homelab/minio:RELEASE.2025-04-22T22-12-26Z@sha256:ac59a61ad2ae6ec82be02baedbf37916425877c3ac422caf9d237f629ca723d8
           imagePullPolicy: IfNotPresent
           args: [server, /data, --console-address, ":9001"]
           ports:
