@@ -524,3 +524,12 @@ test('a new owner can restart a URL while the cancelled reader is still unwindin
   assert.equal(secondResult.objectUrl, thirdResult.objectUrl);
   assert.equal(policy.cacheStats().entries, 1);
 });
+
+test('Tema son radios segmentadas, no un <select> nativo (UX #61.2)', async () => {
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /<select id="theme"/);
+  for (const value of ['dark', 'system', 'light']) assert.match(html, new RegExp(`<input type="radio" name="theme" value="${value}">`));
+  assert.match(html, /role="group" aria-label="Tema" id="theme"/);
+  assert.match(app, /document\.querySelector\('input\[name="theme"\]:checked'\)\?\.value \|\| 'dark'/);
+});

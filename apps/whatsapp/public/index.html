@@ -49,13 +49,7 @@
               </section>
               <section class="settings-section" aria-labelledby="settings-chats-title">
                 <h3 id="settings-chats-title">Chats</h3>
-                <label class="settings-field">Tema
-                  <select id="theme" aria-label="Tema">
-                    <option value="dark">Oscuro</option>
-                    <option value="system">Sistema</option>
-                    <option value="light">Claro</option>
-                  </select>
-                </label>
+                <fieldset class="settings-wallpaper"><legend>Tema</legend><div class="settings-swatches" role="group" aria-label="Tema" id="theme"><label><input type="radio" name="theme" value="dark"><span class="settings-swatch settings-swatch-theme-dark" title="Oscuro"></span><small>Oscuro</small></label><label><input type="radio" name="theme" value="system"><span class="settings-swatch settings-swatch-theme-system" title="Sistema"></span><small>Sistema</small></label><label><input type="radio" name="theme" value="light"><span class="settings-swatch settings-swatch-theme-light" title="Claro"></span><small>Claro</small></label></div></fieldset>
                 <label class="settings-switch"><span><strong>Corrección ortográfica</strong><small>Revisar el texto al escribir mensajes</small></span><input id="settings-spellcheck" type="checkbox"></label>
                 <label class="settings-switch"><span><strong>Reemplaza texto con emojis</strong><small>El emoji sustituye el texto correspondiente mientras escribes</small></span><input id="settings-emoji-replacement" type="checkbox"></label>
                 <label class="settings-switch"><span><strong>Enter para enviar</strong><small>Desactívalo para usar Ctrl o Cmd + Enter</small></span><input id="settings-enter-send" type="checkbox"></label>

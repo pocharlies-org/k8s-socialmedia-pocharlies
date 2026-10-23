@@ -240,8 +240,12 @@ function setTheme(value) {
   if (meta) meta.content = theme === 'light' ? '#efeae2' : '#161717';
   try { localStorage.setItem('wa-theme', value); } catch {}
 }
-try { const storedTheme = localStorage.getItem('wa-theme'); $('theme').value = ['dark', 'light', 'system'].includes(storedTheme) ? storedTheme : 'dark'; } catch { $('theme').value = 'dark'; }
-setTheme($('theme').value); $('theme').onchange = () => setTheme($('theme').value); matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTheme($('theme').value));
+// UX #61.2: el tema son radios segmentadas (como el fondo del chat), no un <select> nativo.
+const themeValue = () => document.querySelector('input[name="theme"]:checked')?.value || 'dark';
+try { const storedTheme = localStorage.getItem('wa-theme'); const control = document.querySelector(`input[name="theme"][value="${['dark', 'light', 'system'].includes(storedTheme) ? storedTheme : 'dark'}"]`); if (control) control.checked = true; } catch { document.querySelector('input[name="theme"][value="dark"]')?.setAttribute('checked', ''); }
+setTheme(themeValue());
+document.querySelectorAll('input[name="theme"]').forEach(control => { control.onchange = () => setTheme(control.value); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTheme(themeValue()));
 function chatFilterValue() { return state.chatFilter; }
 function chatMatchesFilter(chat, filter) {
   if (featureUI?.matchesChat && !featureUI.matchesChat(chat, filter)) return false;

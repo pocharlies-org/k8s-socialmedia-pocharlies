@@ -45,6 +45,9 @@
 .settings-swatch-default { background: linear-gradient(135deg, #efeae2 50%, #161717 50%); }
 .settings-swatch-sand { background: #e5dac5; }
 .settings-swatch-sage { background: #cedbd1; }
+.settings-swatch-theme-dark { background: #161717; }
+.settings-swatch-theme-light { background: #efeae2; }
+.settings-swatch-theme-system { background: linear-gradient(135deg, #161717 50%, #efeae2 50%); }
 .settings-swatch-slate { background: #cbd5db; }
 .settings-swatches input:checked + .settings-swatch { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
 .settings-swatches input:focus-visible + .settings-swatch { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
