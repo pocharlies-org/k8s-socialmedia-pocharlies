@@ -330,7 +330,11 @@ test('quickChatAction reutiliza chat-actions con refresco de fila (UX 21.2)', as
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(ui, /quickChatAction: async \(chat, action\) =>/);
   assert.match(ui, /\['archive', 'pin', 'mute'\]\.includes\(action\)/);
-  assert.match(ui, /updateChatFlags\(chat\.id, \{ \[action === 'archive' \? 'archived'/);
+  // #217: la fila reacciona al confirmar (antes, tras el POST de ~3 s); se revierte si falla.
+  assert.match(ui, /updateChatFlags\(chat\.id, \{\[flagName\]: !current\}\);\s*\n\s*try \{/);
+  assert.match(ui, /catch \(error\) \{\s*\n\s*updateChatFlags\(chat\.id, \{\[flagName\]: current\}\);/);
+  assert.match(ui, /const flagSnapshot = flags \? Object\.fromEntries/, 'el menú de fila también es optimista');
+  assert.match(ui, /if \(flags\) updateChatFlags\(chat\.id, flagSnapshot\);/, 'y revierte la bandera al fallar el proveedor');
 });
 
 test('saltar a una cita ilumina el destino con message-highlight (QA 22-10)', async () => {

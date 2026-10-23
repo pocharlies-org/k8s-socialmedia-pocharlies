@@ -1642,8 +1642,10 @@ export function installFeatureUI({
     const currentValue = { archived: chatIsArchived(runtime.selectedChat, prefs()), pinned: chatIsPinned(runtime.selectedChat, prefs()), muted: chatIsMuted(runtime.selectedChat, prefs()), favorite: chatIsFavorite(runtime.selectedChat, prefs()) }[fieldName];
     if (desiredValue !== null && currentValue === desiredValue) return;
     const providerAction = action === 'archive' ? (currentValue ? 'unarchive' : 'archive') : action === 'pin' ? (currentValue ? 'unpin' : 'pin') : action === 'mute' ? (currentValue ? 'unmute' : 'mute') : (currentValue ? 'unfavorite' : 'favorite');
+    // #217: la fila reacciona al confirmar, no tras el POST; se revierte si falla.
+    updateChatFlags(runtime.chat, { [fieldName]: !currentValue });
     const result = await mutate('/api/chat-actions', { action: providerAction }, { refreshChats: true, success: `${fieldName === 'archived' ? (!currentValue ? 'Chat archivado.' : 'Chat desarchivado.') : 'Preferencia actualizada.'}` });
-    if (result) updateChatFlags(runtime.chat, { [fieldName]: !currentValue });
+    if (!result) updateChatFlags(runtime.chat, { [fieldName]: currentValue });
   }
 
   function openSidebarChatMenu(chat, opener) {
@@ -1663,11 +1665,14 @@ export function installFeatureUI({
       const unreadKey = `${account}:${chat.id}`;
       const previousUnreadKey = runtime.manualUnreadKey;
       if (action === 'unread' && runtime.chat === chat.id) runtime.manualUnreadKey = unreadKey;
+      // #217: reflejo instantáneo (la fila va/viene al confirmar); si el
+      // proveedor falla se restaura el valor previo de la fila.
+      const flagSnapshot = flags ? Object.fromEntries(Object.keys(flags).map(key => [key, chat[key]])) : null;
+      if (flags) updateChatFlags(chat.id, flags);
       try {
         const result = await request(path, { account, chat: chat.id, action, ...extra });
         if (runtime.account !== account) return;
         if (action === 'read' && runtime.manualUnreadKey === unreadKey) runtime.manualUnreadKey = '';
-        if (flags) updateChatFlags(chat.id, flags);
         if (action === 'list') { markListMutation(account); savePrefs(value => ({ ...value,
           lists: value.lists.map(list => list.name === extra.list ? { ...list, chatIds: [...new Set([...list.chatIds, chat.id])] } : list),
           serverListNames: [...new Set([...value.serverListNames, extra.list])],
@@ -1676,6 +1681,7 @@ export function installFeatureUI({
         if (runtime.account === account) toast('Preferencia actualizada.');
         return result;
       } catch (error) {
+        if (flags) updateChatFlags(chat.id, flagSnapshot);
         if (runtime.account === account) {
           if (action === 'unread' && runtime.manualUnreadKey === unreadKey) runtime.manualUnreadKey = previousUnreadKey;
           showError(error);
@@ -2727,13 +2733,17 @@ export function installFeatureUI({
       if (!account || !chat?.id || !['archive', 'pin', 'mute'].includes(action)) return;
       const current = action === 'archive' ? chatIsArchived(chat, prefs()) : action === 'pin' ? chatIsPinned(chat, prefs()) : chatIsMuted(chat, prefs());
       const providerAction = current ? { archive: 'unarchive', pin: 'unpin', mute: 'unmute' }[action] : action;
+      // #217: la fila se queda/va al confirmar, no tras el POST (~3 s de ida y
+      // vuelta al conector). Si el proveedor falla, se revierte el cambio local.
+      const flagName = action === 'archive' ? 'archived' : action === 'pin' ? 'pinned' : 'muted';
+      updateChatFlags(chat.id, {[flagName]: !current});
       try {
         await request('/api/chat-actions', { account, chat: chat.id, action: providerAction });
         if (runtime.account !== account) return;
-        updateChatFlags(chat.id, { [action === 'archive' ? 'archived' : action === 'pin' ? 'pinned' : 'muted']: !current });
         await loadChats();
         if (runtime.account === account) toast(!current && action === 'archive' ? 'Chat archivado.' : 'Preferencia actualizada.');
       } catch (error) {
+        updateChatFlags(chat.id, {[flagName]: current});
         if (runtime.account === account) showError(error);
       }
     },
