@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "lint": "eslint src --ext .ts",
-    "test": "tsx --test src/crypto/meta-signature.test.ts src/bridge/dedup.test.ts src/bridge/me-cache.test.ts"
+    "test": "tsx --test src/crypto/meta-signature.test.ts src/bridge/dedup.test.ts src/bridge/me-cache.test.ts src/bridge/nats.test.ts"
   },
   "dependencies": {
     "crypto": "^1.0.1",
