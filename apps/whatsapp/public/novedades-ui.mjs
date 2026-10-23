@@ -658,10 +658,13 @@ export function installNovedadesUI({
     state.list.replaceChildren()
     const box = node('div', 'novedades-empty')
     box.append(node('p', '', message))
-    const again = button('novedades-retry', 'Reintentar')
-    again.textContent = 'Reintentar'
-    again.onclick = () => void retry()
-    box.append(again)
+    // UX #59.3: con un 4xx permanente reintentar da siempre el mismo error.
+    if (retry) {
+      const again = button('novedades-retry', 'Reintentar')
+      again.textContent = 'Reintentar'
+      again.onclick = () => void retry()
+      box.append(again)
+    }
     state.list.append(box)
     setStatus('')
   }
@@ -720,9 +723,10 @@ export function installNovedadesUI({
       if (!authors.length) emptyPane('No hay estados sincronizados en esta cuenta.')
       const total = authors.reduce((sum, author) => sum + author.count, 0)
       setStatus(authors.length ? `${total} ${total === 1 ? 'estado activo' : 'estados activos'}` : '')
-    } catch {
+    } catch (err) {
       if (!isCurrent(token) || requestId !== state.request) return
-      errorPane('No se pudieron cargar los estados. Reintenta.', renderStatusesTab)
+      if (err?.status >= 400 && err.status < 500) errorPane('Esta función aún no está disponible en esta cuenta.')
+      else errorPane('No se pudieron cargar los estados. Reintenta.', renderStatusesTab)
     } finally {
       if (isCurrent(token) && requestId === state.request) state.panel?.setAttribute('aria-busy', 'false')
     }
@@ -1098,9 +1102,10 @@ export function installNovedadesUI({
       state.channelsCursor = result?.hasMore === true && typeof result?.nextCursor === 'string' && result.nextCursor ? result.nextCursor : null
       renderChannelRows()
       state.channelsMore.hidden = !state.channelsCursor
-    } catch {
+    } catch (err) {
       if (!isCurrent(token) || requestId !== state.request) return
-      errorPane('No se pudieron cargar los canales. Reintenta.', renderChannelsTab)
+      if (err?.status >= 400 && err.status < 500) errorPane('Esta función aún no está disponible en esta cuenta.')
+      else errorPane('No se pudieron cargar los canales. Reintenta.', renderChannelsTab)
       state.channelsMore.hidden = true
     } finally {
       state.channelsLoading = false
@@ -2094,7 +2099,11 @@ export function installNovedadesUI({
     const nextTab = tab === 'channels' ? 'channels' : 'statuses'
     onOpen?.()
     if (!state.closed) {
-      if (opener) state.opener = opener
+      if (opener) {
+        if (state.opener !== opener) state.opener?.setAttribute('aria-expanded', 'false')
+        state.opener = opener
+        opener.setAttribute('aria-expanded', 'true')
+      }
       switchTab(nextTab)
       focusBody()
       return
@@ -2104,6 +2113,7 @@ export function installNovedadesUI({
     state.tab = nextTab
     state.account = text(getAccount())
     state.opener = opener
+    opener?.setAttribute('aria-expanded', 'true')
     state.channelQuery = ''
     state.channels = []
     state.channelsCursor = null
@@ -2120,7 +2130,8 @@ export function installNovedadesUI({
     panel.setAttribute('aria-busy', 'true')
 
     const header = node('header', 'novedades-header')
-    const title = node('h2', 'novedades-title', 'Novedades')
+    // UX #59.5: WhatsApp en español llama «Actualizaciones» a esta pestaña.
+    const title = node('h2', 'novedades-title', 'Actualizaciones')
     title.id = 'novedades-title'
     const closeButton = button('novedades-close', 'Cerrar Novedades')
     closeButton.textContent = '×'
@@ -2232,6 +2243,7 @@ export function installNovedadesUI({
     stopViewerTicker()
     documentRef.removeEventListener?.('keydown', onKeyDown)
     destroy()
+    state.opener?.setAttribute('aria-expanded', 'false')
     if (restoreFocus && state.opener?.isConnected !== false) state.opener.focus?.()
     state.opener = null
   }

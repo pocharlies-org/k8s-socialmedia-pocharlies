@@ -134,3 +134,17 @@ test('only http(s) text becomes a link', () => {
   assert.equal(safeNovedadesLink('https://example.com/x),')?.href, 'https://example.com/x');
   assert.equal(safeNovedadesLink('https://example.com').rel, 'noopener noreferrer nofollow');
 });
+
+// UX #59: el panel no se exporta; aserciones de fuente (patrón chat-history.test.mjs).
+test('UX #59: sin «Reintentar» en 4xx, rail con aria-expanded y «Actualizaciones»', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../public/novedades-ui.mjs', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(src, /if \(err\?\.status >= 400 && err\.status < 500\) errorPane\('Esta función aún no está disponible en esta cuenta\.'\)/);
+  assert.match(src, /if \(retry\) \{/);
+  assert.match(src, /opener\?\.setAttribute\('aria-expanded', 'true'\)/);
+  assert.match(src, /state\.opener\?\.setAttribute\('aria-expanded', 'false'\)/);
+  assert.match(src, /node\('h2', 'novedades-title', 'Actualizaciones'\)/);
+  assert.match(html, /id="statuses-open"[^>]*aria-expanded="false"/);
+  assert.match(html, /id="channels-open"[^>]*aria-expanded="false"/);
+});

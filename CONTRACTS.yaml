@@ -2010,7 +2010,8 @@ contracts:
     verde WhatsApp, ICO multi-resolución 16/32/48); la ruta, el MIME y la
     referencia del shell no cambian. El <title> pasa a «WhatsApp» y la app lo
     reemplaza por «(N) WhatsApp» con no leídos (QA #74) — el título no es
-    contrato.'
+    contrato. La etiqueta aria-expanded de los botones del rail Estados/Canales
+    tampoco (estado de selección del shell, UX #59).'
 - id: http.hindsight.socialmedia-bank.v1
   kind: http-route
   value: /v1/default/banks/{bank_id}

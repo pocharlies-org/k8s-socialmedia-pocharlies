@@ -1246,7 +1246,7 @@ const novedadesReady = import('./novedades-ui.mjs').then(({installNovedadesUI}) 
     entry.disabled = false;
   }
   return novedadesUI;
-}).catch(err => { error(`No se pudieron cargar las novedades: ${err.message}`); return null; });
+}).catch(err => { error(`No se pudieron cargar las actualizaciones: ${err.message}`); return null; });
 const mediaLibraryReady = import('./media-library-ui.mjs').then(({installMediaLibraryUI}) => {
   mediaLibraryUI = installMediaLibraryUI({getAccount: () => state.account, getChats: () => state.chats, api, selectChat: async chat => {
     const source = state.chats.find(item => item.id === chat.id) || { ...chat, isGroup: chat.id.endsWith('@g.us') };
