@@ -92,7 +92,7 @@ test('C2: the normalization vectors of correo-core give the same canonical form'
 
 test('ts is ISO in UTC with Z and no milliseconds, the form the core parses', () => {
   assert.equal(tsCanonico('2026-10-23T11:00:00.999+02:00'), '2026-10-23T09:00:00Z');
-  assert.equal(tsCanonico(1792745000 * 1000), '2026-10-22T07:23:20Z');
+  assert.equal(tsCanonico(1792745000 * 1000), '2026-10-23T08:43:20Z');
   assert.equal(tsCanonico('no es una fecha'), null);
 });
 

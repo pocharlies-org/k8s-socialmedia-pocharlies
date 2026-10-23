@@ -7,8 +7,10 @@ const BASE: Record<string, string> = {
   TG_CONNECTOR_URL: 'http://telegram-connector-professional:3002',
   CONNECTOR_SHARED_SECRET: 'fixture-connector-shared-secret',
   CORE_URL: 'http://correo-machine.correo.svc.cluster.local',
-  CORREO_PRODUCTOR_ID: 'correo-bridge',
-  CORREO_PRODUCTOR_SECRET: 'p'.repeat(32),
+  CORREO_PRODUCTOR_WA_ID: 'correo-bridge-wa',
+  CORREO_PRODUCTOR_WA_SECRET: 'p'.repeat(32),
+  CORREO_PRODUCTOR_TG_ID: 'correo-bridge-tg',
+  CORREO_PRODUCTOR_TG_SECRET: 'q'.repeat(32),
   CORREO_CONECTOR_WA_ID: 'wa-professional',
   CORREO_CONECTOR_WA_SECRET: 'w'.repeat(32),
   CORREO_CONECTOR_TG_ID: 'tg-professional',
@@ -42,6 +44,8 @@ test('defaults: own queue group, port 8080', () => {
     assert.deepEqual([...c.secretosConector.keys()].sort(), ['tg-professional', 'wa-professional']);
     assert.equal(c.conectorPorCanal.whatsapp, 'wa-professional');
     assert.equal(c.conectorPorCanal.telegram, 'tg-professional');
+    assert.deepEqual(c.productores.get('wa-professional'), { id: 'correo-bridge-wa', secreto: 'p'.repeat(32) });
+    assert.deepEqual(c.productores.get('tg-professional'), { id: 'correo-bridge-tg', secreto: 'q'.repeat(32) });
   });
 });
 
@@ -50,14 +54,16 @@ test('the queue group can never be synapse-bridge (it would steal its messages)'
 });
 
 test('key ids follow correo.connector.v1 and each channel has its prefix', () => {
-  for (const [k, v] of [['CORREO_CONECTOR_WA_ID', 'tg-professional'], ['CORREO_CONECTOR_TG_ID', 'wa-professional'], ['CORREO_CONECTOR_WA_ID', 'wa-PRO'], ['CORREO_PRODUCTOR_ID', 'Correo Bridge']]) {
+  for (const [k, v] of [['CORREO_CONECTOR_WA_ID', 'tg-professional'], ['CORREO_CONECTOR_TG_ID', 'wa-professional'], ['CORREO_CONECTOR_WA_ID', 'wa-PRO'], ['CORREO_PRODUCTOR_WA_ID', 'Correo Bridge'], ['CORREO_PRODUCTOR_TG_ID', 'correo-bridge-wa']]) {
     con({ ...BASE, [k]: v }, () => assert.throws(loadConfig, new RegExp(k)));
   }
 });
 
 test('the keys are all distinct and long enough (security condition 4), checked at start', () => {
-  con({ ...BASE, CORREO_CONECTOR_TG_SECRET: BASE.CORREO_CONECTOR_WA_SECRET }, () => assert.throws(loadConfig, /distint/));
-  con({ ...BASE, CORREO_PRODUCTOR_SECRET: BASE.CORREO_CONECTOR_WA_SECRET }, () => assert.throws(loadConfig, /distint/));
+  con({ ...BASE, CORREO_CONECTOR_TG_SECRET: BASE.CORREO_CONECTOR_WA_SECRET }, () => assert.throws(loadConfig, /distinct/));
+  con({ ...BASE, CORREO_PRODUCTOR_WA_SECRET: BASE.CORREO_CONECTOR_WA_SECRET }, () => assert.throws(loadConfig, /distinct/));
+  con({ ...BASE, CORREO_PRODUCTOR_TG_SECRET: BASE.CORREO_PRODUCTOR_WA_SECRET }, () => assert.throws(loadConfig, /distinct/));
+  con({ ...BASE, CORREO_PRODUCTOR_TG_SECRET: BASE.CONNECTOR_SHARED_SECRET.padEnd(32, 'x'), CONNECTOR_SHARED_SECRET: BASE.CONNECTOR_SHARED_SECRET.padEnd(32, 'x') }, () => assert.throws(loadConfig, /distinct/));
   con({ ...BASE, CORREO_CONECTOR_WA_SECRET: 'corto' }, () => assert.throws(loadConfig, /CORREO_CONECTOR_WA_SECRET/));
 });
 

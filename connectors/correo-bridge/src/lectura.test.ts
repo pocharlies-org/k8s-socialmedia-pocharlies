@@ -54,6 +54,10 @@ async function montar(opciones: { canalCaido?: boolean; jidPropio?: string } = {
       return Response.json({ messages: mensajesTg });
     }
     if (url.host === 'wa.test' && url.pathname.startsWith('/api/public/history/')) return Response.json({ messages: [] });
+    // SC-1500: what the Telegram connector answers today for a peer it cannot resolve.
+    if (url.host === 'tg.test' && url.pathname === '/api/public/messages/777000222') {
+      return Response.json({ error: 'Error: Telegram API error 400: PEER_ID_INVALID' }, { status: 500 });
+    }
     return new Response('{}', { status: 404 });
   }) as typeof fetch;
   const conectores = new ClienteConectores({
@@ -87,7 +91,8 @@ async function montar(opciones: { canalCaido?: boolean; jidPropio?: string } = {
 function pedir(port: number, ruta: string, cabeceras: Record<string, string> = {}, metodo = 'GET', cuerpo = ''):
   Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port, path: ruta, method: metodo, headers: cabeceras }, res => {
+    const headers = cuerpo ? { ...cabeceras, 'Content-Length': String(Buffer.byteLength(cuerpo)) } : cabeceras;
+    const req = request({ host: '127.0.0.1', port, path: ruta, method: metodo, headers }, res => {
       let datos = '';
       res.on('data', c => (datos += c));
       res.on('end', () => resolve({ status: res.statusCode ?? 0, json: datos ? JSON.parse(datos) : null }));
@@ -267,8 +272,9 @@ test('C4: no write calls: every request to a connector is a signed GET on the cl
     await pedir(s.port, WA.objetivo, { 'X-Correo-Key-Id': WA.clave_id, 'X-Correo-Timestamp': WA.ts, 'X-Correo-Signature': WA.firma });
     await pedir(s.port, '/mensajes/tg:4242', firmado(TG, '/mensajes/tg:4242'));
     await pedir(s.port, '/mensajes/3EB0A1B2C3D4E5F60002', firmado(WA, '/mensajes/3EB0A1B2C3D4E5F60002'));
+    // B1 does not serve the send route: the read handler leaves it to main.ts, which answers 404.
     const w = await pedir(s.port, '/envios', firmado(WA, '/envios', AHORA_S, 'POST', '{}'), 'POST', '{}');
-    assert.equal(w.status, 404, 'B1 does not serve POST /envios');
+    assert.equal(w.status, 418);
     assert.ok(s.llamadas.length >= 3);
     for (const l of s.llamadas) {
       assert.equal(l.metodo, 'GET', l.url);
@@ -285,6 +291,22 @@ test('a route that is not the bridge\'s is left to the caller (health, status, m
   try {
     const r = await pedir(s.port, '/health');
     assert.equal(r.status, 418);
+  } finally {
+    await s.cerrar();
+  }
+});
+
+test('C7 (SC-1500): a peer the Telegram connector rejects fails only its own read; the next one is served', async () => {
+  const s = await montar();
+  try {
+    const malo = '/hilos/tg:777000222';
+    const r = await pedir(s.port, malo, firmado(TG, malo));
+    assert.equal(r.status, 502);
+    assert.equal(r.json.error, 'canal_no_responde');
+    assert.ok(!JSON.stringify(r.json).includes('PEER_ID_INVALID'), 'the connector error does not leak');
+    const bueno = '/hilos/tg:777000111';
+    const b = await pedir(s.port, bueno, firmado(TG, bueno));
+    assert.equal(b.status, 200);
   } finally {
     await s.cerrar();
   }

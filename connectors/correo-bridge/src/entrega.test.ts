@@ -19,6 +19,7 @@ const CUERPO: MensajeCanal = {
   identidad: { canal: 'whatsapp', valor: '34600111222@c.us' },
 };
 const SECRETO = 'secreto-de-prueba-productor-0123456789';
+const SECRETO_TG = 'secreto-de-prueba-productor-tg-0123456789';
 
 function reloj(inicio = 1_792_745_000_000) {
   let t = inicio;
@@ -41,8 +42,10 @@ function entrega(fetchImpl: typeof fetch, r = reloj()) {
     r,
     e: new Entrega({
       coreUrl: 'http://correo-machine.test',
-      productorId: 'correo-bridge',
-      productorSecreto: SECRETO,
+      productores: new Map([
+        ['wa-professional', { id: 'correo-bridge-wa', secreto: SECRETO }],
+        ['tg-professional', { id: 'correo-bridge-tg', secreto: SECRETO_TG }],
+      ]),
       fetchImpl,
       ahora: r.ahora,
       dormir: r.dormir,
@@ -104,7 +107,7 @@ test('C11: a network error is retried; 202 is delivered and 200 is a duplicate',
   assert.equal(e.contadores.agotados, 0);
 });
 
-test('the POST to the core is signed with HMAC V2 over the exact bytes it sends, with the producer key', async () => {
+test('the POST to the core is signed with HMAC V2 over the exact bytes it sends, with the key of that connector\'s producer', async () => {
   let visto: { url: string; init: RequestInit } | null = null;
   const r = reloj();
   const { e } = entrega((async (url: string, init: RequestInit) => {
@@ -117,12 +120,12 @@ test('the POST to the core is signed with HMAC V2 over the exact bytes it sends,
   assert.equal(url, 'http://correo-machine.test/v2/mensajes/tg-professional');
   assert.equal(init.method, 'POST');
   const h = new Headers(init.headers);
-  assert.equal(h.get('x-correo-key-id'), 'correo-bridge');
+  assert.equal(h.get('x-correo-key-id'), 'correo-bridge-tg');
   assert.equal(h.get('x-correo-timestamp'), String(Math.floor(r.ahora() / 1000)));
   assert.equal(h.get('content-type'), 'application/json');
   assert.equal(String(init.body), JSON.stringify(CUERPO));
   assert.equal(h.get('x-correo-signature'),
-    firmarV2(SECRETO, h.get('x-correo-timestamp') as string, 'POST', '/v2/mensajes/tg-professional', String(init.body)));
+    firmarV2(SECRETO_TG, h.get('x-correo-timestamp') as string, 'POST', '/v2/mensajes/tg-professional', String(init.body)));
 });
 
 test('C11: the alert rule on correo_bridge_agotados_total exists in the repo', () => {
