@@ -1865,6 +1865,8 @@ button.message-poll-option:hover, .message-poll-option.is-selected { border-colo
 .message-poll-voter-list { margin: 6px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
 .message-preservation-marker { color: var(--muted-strong); font-size: 11px; margin-bottom: 5px; }
 .message-reply-reference { min-width: 0; color: var(--muted); }
+/* UX #58.2: la cita se trunca a 1 línea, como WhatsApp (ocupaba 3+). */
+.message-reply-reference .message-kind-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .message-reply-sender { overflow: hidden; color: var(--accent-strong); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .message-kind-line { display: inline-flex; align-items: center; min-width: 0; gap: 6px; color: var(--muted-strong); }
 .message-kind-icon { width: 16px; height: 16px; flex: none; }
