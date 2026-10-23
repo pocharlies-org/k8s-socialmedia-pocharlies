@@ -1247,7 +1247,7 @@ async function runDesktop(page, state, report) {
     await page.locator('#feature-chat-info').click();
     const info = await dialog(page, /Informaci.n del grupo/i);
     await clickDialogButton(info, 'Añadir participante');
-    const add = await dialog(page, /A.adir miembro/i);
+    const add = await dialog(page, /A.adir participante/i);
     await fieldLocator(add, 'Número o identificador').fill('carla-fixture');
     await clickDialogButton(add, 'Añadir');
     await waitForCondition(() => state.log.some(item => item.path === '/api/groups/action' && item.body?.chat === 'alpha-group' && item.body?.action === 'add' && item.body?.participant === 'carla-fixture'), 'group member request missing');
