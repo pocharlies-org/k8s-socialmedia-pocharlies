@@ -1237,7 +1237,7 @@ async function runDesktop(page, state, report) {
     await create.getByRole('button', { name: 'Nuevo grupo', exact: true }).click();
     create = await dialog(page, /Nuevo grupo/i);
     await fieldLocator(create, 'Nombre').fill('Grupo Nuevo');
-    await fieldLocator(create, 'Miembros').fill('ana-fixture,bruno-fixture');
+    await fieldLocator(create, 'Participantes').fill('ana-fixture,bruno-fixture');
     await clickDialogButton(create, 'Continuar');
     await waitForCondition(() => state.log.some(item => item.path === '/api/groups' && item.body?.participants?.length === 2), 'new group request missing');
   });
@@ -1246,12 +1246,12 @@ async function runDesktop(page, state, report) {
     await openChat(page, 'Equipo Fixture');
     await page.locator('#feature-chat-info').click();
     const info = await dialog(page, /Informaci.n del grupo/i);
-    await clickDialogButton(info, 'Añadir miembro');
+    await clickDialogButton(info, 'Añadir participante');
     const add = await dialog(page, /A.adir miembro/i);
     await fieldLocator(add, 'Número o identificador').fill('carla-fixture');
     await clickDialogButton(add, 'Añadir');
     await waitForCondition(() => state.log.some(item => item.path === '/api/groups/action' && item.body?.chat === 'alpha-group' && item.body?.action === 'add' && item.body?.participant === 'carla-fixture'), 'group member request missing');
-    await page.waitForFunction(() => document.querySelector('.feature-toast')?.textContent.includes('Miembro añadido'));
+    await page.waitForFunction(() => document.querySelector('.feature-toast')?.textContent.includes('Participante añadido'));
     await dialog(page, /Informaci.n del grupo/i);
   });
 
