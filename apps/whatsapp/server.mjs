@@ -657,6 +657,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       return withType(chat, chat.previewType || latest?.message_type);
     });
   }
+  // QA #99: file_name llega vacío en ~98 % de los adjuntos; el nombre de descarga se deriva del tipo.
+  const downloadNames = { PHOTO: 'foto', IMAGE: 'foto', VIDEO: 'video', VOICE: 'audio', AUDIO: 'audio', STICKER: 'sticker', DOCUMENT: 'documento' };
+  const downloadExts = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'application/pdf': 'pdf' };
   async function readMessageRows(account, chat, { before, limit, around }) {
     const conversation = await conversationFor(account, chat);
     const readIds = await conversationReadIds(account, conversation);
@@ -722,9 +725,6 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       rows = await query(MESSAGE_LIST_SQL, [account.accountId, readIds]);
       rows = rows.slice(0, size);
     }
-    // QA #99: file_name llega vacío en ~98 % de los adjuntos; el nombre de descarga se deriva del tipo.
-    const downloadNames = { PHOTO: 'foto', IMAGE: 'foto', VIDEO: 'video', VOICE: 'audio', AUDIO: 'audio', STICKER: 'sticker', DOCUMENT: 'documento' };
-    const downloadExts = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'application/pdf': 'pdf' };
     const ids = rows.map(row => row.id).filter(Boolean);
     const providerIds = rows.map(row => row.waMessageId).filter(Boolean);
     let reactionRows = [];
@@ -1724,6 +1724,47 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const a = accountParam(url.searchParams.get('account')); const chat = safeChatId(url.searchParams.get('chat'));
         const result = await readMessageRows(a, chat, { before: url.searchParams.get('before'), limit: url.searchParams.get('limit') });
         return conditionalJson(200, { messages: result.messages, nextCursor: result.nextCursor });
+      }
+      // QA #95 (velocidad): el export bajaba 200 mensajes × hasta 250 páginas en serie. Esta ruta
+      // devuelve la conversación entera en una sola consulta — forma de fila de /api/messages sin
+      // enriquecer (el transcript solo usa texto, remitente, tipo y adjuntos; las miniaturas
+      // previewOnly se descartan igual que hacía el cliente). Tope 50 000: 413, nunca truncado.
+      // CONTRACT: http.whatsapp-app.chat-export.v1
+      if (req.method === 'GET' && path === '/api/chat-export') {
+        const a = accountParam(url.searchParams.get('account')); const chat = safeChatId(url.searchParams.get('chat'));
+        const conversation = await conversationFor(a, chat);
+        const readIds = await conversationReadIds(a, conversation);
+        const rows = await query(
+          `SELECT m.id, m.content AS text, m.direction = 'OUTBOUND' AS "fromMe",
+                  m.wa_timestamp AS timestamp, m.message_type AS type,
+                  CASE WHEN m.direction = 'OUTBOUND' THEN NULL ELSE COALESCE(p.name, p.push_name, p.id) END AS "senderName"
+             FROM messages m
+             LEFT JOIN participants p ON p.id=m.sender_wa_id AND p.account=m.account
+            WHERE m.account=$1 AND m.conversation_id=ANY($2::text[]) AND m.platform='whatsapp'
+              AND ${MESSAGE_RETAINED_SQL} AND ${MESSAGE_VISIBLE_SQL}
+            ORDER BY m.wa_timestamp ASC, m.id ASC LIMIT 50001`,
+          [a.accountId, readIds]
+        );
+        if (rows.length > 50000) throw fail(413, 'Export overflow');
+        const attachments = rows.length ? await query(
+          `SELECT a.message_id,a.mime_type,a.file_name,a.file_type
+             FROM attachments a JOIN messages m ON m.id=a.message_id
+            WHERE m.account=$1 AND m.conversation_id=ANY($2::text[]) AND m.platform='whatsapp'
+              AND ${MESSAGE_RETAINED_SQL}`,
+          [a.accountId, readIds]
+        ) : [];
+        const stamps = new Map(rows.map(row => [row.id, row.timestamp]));
+        const byMessage = new Map();
+        for (const item of attachments) {
+          const stamp = stamps.get(item.message_id) || new Date();
+          const list = byMessage.get(item.message_id) || [];
+          list.push({ name: item.file_name || `${downloadNames[item.file_type] || 'archivo'}-${new Date(stamp).toISOString().slice(0, 10)}.${downloadExts[(item.mime_type || '').toLowerCase()] || 'bin'}`, mimeType: item.mime_type || 'application/octet-stream' });
+          byMessage.set(item.message_id, list);
+        }
+        return json(200, { messages: rows.map(row => ({
+          id: String(row.id), text: row.text || '', timestamp: row.timestamp, fromMe: row.fromMe === true,
+          senderName: row.senderName || null, type: row.type, attachments: byMessage.get(row.id) || [],
+        })), nextCursor: null });
       }
       // CONTRACT: http.whatsapp-connector.history-recover.v1
       if (req.method === 'POST' && path === '/api/messages/recover') {

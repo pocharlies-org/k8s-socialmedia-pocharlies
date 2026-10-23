@@ -71,6 +71,36 @@ export function createPageFetcher({ requestJson, fetchImpl = globalThis.fetch })
   };
 }
 
+/**
+ * QA #95 (velocidad): una sola petición a /api/chat-export en vez de hasta 250
+ * páginas de 200. Devuelve la misma forma de página ({messages, nextCursor:
+ * null}) para que collectMessages funcione igual; el 413 del servidor
+ * (conversación > 50 000) es un ChatExportError en español.
+ */
+export function createWholeExportFetcher({ requestJson, fetchImpl = globalThis.fetch } = {}) {
+  const call = requestJson || (async (url, options) => {
+    const response = await fetchImpl(url, { credentials: 'same-origin', ...options });
+    if (response.status === 413) throw new ChatExportError('La conversación supera el límite de 50 000 mensajes para exportar.');
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new ChatExportError(`Error al leer mensajes (HTTP ${response.status}${body?.error?.message ? `: ${body.error.message}` : ''}).`);
+    }
+    return response.json();
+  });
+  return async ({ account, chat, signal }) => {
+    if (typeof account !== 'string' || !account) throw new ChatExportError('Cuenta de exportación no válida.');
+    if (typeof chat !== 'string' || !chat) throw new ChatExportError('Chat de exportación no válido.');
+    const url = `/api/chat-export?${new URLSearchParams({ account, chat }).toString()}`;
+    try {
+      return await call(url, { signal });
+    } catch (error) {
+      if (error instanceof ChatExportError || error instanceof ChatExportCanceled) throw error;
+      if (signal?.aborted || error?.name === 'AbortError') throw new ChatExportCanceled(undefined, { cause: error });
+      throw new ChatExportError('No se pudo leer la conversación.', { cause: error });
+    }
+  };
+}
+
 function validatePage(page) {
   if (!page || typeof page !== 'object' || Array.isArray(page)) {
     throw new ChatExportError('Respuesta de mensajes no válida (sin objeto de página).');

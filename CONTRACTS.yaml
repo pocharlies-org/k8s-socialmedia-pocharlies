@@ -2393,6 +2393,22 @@ contracts:
     acepta — variante de representacion HTTP: la forma del 200 no cambia;
     quien llame sin accept-encoding (o un proxy que la quite) recibe el
     crudo de siempre.
+- id: http.whatsapp-app.chat-export.v1
+  kind: http-route
+  value: /api/chat-export
+  role: provider
+  files:
+    - apps/whatsapp/server.mjs
+  status: active
+  note: >-
+    GET /api/chat-export de la app whatsapp.e-dani.com (QA velocidad #95): la
+    conversacion entera en una sola consulta para el export TXT —
+    {messages, nextCursor: null} con filas {id, text, timestamp, fromMe,
+    senderName, type, attachments:[{name, mimeType}]} (forma de
+    /api/messages sin reacciones, citas ni previews; las miniaturas
+    previewOnly no salen: el transcript ya las descartaba). Tope 50 000
+    mensajes igual que el cliente: por encima 413 «Export overflow», nunca
+    truncado.
 - id: http.whatsapp-app.messages-delete.v1
   kind: http-route
   value: /api/messages/delete

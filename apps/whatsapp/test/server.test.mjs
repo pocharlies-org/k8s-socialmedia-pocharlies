@@ -909,3 +909,33 @@ test('/api/chats revalida con ETag: el ciclo sin cambios responde 304 (#160, #14
   assert.equal(revalidated.status, 304);
   assert.equal(revalidated.headers.get('etag'), etag);
 });
+function exportDb(rows, attachments = []) {
+  return { query: async sql => {
+    if (/FROM conversations c/.test(sql)) return { rows: [{ id: '34600112234@s.whatsapp.net', name: 'Chat', wa_chat_id: null, is_group: false, archived: false, unread: 0 }] };
+    if (/LIMIT 50001/.test(sql)) return { rows };
+    if (/FROM attachments a JOIN messages m/.test(sql)) return { rows: attachments };
+    return { rows: [] };
+  } };
+}
+test('/api/chat-export devuelve toda la conversación en una consulta y deriva el nombre del adjunto (#95)', async t => {
+  const stamp = new Date('2026-10-01T10:00:00.000Z');
+  const db = exportDb([
+    { id: '11111111-1111-1111-1111-111111111111', text: 'hola', fromMe: false, timestamp: stamp, type: 'TEXT', senderName: 'Ana' },
+    { id: '22222222-2222-2222-2222-222222222222', text: null, fromMe: true, timestamp: stamp, type: 'IMAGE', senderName: null },
+  ], [{ message_id: '22222222-2222-2222-2222-222222222222', mime_type: 'image/jpeg', file_name: '', file_type: 'IMAGE' }]);
+  const { request } = await fixture(t, { db });
+  const response = await request('/api/chat-export?account=personal&chat=34600112234%40s.whatsapp.net');
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.nextCursor, null);
+  assert.deepEqual(body.messages[0], {
+    id: '11111111-1111-1111-1111-111111111111', text: 'hola', timestamp: stamp.toISOString(),
+    fromMe: false, senderName: 'Ana', type: 'TEXT', attachments: [],
+  });
+  assert.deepEqual(body.messages[1].attachments, [{ name: 'foto-2026-10-01.jpg', mimeType: 'image/jpeg' }]);
+});
+test('/api/chat-export responde 413 si la conversación pasa de 50 000 mensajes, nunca trunca (#95)', async t => {
+  const rows = Array.from({ length: 50001 }, (_, i) => ({ id: String(i + 1), text: 'x', fromMe: false, timestamp: new Date(), type: 'TEXT', senderName: null }));
+  const { request } = await fixture(t, { db: exportDb(rows) });
+  assert.equal((await request('/api/chat-export?account=personal&chat=34600112234%40s.whatsapp.net')).status, 413);
+});
