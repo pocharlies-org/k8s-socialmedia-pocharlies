@@ -79,6 +79,14 @@ const AUTHOR_COMPAT_CHECKSUMS: Record<string, string> = {
     '25151ce5de2c0be3adf0271058e2ec9e59a5971848bcd826cecd3224b40fb261',
 };
 
+/** Lock wait cap for the whole run (MIGRATE_LOCK_TIMEOUT, e.g. `10s`, `500ms`). */
+export function migrationLockTimeout(raw = process.env.MIGRATE_LOCK_TIMEOUT): string {
+  const value = raw ?? '10s';
+  if (!/^[1-9]\d{0,5}(ms|s)$/.test(value))
+    throw new Error('MIGRATE_LOCK_TIMEOUT must look like 10s or 500ms');
+  return value;
+}
+
 /** Files that must run even when their objects already exist (idempotent bodies). */
 const ALWAYS_RUN_MARKER = '-- migrate:always-run';
 
@@ -154,9 +162,17 @@ export async function runMigrations(
     if (!files.includes('039_shared_author_compat.sql'))
       throw new Error(`Author migration ${file} requires 039_shared_author_compat.sql`);
   }
+  const lockTimeout = migrationLockTimeout();
   await client.query('BEGIN');
   try {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('socialmedia.schema-migrations'))");
+    // SKIRM-261: the run is ONE transaction, so every lock it takes is held
+    // until COMMIT. Never wait in the lock queue: a waiting DDL makes every
+    // later INSERT on that table wait behind it (prod ingest stalled ~20 min on
+    // 23-10). Fail fast and let the Job retry instead. A killed Job must not
+    // leave its backend running either.
+    await client.query(`SET LOCAL lock_timeout = '${lockTimeout}'`);
+    await client.query("SET LOCAL client_connection_check_interval = '5s'");
     await client.query(
       `CREATE TABLE IF NOT EXISTS ${LEDGER_TABLE} (version text PRIMARY KEY, checksum text NOT NULL, adopted boolean NOT NULL DEFAULT false, applied_at timestamptz NOT NULL DEFAULT now())`
     );

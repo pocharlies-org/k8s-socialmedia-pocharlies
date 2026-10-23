@@ -31,6 +31,19 @@
 #                  una migración puede pasar con el esquema y fallar con los datos)
 #   EMBEDDING_DIMENSION  la misma que el Job whatsapp-mcp-migrate (default 1024),
 #                  para que el runner configure los embeddings como en prod
+#   QA_SANDBOX_PROFILE  1 = el runner informa de la duración de cada migración y
+#                  de qué tablas dejaría con las escrituras bloqueadas y cuánto
+#                  (SKIRM-261, scripts/qa-schema-migrate.ts)
+#   PROD_STATEMENT_TIMEOUT  tope de cada lectura en prod (default 120s)
+#
+# Lecturas de prod sin restos (SKIRM-261, 23-10): un stream de `kubectl exec`
+# cortado dejó cinco COPY de este script vivos 1 h 45 min en `ClientWrite`
+# sosteniendo AccessShareLock sobre messages; la migración de prod esperó detrás
+# y los INSERT de la ingesta, detrás de ella, ~20 min. Un backend bloqueado
+# escribiendo al cliente no atiende statement_timeout (solo la terminación), así
+# que cada sesión de prod lleva application_name propio (qa-schema-sandbox-<pid>)
+# y el script termina las suyas al salir (trap), tras cualquier lectura que
+# falle, y las que hubieran quedado de una ejecución anterior al empezar.
 #
 # Seguridad: por defecto las únicas lecturas de producción son `pg_dump
 # --schema-only` y `pg_dump --data-only -t _migrations` (solo nombres de fichero,
@@ -54,6 +67,8 @@ KUBE_POD="${KUBE_POD:-}"
 PROD_DB=whatsappmcp
 SANDBOX_DATA="${SANDBOX_DATA:-0}"
 export EMBEDDING_DIMENSION="${EMBEDDING_DIMENSION:-1024}"
+PROD_STATEMENT_TIMEOUT="${PROD_STATEMENT_TIMEOUT:-120s}"
+PROD_APP="qa-schema-sandbox-$$"
 
 case "$SANDBOX_NAME" in
   qa-schema-*|skirm89-*) ;;
@@ -79,16 +94,35 @@ prod_pod() {
   [[ -n "$KUBE_POD" ]] || { echo "no se encontró el pod de postgres-shared-rw en $KUBE_NS" >&2; exit 1; }
 }
 
+PROD_ENV=(env "PGAPPNAME=$PROD_APP"
+  "PGOPTIONS=-c statement_timeout=$PROD_STATEMENT_TIMEOUT -c idle_in_transaction_session_timeout=60s")
+
 prod_dump() {
-  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- \
+  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- "${PROD_ENV[@]}" \
     pg_dump -U postgres -d "$PROD_DB" "$@" \
     | sed '/^SET transaction_timeout = 0;$/d'
 }
 
 prod_psql() {
-  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- \
+  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- "${PROD_ENV[@]}" \
     psql -U postgres -d "$PROD_DB" -At -v ON_ERROR_STOP=1 -c "$1"
 }
+
+# Termina en prod los backends de este script (los de esta ejecución, o con
+# `todas` también los de ejecuciones anteriores). Sesión propia con otro nombre.
+prod_cleanup() {
+  [[ -n "$KUBE_POD" ]] || return 0
+  local pattern="$PROD_APP"
+  [[ "${1:-}" == "todas" ]] && pattern="qa-schema-sandbox-%"
+  local n
+  n=$(kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- \
+    env PGAPPNAME=qa-schema-cleanup PGOPTIONS="-c statement_timeout=30s" \
+    psql -U postgres -d "$PROD_DB" -At -c \
+    "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+       WHERE application_name LIKE '$pattern' AND pid <> pg_backend_pid()" 2>/dev/null) || n="?"
+  [[ "$n" == "0" ]] || echo "   prod: terminadas $n sesiones de lectura del sandbox ($pattern)" >&2
+}
+trap 'prod_cleanup' EXIT
 
 # SANDBOX_DATA=1: copia cada tabla de public (salvo el ledger) en trozos de
 # unos DATA_CHUNK_MB megas (el stream de `kubectl exec` muere a los ~70 s: medido
@@ -118,6 +152,7 @@ copy_data() {
       WHERE attrelid = 'public.$t'::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = ''")
     for try in 1 2 3; do
       copy_table "$t" "$pages" "$step" "$cols" && break
+      prod_cleanup
       (( try < 3 )) || { echo "   la copia de $t falló tres veces" >&2; exit 1; }
       echo "   reintento $t (intento $(( try + 1 )))" >&2
       sandbox_psql -q -c "SET session_replication_role = replica" -c "DELETE FROM public.\"$t\"" >/dev/null
@@ -190,6 +225,7 @@ do_up() {
     return 0
   fi
   prod_pod
+  prod_cleanup todas
   echo "== volcando esquema de producción ($KUBE_NS/$KUBE_POD, bd $PROD_DB) =="
   prod_dump --schema-only --no-owner --no-privileges > "$DUMP_FILE"
   echo "   $(wc -c < "$DUMP_FILE") bytes de esquema en $DUMP_FILE"
@@ -236,6 +272,8 @@ do_up() {
 
   # 4. Migraciones del repo con el runner real: el ledger salta lo aplicado en prod;
   #    cualquier migración nueva corre de verdad.
+  # Lo que queda no lee prod: sus sesiones se cierran ya (y el trap lo repite).
+  prod_cleanup
   echo "== aplicando migraciones del repo con migrate.ts =="
   DATABASE_URL="postgres://postgres@127.0.0.1:$port/$PROD_DB" \
     npx tsx "$REPO_ROOT/scripts/qa-schema-migrate.ts"
@@ -253,7 +291,7 @@ do_up() {
     # Segunda pasada: con todo aplicado no debe ejecutar nada.
     local before after
     before=$(sandbox_psql -At -c "SELECT count(*) FROM schema_migrations")
-    DATABASE_URL="postgres://postgres@127.0.0.1:$port/$PROD_DB" \
+    QA_SANDBOX_PROFILE=0 DATABASE_URL="postgres://postgres@127.0.0.1:$port/$PROD_DB" \
       npx tsx "$REPO_ROOT/scripts/qa-schema-migrate.ts" | grep -E 'Applied|Adopted' && { echo "   la segunda pasada aplicó algo" >&2; exit 1; }
     after=$(sandbox_psql -At -c "SELECT count(*) FROM schema_migrations")
     echo "   segunda pasada sin cambios: schema_migrations $before -> $after"

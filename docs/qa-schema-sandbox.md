@@ -104,6 +104,37 @@ y hace una **segunda pasada**, que debe no aplicar nada. Tarda varios minutos
 (`messages` y `message_embeddings` son ~3,6 GB). Son datos de clientes: solo en
 el x86, solo en loopback, y `down` al terminar.
 
+### Sin restos en prod (SKIRM-261, 23-10)
+
+Un stream de `kubectl exec` cortado no mata el `psql` del pod: su backend se
+queda en `ClientWrite` escribiendo a nadie, con el `AccessShareLock` de la tabla
+puesto. El 23-10 quedaron así cinco `COPY` de este script 1 h 45 min sobre
+`messages`; la migración de prod se puso en cola detrás pidiendo su lock y los
+INSERT de la ingesta, detrás de ella, ~20 min. Un backend bloqueado escribiendo
+al cliente no atiende `statement_timeout`, solo la terminación, así que:
+
+- cada sesión de prod del script se llama `qa-schema-sandbox-<pid>`
+  (`application_name`) y lleva `statement_timeout` (`PROD_STATEMENT_TIMEOUT`,
+  120 s) e `idle_in_transaction_session_timeout` de 60 s;
+- el script termina con `pg_terminate_backend` las suyas al salir (`trap`), tras
+  cada trozo que falla y antes de migrar; al empezar, también las de ejecuciones
+  anteriores (`qa-schema-sandbox-%`).
+
+Comprobado: con el `kubectl` local muerto, el backend sigue en `ClientWrite`; la
+limpieza lo termina.
+
+### Medir duración y locks (`QA_SANDBOX_PROFILE=1`)
+
+```bash
+SANDBOX_DATA=1 QA_SANDBOX_PROFILE=1 scripts/qa-schema-sandbox.sh up
+```
+
+El runner informa de cuánto tarda cada migración y, por tabla, de la primera
+migración que toma un lock que bloquea escrituras (y la que toma
+`AccessExclusiveLock`, que bloquea también lecturas), con los milisegundos que
+lo tendría hasta el `COMMIT`. El runner aplica **todo en una transacción**: un
+lock tomado al principio se mantiene hasta el final.
+
 ## Notas
 
 - La producción corre PostgreSQL 17.5 (CNPG `postgres-shared`); el sandbox usa
@@ -111,5 +142,5 @@ el x86, solo en loopback, y `down` al terminar.
   `SET transaction_timeout = 0;` (inexistente en 16) y el script lo filtra; por lo
   demás la restauración es compatible. Si alguna vez el volcado de 17 no restaura
   en 16, lanza con `PG_IMAGE=pgvector/pgvector:pg17` (mismo procedimiento).
-- Nunca escribas en la BD de producción: la herramienta solo hace `pg_dump`.
+- Nunca escribas en la BD de producción: la herramienta solo lee (`pg_dump` y `COPY ... TO STDOUT`) y, para no dejar restos, termina sus propias sesiones de lectura.
 - El contenedor es efímero: `down` lo borra todo; no hay estado que conservar.

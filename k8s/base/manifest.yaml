@@ -712,6 +712,11 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 3
+  # SKIRM-261, medido en prod el 23-10 (13:47Z): las 022-041 sobre 950k mensajes,
+  # del arranque del pod al Completed, 19 s (la transacción, ~15 s; la más larga,
+  # la 030, 6 s). 300 s es más de 15 veces eso: el plazo no se toca. Lo que lo
+  # agotó dos veces fue la espera de locks, y esa la corta el runner con
+  # lock_timeout (MIGRATE_LOCK_TIMEOUT, 10 s): falla rápido y el Job reintenta.
   activeDeadlineSeconds: 300
   ttlSecondsAfterFinished: 3600
   template:
