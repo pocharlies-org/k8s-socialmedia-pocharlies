@@ -182,10 +182,39 @@ metadata:
   namespace: whatsapp-mcp
 spec:
   template:
+    metadata:
+      annotations:
+        # SC-2092: subir el numero reinicia el pod y recoge la CONNECTOR_SHARED_SECRET rotada
+        # (secretKeyRef no se recarga y no hay Reloader).
+        pocharlies/connector-secret-generation: "2"
     spec:
       containers:
         - name: mcp-server
           image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:socialmedia-v3-f0f219bd@sha256:b79c11f3b6e2508abd6b4da1212c5fe2f103c8a785f068f1d0ff40d9a2c00b1c
+---
+# SC-2092: mcp-sse y social-api llevan su imagen por el bloque `images:` de kustomization.yaml;
+# aqui solo la anotacion de reinicio.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-sse
+  namespace: whatsapp-mcp
+spec:
+  template:
+    metadata:
+      annotations:
+        pocharlies/connector-secret-generation: "2"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: social-api
+  namespace: whatsapp-mcp
+spec:
+  template:
+    metadata:
+      annotations:
+        pocharlies/connector-secret-generation: "2"
 ---
 apiVersion: apps/v1
 kind: Deployment
