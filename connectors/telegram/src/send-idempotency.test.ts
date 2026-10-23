@@ -227,28 +227,35 @@ test('the random_id of a key is fixed by (account, key): a retry asks Telegram f
 
 // ── on the ephemeral Postgres ──────────────────────────────────────────────
 
-test('C6: the same key twice → one send; the second answers the record with deduplicated: true', withDb, async () => {
-  await useDb();
-  const key = uniq('dos-veces');
-  const { base, fake } = await connector();
-  const a = await send(base, { text: 'Te lo enviamos mañana' }, key);
-  assert.equal(a.status, 200);
-  assert.equal(a.body.success, true);
-  assert.equal(a.body.deduplicated, false);
-  assert.match(a.body.sentAt, /^\d{4}-\d{2}-\d{2}T/);
-  const b = await send(base, { text: 'Te lo enviamos mañana' }, key);
-  assert.equal(b.status, 200);
-  assert.equal(b.body.deduplicated, true);
-  assert.equal(b.body.messageId, a.body.messageId);
-  assert.equal(fake.sends.length, 1);
-  // The random_id handed to mtcute is the one derived from (account, key).
-  assert.equal(String(fake.sends[0].params?.randomId), idempotentRandomId(key, 'professional').toString());
-  // The raw key is never stored.
-  const stored = (await rows()).filter(r => r.message_id === a.body.messageId);
-  assert.equal(stored.length, 1);
-  assert.ok(!JSON.stringify(stored).includes(key));
-  assert.equal(stored[0].status, 'sent');
-});
+test(
+  'C6: the same key twice → one send; the second answers the record with deduplicated: true',
+  withDb,
+  async () => {
+    await useDb();
+    const key = uniq('dos-veces');
+    const { base, fake } = await connector();
+    const a = await send(base, { text: 'Te lo enviamos mañana' }, key);
+    assert.equal(a.status, 200);
+    assert.equal(a.body.success, true);
+    assert.equal(a.body.deduplicated, false);
+    assert.match(a.body.sentAt, /^\d{4}-\d{2}-\d{2}T/);
+    const b = await send(base, { text: 'Te lo enviamos mañana' }, key);
+    assert.equal(b.status, 200);
+    assert.equal(b.body.deduplicated, true);
+    assert.equal(b.body.messageId, a.body.messageId);
+    assert.equal(fake.sends.length, 1);
+    // The random_id handed to mtcute is the one derived from (account, key).
+    assert.equal(
+      String(fake.sends[0].params?.randomId),
+      idempotentRandomId(key, 'professional').toString()
+    );
+    // The raw key is never stored.
+    const stored = (await rows()).filter(r => r.message_id === a.body.messageId);
+    assert.equal(stored.length, 1);
+    assert.ok(!JSON.stringify(stored).includes(key));
+    assert.equal(stored[0].status, 'sent');
+  }
+);
 
 test('C6: a new connector on the same store (a restart) still sends once', withDb, async () => {
   await useDb();
@@ -265,44 +272,59 @@ test('C6: a new connector on the same store (a restart) still sends once', withD
   assert.equal(first.fake.sends.length + second.fake.sends.length, 1);
 });
 
-test('C6: an attempt saved without an outcome → 409 send_outcome_uncertain and no resend', withDb, async () => {
-  await useDb();
-  const key = uniq('incierto');
-  const { base, fake } = await connector();
-  // A timeout after the request left: nobody knows whether Telegram has it.
-  fake.failNext = new Error('Request timed out');
-  const a = await send(base, { text: 'quizá' }, key);
-  assert.equal(a.status, 500);
-  const b = await send(base, { text: 'quizá' }, key);
-  assert.equal(b.status, 409);
-  assert.equal(b.body.failureClass, 'send_outcome_uncertain');
-  assert.equal(fake.sends.length, 1);
-});
+test(
+  'C6: an attempt saved without an outcome → 409 send_outcome_uncertain and no resend',
+  withDb,
+  async () => {
+    await useDb();
+    const key = uniq('incierto');
+    const { base, fake } = await connector();
+    // A timeout after the request left: nobody knows whether Telegram has it.
+    fake.failNext = new Error('Request timed out');
+    const a = await send(base, { text: 'quizá' }, key);
+    assert.equal(a.status, 500);
+    const b = await send(base, { text: 'quizá' }, key);
+    assert.equal(b.status, 409);
+    assert.equal(b.body.failureClass, 'send_outcome_uncertain');
+    assert.equal(fake.sends.length, 1);
+  }
+);
 
-test('C6: Telegram refused the send (an RPC error) → nothing went out: the same key sends again, same random_id', withDb, async () => {
-  await useDb();
-  const key = uniq('rechazo');
-  const { base, fake } = await connector();
-  fake.failNext = Object.assign(new Error('400: PEER_ID_INVALID'), { code: 400, text: 'PEER_ID_INVALID' });
-  const a = await send(base, { text: 'otra vez' }, key);
-  assert.equal(a.status, 500);
-  const b = await send(base, { text: 'otra vez' }, key);
-  assert.equal(b.status, 200);
-  assert.equal(b.body.deduplicated, false);
-  assert.equal(fake.sends.length, 2);
-  assert.equal(String(fake.sends[0].params?.randomId), String(fake.sends[1].params?.randomId));
-});
+test(
+  'C6: Telegram refused the send (an RPC error) → nothing went out: the same key sends again, same random_id',
+  withDb,
+  async () => {
+    await useDb();
+    const key = uniq('rechazo');
+    const { base, fake } = await connector();
+    fake.failNext = Object.assign(new Error('400: PEER_ID_INVALID'), {
+      code: 400,
+      text: 'PEER_ID_INVALID',
+    });
+    const a = await send(base, { text: 'otra vez' }, key);
+    assert.equal(a.status, 500);
+    const b = await send(base, { text: 'otra vez' }, key);
+    assert.equal(b.status, 200);
+    assert.equal(b.body.deduplicated, false);
+    assert.equal(fake.sends.length, 2);
+    assert.equal(String(fake.sends[0].params?.randomId), String(fake.sends[1].params?.randomId));
+  }
+);
 
-test('C6: the key with another body → 409 idempotency_key_reused, nothing sent', withDb, async () => {
-  await useDb();
-  const key = uniq('otro-cuerpo');
-  const { base, fake } = await connector();
-  assert.equal((await send(base, { text: 'primero' }, key)).status, 200);
-  const r = await send(base, { text: 'segundo' }, key);
-  assert.equal(r.status, 409);
-  assert.equal(r.body.failureClass, 'idempotency_key_reused');
-  assert.equal(fake.sends.length, 1);
-});
+test(
+  'C6: the key with another body → 409 idempotency_key_reused, nothing sent',
+  withDb,
+  async () => {
+    await useDb();
+    const key = uniq('otro-cuerpo');
+    const { base, fake } = await connector();
+    assert.equal((await send(base, { text: 'primero' }, key)).status, 200);
+    const r = await send(base, { text: 'segundo' }, key);
+    assert.equal(r.status, 409);
+    assert.equal(r.body.failureClass, 'idempotency_key_reused');
+    assert.equal(fake.sends.length, 1);
+  }
+);
 
 test('C6: two requests with the same key at once → exactly one send', withDb, async () => {
   await useDb();
@@ -310,7 +332,10 @@ test('C6: two requests with the same key at once → exactly one send', withDb, 
   const { base, fake } = await connector();
   let release!: () => void;
   fake.gate = new Promise<void>(resolve => (release = resolve));
-  const both = Promise.all([send(base, { text: 'a la vez' }, key), send(base, { text: 'a la vez' }, key)]);
+  const both = Promise.all([
+    send(base, { text: 'a la vez' }, key),
+    send(base, { text: 'a la vez' }, key),
+  ]);
   await new Promise(resolve => setTimeout(resolve, 300));
   release();
   const [a, b] = await both;
@@ -352,7 +377,9 @@ test('C6: the isOutbound echo carries the same ref the send returned', withDb, a
     replyToMessage: null,
     markup: null,
   };
-  const parsed = await (wrapper as unknown as { parseMessage(m: unknown): Promise<any> }).parseMessage(echo);
+  const parsed = await (
+    wrapper as unknown as { parseMessage(m: unknown): Promise<any> }
+  ).parseMessage(echo);
   assert.equal(parsed.isOutbound, true);
   assert.equal(`tg:${parsed.telegramMessageId}`, `tg:${r.body.messageId}`);
   assert.equal(fake.sends.length, 1);

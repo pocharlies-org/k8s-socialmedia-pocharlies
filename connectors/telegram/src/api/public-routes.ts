@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { createHMACAuth, createHMACRejectLog } from '@mcp-socialmedia/shared';
 import type { TelegramClientWrapper } from '../telegram-client';
 import { requireSending } from './controller';
+import { readIdempotencyKey, sendOnce } from '../send-idempotency';
 
 type PublicClient = Pick<
   TelegramClientWrapper,
@@ -67,6 +68,20 @@ export function createPublicRouter(
       const tid = topicId !== undefined && topicId !== null ? Number(topicId) : undefined;
       if (tid !== undefined && (!Number.isInteger(tid) || tid <= 0)) {
         res.status(400).json({ error: 'topicId must be a positive integer' });
+        return;
+      }
+      // http.telegram-connector.send-idempotency.v1: the same opt-in key as /api/v1/messages/:chatId.
+      const { key, error: keyError } = readIdempotencyKey(req.headers, req.body);
+      if (keyError) {
+        res.status(400).json({ error: keyError, failureClass: 'invalid_request' });
+        return;
+      }
+      if (key) {
+        const chatId = req.params.chatId;
+        const outcome = await sendOnce(key, { chatId, text, topicId: tid }, randomId =>
+          client.sendMessage(chatId, text, tid, undefined, randomId)
+        );
+        res.status(outcome.status).json(outcome.body);
         return;
       }
       await client.sendMessage(req.params.chatId, text, tid);

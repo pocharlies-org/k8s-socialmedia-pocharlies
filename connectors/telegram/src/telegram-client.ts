@@ -15,6 +15,7 @@ import {
   MtTimeoutError,
   tl,
 } from '@mtcute/node';
+import type { Long } from '@mtcute/node';
 import type { ITelegramStorageProvider } from '@mtcute/node';
 import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
@@ -588,7 +589,8 @@ export class TelegramClientWrapper extends EventEmitter {
     chatId: string,
     text: string,
     topicId?: number,
-    replyTo?: number
+    replyTo?: number,
+    randomId?: Long
   ): Promise<string | null> {
     if (!this.connected) throw new Error('Not connected to Telegram');
     try {
@@ -603,6 +605,8 @@ export class TelegramClientWrapper extends EventEmitter {
       } else if (topicId) {
         opts.replyTo = topicId;
       }
+      // DGX-1235 B2: a keyed send fixes its random_id (send-idempotency.ts).
+      if (randomId) opts.randomId = randomId;
       const sent = await this.client.sendText(
         toMtcutePeer(chatId),
         text,

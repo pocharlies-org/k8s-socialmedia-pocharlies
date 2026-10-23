@@ -28,6 +28,8 @@ export interface BridgeConfig {
   /** Connector id -> its key, for verifying the core's reads. */
   secretosConector: Map<string, string>;
   conectorPorCanal: Record<Canal, string>;
+  /** POST /envios answers 403 envio_desactivado unless ENABLE_OUTBOUND is exactly `true` (B2). */
+  enableOutbound: boolean;
   dedupTtlMs: number;
   dedupMax: number;
   meCacheTtlMs: number;
@@ -69,6 +71,10 @@ export function loadConfig(): BridgeConfig {
   const tgId = patron('CORREO_CONECTOR_TG_ID', /^tg-[a-z0-9-]{1,40}$/);
   const tgSecreto = clave('CORREO_CONECTOR_TG_SECRET');
   trackingOptInBaseUrl();
+  const enableOutbound = optionalEnv('ENABLE_OUTBOUND', 'false');
+  if (enableOutbound !== 'true' && enableOutbound !== 'false') {
+    throw new ConfigError('ENABLE_OUTBOUND must be true or false');
+  }
 
   const todas = [productorWaSecreto, productorTgSecreto, waSecreto, tgSecreto, connectorSharedSecret];
   if (new Set(todas).size !== todas.length) {
@@ -86,6 +92,7 @@ export function loadConfig(): BridgeConfig {
     productores: new Map([[waId, { id: productorWa, secreto: productorWaSecreto }], [tgId, { id: productorTg, secreto: productorTgSecreto }]]),
     secretosConector: new Map([[waId, waSecreto], [tgId, tgSecreto]]),
     conectorPorCanal: { whatsapp: waId, telegram: tgId },
+    enableOutbound: enableOutbound === 'true',
     dedupTtlMs: intEnv('DEDUP_TTL_MS', 86_400_000),
     dedupMax: intEnv('DEDUP_MAX', 50_000),
     meCacheTtlMs: intEnv('ME_CACHE_TTL_MS', 600_000),

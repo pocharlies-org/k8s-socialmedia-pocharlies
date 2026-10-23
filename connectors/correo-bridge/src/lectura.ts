@@ -5,6 +5,7 @@ import { ClienteConectores, ConectorNoResponde, FilaTelegram, FilaWhatsapp } fro
 import { canonica, REF, tsCanonico } from './cuerpo';
 import { verificarV2 } from './firma';
 import type { IndiceRefs } from './refs';
+import { ERRORES, leerCuerpo, responder } from './http';
 
 // CONTRACT: correo.connector.v1
 /**
@@ -13,7 +14,7 @@ import type { IndiceRefs } from './refs';
  * the raw request target: node's `req.url` is the request line as it arrived
  * (what Express calls `originalUrl`), with `@` and `:` not rewritten. The text
  * lives only in memory and in the response: never stored, never logged. The
- * send route of the contract is B2's: this handler does not know it.
+ * send route of the contract (POST /envios) is envios.ts's: this handler leaves it.
  */
 
 const TEXTO_MAX = 4096;
@@ -31,12 +32,6 @@ interface MensajeLeido {
 }
 
 type Error_ = 'no_autenticado' | 'no_encontrado' | 'no_procesable' | 'canal_no_responde';
-const ERRORES: Record<Error_, [number, string]> = {
-  no_autenticado: [401, 'Sin firma, firma mala o fuera de plazo.'],
-  no_encontrado: [404, 'No existe en este conector.'],
-  no_procesable: [422, 'La petición no cumple el contrato.'],
-  canal_no_responde: [502, 'El canal no responde.'],
-};
 
 export interface LecturaOptions {
   /** Connector id (`wa-*`, `tg-*`) -> its key. */
@@ -58,24 +53,6 @@ function recortar(texto: unknown): string {
 function tipo(valor: unknown): string {
   const t = String(valor ?? '').toLowerCase().replace(/[^a-z_]/g, '_').slice(0, 20);
   return t || 'otro';
-}
-
-function leerCuerpo(req: IncomingMessage): Promise<Buffer | null> {
-  return new Promise(resolve => {
-    const trozos: Buffer[] = [];
-    let total = 0;
-    req.on('data', (c: Buffer) => {
-      total += c.length;
-      if (total > CUERPO_MAX) {
-        resolve(null);
-        req.destroy();
-        return;
-      }
-      trozos.push(c);
-    });
-    req.on('end', () => resolve(Buffer.concat(trozos)));
-    req.on('error', () => resolve(null));
-  });
 }
 
 function desdeWhatsapp(f: FilaWhatsapp, hilo: string, propio: string): MensajeLeido | null {
@@ -122,10 +99,6 @@ function hiloDelCanal(claveId: string, hilo: string): string | null {
 export function crearLectura(opts: LecturaOptions): (req: IncomingMessage, res: ServerResponse) => Promise<boolean> {
   const ahoraS = opts.ahoraS ?? (() => Math.floor(Date.now() / 1000));
 
-  const responder = (res: ServerResponse, status: number, cuerpo: unknown): void => {
-    res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(cuerpo));
-  };
   const fallo = (res: ServerResponse, ruta: string, e: Error_): void => {
     const [status, detalle] = ERRORES[e];
     opts.logger.info({ ruta, status }, 'correo.connector read');
@@ -155,7 +128,7 @@ export function crearLectura(opts: LecturaOptions): (req: IncomingMessage, res: 
     if (!m) return false;
     const ruta = m[1];
 
-    const cuerpo = await leerCuerpo(req);
+    const cuerpo = await leerCuerpo(req, CUERPO_MAX);
     const claveId = cuerpo === null ? null
       : verificarV2(opts.secretos, req.headers, req.method ?? '', objetivo, cuerpo, ahoraS());
     if (claveId === null) {

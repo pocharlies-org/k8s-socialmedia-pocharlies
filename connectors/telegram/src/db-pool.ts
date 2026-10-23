@@ -2,11 +2,12 @@
  * SC-1145: the Postgres pool for the credential-store wiring, mirroring
  * connectors/whatsapp-web/src/db-writer.ts (same DB `whatsappmcp`, same
  * DATABASE_URL is REQUIRED (SC-1239 C2: no baked-in fallback). Small pool —
- * this connector only ever talks to `user_channel_credentials` through
- * PostgresCredentialStore, and the house-account pods never open it, so the
- * check lives inside getPool(): a pod without a database still boots, while a
+ * this connector only talks to `user_channel_credentials` through
+ * PostgresCredentialStore and, since DGX-1235 B2, to `telegram_send_attempts`
+ * (send-idempotency.ts) when a send carries an Idempotency-Key. The check lives
+ * inside getPool(): a pod without a database still boots, while a
  * credential-session pod missing DATABASE_URL fails hard at startup with an
- * error naming the variable.
+ * error naming the variable, and a keyed send without it is refused (503).
  */
 import pg from 'pg';
 
@@ -28,4 +29,11 @@ export function getPool(): pg.Pool {
     });
   }
   return pool;
+}
+
+/** Close and forget the pool (shutdown, tests): the next getPool() opens a new one. */
+export async function closePool(): Promise<void> {
+  const current = pool;
+  pool = null;
+  await current?.end();
 }

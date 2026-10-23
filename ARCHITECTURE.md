@@ -118,11 +118,27 @@ Total de casos Jest: **pendiente de medir**.
   (`/status`, `/metrics` y la alerta `CorreoBridgeMensajesPerdidos` de `k8s/base/correo-bridge.yaml`): un mensaje de entrada puede perderse si el puente o el núcleo están caídos más de 30 s; no hay reconciliación.
   Lectura: `GET /mensajes/{ref}` y `GET /hilos/{hilo_ref}` con HMAC V2 verificado sobre la URL cruda (`req.url` de `node:http`, `@` y `:` sin
   reescribir), leyendo de `/api/public/history/:chatId` (WhatsApp) y `/api/public/messages/:chatId` (Telegram) del conector profesional. El texto
-  vive solo en memoria y en la respuesta. **Leer no marca nada como leído**: el cliente HTTP del puente tiene una lista cerrada de rutas, todas
-  GET (`conectores.ts`, `RUTAS_CONECTOR`), y `src/sin-lectura.test.ts` falla si aparece una llamada de marcar leído, otra ruta o un envío. Esa
-  lista es una restricción de código, no de credencial: `CONNECTOR_SHARED_SECRET` abre todas las rutas de todos los conectores (riesgo residual
-  aceptado por security, DGX-1210). `GET /mensajes/{ref}` solo conoce los `ref` que el proceso reenvió desde que arrancó (los conectores no leen un
-  mensaje por id); tras un reinicio, uno anterior da 404. El envío (`POST /envios`, `ENABLE_OUTBOUND`) es de B2.
+  vive solo en memoria y en la respuesta. **Leer no marca nada como leído**: el cliente HTTP del puente tiene dos listas cerradas de rutas, las
+  lecturas GET (`conectores.ts`, `RUTAS_CONECTOR`) y los dos envíos de texto POST (`RUTAS_ENVIO`), y `src/sin-lectura.test.ts` falla si aparece
+  una llamada de marcar leído, otra ruta o un envío fuera de `envios.ts`. Esas listas son una restricción de código, no de credencial:
+  `CONNECTOR_SHARED_SECRET` abre todas las rutas de todos los conectores (riesgo residual aceptado por security, DGX-1210). `GET /mensajes/{ref}`
+  solo conoce los `ref` que el proceso reenvió desde que arrancó (los conectores no leen un mensaje por id); tras un reinicio, uno anterior da 404.
+- **Envío de `correo-bridge` (DGX-1235 B2).** `POST /envios` es el único camino del puente que envía a un cliente: la respuesta que una persona
+  aprobó en Postia, firmada por el núcleo con la clave del conector. El puente solo traduce: cuerpo cerrado, `sha256` del texto, conversación con
+  algún entrante entre sus últimos 50 mensajes (si no, 422 `primer_contacto` sin llamar al conector; un número en frío sigue siendo de WhatsApp
+  Web con navegador) y `ENABLE_OUTBOUND=true` (si no, 403). No guarda nada: pasa la `idempotencia` del núcleo como `Idempotency-Key` a
+  `POST /api/v1/messages/send` (WhatsApp, con el id canónico `…@c.us`/`…@lid` tal cual como `conversationId`) o `POST /api/v1/messages/:chatId`
+  (Telegram), y **quien guarda la idempotencia es el conector**. Quien pueda llamar a `/envios` envía como Skirmshop: `ENABLE_OUTBOUND` va a
+  `false` en `base/` y solo se enciende en el overlay de prod junto al pin `tag@digest` de la imagen. Riesgo residual (no se toca): el envío de
+  WhatsApp degrada a «sin idempotencia» si `whatsapp_send_attempts` falla.
+- **Idempotencia de envío de Telegram (DGX-1235 B2).** `connectors/telegram/src/send-idempotency.ts`, gemelo del de WhatsApp para texto, sobre
+  `telegram_send_attempts` (migración 040), opt-in por `Idempotency-Key` en las dos rutas de envío de texto. A propósito distinto de WhatsApp:
+  con clave y sin almacén (tabla inalcanzable o sin `DATABASE_URL`) responde 503 y **no envía**. El `random_id` del mensaje se deriva de
+  (cuenta, clave): medido, `sendText` de mtcute 0.29 admite `randomId` y Telegram rechaza uno repetido (`RANDOM_ID_DUPLICATE`), así que ni una
+  carrera puede duplicar el mensaje. Un intento cuyo resultado se desconoce (timeout, 5xx) queda `pending` y responde 409
+  `send_outcome_uncertain` sin reenviar; un rechazo RPC de Telegram (4xx) lo deja `failed` y la misma clave vuelve a enviar. El conector de
+  Telegram lleva `DATABASE_URL` desde B2 (`render-connectors.py`); sin clave no abre la base. Sin purga todavía (pocas filas: solo respuestas
+  de Postia); el seguimiento para extraer el núcleo común de `send-idempotency` a `shared` es del tech-lead (B2.9).
 - Nombres heredados: directorio `mcp-socialmedia`, repo `whatsappmcp`, imágenes `whatsappmcp-*`: no renombrar (rompe pins y contratos).
 - Hosts `*.lan.e-dani.com` de los conectores de WhatsApp (`whatsapp`, `whatsapp-pro`, `whatsapp-leila`; IngressRoutes generadas por `render-connectors.py`): `/api/public` va a `connector-public-api-deny`; `/qr` **y el resto del host** (`/api/v1/*`, `/status`) van tras `sso-chain` (ns `keycloak`, SKIRM-110; antes solo `/qr`, y `GET /api/v1/auth/qr` de leila respondía 200 sin credencial en la LAN). Los clientes de máquina no usan esos hosts: llaman al Service interno (`<conector>.whatsapp-mcp.svc.cluster.local:3001`, con el HMAC); un cliente nuevo que apunte a un host `.lan` recibe la redirección a Keycloak.
 - WhatsApp Web personal usa sesión persistente: perderla exige re-emparejar (`http.whatsapp-pairing…`).

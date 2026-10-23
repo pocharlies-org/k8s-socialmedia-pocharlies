@@ -740,6 +740,32 @@ contracts:
     on VOICE/AUDIO rows (their content is the transcription). The pairing pool (telegram-pairing) never
     publishes it. The subject, the field names and the source values are contract: changing any is breaking
     — a new `.v2` entry beside this one.'
+- id: http.telegram-connector.send-idempotency.v1
+  kind: http-route
+  value: Idempotency-Key
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  - connectors/telegram/src/api/public-routes.ts
+  - connectors/telegram/src/send-idempotency.ts
+  - mcp-server/src/infrastructure/database/migrations/040_telegram_send_attempts.sql
+  status: active
+  note: 'DGX-1235 B2 (i). Opt-in send idempotency on POST /api/v1/messages/:chatId and POST /api/public/send/:chatId
+    of the house Telegram connectors, consumed by correo-bridge POST /envios (correo.connector.v1). Same key rules
+    as http.whatsapp-connector.send-idempotency.v1: header `Idempotency-Key` and/or body field `idempotencyKey`
+    (same value if both; a string of at most 200 characters, blank = absent; otherwise 400 {error, failureClass:
+    "invalid_request"}); without a key both routes answer exactly what they answered before. With a key, one row
+    per (CONNECTOR_ACCOUNT, sha256(key)) in telegram_send_attempts (migration 040; the raw key is never stored):
+    the same key with the same request answers the record without sending again, 200 {success: true, messageId,
+    sentAt, deduplicated: true} (a first send adds sentAt and deduplicated: false); the same key with a different
+    request is 409 {error, failureClass: "idempotency_key_reused"}; an earlier attempt whose outcome is unknown
+    (timeout, dropped connection, a 5xx from Telegram) is 409 {error, failureClass: "send_outcome_uncertain",
+    messageId?} and is never resent; an RPC refusal from Telegram (4xx, FLOOD_WAIT) moves the attempt to failed
+    and the same key sends again. Difference with WhatsApp on purpose: with a key and the table unreachable (or no
+    DATABASE_URL) the answer is 503 {error, failureClass: "idempotency_unavailable"} and NOTHING is sent. The
+    message random_id is derived from (account, key) (mtcute sendText randomId), so Telegram itself rejects a
+    duplicate (RANDOM_ID_DUPLICATE). The header/field names, the replay semantics, the 409/503 failureClass values
+    and the no-key-is-legacy rule are contract: changing any is breaking — a new `.v2` entry beside this one.'
 - id: http.telegram-connector.messages-send.v1
   kind: http-route
   value: /messages/:chatId
@@ -2470,6 +2496,7 @@ contracts:
   role: provider
   files:
   - connectors/correo-bridge/src/lectura.ts
+  - connectors/correo-bridge/src/envios.ts
   status: active
   note: 'DGX-1235 B1. correo-bridge serves the read routes of correo.connector.v1, the contract the correo
     core defines and calls (pocharlies-org/correo-core openapi/correo.connector.v1.yaml, publisher there):
@@ -2477,7 +2504,14 @@ contracts:
     with the key of the connector (X-Correo-Key-Id wa-*/tg-*, X-Correo-Timestamp ±60 s, X-Correo-Signature
     over "<ts>.<METHOD> <raw path?query>\n<body>"), 401/404/422/502 with {error, detalle} and never the text
     or the identity. MensajeLeido {ref, hilo_ref, direccion, ts, texto ≤4096, adjuntos [{tipo}] ≤20}. Reading
-    marks nothing as read. POST /envios is B2. In the other direction the bridge POSTs /v2/mensajes/{conector}
+    marks nothing as read. B2: POST /envios {destino_ref, texto, sha256, idempotencia} (closed body; destino_ref
+    canonical for the channel of the key that signed; sha256 of texto in UTF-8) answers 200 {ref, ts, deduplicado},
+    409 idempotencia_reutilizada / resultado_incierto, 422 no_procesable / primer_contacto (no inbound message
+    among the last 50 of the conversation; the connector is not called), 403 envio_desactivado (ENABLE_OUTBOUND
+    not true, or the connector''s sending gate) and 502 canal_no_responde. It stores nothing: it hands texto to
+    POST /api/v1/messages/send of the WhatsApp connector (conversationId = destino_ref as is) or POST
+    /api/v1/messages/:chatId of the Telegram one, with idempotencia as Idempotency-Key (their send-idempotency.v1).
+    The ref is the one the outbound echo brings. In the other direction the bridge POSTs /v2/mensajes/{conector}
     of correo.ingest.v2 with the key of that connector''s producer. A breaking change is correo.connector.v2
     on both sides.'
 - id: nats.correo-bridge.whatsapp-message-received.v1

@@ -6,11 +6,15 @@
 # messages of the professional accounts, and POSTs each one, without text, to
 # the correo core (POST /v2/mensajes/{conector}, HMAC V2 with that connector's
 # producer key). It serves the core the live read routes (GET /mensajes/{ref},
-# GET /hilos/{hilo_ref}) over the connectors' signed read API. It never sends
-# (that is B2) and it has no Postgres.
+# GET /hilos/{hilo_ref}) over the connectors' signed read API, and POST /envios
+# (B2): an approved answer handed to the connector's text send with the core's
+# key as Idempotency-Key (the connector keeps the idempotency). It has no
+# Postgres.
 #
 # INERT: replicas 0 until the core side (A6 in k8s-correo-pocharlies) and the
-# keys exist; ENABLE_OUTBOUND stays false until B2. Single replica + Recreate
+# keys exist. ENABLE_OUTBOUND is false here and is never turned on in base/:
+# it goes on in the prod overlay, together with the tag@digest pin of the
+# image, once the connector keys are checked (B2.8). Single replica + Recreate
 # when on: the dedup, the own-JID cache and the ref index are in memory.
 apiVersion: apps/v1
 kind: Deployment
@@ -50,6 +54,7 @@ spec:
             - { name: CORREO_CONECTOR_TG_ID, value: "tg-professional" }
             - { name: CORREO_PRODUCTOR_WA_ID, value: "correo-bridge-wa" }
             - { name: CORREO_PRODUCTOR_TG_ID, value: "correo-bridge-tg" }
+            # Whoever can call POST /envios sends as Skirmshop: only in the prod overlay.
             - { name: ENABLE_OUTBOUND, value: "false" }
             # Only the one key of whatsapp-mcp-secrets it needs (no envFrom).
             - name: CONNECTOR_SHARED_SECRET

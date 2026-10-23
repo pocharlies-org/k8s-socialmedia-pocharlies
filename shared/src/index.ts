@@ -8,6 +8,7 @@ export * from './crypto/meta-signature';
 export * from './utils/dashboard-notifier';
 export * from './utils/log-redaction';
 export * from './utils/with-timeout';
+export * from './utils/idempotency-key';
 export * from './types/events';
 export * from './session-store';
 export * from './utils/account-key';

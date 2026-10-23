@@ -118,6 +118,13 @@ jobs:
           pnpm exec tsx connectors/whatsapp-web/src/message-deletion.postgres.mjs
           pnpm exec tsx --test scripts/shared-db-migration-compat.postgres.ts
           WHATSAPP_TEST_DATABASE_URL="$DATABASE_URL" node --test apps/whatsapp/test/chat-names-bounded.postgres.mjs apps/whatsapp/test/deleted-at.postgres.mjs
+      # DGX-1235 B2 C6: the Telegram send idempotency on a real Postgres (migration 040,
+      # its own fresh database); without the DSN those cases are skipped in `pnpm test`.
+      - name: Telegram send idempotency on Postgres
+        working-directory: connectors/telegram
+        env:
+          TELEGRAM_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/socialmedia_shared_qa
+        run: pnpm exec tsx --test src/send-idempotency.test.ts
 
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}

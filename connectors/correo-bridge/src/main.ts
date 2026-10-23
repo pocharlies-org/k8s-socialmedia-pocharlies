@@ -7,12 +7,13 @@ import { Entrega } from './entrega';
 import { IndiceRefs } from './refs';
 import { ClienteConectores } from './conectores';
 import { crearLectura } from './lectura';
+import { crearEnvios } from './envios';
 
 /**
- * correo-bridge (DGX-1235 B1): provider of correo.connector.v1, on the NATS
+ * correo-bridge (DGX-1235 B1, B2): provider of correo.connector.v1, on the NATS
  * scaffolding of shared/src/bridge. Stateless (no Postgres): NATS in,
- * POST /v2/mensajes to the correo core out, and the live read routes. It never
- * sends to a customer (that is B2).
+ * POST /v2/mensajes to the correo core out, the live read routes, and
+ * POST /envios, the only way it sends to a customer (behind ENABLE_OUTBOUND).
  */
 
 const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
@@ -103,6 +104,14 @@ async function main(): Promise<void> {
     refs,
     logger,
   });
+  const envios = crearEnvios({
+    secretos: config.secretosConector,
+    conectores,
+    jidPropio: () => meCache.getOwnJid(),
+    habilitado: config.enableOutbound,
+    logger,
+  });
+  logger.info({ enableOutbound: config.enableOutbound }, 'send route');
   // One NATS message, start to end. One sequential loop per subject: a dead
   // core costs each loop at most TOPE_MS per event (entrega.ts).
   const handle = async (subject: string, data: Uint8Array): Promise<void> => {
@@ -145,7 +154,7 @@ async function main(): Promise<void> {
       res.end(metricsText(entrega));
       return;
     }
-    void lectura(req, res).then(atendida => {
+    void (async () => (await envios(req, res)) || lectura(req, res))().then(atendida => {
       if (atendida) return;
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'no_encontrado', detalle: 'No existe en este conector.' }));

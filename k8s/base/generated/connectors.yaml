@@ -631,6 +631,8 @@ spec:
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
         - name: DASHBOARD_URL
           value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets
@@ -802,6 +804,8 @@ spec:
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
         - name: DASHBOARD_URL
           value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: CONNECTOR_ACCOUNT
           value: professional
         - name: TELEGRAM_SESSION_STRING

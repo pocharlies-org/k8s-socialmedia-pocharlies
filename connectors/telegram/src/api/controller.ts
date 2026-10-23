@@ -8,6 +8,7 @@ import {
 } from '../telegram-client';
 import { MessageMutationError, classifyEditError, sendingDisabledReason } from '../message-edit';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
+import { readIdempotencyKey, sendOnce } from '../send-idempotency';
 import pino from 'pino';
 
 const logger = pino({
@@ -1221,6 +1222,20 @@ export function createRouter(
         if (body.replyTo !== undefined && body.replyTo !== null) {
           const n = Number(body.replyTo);
           if (Number.isInteger(n) && n > 0) replyTo = n;
+        }
+
+        // CONTRACT: http.telegram-connector.send-idempotency.v1 — opt-in Idempotency-Key, replay + deduplicated, 409 idempotency_key_reused / send_outcome_uncertain, 503 idempotency_unavailable
+        const { key, error: keyError } = readIdempotencyKey(req.headers, req.body);
+        if (keyError) {
+          res.status(400).json({ error: keyError, failureClass: 'invalid_request' });
+          return;
+        }
+        if (key) {
+          const outcome = await sendOnce(key, { chatId, text, topicId: tid, replyTo }, randomId =>
+            client.sendMessage(chatId, text, tid, replyTo, randomId)
+          );
+          res.status(outcome.status).json(outcome.body);
+          return;
         }
 
         const messageId = await client.sendMessage(chatId, text, tid, replyTo);
