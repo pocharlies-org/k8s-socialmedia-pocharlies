@@ -918,7 +918,9 @@ async function switchAccount(accountId) {
   $('message').value = ''; resizeMessageInput(); $('chat-title').textContent = 'SocialMedia'; $('chat-subtitle').textContent = 'Selecciona un chat para empezar'; $('chat-subtitle').hidden = false; setConversationAvatar(); setAgentContext();
   $('messages').replaceChildren(node('div', 'welcome', 'Selecciona una conversación de esta cuenta.'));
   assistant?.select(context());
-  document.body.classList.remove('chat-open'); sidebarSearch?.accountChanged(); uploadQualityUI?.accountChanged(); featureUI?.accountChanged?.(state.account); communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); error(); renderChats(); updateControls(); await loadChats();
+  document.body.classList.remove('chat-open'); sidebarSearch?.accountChanged(); uploadQualityUI?.accountChanged(); featureUI?.accountChanged?.(state.account);
+  featureUI?.setView?.('all'); // UX #62.1: cambiar de cuenta vuelve a la lista principal, como WhatsApp (no deja la vista de la cuenta anterior).
+  communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); error(); renderChats(); updateControls(); await loadChats();
 }
 $('account').onchange = () => switchAccount($('account').value);
 async function sendPayload(path, payload, onSuccess, onConfirmed) { const ctx = context(); state.busy = true; error(); updateControls(); try { const body = typeof payload === 'function' ? await payload() : payload; if (!current(ctx)) return; await api(path, {...ctx, version: undefined, ...body}); onConfirmed?.(ctx); if (current(ctx)) { onSuccess?.(ctx); await Promise.all([loadMessages(), loadChats()]); } } catch (err) { if (current(ctx)) error(err.message); } finally { state.busy = false; updateControls(); } }
