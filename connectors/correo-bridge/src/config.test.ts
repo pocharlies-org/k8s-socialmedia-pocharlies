@@ -16,7 +16,7 @@ const BASE: Record<string, string> = {
   CORREO_CONECTOR_TG_ID: 'tg-professional',
   CORREO_CONECTOR_TG_SECRET: 't'.repeat(32),
 };
-const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'TRACKING_OPT_IN_BASE_URL'];
+const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'TRACKING_OPT_IN_BASE_URL', 'ENABLE_OUTBOUND'];
 
 function con(env: Record<string, string | undefined>, fn: () => void): void {
   const keys = [...Object.keys(BASE), ...OPCIONALES];
@@ -74,4 +74,13 @@ test('URLs are validated', () => {
     }
   }
   con({ ...BASE, CORE_URL: 'http://correo-machine/prefijo' }, () => assert.throws(loadConfig, /CORE_URL/));
+});
+
+test('B2: ENABLE_OUTBOUND is off unless it says exactly true; anything else refuses to start', () => {
+  con(BASE, () => assert.equal(loadConfig().enableOutbound, false));
+  con({ ...BASE, ENABLE_OUTBOUND: 'false' }, () => assert.equal(loadConfig().enableOutbound, false));
+  con({ ...BASE, ENABLE_OUTBOUND: 'true' }, () => assert.equal(loadConfig().enableOutbound, true));
+  for (const v of ['TRUE', '1', 'yes', 'on']) {
+    con({ ...BASE, ENABLE_OUTBOUND: v }, () => assert.throws(loadConfig, /ENABLE_OUTBOUND/));
+  }
 });
