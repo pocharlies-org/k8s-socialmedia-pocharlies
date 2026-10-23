@@ -1628,6 +1628,19 @@ body[data-theme="light"] .ai-panel-avatar { background: #d8e0e3; color: #34464f;
   line-height: 19px;
 }
 
+/* UX #55.1: fila de reacciones rápidas (objetivo táctil ≥44 px, QA #94). */
+.feature-quick-reactions { display: flex; gap: 6px; justify-content: space-between; }
+.feature-quick-reactions button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 22px;
+  cursor: pointer;
+}
+
 .feature-reply-quote {
   position: relative;
   z-index: 2;
