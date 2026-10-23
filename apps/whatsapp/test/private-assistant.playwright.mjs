@@ -199,7 +199,7 @@ try {
   }
   assert.equal(await page.locator('#ai-panel select').count(), 2, 'the model and thinking selectors are missing');
   const modelSelect = page.getByRole('combobox', {name: 'Modelo', exact: true});
-  const thinkingSelect = page.getByRole('combobox', {name: 'Thinking', exact: true});
+  const thinkingSelect = page.getByRole('combobox', {name: 'Razonamiento', exact: true});
   await until(() => modelSelect.isEnabled(), 'settings inventory');
   await modelSelect.selectOption('qwen3.8-flash-next');
   await until(async () => await modelSelect.isEnabled() && await modelSelect.inputValue() === 'qwen3.8-flash-next', 'model save');

@@ -9089,7 +9089,7 @@ function x() {
 	return v;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/env.js
+//#region node_modules/@assistant-ui/tap/dist/core/helpers/env.js
 var S = typeof process < "u" && !1, C = (e) => ({
 	version: 0,
 	committedVersion: 0,
@@ -9187,7 +9187,7 @@ function se(e, t) {
 	});
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/utils/depsShallowEqual.js
+//#region node_modules/@assistant-ui/tap/dist/hooks/utils/depsShallowEqual.js
 var ce = (e, t) => {
 	S && e.length !== t.length && console.error(`The final argument passed to a hook changed size between renders. The order and size of this array must remain constant.
 
@@ -9221,12 +9221,12 @@ Previous: [${e.join(", ")}]\nIncoming: [${t.join(", ")}]`);
 	})), le(n, a), o;
 };
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useRef.js
+//#region node_modules/@assistant-ui/tap/dist/react-hooks/useRef.js
 function de(e) {
 	return ue(() => ({ current: e }), []);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/context.js
+//#region node_modules/@assistant-ui/tap/dist/core/context.js
 var fe = Symbol("tap.Context.defaultValue"), pe = (e) => e, me = /* @__PURE__ */ new Map(), he = /* @__PURE__ */ new Set(), F = () => new Map(me), I = (e, t) => {
 	let n = me;
 	me = e;
@@ -9352,16 +9352,16 @@ function je(e, t, n) {
 	return Ae(e, t, n, !1);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useState.js
+//#region node_modules/@assistant-ui/tap/dist/react-hooks/useState.js
 var Me = (e, t) => typeof t == "function" ? t(e) : t, Ne = (e) => e === void 0 ? void 0 : typeof e == "function" ? e() : e;
 function Pe(e) {
 	return Ae(Me, e, Ne, !0);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useCallback.js
+//#region node_modules/@assistant-ui/tap/dist/react-hooks/useCallback.js
 var Fe = (e, t) => ue(() => e, t);
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/react-hooks/useEffectEvent.js
+//#region node_modules/@assistant-ui/tap/dist/react-hooks/useEffectEvent.js
 function Ie(e) {
 	let t = b(), n = de(e);
 	return n.current !== e && D(t, () => {
@@ -9372,7 +9372,7 @@ function Ie(e) {
 	}), []);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/thenable.js
+//#region node_modules/@assistant-ui/tap/dist/core/helpers/thenable.js
 var Le = (e) => typeof e == "object" && !!e && typeof e.then == "function", Re = () => {}, ze = (e) => {
 	let t = e;
 	switch (typeof t.status == "string" ? t.status !== "fulfilled" && t.status !== "rejected" && e.then(Re, Re) : (t.status = "pending", e.then((e) => {
@@ -9435,7 +9435,7 @@ var mt = (e) => {
 	return ge(t, e), t;
 }, ht = (e) => Xe() && ye(e) ? Be(e) : R.use(e), gt = (e) => Xe() && ye(e) ? Be(e) : R.useContext(e);
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/resource.js
+//#region node_modules/@assistant-ui/tap/dist/core/resource.js
 function _t(e) {
 	return (...t) => ({
 		hook: e,
@@ -9443,7 +9443,7 @@ function _t(e) {
 	});
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/withKey.js
+//#region node_modules/@assistant-ui/tap/dist/core/withKey.js
 function vt(e, t, n) {
 	return typeof t == "function" ? (...n) => vt(e, t(...n)) : n ? {
 		...t,
@@ -9455,7 +9455,7 @@ function vt(e, t, n) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/throwAggregated.js
+//#region node_modules/@assistant-ui/tap/dist/core/helpers/throwAggregated.js
 var yt = (e, t) => {
 	if (e.length !== 0) {
 		if (e.length === 1) throw e[0];
@@ -9553,7 +9553,7 @@ var Et = (e) => {
 	}
 };
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/helpers/commit.js
+//#region node_modules/@assistant-ui/tap/dist/core/helpers/commit.js
 function jt(e) {
 	let t = [];
 	for (let n = 0; n < e.length; n++) try {
@@ -9603,7 +9603,7 @@ function Ft(e) {
 	yt(t, "Errors during cleanup");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/react-dispatcher.js
+//#region node_modules/@assistant-ui/tap/dist/core/react-dispatcher.js
 var It = {
 	useState: Pe,
 	useReducer: je,
@@ -9647,7 +9647,7 @@ function Bt(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/core/ResourceFiber.js
+//#region node_modules/@assistant-ui/tap/dist/core/ResourceFiber.js
 function Vt(e, t, n = void 0, r) {
 	return {
 		hook: e,
@@ -9702,7 +9702,7 @@ function B(e) {
 	e.isMounted = !0, e.isNeverMounted = !1, t !== null && (e.contextDeps = e.wipContextDeps, w(e.root), e.memoCache.workInProgress !== null && (e.memoCache.current = e.memoCache.workInProgress, e.memoCache.workInProgress = null), jt(t)), n && (Pt(e), Ft(e)), Pt(e);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/utils/useDevStrictMode.js
+//#region node_modules/@assistant-ui/tap/dist/hooks/utils/useDevStrictMode.js
 var Gt = () => {
 	let e = b();
 	return e.devStrictMode ? e.isFirstRender ? "child" : "root" : null;
@@ -9835,7 +9835,7 @@ var Gt = () => {
 	}), !n && i.currentDeps && ce(i.currentDeps, t) ? i.current : (i.wipDeps = t, i.wip = e(), i.wip);
 };
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/useResource.js
+//#region node_modules/@assistant-ui/tap/dist/hooks/useResource.js
 function an(e) {
 	let { version: t, createFiber: n } = nn(), r = et(() => n(e.hook, e.key), [
 		e.hook,
@@ -9851,7 +9851,7 @@ function an(e) {
 	}, [r, i]), i.value;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/useResources.js
+//#region node_modules/@assistant-ui/tap/dist/hooks/useResources.js
 var on = (e, t) => {
 	let n = e.get(t);
 	n && (n.isDirty = !0);
@@ -9916,7 +9916,7 @@ function ln(e) {
 	}, [a, t]), a;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/tap/dist/hooks/useTapHost.js
+//#region node_modules/@assistant-ui/tap/dist/hooks/useTapHost.js
 var un = (e) => e(), dn = (e) => {
 	let { createFiber: t } = nn(), n = et(() => t(un, void 0), [t]), r = Wt(n, [e]);
 	z(() => () => {
@@ -9970,7 +9970,7 @@ function pn() {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/model-context/types.js
+//#region node_modules/@assistant-ui/core/dist/model-context/types.js
 var mn = (e) => {
 	if (!e.overwrite) return e;
 	let { overwrite: t, ...n } = e;
@@ -10166,7 +10166,7 @@ function qn(e) {
 	return e[Gn];
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/types/events.js
+//#region node_modules/@assistant-ui/store/dist/types/events.js
 var Jn = (e) => typeof e == "string" ? {
 	scope: e.split(".")[0],
 	event: e
@@ -10270,7 +10270,7 @@ function mr() {
 	return new AbortController();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/useClientResource.js
+//#region node_modules/@assistant-ui/store/dist/useClientResource.js
 var hr = Symbol("assistant-ui.store.getValue"), gr = (e) => {
 	let t = e[hr];
 	if (!t) throw Error("Client scope contains a non-client resource. Ensure your Derived get() returns a client created with useClientResource(), not a plain resource.");
@@ -10589,7 +10589,7 @@ function qr(e) {
 	return !Dr(t);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/utils/proxied-assistant-state.js
+//#region node_modules/@assistant-ui/store/dist/utils/proxied-assistant-state.js
 var Jr = (e) => {
 	let t;
 	class n extends bn {
@@ -10673,7 +10673,7 @@ function ri(e) {
 	return vt($r(e), xr(e), e.deps);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/store/dist/utils/viewport-scroll.js
+//#region node_modules/@assistant-ui/store/dist/utils/viewport-scroll.js
 var ii = (e, t = 0) => t === 0 ? Math.abs(e.scrollHeight - e.scrollTop - e.clientHeight) <= 1 || e.scrollHeight <= e.clientHeight : e.scrollHeight - t - e.scrollTop - e.clientHeight <= 1 || e.scrollHeight - t <= e.clientHeight, ai = (e, t = 0) => t === 0 ? e.scrollHeight > e.clientHeight + 1 : e.scrollHeight - t > e.clientHeight + 1, oi = (e, t) => e.scrollTop > t.scrollTop && e.scrollHeight === t.scrollHeight, si = Symbol("skip-update"), ci = (e, ...t) => {
 	let n = [];
 	for (let r of e) try {
@@ -10996,7 +10996,7 @@ function Ai(e, t) {
 	return e[n] = s, e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/store/runtime-clients/useSubscribable.js
+//#region node_modules/@assistant-ui/core/dist/store/runtime-clients/useSubscribable.js
 var ji = (e) => it(e.subscribe, e.getState, e.getServerSnapshot), Mi = Symbol.for("assistant-ui.silent-runtime-action"), Ni = (e) => typeof e == "object" && !!e && Mi in e, Pi = (e, t) => {
 	let n = t();
 	return n.catch((t) => {
@@ -11139,7 +11139,7 @@ function zi() {
 	throw Error("beginEdit is not supported in this runtime");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/store/runtime-clients/liveRef.js
+//#region node_modules/@assistant-ui/core/dist/store/runtime-clients/liveRef.js
 var Bi = (e) => ({ get current() {
 	return e();
 } }), Vi = _t((e) => {
@@ -11302,7 +11302,7 @@ function Xi(e) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/normalizePartStatus.js
+//#region node_modules/@assistant-ui/core/dist/utils/normalizePartStatus.js
 var Zi = Object.freeze({ type: "complete" }), Qi = Object.freeze({ type: "running" }), $i = Object.freeze({
 	cancelled: Object.freeze({
 		type: "incomplete",
@@ -11540,7 +11540,7 @@ function fa(e) {
 	return e.type === "text" ? e.text : "";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/store/runtime-clients/handle-thread-list-action.js
+//#region node_modules/@assistant-ui/core/dist/store/runtime-clients/handle-thread-list-action.js
 var pa = (e, t) => Pi(`thread list ${e}`, t), ma = _t((e) => {
 	let t = N(35), { runtime: n, mainThreadIsRunning: r } = e, i = r !== void 0 && r, a = ji(n), o;
 	bb0: {
@@ -11703,7 +11703,7 @@ Kn(ya, (e, t) => {
 	va(e, t), !e.tools && t.tools.source === null && (e.tools = Di({})), !e.dataRenderers && t.dataRenderers.source === null && (e.dataRenderers = fn());
 });
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/react/cjs/react-jsx-runtime.production.js
+//#region node_modules/react/cjs/react-jsx-runtime.production.js
 var xa = /* @__PURE__ */ o(((e) => {
 	var t = Symbol.for("react.transitional.element"), n = Symbol.for("react.fragment");
 	function r(e, n, r) {
@@ -11797,7 +11797,7 @@ var Oa = (e) => {
 	}), t[0] = o, t[1] = a, t[2] = i, t[3] = n, t[4] = s) : s = t[4], s;
 });
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/json/is-json.js
+//#region node_modules/@assistant-ui/core/dist/utils/json/is-json.js
 function Na(e) {
 	return typeof e == "object" && !!e && !Array.isArray(e);
 }
@@ -11805,7 +11805,7 @@ function Pa(e, t = 0) {
 	return t > 100 ? !1 : e === null || typeof e == "string" || typeof e == "boolean" ? !0 : typeof e == "number" ? !Number.isNaN(e) && Number.isFinite(e) : Array.isArray(e) ? e.every((e) => Pa(e, t + 1)) : Na(e) ? Object.entries(e).every(([e, n]) => typeof e == "string" && Pa(n, t + 1)) : !1;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/json/is-json-equal.js
+//#region node_modules/@assistant-ui/core/dist/utils/json/is-json-equal.js
 var Fa = 100, Ia = (e, t, n) => {
 	if (e === t) return !0;
 	if (n > Fa || e == null || t == null) return !1;
@@ -12196,7 +12196,7 @@ function oo(e = {}) {
 	return [ao((e) => (r = e, r.__internal_subscribeToClose(t), n), e), r];
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/core/utils/stream/PipeableTransformStream.js
+//#region node_modules/assistant-stream/dist/core/utils/stream/PipeableTransformStream.js
 var so = class extends TransformStream {
 	constructor(e) {
 		super();
@@ -12504,7 +12504,7 @@ function fo(e) {
 	return [d, a];
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/utils/json/parse-partial-json-object.js
+//#region node_modules/assistant-stream/dist/utils/json/parse-partial-json-object.js
 var po = /* @__PURE__ */ l(co(), 1), mo = Symbol("aui.parse-partial-json-object.meta"), ho = (e) => e?.[mo], go = (e) => {
 	if (e.length === 0) return { [mo]: {
 		state: "partial",
@@ -12548,7 +12548,7 @@ var po = /* @__PURE__ */ l(co(), 1), mo = Symbol("aui.parse-partial-json-object.
 	return _o(e, n, t.map(String));
 };
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/utils/AsyncIterableStream.js
+//#region node_modules/assistant-stream/dist/utils/AsyncIterableStream.js
 async function* yo() {
 	let e = this.getReader(), t = !0;
 	try {
@@ -12578,7 +12578,7 @@ function bo(e) {
 	return e[Symbol.asyncIterator] ??= yo, e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/core/utils/withPromiseOrValue.js
+//#region node_modules/assistant-stream/dist/core/utils/withPromiseOrValue.js
 function xo(e, t, n) {
 	try {
 		let r = e();
@@ -12589,7 +12589,7 @@ function xo(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/assistant-stream/dist/core/tool/ToolCallReader.js
+//#region node_modules/assistant-stream/dist/core/tool/ToolCallReader.js
 function So(e, t) {
 	let n = e;
 	for (let e of t) {
@@ -13036,7 +13036,7 @@ function Ho(e, t, n, r) {
 	});
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/model-context/interactable-composer-metadata.js
+//#region node_modules/@assistant-ui/core/dist/model-context/interactable-composer-metadata.js
 function Uo(e) {
 	let t = e.metadata;
 	if (!t || typeof t != "object") return;
@@ -13219,7 +13219,7 @@ function ts(e, t) {
 	return Object.keys(i).length ? i : void 0;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/runtimes/useRuntimeAdapters.js
+//#region node_modules/@assistant-ui/core/dist/react/runtimes/useRuntimeAdapters.js
 var ns = mt(null), rs = () => gt(ns), is = Symbol("innerMessage"), as = Symbol("innerMessages"), os = [], ss = (e, t) => {
 	is in e || (e[is] = t);
 }, cs = (e) => {
@@ -13227,7 +13227,7 @@ var ns = mt(null), rs = () => gt(ns), is = Symbol("innerMessage"), as = Symbol("
 	return n ? Array.isArray(n) ? n : (t[as] = [n], t[as]) : os;
 }, ls = "__external_store_fallback_", us = no("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 7);
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/data-url.js
+//#region node_modules/@assistant-ui/core/dist/utils/data-url.js
 function ds(e) {
 	let t = e.match(/^data:([^;,]+)(?:;[^;,]+)*;base64,(.*)$/i);
 	return t ? {
@@ -13236,7 +13236,7 @@ function ds(e) {
 	} : null;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/runtime/utils/thread-message-like.js
+//#region node_modules/@assistant-ui/core/dist/runtime/utils/thread-message-like.js
 var fs = (e, t) => {
 	if (e.startsWith("data-")) return {
 		type: "data",
@@ -13472,7 +13472,7 @@ function Is() {
 	throw Error("Not supported");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/utils/getGroupStatus.js
+//#region node_modules/@assistant-ui/core/dist/utils/getGroupStatus.js
 var Ls = (e) => {
 	for (let t of e) if (t?.status.type === "running") return Qi;
 	return e.at(-1)?.status ?? Zi;
@@ -13535,7 +13535,7 @@ function Vs(e) {
 	return e.message.parts;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/providers/SuggestionByIndexProvider.js
+//#region node_modules/@assistant-ui/core/dist/react/providers/SuggestionByIndexProvider.js
 var Hs = (e) => {
 	let t = N(6), { index: n, children: r } = e, i = Gr(), a;
 	t[0] === n ? a = t[1] : (a = _n({ suggestion: Qr({
@@ -14794,7 +14794,7 @@ var Hs = (e) => {
 	}
 }, Vc = Object.freeze([]);
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/runtime/utils/tool-call-tree.js
+//#region node_modules/@assistant-ui/core/dist/runtime/utils/tool-call-tree.js
 function* Hc(e) {
 	for (let t of e) if (t?.role === "assistant" && Array.isArray(t.content)) for (let e of t.content) e && e.type === "tool-call" && (yield {
 		part: e,
@@ -14802,7 +14802,7 @@ function* Hc(e) {
 	}, e.messages?.length && (yield* Hc(e.messages)));
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/adapters/attachment.js
+//#region node_modules/@assistant-ui/core/dist/adapters/attachment.js
 function Uc(e, t) {
 	if (t === "*") return !0;
 	let n = t.split(",").map((e) => e.trim().toLowerCase()), r = e.name.toLowerCase(), i = e.type.split(";", 1)[0].trim().toLowerCase();
@@ -14851,7 +14851,7 @@ function Gc(e) {
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/types/attachment.js
+//#region node_modules/@assistant-ui/core/dist/types/attachment.js
 var Kc = (e) => "content" in e && !("lastModified" in e), qc = (e) => e.status.type === "complete", Jc = class {
 	operations = /* @__PURE__ */ new Set();
 	start() {
@@ -16624,7 +16624,7 @@ function Dl(e) {
 	return e.message.composer.isEditing;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/utils/getMessageQuote.js
+//#region node_modules/@assistant-ui/core/dist/react/utils/getMessageQuote.js
 var Ol = (e) => {
 	let t = e.message.metadata;
 	if (t && typeof t == "object") return t.custom?.quote;
@@ -16677,7 +16677,7 @@ function Fl(e) {
 	return t?.type === "generative-ui" ? t.spec : void 0;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/message/MessageParts.js
+//#region node_modules/@assistant-ui/core/dist/react/primitives/message/MessageParts.js
 var Il = (e) => {
 	let t = -1;
 	return {
@@ -17121,7 +17121,7 @@ function yu(e) {
 	return e.message.parts.length;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/utils/groupParts.js
+//#region node_modules/@assistant-ui/core/dist/react/utils/groupParts.js
 var bu = Symbol.for("@assistant-ui/groupBy.memoKey"), xu = (e) => {
 	let t = e.nextChildIdx++;
 	return e.nodeKey === "" ? String(t) : `${e.nodeKey}.${t}`;
@@ -17228,7 +17228,7 @@ var Ou = lt((e) => {
 });
 Ou.displayName = "MessagePrimitive.Quote";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/message/MessageAttachments.js
+//#region node_modules/@assistant-ui/core/dist/react/primitives/message/MessageAttachments.js
 var ku = (e, t) => {
 	switch (t.type) {
 		case "image": return e?.Image ?? e?.Attachment;
@@ -17283,7 +17283,7 @@ function Pu(e) {
 	return e.attachment;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/messagePart/MessagePartInProgress.js
+//#region node_modules/@assistant-ui/core/dist/react/primitives/messagePart/MessagePartInProgress.js
 var Fu = (e) => {
 	let { children: t } = e;
 	return V(Iu) ? t : null;
@@ -17293,7 +17293,7 @@ function Iu(e) {
 	return e.part.status.type === "running";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitives/thread/ThreadSuggestions.js
+//#region node_modules/@assistant-ui/core/dist/react/primitives/thread/ThreadSuggestions.js
 var Lu = (e) => {
 	let t = N(2), { components: n } = e, r = n.Suggestion, i;
 	return t[0] === r ? i = t[1] : (i = /* @__PURE__ */ (0, U.jsx)(r, {}), t[0] = r, t[1] = i), i;
@@ -17363,7 +17363,7 @@ function Gu(e) {
 	return e.trim();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/core/dist/react/primitive-hooks/useMessageError.js
+//#region node_modules/@assistant-ui/core/dist/react/primitive-hooks/useMessageError.js
 var Ku = () => V(Uu), qu = (e) => {
 	let { cloud: t, initialMessages: n, maxSteps: r, adapters: i, unstable_humanToolNames: a, unstable_enableMessageQueue: o, unstable_queueClearOnRewind: s, unstable_queueClearOnCancel: c, ...l } = e;
 	return {
@@ -17381,7 +17381,7 @@ var Ku = () => V(Uu), qu = (e) => {
 	};
 };
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/context/react/utils/createContextHook.js
+//#region node_modules/@assistant-ui/react/dist/context/react/utils/createContextHook.js
 function Ju(e, t) {
 	function n(n) {
 		let r = gt(e);
@@ -17391,7 +17391,7 @@ function Ju(e, t) {
 	return n;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/context/react/utils/createContextStoreHook.js
+//#region node_modules/@assistant-ui/react/dist/context/react/utils/createContextStoreHook.js
 function Yu(e, t) {
 	function n(n) {
 		let r = e(n);
@@ -17409,7 +17409,7 @@ function Yu(e, t) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/context/react/ThreadViewportContext.js
+//#region node_modules/@assistant-ui/react/dist/context/react/ThreadViewportContext.js
 var Xu = mt(null), { useThreadViewport: Zu, useThreadViewportStore: Qu } = Yu(Ju(Xu, "ThreadPrimitive.Viewport"), "useThreadViewport"), $u = (e) => {
 	let t, n = /* @__PURE__ */ new Set(), r = (e, r) => {
 		let i = typeof e == "function" ? e(t) : e;
@@ -17585,7 +17585,7 @@ function md(...e) {
 }
 dd(md, "useComposedRefs");
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@radix-ui/react-slot/dist/index.mjs
+//#region node_modules/@radix-ui/react-slot/dist/index.mjs
 var hd = Object.defineProperty, gd = (e, t) => hd(e, "name", {
 	value: t,
 	configurable: !0
@@ -17701,7 +17701,7 @@ function Fd(e, t) {
 }
 Nd(Fd, "dispatchDiscreteCustomEvent");
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@radix-ui/primitive/dist/index.mjs
+//#region node_modules/@radix-ui/primitive/dist/index.mjs
 var Id = Object.defineProperty, Ld = (e, t) => Id(e, "name", {
 	value: t,
 	configurable: !0
@@ -17741,7 +17741,7 @@ function Ud(e) {
 }
 Ld(Ud, "isFrame");
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs
+//#region node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs
 var Wd = Object.defineProperty, Gd = (e, t) => Wd(e, "name", {
 	value: t,
 	configurable: !0
@@ -17754,11 +17754,11 @@ function Kd(e) {
 }
 Gd(Kd, "useCallbackRef");
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/radix-ui/dist/internal.mjs
+//#region node_modules/radix-ui/dist/internal.mjs
 var qd = Pd;
 qd.dispatchDiscreteCustomEvent = Fd, qd.Root = Pd;
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/_virtual/_rolldown/runtime.js
+//#region node_modules/@assistant-ui/react/dist/_virtual/_rolldown/runtime.js
 var Jd = Object.defineProperty, Yd = (e, t) => {
 	let n = {};
 	for (var r in e) Jd(n, r, {
@@ -17848,7 +17848,7 @@ function sf(e) {
 	return e.onScrollToBottom;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/hooks/useMediaQuery.js
+//#region node_modules/@assistant-ui/react/dist/utils/hooks/useMediaQuery.js
 var cf = () => !1, lf = () => {}, uf = (e) => {
 	let t = N(4), n;
 	t[0] === e ? n = t[1] : (n = (t) => {
@@ -17867,7 +17867,7 @@ function mf(e) {
 	return e.part.type !== "text" && e.part.type !== "reasoning" ? ff : e.part;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/smooth/SmoothContext.js
+//#region node_modules/@assistant-ui/react/dist/utils/smooth/SmoothContext.js
 var hf = mt(null), gf = (e) => ({ useSmoothStatus: nd(() => e) }), _f = (e) => {
 	let t = N(6), { children: n } = e, r;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = { optional: !0 }, t[0] = r) : r = t[0];
@@ -17999,7 +17999,7 @@ function jf(e) {
 	return e.part.type === "image" ? e.part : kf;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartText.js
+//#region node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartText.js
 var Mf = ct(({ smooth: e = !0, component: t = tf.span, render: n, ...r }, i) => {
 	let { text: a, status: o } = Df(pf(), e), s = {
 		"data-status": o.type,
@@ -18013,7 +18013,7 @@ var Mf = ct(({ smooth: e = !0, component: t = tf.span, render: n, ...r }, i) => 
 });
 Mf.displayName = "MessagePartPrimitive.Text";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartImage.js
+//#region node_modules/@assistant-ui/react/dist/primitives/messagePart/MessagePartImage.js
 var Nf = ct((e, t) => {
 	let n = N(4), { image: r } = Af(), i;
 	return n[0] !== t || n[1] !== r || n[2] !== e ? (i = /* @__PURE__ */ (0, U.jsx)(tf.img, {
@@ -18024,7 +18024,7 @@ var Nf = ct((e, t) => {
 });
 Nf.displayName = "MessagePartPrimitive.Image";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/hooks/useManagedRef.js
+//#region node_modules/@assistant-ui/react/dist/utils/hooks/useManagedRef.js
 var Pf = (e) => {
 	let t = N(2), n = $e(void 0), r;
 	return t[0] === e ? r = t[1] : (r = (t) => {
@@ -18134,7 +18134,7 @@ function Xf(e) {
 	return e.message.id;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessageParts.js
+//#region node_modules/@assistant-ui/react/dist/primitives/message/MessageParts.js
 var Zf = {
 	...Hl,
 	Text: () => /* @__PURE__ */ (0, U.jsxs)("p", {
@@ -18167,7 +18167,7 @@ var Zf = {
 };
 Qf.displayName = "MessagePrimitive.Parts";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessageIf.js
+//#region node_modules/@assistant-ui/react/dist/primitives/message/MessageIf.js
 var $f = (e) => {
 	let t = N(12), n;
 	return t[0] !== e.assistant || t[1] !== e.copied || t[2] !== e.hasAttachments || t[3] !== e.hasBranches || t[4] !== e.hasContent || t[5] !== e.last || t[6] !== e.lastOrHover || t[7] !== e.speaking || t[8] !== e.submittedFeedback || t[9] !== e.system || t[10] !== e.user ? (n = (t) => {
@@ -18180,14 +18180,14 @@ var $f = (e) => {
 };
 ep.displayName = "MessagePrimitive.If";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessageError.js
+//#region node_modules/@assistant-ui/react/dist/primitives/message/MessageError.js
 var tp = (e) => {
 	let { children: t } = e;
 	return Ku() === void 0 ? null : t;
 };
 tp.displayName = "MessagePrimitive.Error";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message/MessagePartsGrouped.js
+//#region node_modules/@assistant-ui/react/dist/primitives/message/MessagePartsGrouped.js
 var np = (e) => {
 	let t = /* @__PURE__ */ new Map();
 	for (let n = 0; n < e.length; n++) {
@@ -18396,7 +18396,7 @@ function _p(e) {
 	return e.message.parts.length;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/message.js
+//#region node_modules/@assistant-ui/react/dist/primitives/message.js
 var vp = /* @__PURE__ */ Yd({
 	AttachmentByIndex: () => ju,
 	Attachments: () => Nu,
@@ -18433,7 +18433,7 @@ function bp(e) {
 	return e.type !== "attributes" || e.attributeName !== "style";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/useThreadViewportAutoScroll.js
+//#region node_modules/@assistant-ui/react/dist/primitives/thread/useThreadViewportAutoScroll.js
 var xp = ({ autoScroll: e, scrollToBottomOnRunStart: t = !0, scrollToBottomOnInitialize: n = !0, scrollToBottomOnThreadSwitch: r = !0 }) => {
 	let i = $e(null), a = V((e) => e.thread.messages.length > 0), o = V((e) => e.thread.isRunning), s = $e(!1), c = $e(null), l = Qu();
 	e === void 0 && (e = l.getState().turnAnchor !== "top");
@@ -18534,7 +18534,7 @@ var xp = ({ autoScroll: e, scrollToBottomOnRunStart: t = !0, scrollToBottomOnIni
 });
 Sp.displayName = "ThreadPrimitive.Root";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/ThreadEmpty.js
+//#region node_modules/@assistant-ui/react/dist/primitives/thread/ThreadEmpty.js
 var Cp = (e) => {
 	let { children: t } = e;
 	return V(wp) ? t : null;
@@ -18544,7 +18544,7 @@ function wp(e) {
 	return e.thread.isEmpty;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/ThreadIf.js
+//#region node_modules/@assistant-ui/react/dist/primitives/thread/ThreadIf.js
 var Tp = (e) => {
 	let t = N(4), n;
 	return t[0] !== e.disabled || t[1] !== e.empty || t[2] !== e.running ? (n = (t) => !(e.empty === !0 && !t.thread.isEmpty || e.empty === !1 && t.thread.isEmpty || e.running === !0 && !t.thread.isRunning || e.running === !1 && t.thread.isRunning || e.disabled === !0 && !t.thread.isDisabled || e.disabled === !1 && t.thread.isDisabled), t[0] = e.disabled, t[1] = e.empty, t[2] = e.running, t[3] = n) : n = t[3], V(n);
@@ -18554,7 +18554,7 @@ var Tp = (e) => {
 };
 Ep.displayName = "ThreadPrimitive.If";
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/utils/hooks/useSizeHandle.js
+//#region node_modules/@assistant-ui/react/dist/utils/hooks/useSizeHandle.js
 var Dp = (e, t) => {
 	let n = N(3), r;
 	return n[0] !== t || n[1] !== e ? (r = (n) => {
@@ -18762,7 +18762,7 @@ function Yp(e) {
 	return e.topAnchorTurn;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react/dist/primitives/thread/ThreadViewportFooter.js
+//#region node_modules/@assistant-ui/react/dist/primitives/thread/ThreadViewportFooter.js
 var Xp = ct((e, t) => {
 	let n = N(3), r = md(t, Dp(Zu(Zp), Qp)), i;
 	return n[0] !== e || n[1] !== r ? (i = /* @__PURE__ */ (0, U.jsx)(tf.div, {
@@ -18894,7 +18894,7 @@ var tm = nf("ThreadPrimitive.Suggestion", (e) => {
 	...r
 });
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react-markdown/dist/overrides/CodeOverride.js
+//#region node_modules/@assistant-ui/react-markdown/dist/overrides/CodeOverride.js
 function vm(e) {
 	if (typeof e == "string") return e;
 	if (Array.isArray(e)) {
@@ -18946,19 +18946,19 @@ var ym = ({ node: e, components: { Pre: t, Code: n, SyntaxHighlighter: r, CodeHe
 	return !0;
 }, Sm = (0, M.memo)(bm, (e, t) => e.components === t.components && xm(e.componentsByLanguage, t.componentsByLanguage) && om(e, t));
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/comma-separated-tokens/index.js
+//#region node_modules/comma-separated-tokens/index.js
 function Cm(e, t) {
 	let n = t || {};
 	return (e[e.length - 1] === "" ? [...e, ""] : e).join((n.padRight ? " " : "") + "," + (n.padLeft === !1 ? "" : " ")).trim();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/estree-util-is-identifier-name/lib/index.js
+//#region node_modules/estree-util-is-identifier-name/lib/index.js
 var wm = /^[$_\p{ID_Start}][$_\u{200C}\u{200D}\p{ID_Continue}]*$/u, Tm = /^[$_\p{ID_Start}][-$_\u{200C}\u{200D}\p{ID_Continue}]*$/u, Em = {};
 function Dm(e, t) {
 	return ((t || Em).jsx ? Tm : wm).test(e);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/hast-util-whitespace/lib/index.js
+//#region node_modules/hast-util-whitespace/lib/index.js
 var Om = /[ \t\n\f\r]/g;
 function km(e) {
 	return typeof e == "object" ? e.type === "text" && Am(e.value) : Am(e);
@@ -18967,7 +18967,7 @@ function Am(e) {
 	return e.replace(Om, "") === "";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/schema.js
+//#region node_modules/property-information/lib/util/schema.js
 var jm = class {
 	constructor(e, t, n) {
 		this.normal = t, this.property = e, n && (this.space = n);
@@ -18975,19 +18975,19 @@ var jm = class {
 };
 jm.prototype.normal = {}, jm.prototype.property = {}, jm.prototype.space = void 0;
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/merge.js
+//#region node_modules/property-information/lib/util/merge.js
 function Mm(e, t) {
 	let n = {}, r = {};
 	for (let t of e) Object.assign(n, t.property), Object.assign(r, t.normal);
 	return new jm(n, r, t);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/normalize.js
+//#region node_modules/property-information/lib/normalize.js
 function Nm(e) {
 	return e.toLowerCase();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/info.js
+//#region node_modules/property-information/lib/util/info.js
 var Pm = class {
 	constructor(e, t) {
 		this.attribute = t, this.property = e;
@@ -18995,7 +18995,7 @@ var Pm = class {
 };
 Pm.prototype.attribute = "", Pm.prototype.booleanish = !1, Pm.prototype.boolean = !1, Pm.prototype.commaOrSpaceSeparated = !1, Pm.prototype.commaSeparated = !1, Pm.prototype.defined = !1, Pm.prototype.mustUseProperty = !1, Pm.prototype.number = !1, Pm.prototype.overloadedBoolean = !1, Pm.prototype.property = "", Pm.prototype.spaceSeparated = !1, Pm.prototype.space = void 0;
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/types.js
+//#region node_modules/property-information/lib/util/types.js
 var Fm = /* @__PURE__ */ s({
 	boolean: () => Y,
 	booleanish: () => Lm,
@@ -19009,7 +19009,7 @@ function Hm() {
 	return 2 ** ++Im;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/defined-info.js
+//#region node_modules/property-information/lib/util/defined-info.js
 var Um = Object.keys(Fm), Wm = class extends Pm {
 	constructor(e, t, n, r) {
 		let i = -1;
@@ -19024,7 +19024,7 @@ function Gm(e, t, n) {
 	n && (e[t] = n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/create.js
+//#region node_modules/property-information/lib/util/create.js
 function Km(e) {
 	let t = {}, n = {};
 	for (let [r, i] of Object.entries(e.properties)) {
@@ -19034,7 +19034,7 @@ function Km(e) {
 	return new jm(t, n, e.space);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/aria.js
+//#region node_modules/property-information/lib/aria.js
 var qm = Km({
 	properties: {
 		ariaActiveDescendant: null,
@@ -19092,17 +19092,17 @@ var qm = Km({
 	}
 });
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/case-sensitive-transform.js
+//#region node_modules/property-information/lib/util/case-sensitive-transform.js
 function Jm(e, t) {
 	return t in e ? e[t] : t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/util/case-insensitive-transform.js
+//#region node_modules/property-information/lib/util/case-insensitive-transform.js
 function Ym(e, t) {
 	return Jm(e, t.toLowerCase());
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/lib/html.js
+//#region node_modules/property-information/lib/html.js
 var Xm = Km({
 	attributes: {
 		acceptcharset: "accept-charset",
@@ -20055,7 +20055,7 @@ function sh(e) {
 	return e.charAt(1).toUpperCase();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/property-information/index.js
+//#region node_modules/property-information/index.js
 var ch = Mm([
 	qm,
 	Xm,
@@ -20070,12 +20070,12 @@ var ch = Mm([
 	eh
 ], "svg");
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/space-separated-tokens/index.js
+//#region node_modules/space-separated-tokens/index.js
 function uh(e) {
 	return e.join(" ").trim();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/inline-style-parser/cjs/index.js
+//#region node_modules/inline-style-parser/cjs/index.js
 var dh = /* @__PURE__ */ o(((e, t) => {
 	var n = /\/\*[^*]*\*+([^/*][^*]*\*+)*\//g, r = /\n/g, i = /^\s*/, a = /^(\*?[-#/*\\\w]+(\[[0-9a-z_-]+\])?)\s*/, o = /^:\s*/, s = /^((?:'(?:\\'|.)*?'|"(?:\\"|.)*?"|\([^)]*?\)|[^};])+)/, c = /^[;\s]*/, l = /^\s+|\s+$/g;
 	function u(e, t) {
@@ -20219,7 +20219,7 @@ function vh(e) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-stringify-position/lib/index.js
+//#region node_modules/unist-util-stringify-position/lib/index.js
 function yh(e) {
 	return !e || typeof e != "object" ? "" : "position" in e || "type" in e ? xh(e.position) : "start" in e || "end" in e ? xh(e) : "line" in e || "column" in e ? bh(e) : "";
 }
@@ -20233,7 +20233,7 @@ function Sh(e) {
 	return e && typeof e == "number" ? e : 1;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile-message/lib/index.js
+//#region node_modules/vfile-message/lib/index.js
 var Ch = class extends Error {
 	constructor(e, t, n) {
 		super(), typeof t == "string" && (n = t, t = void 0);
@@ -20255,7 +20255,7 @@ var Ch = class extends Error {
 };
 Ch.prototype.file = "", Ch.prototype.name = "", Ch.prototype.reason = "", Ch.prototype.message = "", Ch.prototype.stack = "", Ch.prototype.column = void 0, Ch.prototype.line = void 0, Ch.prototype.ancestors = void 0, Ch.prototype.cause = void 0, Ch.prototype.fatal = void 0, Ch.prototype.place = void 0, Ch.prototype.ruleId = void 0, Ch.prototype.source = void 0;
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/hast-util-to-jsx-runtime/lib/index.js
+//#region node_modules/hast-util-to-jsx-runtime/lib/index.js
 var wh = /* @__PURE__ */ l(mh(), 1), Th = {}.hasOwnProperty, Eh = /* @__PURE__ */ new Map(), Dh = /[A-Z]/g, Oh = /* @__PURE__ */ new Set([
 	"table",
 	"tbody",
@@ -20497,7 +20497,7 @@ function Qh(e) {
 	return "-" + e.toLowerCase();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/html-url-attributes/lib/index.js
+//#region node_modules/html-url-attributes/lib/index.js
 var $h = {
 	action: ["form"],
 	cite: [
@@ -20552,7 +20552,7 @@ function ig(e) {
 	return !!(e && typeof e == "object");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/decode-named-character-reference/index.dom.js
+//#region node_modules/decode-named-character-reference/index.dom.js
 var ag = document.createElement("i");
 function og(e) {
 	let t = "&" + e + ";";
@@ -20561,7 +20561,7 @@ function og(e) {
 	return n.charCodeAt(n.length - 1) === 59 && e !== "semi" ? !1 : n !== t && n;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-chunked/index.js
+//#region node_modules/micromark-util-chunked/index.js
 function sg(e, t, n, r) {
 	let i = e.length, a = 0, o;
 	if (t = t < 0 ? -t > i ? 0 : i + t : t > i ? i : t, n = n > 0 ? n : 0, r.length < 1e4) o = Array.from(r), o.unshift(t, n), e.splice(...o);
@@ -20571,7 +20571,7 @@ function cg(e, t) {
 	return e.length > 0 ? (sg(e, e.length, 0, t), e) : t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-combine-extensions/index.js
+//#region node_modules/micromark-util-combine-extensions/index.js
 var lg = {}.hasOwnProperty;
 function ug(e) {
 	let t = {}, n = -1;
@@ -20595,18 +20595,18 @@ function fg(e, t) {
 	sg(e, 0, 0, r);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-decode-numeric-character-reference/index.js
+//#region node_modules/micromark-util-decode-numeric-character-reference/index.js
 function pg(e, t) {
 	let n = Number.parseInt(e, t);
 	return n < 9 || n === 11 || n > 13 && n < 32 || n > 126 && n < 160 || n > 55295 && n < 57344 || n > 64975 && n < 65008 || (n & 65535) == 65535 || (n & 65535) == 65534 || n > 1114111 ? "�" : String.fromCodePoint(n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-normalize-identifier/index.js
+//#region node_modules/micromark-util-normalize-identifier/index.js
 function mg(e) {
 	return e.replace(/[\t\n\r ]+/g, " ").replace(/^ | $/g, "").toLowerCase().toUpperCase();
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-character/index.js
+//#region node_modules/micromark-util-character/index.js
 var hg = Tg(/[A-Za-z]/), gg = Tg(/[\dA-Za-z]/), _g = Tg(/[#-'*+\--9=?A-Z^-~]/);
 function vg(e) {
 	return e !== null && (e < 32 || e === 127);
@@ -20629,7 +20629,7 @@ function Tg(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-sanitize-uri/index.js
+//#region node_modules/micromark-util-sanitize-uri/index.js
 function Eg(e) {
 	let t = [], n = -1, r = 0, i = 0;
 	for (; ++n < e.length;) {
@@ -20645,7 +20645,7 @@ function Eg(e) {
 	return t.join("") + e.slice(r);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-space/index.js
+//#region node_modules/micromark-factory-space/index.js
 function $(e, t, n, r) {
 	let i = r ? r - 1 : Infinity, a = 0;
 	return o;
@@ -20657,7 +20657,7 @@ function $(e, t, n, r) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/content.js
+//#region node_modules/micromark/lib/initialize/content.js
 var Dg = { tokenize: Og };
 function Og(e) {
 	let t = e.attempt(this.parser.constructs.contentInitial, r, i), n;
@@ -20688,7 +20688,7 @@ function Og(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/document.js
+//#region node_modules/micromark/lib/initialize/document.js
 var kg = { tokenize: jg }, Ag = { tokenize: Mg };
 function jg(e) {
 	let t = this, n = [], r = 0, i, a, o;
@@ -20786,13 +20786,13 @@ function Mg(e, t, n) {
 	return $(e, e.attempt(this.parser.constructs.document, t, n), "linePrefix", this.parser.constructs.disable.null.includes("codeIndented") ? void 0 : 4);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-classify-character/index.js
+//#region node_modules/micromark-util-classify-character/index.js
 function Ng(e) {
 	if (e === null || Sg(e) || wg(e)) return 1;
 	if (Cg(e)) return 2;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-resolve-all/index.js
+//#region node_modules/micromark-util-resolve-all/index.js
 function Pg(e, t, n) {
 	let r = [], i = -1;
 	for (; ++i < e.length;) {
@@ -20802,7 +20802,7 @@ function Pg(e, t, n) {
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/attention.js
+//#region node_modules/micromark-core-commonmark/lib/attention.js
 var Fg = {
 	name: "attention",
 	resolveAll: Ig,
@@ -20912,7 +20912,7 @@ function Rg(e, t) {
 	e.column += t, e.offset += t, e._bufferIndex += t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/autolink.js
+//#region node_modules/micromark-core-commonmark/lib/autolink.js
 var zg = {
 	name: "autolink",
 	tokenize: Bg
@@ -20953,7 +20953,7 @@ function Bg(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/blank-line.js
+//#region node_modules/micromark-core-commonmark/lib/blank-line.js
 var Vg = {
 	partial: !0,
 	tokenize: Hg
@@ -20968,7 +20968,7 @@ function Hg(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/block-quote.js
+//#region node_modules/micromark-core-commonmark/lib/block-quote.js
 var Ug = {
 	continuation: { tokenize: Gg },
 	exit: Kg,
@@ -21003,7 +21003,7 @@ function Kg(e) {
 	e.exit("blockQuote");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/character-escape.js
+//#region node_modules/micromark-core-commonmark/lib/character-escape.js
 var qg = {
 	name: "characterEscape",
 	tokenize: Jg
@@ -21018,7 +21018,7 @@ function Jg(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/character-reference.js
+//#region node_modules/micromark-core-commonmark/lib/character-reference.js
 var Yg = {
 	name: "characterReference",
 	tokenize: Xg
@@ -21044,7 +21044,7 @@ function Xg(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/code-fenced.js
+//#region node_modules/micromark-core-commonmark/lib/code-fenced.js
 var Zg = {
 	partial: !0,
 	tokenize: e_
@@ -21130,7 +21130,7 @@ function e_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/code-indented.js
+//#region node_modules/micromark-core-commonmark/lib/code-indented.js
 var t_ = {
 	name: "codeIndented",
 	tokenize: r_
@@ -21170,7 +21170,7 @@ function i_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/code-text.js
+//#region node_modules/micromark-core-commonmark/lib/code-text.js
 var a_ = {
 	name: "codeText",
 	previous: s_,
@@ -21211,7 +21211,7 @@ function c_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-subtokenize/lib/splice-buffer.js
+//#region node_modules/micromark-util-subtokenize/lib/splice-buffer.js
 var l_ = class {
 	constructor(e) {
 		this.left = e ? [...e] : [], this.right = [];
@@ -21269,7 +21269,7 @@ function u_(e, t) {
 	else for (; n < t.length;) e.push(...t.slice(n, n + 1e4)), n += 1e4;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-subtokenize/index.js
+//#region node_modules/micromark-util-subtokenize/index.js
 function d_(e) {
 	let t = {}, n = -1, r, i, a, o, s, c, l, u = new l_(e);
 	for (; ++n < u.length;) {
@@ -21301,7 +21301,7 @@ function f_(e, t) {
 	return l;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/content.js
+//#region node_modules/micromark-core-commonmark/lib/content.js
 var p_ = {
 	resolve: h_,
 	tokenize: g_
@@ -21344,7 +21344,7 @@ function __(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-destination/index.js
+//#region node_modules/micromark-factory-destination/index.js
 function v_(e, t, n, r, i, a, o, s, c) {
 	let l = c || Infinity, u = 0;
 	return d;
@@ -21368,7 +21368,7 @@ function v_(e, t, n, r, i, a, o, s, c) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-label/index.js
+//#region node_modules/micromark-factory-label/index.js
 function y_(e, t, n, r, i, a) {
 	let o = this, s = 0, c;
 	return l;
@@ -21388,7 +21388,7 @@ function y_(e, t, n, r, i, a) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-title/index.js
+//#region node_modules/micromark-factory-title/index.js
 function b_(e, t, n, r, i, a) {
 	let o;
 	return s;
@@ -21409,7 +21409,7 @@ function b_(e, t, n, r, i, a) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-factory-whitespace/index.js
+//#region node_modules/micromark-factory-whitespace/index.js
 function x_(e, t) {
 	let n;
 	return r;
@@ -21418,7 +21418,7 @@ function x_(e, t) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/definition.js
+//#region node_modules/micromark-core-commonmark/lib/definition.js
 var S_ = {
 	name: "definition",
 	tokenize: w_
@@ -21470,7 +21470,7 @@ function T_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/hard-break-escape.js
+//#region node_modules/micromark-core-commonmark/lib/hard-break-escape.js
 var E_ = {
 	name: "hardBreakEscape",
 	tokenize: D_
@@ -21485,7 +21485,7 @@ function D_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/heading-atx.js
+//#region node_modules/micromark-core-commonmark/lib/heading-atx.js
 var O_ = {
 	name: "headingAtx",
 	resolve: k_,
@@ -21548,7 +21548,7 @@ function A_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-html-tag-name/index.js
+//#region node_modules/micromark-util-html-tag-name/index.js
 var j_ = /* @__PURE__ */ "address.article.aside.base.basefont.blockquote.body.caption.center.col.colgroup.dd.details.dialog.dir.div.dl.dt.fieldset.figcaption.figure.footer.form.frame.frameset.h1.h2.h3.h4.h5.h6.head.header.hr.html.iframe.legend.li.link.main.menu.menuitem.nav.noframes.ol.optgroup.option.p.param.search.section.summary.table.tbody.td.tfoot.th.thead.title.tr.track.ul".split("."), M_ = [
 	"pre",
 	"script",
@@ -21690,7 +21690,7 @@ function z_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/html-text.js
+//#region node_modules/micromark-core-commonmark/lib/html-text.js
 var B_ = {
 	name: "htmlText",
 	tokenize: V_
@@ -21787,7 +21787,7 @@ function V_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/label-end.js
+//#region node_modules/micromark-core-commonmark/lib/label-end.js
 var H_ = {
 	name: "labelEnd",
 	resolveAll: K_,
@@ -21936,7 +21936,7 @@ function Z_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/label-start-image.js
+//#region node_modules/micromark-core-commonmark/lib/label-start-image.js
 var Q_ = {
 	name: "labelStartImage",
 	resolveAll: H_.resolveAll,
@@ -21957,7 +21957,7 @@ function $_(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/label-start-link.js
+//#region node_modules/micromark-core-commonmark/lib/label-start-link.js
 var ev = {
 	name: "labelStartLink",
 	resolveAll: H_.resolveAll,
@@ -21975,7 +21975,7 @@ function tv(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/line-ending.js
+//#region node_modules/micromark-core-commonmark/lib/line-ending.js
 var nv = {
 	name: "lineEnding",
 	tokenize: rv
@@ -21987,7 +21987,7 @@ function rv(e, t) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/thematic-break.js
+//#region node_modules/micromark-core-commonmark/lib/thematic-break.js
 var iv = {
 	name: "thematicBreak",
 	tokenize: av
@@ -22009,7 +22009,7 @@ function av(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/list.js
+//#region node_modules/micromark-core-commonmark/lib/list.js
 var ov = {
 	continuation: { tokenize: uv },
 	exit: fv,
@@ -22082,7 +22082,7 @@ function pv(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-core-commonmark/lib/setext-underline.js
+//#region node_modules/micromark-core-commonmark/lib/setext-underline.js
 var mv = {
 	name: "setextUnderline",
 	resolveTo: hv,
@@ -22138,7 +22138,7 @@ function gv(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/flow.js
+//#region node_modules/micromark/lib/initialize/flow.js
 var _v = { tokenize: vv };
 function vv(e) {
 	let t = this, n = e.attempt(Vg, r, e.attempt(this.parser.constructs.flowInitial, i, $(e, e.attempt(this.parser.constructs.flow, i, e.attempt(p_, i)), "linePrefix")));
@@ -22159,7 +22159,7 @@ function vv(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/initialize/text.js
+//#region node_modules/micromark/lib/initialize/text.js
 var yv = { resolveAll: Cv() }, bv = Sv("string"), xv = Sv("text");
 function Sv(e) {
 	return {
@@ -22244,7 +22244,7 @@ function wv(e, t) {
 	return e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/constructs.js
+//#region node_modules/micromark/lib/constructs.js
 var Tv = /* @__PURE__ */ s({
 	attentionMarkers: () => Nv,
 	contentInitial: () => Dv,
@@ -22301,7 +22301,7 @@ var Tv = /* @__PURE__ */ s({
 	96: a_
 }, Mv = { null: [Fg, yv] }, Nv = { null: [42, 95] }, Pv = { null: [] };
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/create-tokenizer.js
+//#region node_modules/micromark/lib/create-tokenizer.js
 function Fv(e, t, n) {
 	let r = {
 		_bufferIndex: -1,
@@ -22474,7 +22474,7 @@ function Lv(e, t) {
 	return r.join("");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/parse.js
+//#region node_modules/micromark/lib/parse.js
 function Rv(e) {
 	let t = {
 		constructs: ug([Tv, ...(e || {}).extensions || []]),
@@ -22495,13 +22495,13 @@ function Rv(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/postprocess.js
+//#region node_modules/micromark/lib/postprocess.js
 function zv(e) {
 	for (; !d_(e););
 	return e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark/lib/preprocess.js
+//#region node_modules/micromark/lib/preprocess.js
 var Bv = /[\0\t\n\r]/g;
 function Vv() {
 	let e = 1, t = "", n = !0, r;
@@ -22532,7 +22532,7 @@ function Vv() {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-util-decode-string/index.js
+//#region node_modules/micromark-util-decode-string/index.js
 var Hv = /\\([!-/:-@[-`{-~])|&(#(?:\d{1,7}|x[\da-f]{1,6})|[\da-z]{1,31});/gi;
 function Uv(e) {
 	return e.replace(Hv, Wv);
@@ -22546,7 +22546,7 @@ function Wv(e, t, n) {
 	return og(n) || e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-from-markdown/lib/index.js
+//#region node_modules/mdast-util-from-markdown/lib/index.js
 var Gv = {}.hasOwnProperty;
 function Kv(e, t, n) {
 	return t && typeof t == "object" && (n = t, t = void 0), qv(n)(zv(Rv(n).document().write(Vv()(e, t, !0))));
@@ -23093,7 +23093,7 @@ function Zv(e, t) {
 	}) + ") is still open");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/remark-parse/lib/index.js
+//#region node_modules/remark-parse/lib/index.js
 function Qv(e) {
 	let t = this;
 	t.parser = n;
@@ -23107,7 +23107,7 @@ function Qv(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/blockquote.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/blockquote.js
 function $v(e, t) {
 	let n = {
 		type: "element",
@@ -23118,7 +23118,7 @@ function $v(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/break.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/break.js
 function ey(e, t) {
 	let n = {
 		type: "element",
@@ -23132,7 +23132,7 @@ function ey(e, t) {
 	}];
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/code.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/code.js
 function ty(e, t) {
 	let n = t.value ? t.value + "\n" : "", r = {}, i = t.lang ? t.lang.split(/\s+/) : [];
 	i.length > 0 && (r.className = ["language-" + i[0]]);
@@ -23153,7 +23153,7 @@ function ty(e, t) {
 	}, e.patch(t, a), a;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/delete.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/delete.js
 function ny(e, t) {
 	let n = {
 		type: "element",
@@ -23164,7 +23164,7 @@ function ny(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/emphasis.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/emphasis.js
 function ry(e, t) {
 	let n = {
 		type: "element",
@@ -23175,7 +23175,7 @@ function ry(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/footnote-reference.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/footnote-reference.js
 function iy(e, t) {
 	let n = typeof e.options.clobberPrefix == "string" ? e.options.clobberPrefix : "user-content-", r = String(t.identifier).toUpperCase(), i = Eg(r.toLowerCase()), a = e.footnoteOrder.indexOf(r), o, s = e.footnoteCounts.get(r);
 	s === void 0 ? (s = 0, e.footnoteOrder.push(r), o = e.footnoteOrder.length) : o = a + 1, s += 1, e.footnoteCounts.set(r, s);
@@ -23203,7 +23203,7 @@ function iy(e, t) {
 	return e.patch(t, l), e.applyData(t, l);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/heading.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/heading.js
 function ay(e, t) {
 	let n = {
 		type: "element",
@@ -23214,7 +23214,7 @@ function ay(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/html.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/html.js
 function oy(e, t) {
 	if (e.options.allowDangerousHtml) {
 		let n = {
@@ -23225,7 +23225,7 @@ function oy(e, t) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/revert.js
+//#region node_modules/mdast-util-to-hast/lib/revert.js
 function sy(e, t) {
 	let n = t.referenceType, r = "]";
 	if (n === "collapsed" ? r += "[]" : n === "full" && (r += "[" + (t.label || t.identifier) + "]"), t.type === "imageReference") return [{
@@ -23244,7 +23244,7 @@ function sy(e, t) {
 	}), i;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/image-reference.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/image-reference.js
 function cy(e, t) {
 	let n = String(t.identifier).toUpperCase(), r = e.definitionById.get(n);
 	if (!r) return sy(e, t);
@@ -23262,7 +23262,7 @@ function cy(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/image.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/image.js
 function ly(e, t) {
 	let n = { src: Eg(t.url) };
 	t.alt !== null && t.alt !== void 0 && (n.alt = t.alt), t.title !== null && t.title !== void 0 && (n.title = t.title);
@@ -23275,7 +23275,7 @@ function ly(e, t) {
 	return e.patch(t, r), e.applyData(t, r);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/inline-code.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/inline-code.js
 function uy(e, t) {
 	let n = {
 		type: "text",
@@ -23291,7 +23291,7 @@ function uy(e, t) {
 	return e.patch(t, r), e.applyData(t, r);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/link-reference.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/link-reference.js
 function dy(e, t) {
 	let n = String(t.identifier).toUpperCase(), r = e.definitionById.get(n);
 	if (!r) return sy(e, t);
@@ -23306,7 +23306,7 @@ function dy(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/link.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/link.js
 function fy(e, t) {
 	let n = { href: Eg(t.url) };
 	t.title !== null && t.title !== void 0 && (n.title = t.title);
@@ -23319,7 +23319,7 @@ function fy(e, t) {
 	return e.patch(t, r), e.applyData(t, r);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/list-item.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/list-item.js
 function py(e, t, n) {
 	let r = e.all(t), i = n ? my(n) : hy(t), a = {}, o = [];
 	if (typeof t.checked == "boolean") {
@@ -23377,7 +23377,7 @@ function hy(e) {
 	return e.spread ?? e.children.length > 1;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/list.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/list.js
 function gy(e, t) {
 	let n = {}, r = e.all(t), i = -1;
 	for (typeof t.start == "number" && t.start !== 1 && (n.start = t.start); ++i < r.length;) {
@@ -23396,7 +23396,7 @@ function gy(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/paragraph.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/paragraph.js
 function _y(e, t) {
 	let n = {
 		type: "element",
@@ -23407,7 +23407,7 @@ function _y(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/root.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/root.js
 function vy(e, t) {
 	let n = {
 		type: "root",
@@ -23416,7 +23416,7 @@ function vy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/strong.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/strong.js
 function yy(e, t) {
 	let n = {
 		type: "element",
@@ -23427,7 +23427,7 @@ function yy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/table.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/table.js
 function by(e, t) {
 	let n = e.all(t), r = n.shift(), i = [];
 	if (r) {
@@ -23460,7 +23460,7 @@ function by(e, t) {
 	return e.patch(t, a), e.applyData(t, a);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/table-row.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/table-row.js
 function xy(e, t, n) {
 	let r = n ? n.children : void 0, i = (r ? r.indexOf(t) : 1) === 0 ? "th" : "td", a = n && n.type === "table" ? n.align : void 0, o = a ? a.length : t.children.length, s = -1, c = [];
 	for (; ++s < o;) {
@@ -23483,7 +23483,7 @@ function xy(e, t, n) {
 	return e.patch(t, l), e.applyData(t, l);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/table-cell.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/table-cell.js
 function Sy(e, t) {
 	let n = {
 		type: "element",
@@ -23494,7 +23494,7 @@ function Sy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/trim-lines/index.js
+//#region node_modules/trim-lines/index.js
 var Cy = 9, wy = 32;
 function Ty(e) {
 	let t = String(e), n = /\r?\n|\r/g, r = n.exec(t), i = 0, a = [];
@@ -23514,7 +23514,7 @@ function Ey(e, t, n) {
 	return i > r ? e.slice(r, i) : "";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/text.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/text.js
 function Dy(e, t) {
 	let n = {
 		type: "text",
@@ -23523,7 +23523,7 @@ function Dy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/thematic-break.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/thematic-break.js
 function Oy(e, t) {
 	let n = {
 		type: "element",
@@ -23534,7 +23534,7 @@ function Oy(e, t) {
 	return e.patch(t, n), e.applyData(t, n);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/handlers/index.js
+//#region node_modules/mdast-util-to-hast/lib/handlers/index.js
 var ky = {
 	blockquote: $v,
 	break: ey,
@@ -23566,7 +23566,7 @@ var ky = {
 };
 function Ay() {}
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@ungap/structured-clone/esm/deserialize.js
+//#region node_modules/@ungap/structured-clone/esm/deserialize.js
 var { defineProperty: jy } = Object, My = typeof self == "object" ? self : globalThis, Ny = (e, t) => {
 	switch (e) {
 		case "Function":
@@ -23727,7 +23727,7 @@ var { defineProperty: jy } = Object, My = typeof self == "object" ? self : globa
 /* c8 ignore start */
 (e, t) => t && ("json" in t || "lossy" in t) ? Fy(Uy(e, t)) : structuredClone(e) : (e, t) => Fy(Uy(e, t));
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/footer.js
+//#region node_modules/mdast-util-to-hast/lib/footer.js
 function Gy(e, t) {
 	let n = [{
 		type: "text",
@@ -23827,7 +23827,7 @@ function qy(e) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-is/lib/index.js
+//#region node_modules/unist-util-is/lib/index.js
 var Jy = (function(e) {
 	if (e == null) return $y;
 	if (typeof e == "function") return Qy(e);
@@ -23873,12 +23873,12 @@ function eb(e) {
 	return typeof e == "object" && !!e && "type" in e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-visit-parents/lib/color.js
+//#region node_modules/unist-util-visit-parents/lib/color.js
 function tb(e) {
 	return e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-visit-parents/lib/index.js
+//#region node_modules/unist-util-visit-parents/lib/index.js
 var nb = [];
 function rb(e, t, n, r) {
 	let i;
@@ -23911,7 +23911,7 @@ function ib(e) {
 	return Array.isArray(e) ? e : typeof e == "number" ? [!0, e] : e == null ? nb : [e];
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unist-util-visit/lib/index.js
+//#region node_modules/unist-util-visit/lib/index.js
 function ab(e, t, n, r) {
 	let i, a, o;
 	typeof t == "function" && typeof n != "function" ? (a = void 0, o = t, i = n) : (a = t, o = n, i = r), rb(e, a, s, i);
@@ -23921,7 +23921,7 @@ function ab(e, t, n, r) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/state.js
+//#region node_modules/mdast-util-to-hast/lib/state.js
 var ob = {}.hasOwnProperty, sb = {};
 function cb(e, t) {
 	let n = t || sb, r = /* @__PURE__ */ new Map(), i = /* @__PURE__ */ new Map(), a = {
@@ -24024,7 +24024,7 @@ function pb(e) {
 	return e.slice(t);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-hast/lib/index.js
+//#region node_modules/mdast-util-to-hast/lib/index.js
 function mb(e, t) {
 	let n = cb(e, t), r = n.one(e, void 0), i = qy(n), a = Array.isArray(r) ? {
 		type: "root",
@@ -24039,7 +24039,7 @@ function mb(e, t) {
 	}, i)), a;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/remark-rehype/lib/index.js
+//#region node_modules/remark-rehype/lib/index.js
 function hb(e, t) {
 	return e && "run" in e ? async function(n, r) {
 		let i = mb(n, {
@@ -24055,12 +24055,12 @@ function hb(e, t) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/bail/index.js
+//#region node_modules/bail/index.js
 function gb(e) {
 	if (e) throw e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/extend/index.js
+//#region node_modules/extend/index.js
 var _b = /* @__PURE__ */ o(((e, t) => {
 	var n = Object.prototype.hasOwnProperty, r = Object.prototype.toString, i = Object.defineProperty, a = Object.getOwnPropertyDescriptor, o = function(e) {
 		return typeof Array.isArray == "function" ? Array.isArray(e) : r.call(e) === "[object Array]";
@@ -24097,14 +24097,14 @@ var _b = /* @__PURE__ */ o(((e, t) => {
 	};
 }));
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/is-plain-obj/index.js
+//#region node_modules/is-plain-obj/index.js
 function vb(e) {
 	if (typeof e != "object" || !e) return !1;
 	let t = Object.getPrototypeOf(e);
 	return (t === null || t === Object.prototype || Object.getPrototypeOf(t) === null) && !(Symbol.toStringTag in e) && !(Symbol.iterator in e);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/trough/lib/index.js
+//#region node_modules/trough/lib/index.js
 function yb() {
 	let e = [], t = {
 		run: n,
@@ -24153,7 +24153,7 @@ function bb(e, t) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minpath.browser.js
+//#region node_modules/vfile/lib/minpath.browser.js
 var xb = {
 	basename: Sb,
 	dirname: Cb,
@@ -24253,18 +24253,18 @@ function Ob(e) {
 	if (typeof e != "string") throw TypeError("Path must be a string. Received " + JSON.stringify(e));
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minproc.browser.js
+//#region node_modules/vfile/lib/minproc.browser.js
 var kb = { cwd: Ab };
 function Ab() {
 	return "/";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minurl.shared.js
+//#region node_modules/vfile/lib/minurl.shared.js
 function jb(e) {
 	return !!(typeof e == "object" && e && "href" in e && e.href && "protocol" in e && e.protocol && e.auth === void 0);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/minurl.browser.js
+//#region node_modules/vfile/lib/minurl.browser.js
 function Mb(e) {
 	if (typeof e == "string") e = new URL(e);
 	else if (!jb(e)) {
@@ -24293,7 +24293,7 @@ function Nb(e) {
 	return decodeURIComponent(t);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/vfile/lib/index.js
+//#region node_modules/vfile/lib/index.js
 var Pb = [
 	"history",
 	"path",
@@ -24376,7 +24376,7 @@ function zb(e) {
 	return !!(e && typeof e == "object" && "byteLength" in e && "byteOffset" in e);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/unified/lib/callable-instance.js
+//#region node_modules/unified/lib/callable-instance.js
 var Bb = (function(e) {
 	let t = this.constructor.prototype, n = t[e], r = function() {
 		return n.apply(r, arguments);
@@ -24538,7 +24538,7 @@ function Qb(e) {
 	return !!(e && typeof e == "object" && "byteLength" in e && "byteOffset" in e);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/react-markdown/lib/index.js
+//#region node_modules/react-markdown/lib/index.js
 var $b = [], ex = { allowDangerousHtml: !0 }, tx = /^(https?|ircs?|mailto|xmpp)$/i, nx = [
 	{
 		from: "astPlugins",
@@ -24667,7 +24667,7 @@ function sx(e) {
 	return t === -1 || i !== -1 && t > i || n !== -1 && t > n || r !== -1 && t > r || tx.test(e.slice(0, t)) ? e : "";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/@assistant-ui/react-markdown/dist/primitives/MarkdownText.js
+//#region node_modules/@assistant-ui/react-markdown/dist/primitives/MarkdownText.js
 var { useSmooth: cx, useSmoothStatus: lx, withSmoothContextProvider: ux } = rm, dx = (0, M.memo)(({ text: e, overrideVersion: t, ...n }) => /* @__PURE__ */ (0, U.jsx)(rx, {
 	...n,
 	children: e
@@ -24753,7 +24753,7 @@ var _x = ({ components: e, componentsByLanguage: t, smooth: n = !0, defer: r = !
 vx.displayName = "MarkdownTextPrimitive";
 var yx = ux(vx);
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/ccount/index.js
+//#region node_modules/ccount/index.js
 function bx(e, t) {
 	let n = String(e);
 	if (typeof t != "string") throw TypeError("Expected character");
@@ -24762,13 +24762,13 @@ function bx(e, t) {
 	return r;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/escape-string-regexp/index.js
+//#region node_modules/escape-string-regexp/index.js
 function xx(e) {
 	if (typeof e != "string") throw TypeError("Expected a string");
 	return e.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&").replace(/-/g, "\\x2d");
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-find-and-replace/lib/index.js
+//#region node_modules/mdast-util-find-and-replace/lib/index.js
 function Sx(e, t, n) {
 	let r = Jy((n || {}).ignore || []), i = Cx(t), a = -1;
 	for (; ++a < i.length;) rb(e, "text", o);
@@ -24825,7 +24825,7 @@ function Tx(e) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-autolink-literal/lib/index.js
+//#region node_modules/mdast-util-gfm-autolink-literal/lib/index.js
 var Ex = "phrasing", Dx = [
 	"autolink",
 	"link",
@@ -24949,7 +24949,7 @@ function Vx(e, t) {
 	return (e.index === 0 || wg(n) || Cg(n)) && (!t || n !== 47);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-footnote/lib/index.js
+//#region node_modules/mdast-util-gfm-footnote/lib/index.js
 Zx.peek = Xx;
 function Hx() {
 	this.buffer();
@@ -25043,7 +25043,7 @@ function tS(e, t, n) {
 	return (n ? "" : "    ") + e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-strikethrough/lib/index.js
+//#region node_modules/mdast-util-gfm-strikethrough/lib/index.js
 var nS = [
 	"autolink",
 	"destinationLiteral",
@@ -25091,7 +25091,7 @@ function cS() {
 	return "~";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/markdown-table/index.js
+//#region node_modules/markdown-table/index.js
 function lS(e) {
 	return e.length;
 }
@@ -25149,7 +25149,7 @@ function fS(e) {
 	return t === 67 || t === 99 ? 99 : t === 76 || t === 108 ? 108 : t === 82 || t === 114 ? 114 : 0;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/blockquote.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/blockquote.js
 function pS(e, t, n, r) {
 	let i = n.enter("blockquote"), a = n.createTracker(r);
 	a.move("> "), a.shift(2);
@@ -25160,7 +25160,7 @@ function mS(e, t, n) {
 	return ">" + (n ? "" : " ") + e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/pattern-in-scope.js
+//#region node_modules/mdast-util-to-markdown/lib/util/pattern-in-scope.js
 function hS(e, t) {
 	return gS(e, t.inConstruct, !0) && !gS(e, t.notInConstruct, !1);
 }
@@ -25171,14 +25171,14 @@ function gS(e, t, n) {
 	return !1;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/break.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/break.js
 function _S(e, t, n, r) {
 	let i = -1;
 	for (; ++i < n.unsafe.length;) if (n.unsafe[i].character === "\n" && hS(n.stack, n.unsafe[i])) return /[ \t]/.test(r.before) ? "" : " ";
 	return "\\\n";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/longest-streak/index.js
+//#region node_modules/longest-streak/index.js
 function vS(e, t) {
 	let n = String(e), r = n.indexOf(t), i = r, a = 0, o = 0;
 	if (typeof t != "string") throw TypeError("Expected substring");
@@ -25186,19 +25186,19 @@ function vS(e, t) {
 	return o;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/format-code-as-indented.js
+//#region node_modules/mdast-util-to-markdown/lib/util/format-code-as-indented.js
 function yS(e, t) {
 	return !(t.options.fences !== !1 || !e.value || e.lang || !/[^ \r\n]/.test(e.value) || /^[\t ]*(?:[\r\n]|$)|(?:^|[\r\n])[\t ]*$/.test(e.value));
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-fence.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-fence.js
 function bS(e) {
 	let t = e.options.fence || "`";
 	if (t !== "`" && t !== "~") throw Error("Cannot serialize code with `" + t + "` for `options.fence`, expected `` ` `` or `~`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/code.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/code.js
 function xS(e, t, n, r) {
 	let i = bS(n), a = e.value || "", o = i === "`" ? "GraveAccent" : "Tilde";
 	if (yS(e, n)) {
@@ -25230,14 +25230,14 @@ function SS(e, t, n) {
 	return (n ? "" : "    ") + e;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-quote.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-quote.js
 function CS(e) {
 	let t = e.options.quote || "\"";
 	if (t !== "\"" && t !== "'") throw Error("Cannot serialize title with `" + t + "` for `options.quote`, expected `\"`, or `'`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/definition.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/definition.js
 function wS(e, t, n, r) {
 	let i = CS(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.enter("definition"), s = n.enter("label"), c = n.createTracker(r), l = c.move("[");
 	return l += c.move(n.safe(n.associationId(e), {
@@ -25259,19 +25259,19 @@ function wS(e, t, n, r) {
 	})), l += c.move(i), s()), o(), l;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-emphasis.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-emphasis.js
 function TS(e) {
 	let t = e.options.emphasis || "*";
 	if (t !== "*" && t !== "_") throw Error("Cannot serialize emphasis with `" + t + "` for `options.emphasis`, expected `*`, or `_`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/encode-character-reference.js
+//#region node_modules/mdast-util-to-markdown/lib/util/encode-character-reference.js
 function ES(e) {
 	return "&#x" + e.toString(16).toUpperCase() + ";";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/encode-info.js
+//#region node_modules/mdast-util-to-markdown/lib/util/encode-info.js
 function DS(e, t, n) {
 	let r = Ng(e), i = Ng(t);
 	return r === void 0 ? i === void 0 ? n === "_" ? {
@@ -25307,7 +25307,7 @@ function DS(e, t, n) {
 	};
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/emphasis.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/emphasis.js
 OS.peek = kS;
 function OS(e, t, n, r) {
 	let i = TS(n), a = n.enter("emphasis"), o = n.createTracker(r), s = o.move(i), c = o.move(n.containerPhrasing(e, {
@@ -25328,7 +25328,7 @@ function kS(e, t, n) {
 	return n.options.emphasis || "*";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/format-heading-as-setext.js
+//#region node_modules/mdast-util-to-markdown/lib/util/format-heading-as-setext.js
 function AS(e, t) {
 	let n = !1;
 	return ab(e, function(e) {
@@ -25336,7 +25336,7 @@ function AS(e, t) {
 	}), !!((!e.depth || e.depth < 3) && tg(e) && (t.options.setext || n));
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/heading.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/heading.js
 function jS(e, t, n, r) {
 	let i = Math.max(Math.min(6, e.depth || 1), 1), a = n.createTracker(r);
 	if (AS(e, n)) {
@@ -25357,7 +25357,7 @@ function jS(e, t, n, r) {
 	return /^[\t ]/.test(l) && (l = ES(l.charCodeAt(0)) + l.slice(1)), l = l ? o + " " + l : o, n.options.closeAtx && (l += " " + o), c(), s(), l;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/html.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/html.js
 MS.peek = NS;
 function MS(e) {
 	return e.value || "";
@@ -25366,7 +25366,7 @@ function NS() {
 	return "<";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/image.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/image.js
 PS.peek = FS;
 function PS(e, t, n, r) {
 	let i = CS(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.enter("image"), s = n.enter("label"), c = n.createTracker(r), l = c.move("![");
@@ -25392,7 +25392,7 @@ function FS() {
 	return "!";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/image-reference.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/image-reference.js
 IS.peek = LS;
 function IS(e, t, n, r) {
 	let i = e.referenceType, a = n.enter("imageReference"), o = n.enter("label"), s = n.createTracker(r), c = s.move("!["), l = n.safe(e.alt, {
@@ -25414,7 +25414,7 @@ function LS() {
 	return "!";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/inline-code.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/inline-code.js
 RS.peek = zS;
 function RS(e, t, n) {
 	let r = e.value || "", i = "`", a = -1;
@@ -25432,13 +25432,13 @@ function zS() {
 	return "`";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/format-link-as-autolink.js
+//#region node_modules/mdast-util-to-markdown/lib/util/format-link-as-autolink.js
 function BS(e, t) {
 	let n = tg(e);
 	return !(t.options.resourceLink || !e.url || e.title || !e.children || e.children.length !== 1 || e.children[0].type !== "text" || n !== e.url && "mailto:" + n !== e.url || !/^[a-z][a-z+.-]+:/i.test(e.url) || /[\0- <>\u007F]/.test(e.url));
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/link.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/link.js
 VS.peek = HS;
 function VS(e, t, n, r) {
 	let i = CS(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.createTracker(r), s, c;
@@ -25476,7 +25476,7 @@ function HS(e, t, n) {
 	return BS(e, n) ? "<" : "[";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/link-reference.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/link-reference.js
 US.peek = WS;
 function US(e, t, n, r) {
 	let i = e.referenceType, a = n.enter("linkReference"), o = n.enter("label"), s = n.createTracker(r), c = s.move("["), l = n.containerPhrasing(e, {
@@ -25498,14 +25498,14 @@ function WS() {
 	return "[";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-bullet.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-bullet.js
 function GS(e) {
 	let t = e.options.bullet || "*";
 	if (t !== "*" && t !== "+" && t !== "-") throw Error("Cannot serialize items with `" + t + "` for `options.bullet`, expected `*`, `+`, or `-`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-bullet-other.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-bullet-other.js
 function KS(e) {
 	let t = GS(e), n = e.options.bulletOther;
 	if (!n) return t === "*" ? "-" : "*";
@@ -25514,21 +25514,21 @@ function KS(e) {
 	return n;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-bullet-ordered.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-bullet-ordered.js
 function qS(e) {
 	let t = e.options.bulletOrdered || ".";
 	if (t !== "." && t !== ")") throw Error("Cannot serialize items with `" + t + "` for `options.bulletOrdered`, expected `.` or `)`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-rule.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-rule.js
 function JS(e) {
 	let t = e.options.rule || "*";
 	if (t !== "*" && t !== "-" && t !== "_") throw Error("Cannot serialize rules with `" + t + "` for `options.rule`, expected `*`, `-`, or `_`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/list.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/list.js
 function YS(e, t, n, r) {
 	let i = n.enter("list"), a = n.bulletCurrent, o = e.ordered ? qS(n) : GS(n), s = e.ordered ? o === "." ? ")" : "." : KS(n), c = t && n.bulletLastUsed ? o === n.bulletLastUsed : !1;
 	if (!e.ordered) {
@@ -25549,14 +25549,14 @@ function YS(e, t, n, r) {
 	return n.bulletLastUsed = o, n.bulletCurrent = a, i(), l;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-list-item-indent.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-list-item-indent.js
 function XS(e) {
 	let t = e.options.listItemIndent || "one";
 	if (t !== "tab" && t !== "one" && t !== "mixed") throw Error("Cannot serialize items with `" + t + "` for `options.listItemIndent`, expected `tab`, `one`, or `mixed`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/list-item.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/list-item.js
 function ZS(e, t, n, r) {
 	let i = XS(n), a = n.bulletCurrent || GS(n);
 	t && t.type === "list" && t.ordered && (a = (typeof t.start == "number" && t.start > -1 ? t.start : 1) + (n.options.incrementListMarker === !1 ? 0 : t.children.indexOf(e)) + a);
@@ -25571,13 +25571,13 @@ function ZS(e, t, n, r) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/paragraph.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/paragraph.js
 function QS(e, t, n, r) {
 	let i = n.enter("paragraph"), a = n.enter("phrasing"), o = n.containerPhrasing(e, r);
 	return a(), i(), o;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-phrasing/lib/index.js
+//#region node_modules/mdast-util-phrasing/lib/index.js
 var $S = Jy([
 	"break",
 	"delete",
@@ -25597,21 +25597,21 @@ var $S = Jy([
 	"textDirective"
 ]);
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/root.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/root.js
 function eC(e, t, n, r) {
 	return (e.children.some(function(e) {
 		return $S(e);
 	}) ? n.containerPhrasing : n.containerFlow).call(n, e, r);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-strong.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-strong.js
 function tC(e) {
 	let t = e.options.strong || "*";
 	if (t !== "*" && t !== "_") throw Error("Cannot serialize strong with `" + t + "` for `options.strong`, expected `*`, or `_`");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/strong.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/strong.js
 nC.peek = rC;
 function nC(e, t, n, r) {
 	let i = tC(n), a = n.enter("strong"), o = n.createTracker(r), s = o.move(i + i), c = o.move(n.containerPhrasing(e, {
@@ -25632,25 +25632,25 @@ function rC(e, t, n) {
 	return n.options.strong || "*";
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/text.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/text.js
 function iC(e, t, n, r) {
 	return n.safe(e.value, r);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/util/check-rule-repetition.js
+//#region node_modules/mdast-util-to-markdown/lib/util/check-rule-repetition.js
 function aC(e) {
 	let t = e.options.ruleRepetition || 3;
 	if (t < 3) throw Error("Cannot serialize rules with repetition `" + t + "` for `options.ruleRepetition`, expected `3` or more");
 	return t;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/thematic-break.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/thematic-break.js
 function oC(e, t, n) {
 	let r = (JS(n) + (n.options.ruleSpaces ? " " : "")).repeat(aC(n));
 	return n.options.ruleSpaces ? r.slice(0, -1) : r;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-to-markdown/lib/handle/index.js
+//#region node_modules/mdast-util-to-markdown/lib/handle/index.js
 var sC = {
 	blockquote: pS,
 	break: _S,
@@ -25674,7 +25674,7 @@ var sC = {
 	thematicBreak: oC
 };
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-table/lib/index.js
+//#region node_modules/mdast-util-gfm-table/lib/index.js
 function cC() {
 	return {
 		enter: {
@@ -25807,7 +25807,7 @@ function gC(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm-task-list-item/lib/index.js
+//#region node_modules/mdast-util-gfm-task-list-item/lib/index.js
 function _C() {
 	return { exit: {
 		taskListCheckValueChecked: yC,
@@ -25862,7 +25862,7 @@ function xC(e, t, n, r) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/mdast-util-gfm/lib/index.js
+//#region node_modules/mdast-util-gfm/lib/index.js
 function SC() {
 	return [
 		Ox(),
@@ -25882,7 +25882,7 @@ function CC(e) {
 	] };
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-autolink-literal/lib/syntax.js
+//#region node_modules/micromark-extension-gfm-autolink-literal/lib/syntax.js
 var wC = {
 	tokenize: RC,
 	partial: !0
@@ -26054,7 +26054,7 @@ function qC(e) {
 	return e.length > 0 && !n && (e[e.length - 1][1]._gfmAutolinkLiteralWalkedInto = !0), n;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-footnote/lib/syntax.js
+//#region node_modules/micromark-extension-gfm-footnote/lib/syntax.js
 var JC = {
 	tokenize: nw,
 	partial: !0
@@ -26242,7 +26242,7 @@ function nw(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-strikethrough/lib/syntax.js
+//#region node_modules/micromark-extension-gfm-strikethrough/lib/syntax.js
 function rw(e) {
 	let t = (e || {}).singleTilde, n = {
 		name: "strikethrough",
@@ -26334,7 +26334,7 @@ function rw(e) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-table/lib/edit-map.js
+//#region node_modules/micromark-extension-gfm-table/lib/edit-map.js
 var iw = class {
 	constructor() {
 		this.map = [], this.index = /* @__PURE__ */ new Map();
@@ -26374,7 +26374,7 @@ function aw(e, t, n, r) {
 	e.map.push(a), e.index.set(t, a);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-table/lib/infer.js
+//#region node_modules/micromark-extension-gfm-table/lib/infer.js
 function ow(e, t) {
 	let n = !1, r = [];
 	for (; t < e.length;) {
@@ -26393,7 +26393,7 @@ function ow(e, t) {
 	return r;
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-table/lib/syntax.js
+//#region node_modules/micromark-extension-gfm-table/lib/syntax.js
 function sw() {
 	return { flow: { null: {
 		name: "table",
@@ -26589,7 +26589,7 @@ function fw(e, t) {
 	return n[1][r];
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm-task-list-item/lib/syntax.js
+//#region node_modules/micromark-extension-gfm-task-list-item/lib/syntax.js
 var pw = {
 	name: "tasklistCheck",
 	tokenize: hw
@@ -26620,7 +26620,7 @@ function gw(e, t, n) {
 	}
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/micromark-extension-gfm/index.js
+//#region node_modules/micromark-extension-gfm/index.js
 function _w(e) {
 	return ug([
 		NC(),
@@ -26631,7 +26631,7 @@ function _w(e) {
 	]);
 }
 //#endregion
-//#region ../../../SC-2760-staticcache/apps/whatsapp/node_modules/remark-gfm/lib/index.js
+//#region node_modules/remark-gfm/lib/index.js
 var vw = {};
 function yw(e) {
 	let t = this, n = e || vw, r = t.data(), i = r.micromarkExtensions ||= [], a = r.fromMarkdownExtensions ||= [], o = r.toMarkdownExtensions ||= [];
@@ -27215,8 +27215,8 @@ function Ew({ ctx: e, request: t, useDraft: n, active: r, api: i, draftPrompt: a
 									children: e.label || e.id
 								}, e.id))]
 							})] }),
-							/* @__PURE__ */ (0, U.jsxs)("label", { children: ["Thinking", /* @__PURE__ */ (0, U.jsxs)("select", {
-								"aria-label": "Thinking",
+							/* @__PURE__ */ (0, U.jsxs)("label", { children: ["Razonamiento", /* @__PURE__ */ (0, U.jsxs)("select", {
+								"aria-label": "Razonamiento",
 								value: k?.reasoningEffort || "default",
 								disabled: Je || qe.length < 2,
 								onChange: (e) => De(k.model, e.target.value),
