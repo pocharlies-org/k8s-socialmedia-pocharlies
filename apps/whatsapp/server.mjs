@@ -748,16 +748,25 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     ) : [];
     const attachedIds = new Set(attachments.map(item => item.message_id));
     const missingImages = rows.filter(row => row.type === 'IMAGE' && !attachedIds.has(row.id)).map(row => row.id);
-    const thumbnails = missingImages.length ? await query(
-      `SELECT m.id FROM messages m JOIN whatsapp_message_payloads p
-         ON p.wa_message_id=m.wa_message_id AND p.account=m.account
+    // UX #63: una sola consulta de payloads — previsualización de imágenes sin adjunto y póster de los vídeos.
+    const thumbIds = [...new Set([...missingImages, ...rows.filter(row => row.type === 'VIDEO').map(row => row.id)])];
+    const thumbs = thumbIds.length ? await query(
+      // EXISTS (no JOIN): el JOIN con el OR IMAGE/VIDEO invierte el orden en el planner y pierde messages_pkey (rojo en CI 23-10).
+      `SELECT m.id, m.message_type FROM messages m
         WHERE m.id=ANY($1::${messageIdType}[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
           AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}
-          AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
-          AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000`,
-      [missingImages, account.accountId, readIds]
+          AND ((m.message_type='IMAGE' AND EXISTS (SELECT 1 FROM whatsapp_message_payloads p
+                WHERE p.account=m.account AND p.wa_message_id=m.wa_message_id
+                  AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
+                  AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000))
+            OR (m.message_type='VIDEO' AND EXISTS (SELECT 1 FROM whatsapp_message_payloads p
+                WHERE p.account=m.account AND p.wa_message_id=m.wa_message_id
+                  AND jsonb_typeof(p.message_payload->'videoMessage'->'jpegThumbnail') IN ('string','object')
+                  AND pg_column_size(p.message_payload->'videoMessage'->'jpegThumbnail') <= 300000)))`,
+      [thumbIds, account.accountId, readIds]
     ) : [];
-    const thumbnailIds = new Set(thumbnails.map(item => item.id));
+    const thumbnailIds = new Set(thumbs.filter(item => item.message_type === 'IMAGE').map(item => item.id));
+    const posterIds = new Set(thumbs.filter(item => item.message_type === 'VIDEO').map(item => item.id));
     const textIds = rows.filter(row => row.type === 'TEXT' && /https?:\/\//i.test(row.text || '')).map(row => row.id);
     const previewRows = textIds.length ? await query(
       `SELECT m.id, p.message_payload->'extendedTextMessage' AS preview_payload
@@ -814,6 +823,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       attachments: attachments.filter(item => item.message_id === row.id).map(item => ({
         id: String(item.id),
         url: `/api/media/${encodeURIComponent(item.id)}?account=${encodeURIComponent(account.accountId)}&chat=${encodeURIComponent(chat)}`,
+        ...(posterIds.has(row.id) ? { posterUrl: `/api/media/thumb/${encodeURIComponent(row.id)}?account=${encodeURIComponent(account.accountId)}&chat=${encodeURIComponent(chat)}` } : {}),
         mimeType: item.mime_type || 'application/octet-stream',
         name: item.file_name || `${downloadNames[item.file_type] || 'archivo'}-${new Date(row.timestamp).toISOString().slice(0, 10)}.${downloadExts[(item.mime_type || '').toLowerCase()] || 'bin'}`,
         type: item.file_type || null,
@@ -1736,12 +1746,12 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const schema = await getDatabaseSchema(query);
         if (!validDatabaseId(id, schema.messageIdType)) throw fail(404, 'Media not found');
         const rows = await query(
-          `SELECT p.message_payload->'imageMessage'->'jpegThumbnail' AS thumbnail
+          `SELECT COALESCE(p.message_payload->'imageMessage'->'jpegThumbnail', p.message_payload->'videoMessage'->'jpegThumbnail') AS thumbnail
              FROM messages m JOIN whatsapp_message_payloads p
                ON p.wa_message_id=m.wa_message_id AND p.account=m.account
             WHERE m.id=$1 AND m.account=$2 AND m.conversation_id=ANY($3::text[])
-              AND m.platform='whatsapp' AND m.message_type='IMAGE' AND ${MESSAGE_RETAINED_SQL}
-              AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000`,
+              AND m.platform='whatsapp' AND m.message_type IN ('IMAGE','VIDEO') AND ${MESSAGE_RETAINED_SQL}
+              AND pg_column_size(COALESCE(p.message_payload->'imageMessage'->'jpegThumbnail', p.message_payload->'videoMessage'->'jpegThumbnail')) <= 300000`,
           [id, a.accountId, readIds]
         );
         const bytes = jpegThumbnailBytes(rows[0]?.thumbnail);

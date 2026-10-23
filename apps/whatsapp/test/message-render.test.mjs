@@ -728,3 +728,27 @@ test('documento sin caption no repite el nombre y muestra tamaño (UX #53)', () 
   const captioned = renderer.renderMessage({ id: 'e', type: 'DOCUMENT', text: 'el informe', attachments: [{ ...doc, caption: 'el informe' }] }, { document: fakeDocument });
   assert.equal(treeText(captioned.querySelector('.message-text')), 'el informe');
 });
+
+test('video bubble carries a Spanish label and the payload poster (UX #63)', () => {
+  const policy = stubPolicy();
+  const container = createAttachmentElement({
+    url: 'http://nas/api/media/v1?account=personal&chat=c',
+    posterUrl: 'http://nas/api/media/thumb/42?account=personal&chat=c',
+    mimeType: 'video/mp4', name: 'playa.mp4', size: 8 * 1024 * 1024,
+  }, { document: fakeDocument, mediaPolicy: policy });
+  const video = container.querySelector('.attachment-video');
+  assert.equal(video.poster, 'http://nas/api/media/thumb/42?account=personal&chat=c');
+  assert.equal(video.attributes.get('aria-label'), 'Vídeo: playa.mp4');
+  assert(container.querySelector('.attachment-video-wrap'), 'el badge de duración vive sobre el vídeo');
+});
+
+test('duration badge and Spanish pending label (UX #63)', async () => {
+  const source = await readFile(new URL('../public/message-render.mjs', import.meta.url), 'utf8');
+  assert.match(source, /attachment-video-duration/);
+  assert.match(source, /loadedmetadata/);
+  assert.match(source, /video: 'Descargar vídeo'/);
+  const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /videoMessage'->'jpegThumbnail/);
+  assert.match(server, /message_type IN \('IMAGE','VIDEO'\)/);
+  assert.match(server, /posterUrl/);
+});

@@ -894,7 +894,7 @@ export function installFeatureUI({
       const remove = button(documentRef, 'Quitar', 'feature-button subtle');
       remove.onclick = async () => {
         if (!windowRef?.confirm?.(`¿Quitar a ${member.name || member.id} del grupo?`)) return;
-        const result = await mutate('/api/groups/action', { action: 'remove', participant: member.id }, { refreshMessages: false, success: 'Miembro quitado.' });
+        const result = await mutate('/api/groups/action', { action: 'remove', participant: member.id }, { refreshMessages: false, success: 'Participante quitado.' });
         if (result) { closeModal(); openInfo(); }
       };
       actions.append(promote, remove);
@@ -968,11 +968,12 @@ export function installFeatureUI({
           modal.body.append(row);
         }
       }
-      addSection(modal.body, `Miembros${members.length ? ` · ${members.length}` : ''}`);
-      if (!members.length) modal.body.append(node('p', 'feature-muted', 'No hay miembros disponibles para esta cuenta.'));
+      // UX #66.5: WhatsApp en español dice «Participantes», no «Miembros».
+      addSection(modal.body, `Participantes${members.length ? ` · ${members.length}` : ''}`);
+      if (!members.length) modal.body.append(node('p', 'feature-muted', 'No hay participantes disponibles para esta cuenta.'));
       else for (const member of members) renderMember(member, { ...info, capabilities: result.capabilities || info.capabilities }, modal.body);
       if (bool(capabilities.manageMembers)) {
-        const addMember = button(documentRef, 'Añadir miembro', 'feature-button primary');
+        const addMember = button(documentRef, 'Añadir participante', 'feature-button primary');
         addMember.onclick = () => openMemberForm();
         modal.body.append(addMember);
       }
@@ -1068,7 +1069,7 @@ export function installFeatureUI({
   }
 
   function openMemberForm() {
-    const modal = openModal('Añadir miembro', { opener: documentRef.activeElement });
+    const modal = openModal('Añadir participante', { opener: documentRef.activeElement });
     const address = field(documentRef, 'Número o identificador', 'tel', 'memberId', '', '+34 600 000 000');
     const submit = button(documentRef, 'Añadir', 'feature-button primary');
     submit.type = 'submit';
@@ -1078,7 +1079,7 @@ export function installFeatureUI({
       event.preventDefault();
       const value = address.input.value.trim();
       if (!value) { address.input.focus(); return; }
-      const result = await mutate('/api/groups/action', { action: 'add', participant: value }, { success: 'Miembro añadido.' });
+      const result = await mutate('/api/groups/action', { action: 'add', participant: value }, { success: 'Participante añadido.' });
       if (result) { closeModal(); openInfo(); }
     };
     modal.body.append(form);
@@ -2010,7 +2011,7 @@ export function installFeatureUI({
     const modal = openModal('Nuevo grupo', { wide: true });
     const form = node('form', 'feature-form');
     const name = field(documentRef, 'Nombre', 'text', 'name');
-    const members = field(documentRef, 'Miembros (separados por comas, p. ej. +34600112233)', 'text', 'members', '', '+34600112233, +34600112244');
+    const members = field(documentRef, 'Participantes (separados por comas, p. ej. +34600112233)', 'text', 'members', '', '+34600112233, +34600112244');
     const submit = button(documentRef, 'Continuar', 'feature-button primary');
     submit.type = 'submit';
     form.append(name.wrapper, members.wrapper, submit);
@@ -2028,7 +2029,7 @@ export function installFeatureUI({
       event.preventDefault();
       const values = formData(form);
       const payload = { name: values.name.trim().slice(0, 100), participants: values.members.split(',').map(item => item.trim()).filter(Boolean) };
-      if (!payload.name || !payload.participants.length) { showError('Indica el nombre del grupo y al menos un miembro.'); return; }
+      if (!payload.name || !payload.participants.length) { showError('Indica el nombre del grupo y al menos un participante.'); return; }
       showError('');
       const result = await mutate('/api/groups', payload, { refreshChats: true, success: 'Operación confirmada.', includeChat: false });
       const chat = result?.chat || result?.conversation;
@@ -2608,9 +2609,13 @@ export function installFeatureUI({
     if (!documentRef.body.classList.contains('chat-open')) return;
     if (!(Number(runtime.selectedChat?.unread) > 0 || bool(runtime.selectedChat?.unread))) return;
     runtime.readPending.add(key);
+    // #163: el POST tarda ~2,9 s (la BD solo se limpia tras confirmar el conector). El badge se
+    // quita al instante como en WhatsApp; si el proveedor falla, vuelve con su valor anterior.
+    const previousUnread = runtime.selectedChat?.unread;
+    updateChatFlags(chat, { unread: 0 });
     const result = await mutate('/api/chat-actions', { action: 'read' }, { refreshChats: true, success: '' });
     runtime.readPending.delete(key);
-    if (result && runtime.account === account && runtime.chat === chat) updateChatFlags(chat, { unread: 0 });
+    if (runtime.account === account && runtime.chat === chat) updateChatFlags(chat, { unread: result ? 0 : (previousUnread || 1) });
   }
 
   function chatChanged(chat) {

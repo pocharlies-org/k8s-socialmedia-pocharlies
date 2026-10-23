@@ -380,7 +380,8 @@ test('thumbnail fallback is account and chat scoped and serves only bounded JPEG
   let thumbnail = JSON.parse(JSON.stringify({ imageMessage: { jpegThumbnail: jpeg } })).imageMessage.jpegThumbnail;
   const db = { query: async (sql, args) => {
     if (/FROM conversations/.test(sql)) return { rows: args[1] === 'personal-chat' ? [{ id: 'personal-chat' }] : [] };
-    if (/SELECT p\.message_payload->'imageMessage'/.test(sql)) return { rows: args[1] === 'personal' && args[2]?.includes('personal-chat') ? [{ thumbnail }] : [] };
+    // UX #63: la SQL ahora es COALESCE(imageMessage|videoMessage) — el stub casa el nuevo prefijo.
+    if (/SELECT COALESCE\(p\.message_payload->'imageMessage'/.test(sql)) return { rows: args[1] === 'personal' && args[2]?.includes('personal-chat') ? [{ thumbnail }] : [] };
     return { rows: [] };
   } };
   const { request } = await fixture(t, { db });
@@ -404,9 +405,9 @@ test('an image without a stored attachment exposes its scoped thumbnail in messa
       id, waMessageId: 'provider-image', text: null, fromMe: true,
       timestamp: new Date('2026-09-23T14:09:36Z'), type: 'IMAGE', metadata: null,
     }] };
-    if (/SELECT m\.id FROM messages m JOIN whatsapp_message_payloads/.test(sql)) {
+    if (/SELECT m\.id, m\.message_type FROM messages m\s+WHERE/.test(sql)) {
       assert.deepEqual(args, [[id], 'personal', ['personal-chat']]);
-      return { rows: [{ id }] };
+      return { rows: [{ id, message_type: 'IMAGE' }] };
     }
     return { rows: [] };
   } };

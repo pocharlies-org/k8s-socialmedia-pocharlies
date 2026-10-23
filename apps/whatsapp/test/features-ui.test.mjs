@@ -388,7 +388,7 @@ test('los tres formularios de creación pintan el motivo en vez de callar (QA #1
   const src = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   assert.match(src, /function formValidator\(documentRef, form\) \{/);
   assert.equal((src.match(/formValidator\(documentRef, form\)/g) || []).length, 4);
-  assert.match(src, /showError\('Indica el nombre del grupo y al menos un miembro\.'\)/);
+  assert.match(src, /showError\('Indica el nombre del grupo y al menos un participante\.'\)/);
   assert.match(src, /name: values\.name\.trim\(\)\.slice\(0, 100\)/);
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.feature-form-error \{ margin: 0; color: var\(--danger\);/);
