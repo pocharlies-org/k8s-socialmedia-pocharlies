@@ -240,12 +240,17 @@ export function formatDateSeparator(value, now = new Date()) {
   return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
 }
 
-/** Format a chat-list timestamp as WhatsApp does: time today, Ayer, or date. */
+/** Format a chat-list timestamp as WhatsApp does: time today, Ayer, nombre del
+    día hasta 7 días (UX #54) y fecha absoluta a partir de ahí. */
 export function formatChatListTime(value, now = new Date()) {
   const date = parseTimestamp(value);
-  if (!date) return '';
-  const label = formatDateSeparator(date, now);
-  return label === 'Hoy' ? formatMessageTime(date) : label;
+  const reference = parseTimestamp(now);
+  if (!date || !reference) return '';
+  const difference = Math.round((dayStart(reference) - dayStart(date)) / 86400000);
+  if (difference === 0) return formatMessageTime(date);
+  if (difference === 1) return 'Ayer';
+  if (difference > 1 && difference < 7) return date.toLocaleDateString('es-ES', { weekday: 'long' });
+  return formatDateSeparator(date, now);
 }
 
 function senderGroupKey(message) {

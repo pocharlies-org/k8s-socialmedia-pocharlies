@@ -201,6 +201,9 @@ test('formatChatListTime follows WhatsApp today, yesterday and older-date labels
 
   assert.equal(formatChatListTime(new Date(2026, 8, 23, 8, 7).toISOString(), now), '08:07');
   assert.equal(formatChatListTime(new Date(2026, 8, 22, 23), now), 'Ayer');
+  assert.equal(formatChatListTime(new Date(2026, 8, 21, 23), now), 'lunes'); // UX #54: nombre del día hasta 7 días
+  assert.equal(formatChatListTime(new Date(2026, 8, 17, 23), now), 'jueves');
+  assert.equal(formatChatListTime(new Date(2026, 8, 16, 23), now), '16/09/2026');
   assert.equal(formatChatListTime(new Date(2026, 0, 5, 23), now), '05/01/2026');
   assert.equal(formatChatListTime('no es una fecha', now), '');
 });
