@@ -302,9 +302,42 @@ function setConversationAvatar(chat = null) {
 }
 // QA #87: el servidor pliega tildes (pg_trgm); la lista debe plegar igual o «ibanez» no encuentra nada.
 const foldSearch = value => value.toLocaleLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+// #83 (QA velocidad): con 1000+ chats montar las filas enteras era el p90 de 10,8 s
+// y los 148 avatares. La fila mide 76 px fijos (styles.css .chat-item), así que la
+// ventana se calcula por scrollTop con dos espaciadores. Por debajo del umbral se
+// pinta todo como siempre (sin regresión en listas pequeñas).
+const CHAT_ROW_H = 76;
+const CHAT_VIRTUAL_MIN = 80;
+const CHAT_VIRTUAL_BUFFER = 10;
+let virtualChats = null;
+let virtualRange = null;
+function chatWindowRange(total, scrollTop, viewport) {
+  const visible = Math.ceil((viewport || 800) / CHAT_ROW_H) + 2 * CHAT_VIRTUAL_BUFFER;
+  const start = Math.min(Math.max(0, Math.floor(scrollTop / CHAT_ROW_H) - CHAT_VIRTUAL_BUFFER), Math.max(0, total - visible));
+  return {start, end: Math.min(total, start + visible)};
+}
+function chatSpacer(px) { const spacer = node('div', 'chat-spacer'); spacer.style.height = `${px}px`; return spacer; }
+function renderChatWindow() {
+  const {start, end} = virtualRange;
+  const list = $('chats');
+  list.replaceChildren();
+  if (start > 0) list.append(chatSpacer(start * CHAT_ROW_H));
+  for (const chat of virtualChats.slice(start, end)) list.append(chatRowNode(chat));
+  if (end < virtualChats.length) list.append(chatSpacer((virtualChats.length - end) * CHAT_ROW_H));
+}
+let chatsScrollRaf = 0;
+$('chats').addEventListener('scroll', () => {
+  if (!virtualRange || chatsScrollRaf) return;
+  chatsScrollRaf = requestAnimationFrame(() => {
+    chatsScrollRaf = 0;
+    if (!virtualRange) return;
+    const next = chatWindowRange(virtualChats.length, $('chats').scrollTop, $('chats').clientHeight);
+    if (next.start !== virtualRange.start || next.end !== virtualRange.end) { virtualRange = next; renderChatWindow(); }
+  });
+});
 function renderChats() {
   // QA #89/#97: «Destacados» es una vista de mensajes, no de chats.
-  if (featureUI?.isFeatureView?.() === 'starred') { $('chat-status').textContent = ''; void featureUI.starredView?.($('chats')); return; }
+  if (featureUI?.isFeatureView?.() === 'starred') { virtualChats = null; virtualRange = null; $('chat-status').textContent = ''; void featureUI.starredView?.($('chats')); return; }
   const archivedView = featureUI?.isFeatureView?.() === 'archived';
   sidebarSearch?.viewChanged(archivedView);
   // UX #6.1: el buscador filtra también dentro de Archivados (antes se vaciaba).
@@ -322,8 +355,18 @@ function renderChats() {
   // QA #74: la pestaña no avisaba de los no leídos (title fijo «SocialMedia»).
   const unreadTotal = state.chats.reduce((sum, chat) => sum + (chat.unread === true ? 1 : Math.max(0, Number(chat.unread) || 0)), 0);
   document.title = unreadTotal ? `(${unreadTotal > 99 ? '99+' : unreadTotal}) WhatsApp` : 'WhatsApp';
-  $('chats').replaceChildren();
-  for (const chat of chats) {
+  virtualChats = chats;
+  if (chats.length > CHAT_VIRTUAL_MIN) {
+    virtualRange = chatWindowRange(chats.length, $('chats').scrollTop, $('chats').clientHeight);
+    renderChatWindow();
+  } else {
+    virtualRange = null;
+    $('chats').replaceChildren();
+    for (const chat of chats) $('chats').append(chatRowNode(chat));
+  }
+  renderChatsTail(chats, {numeric, digits, filter});
+}
+function chatRowNode(chat) {
     const button = node('button', `chat-item${chat.isGroup === true ? ' is-group' : ''}`);
     button.type = 'button';
     button.dataset.chatId = chat.id;
@@ -392,8 +435,9 @@ function renderChats() {
       quicks.push(quick);
     }
     row.append(button, menu, ...quicks);
-    $('chats').append(row);
-  }
+    return row;
+}
+function renderChatsTail(chats, {numeric, digits, filter}) {
   // QA #125: un número sin coincidencia en el listado no es un callejón — ofrece abrir
   // el chat con ese número (el directorio ya sabe empezar chats por teléfono).
   if (numeric && !chats.length && state.chats.length) {
