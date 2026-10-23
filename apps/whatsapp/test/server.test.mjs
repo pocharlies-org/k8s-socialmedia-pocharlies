@@ -380,7 +380,8 @@ test('thumbnail fallback is account and chat scoped and serves only bounded JPEG
   let thumbnail = JSON.parse(JSON.stringify({ imageMessage: { jpegThumbnail: jpeg } })).imageMessage.jpegThumbnail;
   const db = { query: async (sql, args) => {
     if (/FROM conversations/.test(sql)) return { rows: args[1] === 'personal-chat' ? [{ id: 'personal-chat' }] : [] };
-    if (/SELECT p\.message_payload->'imageMessage'/.test(sql)) return { rows: args[1] === 'personal' && args[2]?.includes('personal-chat') ? [{ thumbnail }] : [] };
+    // UX #63: la SQL ahora es COALESCE(imageMessage|videoMessage) — el stub casa el nuevo prefijo.
+    if (/SELECT COALESCE\(p\.message_payload->'imageMessage'/.test(sql)) return { rows: args[1] === 'personal' && args[2]?.includes('personal-chat') ? [{ thumbnail }] : [] };
     return { rows: [] };
   } };
   const { request } = await fixture(t, { db });

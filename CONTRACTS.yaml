@@ -2015,7 +2015,10 @@ contracts:
     popover de Ajustes (botón settings-privacy) es markup del shell que abre el
     modal existente: no es contrato (UX #60, 23-10). El control de Tema pasa de
     <select> a radios segmentadas (mismo localStorage wa-theme y mismas
-    conductas): el control tampoco es contrato (UX #61.2, 23-10).'
+    conductas): el control tampoco es contrato (UX #61.2, 23-10). La proyección
+    añade posterUrl a los adjuntos de vídeo y /api/media/thumb/ sirve también el
+    jpegThumbnail de VIDEO (antes solo IMAGE): la respuesta se amplía sin cambiar
+    valor ni ruta existentes — no es contrato (UX #63, 23-10).'
 - id: http.hindsight.socialmedia-bank.v1
   kind: http-route
   value: /v1/default/banks/{bank_id}

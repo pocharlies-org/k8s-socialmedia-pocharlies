@@ -359,7 +359,7 @@ function attachmentName(attachment) {
   return textValue(attachment?.name || attachment?.fileName || attachment?.file_name || 'Archivo adjunto').trim() || 'Archivo adjunto';
 }
 
-const MEDIA_PENDING_LABELS = { image: 'Descargar foto', audio: 'Descargar audio', video: 'Descargar video', document: 'Descargar documento' };
+const MEDIA_PENDING_LABELS = { image: 'Descargar foto', audio: 'Descargar audio', video: 'Descargar vídeo', document: 'Descargar documento' };
 const MEDIA_PENDING_BADGES = { image: 'IMG', audio: 'AUD', video: 'VID', document: 'DOC' };
 
 function attachmentSizeBytes(attachment) {
@@ -722,13 +722,24 @@ function attachmentMediaNodes(attachment, { documentRef, src, name, parent, onIm
     return [button];
   }
   if (kind === 'video') {
+    const wrap = makeElement(documentRef, 'span', 'attachment-video-wrap');
     const video = makeElement(documentRef, 'video', 'attachment-video');
     video.controls = true;
     video.preload = 'metadata';
     video.playsInline = true;
+    video.setAttribute('aria-label', `Vídeo: ${name}`);
+    // UX #63: el servidor solo proyecta posterUrl si el payload trae jpegThumbnail.
+    if (attachment?.posterUrl) video.poster = attachment.posterUrl;
     video.src = src;
     addMediaError(video, parent, documentRef);
-    return [video];
+    video.addEventListener('loadedmetadata', () => {
+      const total = Math.round(video.duration);
+      if (!Number.isFinite(total) || total <= 0) return;
+      wrap.append(makeElement(documentRef, 'span', 'attachment-video-duration',
+        `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`));
+    }, { once: true });
+    wrap.append(video);
+    return [wrap];
   }
   if (kind === 'audio') return [createAudioPlayer(src, name, parent, documentRef)];
   return [];
@@ -880,7 +891,6 @@ export function createAttachmentElement(attachment, { document: documentRef = gl
     mountMedia(url);
     const video = container.querySelector('.attachment-video');
     video.preload = policy.enabled(kind, account) ? 'metadata' : 'none';
-    video.setAttribute('aria-label', `Video ${name}`);
     container.dataset.mediaState = 'streaming';
     return container;
   }
