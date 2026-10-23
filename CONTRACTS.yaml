@@ -2388,6 +2388,11 @@ contracts:
     ahora con su payload. Desde 23-10 la respuesta lleva ETag fuerte y
     cache-control no-cache (tambien en GET /api/chats): un If-None-Match
     igual responde 304 sin cuerpo — aditivo, el 200 sigue igual (#160/#142).
+    Desde 23-10 (gzip, #266) los JSON >1 KiB y los estaticos de texto salen
+    con content-encoding gzip y vary accept-encoding cuando el cliente los
+    acepta — variante de representacion HTTP: la forma del 200 no cambia;
+    quien llame sin accept-encoding (o un proxy que la quite) recibe el
+    crudo de siempre.
 - id: http.whatsapp-app.messages-delete.v1
   kind: http-route
   value: /api/messages/delete
