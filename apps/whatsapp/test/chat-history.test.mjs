@@ -67,7 +67,9 @@ test('hay botón «ir abajo» cuando el chat está lejos del final (QA 22-10)', 
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /aria-label', 'Ir al final del chat'/);
   assert.match(app, /scrollTo\(\{top: \$\('messages'\)\.scrollHeight, behavior: 'smooth'\}\)/);
-  assert.match(app, /scrollBottom\.hidden = !state\.chat \|\| pane\.scrollHeight - pane\.scrollTop - pane\.clientHeight < 300/);
+  assert.match(app, /const hidden = !state\.chat \|\| pane\.scrollHeight - pane\.scrollTop - pane\.clientHeight < 300/);
+  // UX #70.1: el botón trae contador de mensajes recibidos lejos del final.
+  assert.match(app, /unseenScroll \+= Math\.max\(0, remote\.length - lastRemoteCount\)/);
 });
 
 test('el favorito se marca en la fila y Favoritos vacío explica cómo marcarlo (QA 22-10)', async () => {
