@@ -1452,6 +1452,16 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
   }
   const server = http.createServer(async (req, res) => {
     const json = (status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
+    // #160/#142: SSE re-avisa y el cliente re-pide /api/chats y /api/messages en cada ciclo.
+    // Con ETag el ciclo sin cambios cuesta un 304, no 42.5 KB. no-cache: se revalida siempre, nunca sirve viejo.
+    const conditionalJson = (status, value) => {
+      const body = JSON.stringify(value);
+      const etag = `"${createHash('sha256').update(body).digest('base64url').slice(0, 22)}"`;
+      const headers = { etag, 'cache-control': 'no-cache' };
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
+      res.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8' });
+      res.end(body);
+    };
     const redirect = (location, setCookie) => {
       const headers = { location };
       if (setCookie) headers['set-cookie'] = Array.isArray(setCookie) ? setCookie : [setCookie];
@@ -1681,7 +1691,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
           const remoteState = providerState.get(providerChatId(chat));
           return { ...chat, pinned: remoteState?.pinned ?? (localState.pinned === true), muted: remoteState?.muted ?? (localState.muted === true), favorite: local.favorites.includes(chat.id) };
         });
-        return json(200, { chats, archived: includeArchived, nextCursor: page.nextCursor });
+        return conditionalJson(200, { chats, archived: includeArchived, nextCursor: page.nextCursor });
       }
       if (req.method === 'GET' && (path === '/api/chats/archived' || path === '/api/archived-chats')) {
         const a = accountParam(url.searchParams.get('account'));
@@ -1696,7 +1706,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       if (req.method === 'GET' && path === '/api/messages') {
         const a = accountParam(url.searchParams.get('account')); const chat = safeChatId(url.searchParams.get('chat'));
         const result = await readMessageRows(a, chat, { before: url.searchParams.get('before'), limit: url.searchParams.get('limit') });
-        return json(200, { messages: result.messages, nextCursor: result.nextCursor });
+        return conditionalJson(200, { messages: result.messages, nextCursor: result.nextCursor });
       }
       // CONTRACT: http.whatsapp-connector.history-recover.v1
       if (req.method === 'POST' && path === '/api/messages/recover') {

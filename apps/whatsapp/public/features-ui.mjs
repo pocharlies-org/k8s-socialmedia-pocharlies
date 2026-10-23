@@ -2609,9 +2609,13 @@ export function installFeatureUI({
     if (!documentRef.body.classList.contains('chat-open')) return;
     if (!(Number(runtime.selectedChat?.unread) > 0 || bool(runtime.selectedChat?.unread))) return;
     runtime.readPending.add(key);
+    // #163: el POST tarda ~2,9 s (la BD solo se limpia tras confirmar el conector). El badge se
+    // quita al instante como en WhatsApp; si el proveedor falla, vuelve con su valor anterior.
+    const previousUnread = runtime.selectedChat?.unread;
+    updateChatFlags(chat, { unread: 0 });
     const result = await mutate('/api/chat-actions', { action: 'read' }, { refreshChats: true, success: '' });
     runtime.readPending.delete(key);
-    if (result && runtime.account === account && runtime.chat === chat) updateChatFlags(chat, { unread: 0 });
+    if (runtime.account === account && runtime.chat === chat) updateChatFlags(chat, { unread: result ? 0 : (previousUnread || 1) });
   }
 
   function chatChanged(chat) {
