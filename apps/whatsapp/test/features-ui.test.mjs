@@ -538,3 +538,10 @@ test('menú ⋮ de cabecera: role=menu con flechas, Bloquear compartido y Privac
   assert.match(html, /id="settings-privacy"/);
   assert.match(ui, /getElementById\('settings-privacy'\)\?\.addEventListener\('click'/);
 });
+
+test('el diálogo abierto desde otro devuelve el foco al disparador (UX #71)' , async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  // El opener desprendido por closeModal se reencadena al que acaba de recuperar el foco.
+  assert.match(ui, /if \(opener\?\.isConnected === false\) opener = documentRef\.activeElement;/);
+  assert.match(ui, /if \(modal\.opener\?\.isConnected !== false\) modal\.opener\.focus\?\.\(\)/);
+});
