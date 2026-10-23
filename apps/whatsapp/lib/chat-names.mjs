@@ -116,6 +116,27 @@ WITH lid_phones AS MATERIALIZED (
     AND id ~ '@lid$'
   GROUP BY 1
   HAVING COUNT(*) = 1
+),
+-- #265: el alias PN↔LID se agrega una sola vez por teléfono. El LATERAL que había
+-- escaneaba conversations por cada una de las 1033 filas con un regexp sin índice
+-- (~2,1 s de los 3,6 s del listado, medido 23-10 sobre NVMe: 29 539 hits vs 87
+-- lecturas — CPU, no disco). Mismas columnas que el LATERAL; los lectores no cambian.
+pn_alias AS MATERIALIZED (
+  SELECT lp.phone,
+         array_agg(pn.id ORDER BY pn.id) AS ids,
+         (array_agg(pn.name ORDER BY
+           (pn.name IS NULL OR BTRIM(pn.name) = ''
+             OR pn.name ~ '@(lid|c\\.us|s\\.whatsapp\\.net)$'), pn.id))[1] AS name,
+         (array_agg(pn.avatar_url ORDER BY (pn.avatar_url IS NULL), pn.id))[1] AS avatar_url,
+         COALESCE(SUM(COALESCE(pn.unread_count, 0)), 0)::integer AS unread_count,
+         BOOL_OR(COALESCE(pn.archived, false)) AS archived
+  FROM lid_phones lp
+  JOIN conversations pn
+    ON pn.account = $1
+   AND COALESCE(pn.is_group, false) = false
+   AND pn.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
+   AND regexp_replace(pn.id, '@c\\.us$', '@s.whatsapp.net') = lp.phone
+  GROUP BY lp.phone
 )
 -- El nombre NO se resuelve aquí: los laterals de nombre (saved_contact, inbound)
 -- corrían por las ~1000 filas candidatas y en frío pasaban de los 10 s del
@@ -136,28 +157,12 @@ SELECT c.id,
        COALESCE(last_message.wa_timestamp, c.last_message_at)::text AS "_sortTimestamp",
        last_message.direction = 'OUTBOUND' AS "fromMe"
 FROM conversations c
-LEFT JOIN lid_phones one_lid
-  ON one_lid.phone = regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')
+LEFT JOIN pn_alias
+  ON c.id ~ '@lid$'
+ AND COALESCE(c.is_group, false) = false
+ AND pn_alias.phone = regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')
 LEFT JOIN lid_phones one_lid_self
   ON one_lid_self.phone = regexp_replace(c.id, '@c\\.us$', '@s.whatsapp.net')
-LEFT JOIN LATERAL (
-  SELECT array_agg(pn.id ORDER BY pn.id) AS ids,
-         (array_agg(pn.name ORDER BY
-           (pn.name IS NULL OR BTRIM(pn.name) = ''
-             OR pn.name ~ '@(lid|c\\.us|s\\.whatsapp\\.net)$'), pn.id))[1] AS name,
-         (array_agg(pn.avatar_url ORDER BY (pn.avatar_url IS NULL), pn.id))[1] AS avatar_url,
-         COALESCE(SUM(COALESCE(pn.unread_count, 0)), 0)::integer AS unread_count,
-         BOOL_OR(COALESCE(pn.archived, false)) AS archived
-  FROM conversations pn
-  WHERE c.id ~ '@lid$'
-    AND COALESCE(c.is_group, false) = false
-    AND pn.account = c.account
-    AND COALESCE(pn.is_group, false) = false
-    AND pn.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
-    AND regexp_replace(pn.id, '@c\\.us$', '@s.whatsapp.net') =
-        regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')
-    AND one_lid.phone IS NOT NULL
-) pn_alias ON true
 -- UNION ALL con LIMIT 1 por brazo: con ANY(array_prepend(...)) el planner
 -- no usa el índice por conversación y escanea messages por timestamp global
 -- (medido 19-10: 4 s/conversación con 449k mensajes; así, 0,2 s).
