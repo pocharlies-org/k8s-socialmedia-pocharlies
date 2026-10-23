@@ -1796,10 +1796,18 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const pathChat = path.match(/^\/api\/(?:chats|groups)\/([^/]+)\/(?:group|contact|info|participants)$/)?.[1];
         const chat = safeChatId(url.searchParams.get('chat') || url.searchParams.get('id') || (pathChat ? decodeURIComponent(pathChat) : null));
         const conversation = await conversationFor(a, chat);
+        // UX #32.1/#56.2: el jid/LID crudo nunca es nombre visible; sin nombre
+        // útil sale null y la ficha pone «Grupo»/«Contacto».
+        const displayName = readableChatName({
+          id: conversation.id,
+          isGroup: conversation.is_group === true,
+          name: conversation.name,
+          waChatId: conversation.wa_chat_id,
+        });
         const result = {
           account: a.accountId,
           chat: conversation.id,
-          name: conversation.name || conversation.id,
+          name: isJidPlaceholder(displayName, conversation.id) ? null : displayName,
           isGroup: conversation.is_group === true,
           archived: conversation.archived === true,
           unread: Number(conversation.unread || 0),
@@ -1864,7 +1872,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         return json(200, { ...result, contact: {
           id: contact.id || conversation.id,
           phone: contact.phone || null,
-          name: contact.name || contact.push_name || conversation.name || null,
+          name: [contact.name, contact.push_name].find(name => !isJidPlaceholder(name, contact.id || conversation.id)) || null,
           avatarUrl: `/api/contacts/${encodeURIComponent(contact.id || conversation.id)}/avatar?account=${encodeURIComponent(a.accountId)}`,
           presence: { state: 'unknown', lastSeen: null, available: false },
         } });

@@ -183,3 +183,11 @@ test('el fallo del micrófono traduce el motivo por err.name (QA #126)', async (
   assert.match(src, /NotReadableError: 'el micrófono está ocupado\.'/);
   assert.doesNotMatch(src, /No se pudo acceder al micrófono: \$\{err\.message\}/);
 });
+
+test('UX #58: re-ancla al fondo tras asentar el layout, cita a 1 línea y chat fijado role=img', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(app, /if \(first\) requestAnimationFrame\(\(\) => \{/);
+  assert.match(app, /pin\.setAttribute\('role', 'img'\)/);
+  assert.match(css, /\.message-reply-reference \.message-kind-label \{[^}]*text-overflow: ellipsis/);
+});

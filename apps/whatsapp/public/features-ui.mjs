@@ -929,9 +929,11 @@ export function installFeatureUI({
     modal.body.replaceChildren();
     const identity = node('div', 'feature-profile-head');
     const photo = node('span', 'feature-profile-photo');
-    initialsAvatar(photo, info.name || profile.name || runtime.chat, profile.avatarUrl || profile.avatar_url || info.avatarUrl || info.avatar_url);
+    // UX #32.1/#56.2: sin nombre útil se pone la etiqueta, nunca el jid/LID crudo.
+    const title = info.name || profile.name || (isGroup ? 'Grupo' : 'Contacto');
+    initialsAvatar(photo, title, profile.avatarUrl || profile.avatar_url || info.avatarUrl || info.avatar_url);
     const copy = node('div', 'feature-profile-copy');
-    copy.append(node('h3', '', info.name || profile.name || runtime.chat), node('p', 'feature-muted', isGroup ? 'Grupo' : visiblePresenceLabel(presence, 'es-ES')));
+    copy.append(node('h3', '', title), node('p', 'feature-muted', isGroup ? 'Grupo' : visiblePresenceLabel(presence, 'es-ES')));
     identity.append(photo, copy);
     modal.body.append(identity);
     if (isGroup) {
@@ -1427,28 +1429,61 @@ export function installFeatureUI({
     const source = { account: runtime.account, chat: runtime.chat, generation: runtime.generation };
     const messageIds = [...ids];
     const modal = openModal('Reenviar mensaje', { wide: true });
-    const form = node('form', 'feature-form');
-    const select = documentRef.createElement('select'); select.name = 'targetChat'; select.required = true; select.append(option(documentRef, 'Selecciona una conversación', ''));
-    for (const chat of array(getChats()).filter(chat => !chatIsArchived(chat, prefs()))) select.append(option(documentRef, chat.name || chat.id, chat.id));
+    // UX #57 / QA #92: buscador + hasta 5 destinos con contador, como WhatsApp
+    // (el <select> de 1034 opciones era inutilizable). El pie de foto queda fuera:
+    // el contrato del conector (forward) no admite caption.
+    const chosen = new Set();
+    const search = documentRef.createElement('input');
+    search.type = 'search';
+    search.placeholder = 'Buscar conversación';
+    search.setAttribute('aria-label', 'Buscar conversación de destino');
+    const list = node('div', 'feature-forward-list');
     const submit = button(documentRef, 'Reenviar', 'feature-button primary');
     submit.type = 'submit';
-    form.append(makeElement(documentRef, 'label', 'feature-field', 'Conversación de destino'), select, submit);
+    submit.disabled = true;
+    const render = () => {
+      const term = (search.value || '').trim().toLowerCase();
+      list.replaceChildren();
+      for (const chat of array(getChats()).filter(chat => !chatIsArchived(chat, prefs()))) {
+        const name = chat.name || (chat.isGroup ? 'Grupo sin nombre' : 'Contacto sin nombre');
+        if (term && !name.toLowerCase().includes(term) && !String(chat.id).toLowerCase().includes(term)) continue;
+        const row = node('label', 'feature-forward-row');
+        const check = documentRef.createElement('input');
+        check.type = 'checkbox';
+        check.checked = chosen.has(chat.id);
+        check.onchange = () => {
+          if (check.checked && chosen.size >= 5) { check.checked = false; toast('Máximo 5 conversaciones.', 'error'); return; }
+          if (check.checked) chosen.add(chat.id); else chosen.delete(chat.id);
+          submit.textContent = chosen.size > 1 ? `Reenviar a ${chosen.size}` : 'Reenviar';
+          submit.disabled = chosen.size === 0;
+        };
+        row.append(check, node('span', '', name));
+        list.append(row);
+      }
+    };
+    search.oninput = render;
+    const form = node('form', 'feature-form');
+    form.append(search, list, submit);
     form.onsubmit = async event => {
       event.preventDefault();
-      const targetChat = select.value;
-      if (!targetChat) return;
+      const targets = [...chosen];
+      if (!targets.length) return;
       let sent = 0;
-      for (const messageId of messageIds) {
-        if (runtime.account !== source.account || runtime.chat !== source.chat || runtime.generation !== source.generation) return;
-        const result = await mutate('/api/messages/forward', { messageId, targetChat }, { success: '' });
-        if (!result) return;
-        sent += 1;
+      for (const targetChat of targets) {
+        for (const messageId of messageIds) {
+          if (runtime.account !== source.account || runtime.chat !== source.chat || runtime.generation !== source.generation) return;
+          const result = await mutate('/api/messages/forward', { messageId, targetChat }, { success: '' });
+          if (!result) return;
+          sent += 1;
+        }
       }
       // QA #116: reenviar al chat abierto no refrescaba el transcript (solo el eco SSE
       // tardío lo traía); el refresco diferido de la casa (QA #80) lo pinta en ~2,5 s.
-      if (sent && targetChat === source.chat) refetchAfterEcho();
-      if (sent) { toast(`${sent} mensaje${sent === 1 ? '' : 's'} reenviado${sent === 1 ? '' : 's'}.`, 'success'); runtime.selectedMessageIds.clear(); closeModal(); enhanceMessages(); }
+      if (sent && targets.includes(source.chat)) refetchAfterEcho();
+      if (sent) { toast(`${sent} reenvío${sent === 1 ? '' : 's'}.`, 'success'); runtime.selectedMessageIds.clear(); closeModal(); enhanceMessages(); }
     };
+    render();
+    search.focus?.();
     modal.body.append(form, node('p', 'feature-muted', 'La entrega depende de la confirmación del proveedor.'));
   }
 
