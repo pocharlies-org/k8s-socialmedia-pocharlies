@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { procesar } from './filter';
-import { DedupCache } from './dedup';
+import { DedupCache } from '@mcp-socialmedia/shared';
 
 // C1 (DGX-1235 B1): every event of the fixture, in order, through the same
 // pipeline main.ts runs (decode -> fail-closed filter -> canonical body).

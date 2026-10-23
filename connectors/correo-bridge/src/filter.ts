@@ -1,6 +1,7 @@
 import { JSONCodec } from 'nats';
+import { normalizeJid, trackingOptInBaseUrl } from '@mcp-socialmedia/shared';
 import type { MessageReceivedEvent, TelegramMessageReceivedEvent } from '@mcp-socialmedia/shared';
-import { trackingOptInBaseUrl, Canal } from './config';
+import type { Canal } from './config';
 import { cuerpoTelegram, cuerpoWhatsapp, MensajeCanal } from './cuerpo';
 
 /**
@@ -28,20 +29,6 @@ const TRACKING_OPT_IN_PREFIX =
 const TRACKING_OPT_IN_ORDER_RE = /\bord\d{3,}\b/i;
 
 const codec = JSONCodec<unknown>();
-
-/** Own-identity comparison form (see whatsapp-synapse-bridge normalizeJid). */
-export function normalizeJid(jid: string | null | undefined): string {
-  if (!jid || typeof jid !== 'string') return '';
-  let value = jid.trim();
-  if (!value) return '';
-  if (value.endsWith('@s.whatsapp.net')) value = value.replace('@s.whatsapp.net', '@c.us');
-  const at = value.indexOf('@');
-  if (at <= 0) return value;
-  let user = value.slice(0, at);
-  const colon = user.indexOf(':');
-  if (colon > 0) user = user.slice(0, colon);
-  return `${user}${value.slice(at)}`;
-}
 
 function hasSuffix(jid: string, suffixes: readonly string[]): boolean {
   return suffixes.some(s => jid.endsWith(s));

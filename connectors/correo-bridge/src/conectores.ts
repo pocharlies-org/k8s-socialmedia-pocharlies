@@ -1,5 +1,4 @@
-import { withTimeout } from '@mcp-socialmedia/shared';
-import { signConnectorRequest } from './me-cache';
+import { signConnectorRequest, withTimeout } from '@mcp-socialmedia/shared';
 
 /**
  * The bridge's only HTTP client towards the socialmedia connectors, with a
@@ -10,7 +9,7 @@ import { signConnectorRequest } from './me-cache';
  * sin-lectura.test.ts).
  */
 export const RUTAS_CONECTOR: readonly string[] = [
-  '/api/v1/me', // me-cache.ts: own WhatsApp JID
+  '/api/v1/me', // MeCache (shared/src/bridge/me-cache.ts): own WhatsApp JID
   '/api/public/history/', // WhatsApp: contract http.whatsapp-connector.public-history.v1
   '/api/public/messages/', // Telegram: contract http.telegram-connector.public-messages.v1
 ];
@@ -73,7 +72,7 @@ export class ClienteConectores {
   private async leer<T>(base: string, ruta: string): Promise<T[]> {
     if (!RUTAS_CONECTOR.some(r => ruta.startsWith(r))) throw new Error('route outside the closed list');
     const ts = Math.floor(this.now() / 1000);
-    // Same as me-cache: a bodyless GET signed over `${ts}:{}`.
+    // Same as MeCache: a bodyless GET signed over `${ts}:{}`.
     let res: Response;
     try {
       res = await withTimeout(

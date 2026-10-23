@@ -1,6 +1,6 @@
 /**
- * Fail-fast configuration of correo-bridge (DGX-1235). Shape copied from
- * whatsapp-synapse-bridge/src/config.ts. A missing key or URL refuses to start.
+ * Fail-fast configuration of correo-bridge (DGX-1235), on the helpers of
+ * shared/src/bridge. A missing key or URL refuses to start.
  *
  * Three kinds of key, never the same value (security condition 4 of DGX-1210):
  * - one producer key per connector (correo-core docs/guia-modulos.md: a producer
@@ -8,6 +8,8 @@
  * - one key per connector (`wa-*`, `tg-*`): the core signs its reads with it;
  * - CONNECTOR_SHARED_SECRET: the house HMAC towards the socialmedia connectors.
  */
+
+import { ConfigError, requireEnv, optionalEnv, httpUrl, intEnv, trackingOptInBaseUrl } from '@mcp-socialmedia/shared';
 
 export type Canal = 'whatsapp' | 'telegram';
 
@@ -34,52 +36,6 @@ export interface BridgeConfig {
   port: number;
 }
 
-class ConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ConfigError';
-  }
-}
-
-function requireEnv(name: string): string {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === '') {
-    throw new ConfigError(`Missing required environment variable: ${name}`);
-  }
-  return raw.trim();
-}
-
-function optionalEnv(name: string, fallback: string): string {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === '') return fallback;
-  return raw.trim();
-}
-
-function httpUrl(name: string, value: string, sinRuta = false): string {
-  let url: URL;
-  try { url = new URL(value); } catch { throw new ConfigError(`${name} must be an absolute URL`); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new ConfigError(`${name} must use HTTP(S) without credentials, query or fragment`);
-  }
-  if (sinRuta && url.pathname !== '/') throw new ConfigError(`${name} must have no path`);
-  return url.toString().replace(/\/$/, '');
-}
-
-export function trackingOptInBaseUrl(): string | undefined {
-  const value = optionalEnv('TRACKING_OPT_IN_BASE_URL', '');
-  return value ? `${httpUrl('TRACKING_OPT_IN_BASE_URL', value)}/` : undefined;
-}
-
-function intEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const parsed = parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new ConfigError(`Environment variable ${name} must be a positive integer, got: ${raw}`);
-  }
-  return parsed;
-}
-
 function patron(name: string, re: RegExp): string {
   const value = requireEnv(name);
   if (!re.test(value)) throw new ConfigError(`${name} must match ${re}`);
@@ -101,7 +57,8 @@ export function loadConfig(): BridgeConfig {
   const whatsappConnectorUrl = httpUrl('WA_CONNECTOR_URL', requireEnv('WA_CONNECTOR_URL'));
   const telegramConnectorUrl = httpUrl('TG_CONNECTOR_URL', requireEnv('TG_CONNECTOR_URL'));
   const connectorSharedSecret = requireEnv('CONNECTOR_SHARED_SECRET');
-  const coreUrl = httpUrl('CORE_URL', requireEnv('CORE_URL'), true);
+  const coreUrl = httpUrl('CORE_URL', requireEnv('CORE_URL'));
+  if (new URL(coreUrl).pathname !== '/') throw new ConfigError('CORE_URL must have no path');
   const productorWa = patron('CORREO_PRODUCTOR_WA_ID', /^[a-z0-9][a-z0-9-]{0,39}$/);
   const productorWaSecreto = clave('CORREO_PRODUCTOR_WA_SECRET');
   const productorTg = patron('CORREO_PRODUCTOR_TG_ID', /^[a-z0-9][a-z0-9-]{0,39}$/);

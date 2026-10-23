@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import type pino from 'pino';
+import { normalizeJid } from '@mcp-socialmedia/shared';
 import { ClienteConectores, ConectorNoResponde, FilaTelegram, FilaWhatsapp } from './conectores';
 import { canonica, REF, tsCanonico } from './cuerpo';
-import { normalizeJid } from './filter';
 import { verificarV2 } from './firma';
 import type { IndiceRefs } from './refs';
 

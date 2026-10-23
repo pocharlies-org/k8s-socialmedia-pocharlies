@@ -1,19 +1,16 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import * as fs from 'fs';
-import { connect, NatsConnection, ConnectionOptions, Subscription } from 'nats';
 import pino from 'pino';
+import { DedupCache, MeCache, NatsSubscriber } from '@mcp-socialmedia/shared';
 import { loadConfig, BridgeConfig, ConfigError } from './config';
 import { procesar, SUBJECT_TELEGRAM, SUBJECT_WHATSAPP } from './filter';
-import { DedupCache } from './dedup';
-import { MeCache } from './me-cache';
 import { Entrega } from './entrega';
 import { IndiceRefs } from './refs';
 import { ClienteConectores } from './conectores';
 import { crearLectura } from './lectura';
 
 /**
- * correo-bridge (DGX-1235 B1): provider of correo.connector.v1. Shape copied
- * from whatsapp-synapse-bridge/src/main.ts. Stateless (no Postgres): NATS in,
+ * correo-bridge (DGX-1235 B1): provider of correo.connector.v1, on the NATS
+ * scaffolding of shared/src/bridge. Stateless (no Postgres): NATS in,
  * POST /v2/mensajes to the correo core out, and the live read routes. It never
  * sends to a customer (that is B2).
  */
@@ -32,15 +29,9 @@ function countDrop(reason: string): void {
 }
 
 class Bridge {
-  private nc: NatsConnection | null = null;
-  private subs: Subscription[] = [];
-  private connected = false;
-  private connecting = false;
-  private stopped = false;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectAttempts = 0;
-  private readonly reconnectBaseMs = parseInt(process.env.NATS_RECONNECT_BASE_MS || '2000', 10);
-  private readonly reconnectMaxMs = parseInt(process.env.NATS_RECONNECT_MAX_MS || '30000', 10);
+  // One sequential loop per subject (NatsSubscriber): a dead core costs each
+  // loop at most TOPE_MS per event (entrega.ts), never an unbounded block.
+  private readonly nats: NatsSubscriber;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -48,50 +39,27 @@ class Bridge {
     private readonly dedup: DedupCache,
     private readonly refs: IndiceRefs,
     private readonly entrega: Entrega
-  ) {}
+  ) {
+    this.nats = new NatsSubscriber({
+      natsUrl: config.natsUrl,
+      natsCaCert: config.natsCaCert,
+      queue: config.natsQueueGroup,
+      subjects: [SUBJECT_WHATSAPP, SUBJECT_TELEGRAM],
+      logger,
+      onMessage: (subject, data) => this.handle(subject, data),
+    });
+  }
 
   isConnected(): boolean {
-    return this.connected;
+    return this.nats.isConnected();
   }
 
-  async start(): Promise<void> {
-    if (this.connecting || this.connected) return;
-    this.connecting = true;
-    this.stopped = false;
-    try {
-      const options: ConnectionOptions = {
-        servers: this.config.natsUrl,
-        maxReconnectAttempts: -1,
-        reconnectTimeWait: this.reconnectBaseMs,
-        timeout: 2000,
-      };
-      if (this.config.natsUrl.startsWith('tls://') && this.config.natsCaCert) {
-        options.tls = { ca: fs.readFileSync(this.config.natsCaCert, 'utf-8') };
-      }
-      this.nc = await connect(options);
-      this.connected = true;
-      this.reconnectAttempts = 0;
-      logger.info({ queue: this.config.natsQueueGroup }, 'connected to NATS, subscribing');
-      for (const subject of [SUBJECT_WHATSAPP, SUBJECT_TELEGRAM]) this.subscribe(this.nc, subject);
-      void this.watchClosed(this.nc);
-    } catch (error) {
-      logger.warn({ err: String(error) }, 'NATS unavailable; scheduling reconnect');
-      this.connected = false;
-      this.connecting = false;
-      this.scheduleReconnect();
-    } finally {
-      this.connecting = false;
-    }
+  start(): Promise<void> {
+    return this.nats.start();
   }
 
-  // One sequential loop per subject: a dead core costs each loop at most
-  // TOPE_MS per event (entrega.ts), never an unbounded block.
-  private subscribe(nc: NatsConnection, subject: string): void {
-    const sub = nc.subscribe(subject, { queue: this.config.natsQueueGroup });
-    this.subs.push(sub);
-    void (async (): Promise<void> => {
-      for await (const msg of sub) await this.handle(subject, msg.data);
-    })();
+  stop(): Promise<void> {
+    return this.nats.stop();
   }
 
   private async handle(subject: string, data: Uint8Array): Promise<void> {
@@ -106,49 +74,6 @@ class Bridge {
     metrics.forwarded++;
     this.refs.guardar(r.cuerpo.ref, r.cuerpo.hilo_ref);
     await this.entrega.entregar(this.config.conectorPorCanal[r.canal], r.cuerpo);
-  }
-
-  private async watchClosed(nc: NatsConnection): Promise<void> {
-    const err = await nc.closed();
-    if (this.nc !== nc) return;
-    this.connected = false;
-    this.nc = null;
-    this.subs = [];
-    if (err) logger.warn({ err: String(err) }, 'NATS connection closed');
-    else logger.info('NATS connection closed');
-    this.scheduleReconnect();
-  }
-
-  private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer || this.connecting) return;
-    const delayMs = Math.min(this.reconnectMaxMs, this.reconnectBaseMs * Math.max(1, 2 ** this.reconnectAttempts));
-    this.reconnectAttempts += 1;
-    logger.warn({ delayMs }, 'scheduling NATS reconnect');
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      void this.start();
-    }, delayMs);
-    (this.reconnectTimer as unknown as { unref?: () => void }).unref?.();
-  }
-
-  async stop(): Promise<void> {
-    this.stopped = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    for (const sub of this.subs) {
-      try {
-        await sub.drain();
-      } catch {
-        /* ignore drain errors on shutdown */
-      }
-    }
-    if (this.nc) {
-      await this.nc.close();
-      this.nc = null;
-    }
-    this.connected = false;
   }
 }
 

@@ -6,14 +6,16 @@ import { RUTAS_CONECTOR } from './conectores';
 
 // C3 (DGX-1235 B1, security condition 5): reading never marks anything as
 // read, and the bridge never sends (that is B2). Static: it scans every
-// non-test source file. The live unread_count check is qa's.
-const SRC = __dirname;
-const fuentes = readdirSync(SRC)
+// non-test source file of the bridge and of the scaffolding it imports from
+// shared (shared/src/bridge: MeCache calls the connector). The live
+// unread_count check is qa's.
+const DIRS = [__dirname, join(__dirname, '..', '..', '..', 'shared', 'src', 'bridge')];
+const fuentes = DIRS.flatMap(dir => readdirSync(dir)
   .filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts'))
-  .map(f => ({ f, texto: readFileSync(join(SRC, f), 'utf-8') }));
+  .map(f => ({ f, texto: readFileSync(join(dir, f), 'utf-8') })));
 
 test('C3: no source file names a mark-as-read call', () => {
-  assert.ok(fuentes.length >= 5);
+  assert.ok(fuentes.some(x => x.f === 'me-cache.ts') && fuentes.some(x => x.f === 'lectura.ts'));
   const prohibido = /\/messages\/read|markAsRead|markRead|readMessages|readHistory|mark-read|sendSeen|readReceipt/i;
   for (const { f, texto } of fuentes) {
     assert.doesNotMatch(texto, prohibido, f);
