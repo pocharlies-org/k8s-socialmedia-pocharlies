@@ -1722,30 +1722,7 @@ export function installFeatureUI({
         if (runtime.account !== account || runtime.modal?.body !== modal.body
           || providerBlock.confirmed !== true || typeof providerBlock.blocked !== 'boolean') return;
         const blocked = providerBlock.blocked;
-        add(actions, blocked ? 'Desbloquear' : 'Bloquear', () => {
-          const confirmation = openModal(blocked ? 'Desbloquear contacto' : 'Bloquear contacto');
-          confirmation.body.append(node('p', 'feature-description', blocked
-            ? 'Volverás a recibir mensajes de este contacto.'
-            : 'Dejarás de recibir mensajes de este contacto.'));
-          const cancel = button(documentRef, 'Cancelar', 'feature-button subtle');
-          cancel.onclick = closeModal;
-          const confirm = button(documentRef, blocked ? 'Desbloquear' : 'Bloquear', 'feature-button primary');
-          confirm.onclick = async () => {
-            if (runtime.account !== account) return;
-            confirm.disabled = true;
-            try {
-              const result = await request('/api/chat-actions', { chat: chat.id, action: blocked ? 'unblock' : 'block' });
-              if (result.confirmed !== true || result.blocked !== !blocked) throw new Error('El proveedor no confirmó el bloqueo.');
-              if (runtime.account === account) { closeModal(); toast('Preferencia actualizada.'); }
-            } catch (error) {
-              if (runtime.account === account) showError(error);
-              if (runtime.modal?.body === confirmation.body) confirm.disabled = false;
-            }
-          };
-          const footer = node('div', 'feature-dialog-actions');
-          footer.append(cancel, confirm);
-          confirmation.body.append(footer);
-        });
+        add(actions, blocked ? 'Desbloquear' : 'Bloquear', () => confirmBlockToggle(account, chat, blocked));
       }).catch(() => {});
     }
     modal.dialog.addEventListener('keydown', event => {
@@ -1806,11 +1783,46 @@ export function installFeatureUI({
     };
   }
 
+  // UX #60: la confirmación de bloqueo es común al menú de fila y al de cabecera.
+  function confirmBlockToggle(account, chat, blocked) {
+    const confirmation = openModal(blocked ? 'Desbloquear contacto' : 'Bloquear contacto');
+    confirmation.body.append(node('p', 'feature-description', blocked
+      ? 'Volverás a recibir mensajes de este contacto.'
+      : 'Dejarás de recibir mensajes de este contacto.'));
+    const cancel = button(documentRef, 'Cancelar', 'feature-button subtle');
+    cancel.onclick = closeModal;
+    const confirm = button(documentRef, blocked ? 'Desbloquear' : 'Bloquear', 'feature-button primary');
+    confirm.onclick = async () => {
+      if (runtime.account !== account) return;
+      confirm.disabled = true;
+      try {
+        const result = await request('/api/chat-actions', { chat: chat.id, action: blocked ? 'unblock' : 'block' });
+        if (result.confirmed !== true || result.blocked !== !blocked) throw new Error('El proveedor no confirmó el bloqueo.');
+        if (runtime.account === account) { closeModal(); toast('Preferencia actualizada.'); }
+      } catch (error) {
+        if (runtime.account === account) showError(error);
+        if (runtime.modal?.body === confirmation.body) confirm.disabled = false;
+      }
+    };
+    const footer = node('div', 'feature-dialog-actions');
+    footer.append(cancel, confirm);
+    confirmation.body.append(footer);
+  }
+
   function openChatMenu(event) {
     if (!runtime.chat) return;
     const modal = openModal('Opciones de conversación', { opener: event?.currentTarget ?? documentRef.activeElement, variant: 'menu' });
+    modal.dialog.setAttribute('role', 'menu');
+    modal.dialog.setAttribute('aria-label', `Opciones de ${runtime.selectedChat?.name || runtime.chat}`);
+    modal.dialog.removeAttribute('aria-labelledby');
     const actions = node('div', 'feature-action-grid');
-    const add = (label, action) => { const item = button(documentRef, label, 'feature-button subtle'); item.onclick = () => { closeModal(); action(); }; actions.append(item); };
+    const add = (label, action) => {
+      const item = button(documentRef, label, 'feature-button subtle');
+      item.setAttribute('role', 'menuitem'); item.tabIndex = -1;
+      item.onclick = () => { closeModal(); action(); };
+      actions.append(item);
+      return item;
+    };
     add('Información', openInfo);
     add('Buscar mensajes', openSearch);
     add(chatIsArchived(runtime.selectedChat, prefs()) ? 'Desarchivar' : 'Archivar', () => openChatAction('archive'));
@@ -1820,7 +1832,27 @@ export function installFeatureUI({
     add('Listas', openLists);
     add('Privacidad', openPrivacy);
     add('Exportar chat', openChatExport);
+    const blockChat = runtime.selectedChat;
+    if (blockChat && !blockChat.isGroup) {
+      const account = runtime.account;
+      void request('/api/contact-block', undefined, { account, chat: blockChat.id }).then(providerBlock => {
+        if (runtime.account !== account || runtime.modal?.body !== modal.body
+          || providerBlock.confirmed !== true || typeof providerBlock.blocked !== 'boolean') return;
+        const blocked = providerBlock.blocked;
+        add(blocked ? 'Desbloquear' : 'Bloquear', () => confirmBlockToggle(account, blockChat, blocked));
+      }).catch(() => {});
+    }
     modal.body.append(actions);
+    // UX #60.2: navegación por flechas, como el menú de la fila.
+    modal.dialog.addEventListener('keydown', keyEvent => {
+      if (keyEvent.key === 'Tab') { closeModal(); return; }
+      const items = [...actions.children].filter(item => item.getAttribute('role') === 'menuitem');
+      const index = items.indexOf(documentRef.activeElement);
+      const next = keyEvent.key === 'Home' ? 0 : keyEvent.key === 'End' ? items.length - 1
+        : keyEvent.key === 'ArrowDown' ? (index + 1) % items.length
+        : keyEvent.key === 'ArrowUp' ? (index + items.length - 1) % items.length : -1;
+      if (next >= 0) { keyEvent.preventDefault(); items[next]?.focus(); }
+    });
   }
 
   function openChatExport() {
@@ -2659,6 +2691,10 @@ export function installFeatureUI({
   windowRef?.addEventListener?.('pagehide', () => { clearInterval(runtime.presenceTimer); runtime.presenceTimer = null; });
 
   addHeaderControls();
+  // UX #60.5: Privacidad global desde Ajustes, el mismo modal del menú del chat.
+  documentRef.getElementById('settings-privacy')?.addEventListener('click', () => {
+    void openPrivacy(documentRef.querySelector('.rail-settings summary'));
+  });
   return {
     matchesChat,
     accountChanged,
