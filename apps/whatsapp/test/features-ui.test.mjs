@@ -292,9 +292,19 @@ test('en modo selección, pulsar la burbuja alterna el mensaje (QA 22-10)', asyn
   const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
   // El click en la burbuja debe alternar sin tocar el checkbox, y los elementos
   // interactivos (media, enlaces, checkbox) no pueden desencadenar la selección.
-  assert.match(ui, /bubble\.onclick = runtime\.selectedMessageIds\.size/);
+  assert.match(ui, /bubble\.onclick = selecting/);
   assert.match(ui, /closest\?\.\('button, a, input'\)|closest\('button, a, input'\)/);
   assert.match(ui, /toggleMessageSelected\(id, !runtime\.selectedMessageIds\.has\(id\)\)/);
+});
+
+test('#155 (velocidad): dentro del modo selección un toggle solo toca la burbuja afectada', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  // Entrar/salir del modo (0 ↔ >0) recorre todo (enhanceMessages); un toggle dentro
+  // del modo no: re-renderizar 101 burbujas por clic era el coste medido.
+  assert.match(ui, /const wasSelecting = runtime\.selectedMessageIds\.size > 0;/);
+  assert.match(ui, /if \(wasSelecting && runtime\.selectedMessageIds\.size > 0\) \{\s*const bubble = documentRef\.querySelector\(/);
+  assert.match(ui, /if \(bubble\) applySelectionToBubble\(bubble, text\(id\)\);/);
+  assert.match(ui, /\} else \{\s*enhanceMessages\(\);/);
 });
 
 test('«Nuevo grupo» deshabilita «Continuar» hasta nombre + ≥1 miembro (UX #49.1)', async () => {

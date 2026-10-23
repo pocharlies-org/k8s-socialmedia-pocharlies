@@ -1362,20 +1362,7 @@ export function installFeatureUI({
           if (runtime.account === context.account && runtime.chat === context.chat && runtime.generation === context.generation) toast(error.message || 'No se pudo mostrar el mensaje citado.', 'error');
         }
       };
-      let selector = bubble.querySelector('.feature-message-select');
-      if (runtime.selectedMessageIds.size) {
-        if (!selector) {
-          selector = documentRef.createElement('input'); selector.type = 'checkbox'; selector.className = 'feature-message-select'; selector.setAttribute('aria-label', 'Seleccionar mensaje');
-          selector.onclick = event => { event.stopPropagation(); toggleMessageSelected(id, selector.checked); };
-          bubble.prepend(selector);
-        }
-        selector.checked = runtime.selectedMessageIds.has(id);
-      } else selector?.remove();
-      // QA 22-10: en modo selección, pulsar la burbuja alterna (comportamiento de WhatsApp).
-      // Media, enlaces y el checkbox conservan su propio comportamiento.
-      bubble.onclick = runtime.selectedMessageIds.size
-        ? event => { if (!event.target?.closest?.('button, a, input')) toggleMessageSelected(id, !runtime.selectedMessageIds.has(id)); }
-        : null;
+      applySelectionToBubble(bubble, id);
       const reactions = reactionFor(message);
       let reactionStrip = bubble.querySelector('.feature-reactions');
       if (reactions.length) {
@@ -1388,9 +1375,35 @@ export function installFeatureUI({
     if (toolbar) toolbar.hidden = runtime.selectedMessageIds.size === 0;
   }
 
+  // #155 (velocidad): el modo selección pone/quita el checkbox en todas las burbujas;
+  // dentro del modo, un toggle solo toca la burbuja afectada.
+  function applySelectionToBubble(bubble, id) {
+    const selecting = runtime.selectedMessageIds.size > 0;
+    let selector = bubble.querySelector('.feature-message-select');
+    if (selecting) {
+      if (!selector) {
+        selector = documentRef.createElement('input'); selector.type = 'checkbox'; selector.className = 'feature-message-select'; selector.setAttribute('aria-label', 'Seleccionar mensaje');
+        selector.onclick = event => { event.stopPropagation(); toggleMessageSelected(id, selector.checked); };
+        bubble.prepend(selector);
+      }
+      selector.checked = runtime.selectedMessageIds.has(id);
+    } else selector?.remove();
+    // QA 22-10: en modo selección, pulsar la burbuja alterna (comportamiento de WhatsApp).
+    // Media, enlaces y el checkbox conservan su propio comportamiento.
+    bubble.onclick = selecting
+      ? event => { if (!event.target?.closest?.('button, a, input')) toggleMessageSelected(id, !runtime.selectedMessageIds.has(id)); }
+      : null;
+  }
+
   function toggleMessageSelected(id, selected = true) {
+    const wasSelecting = runtime.selectedMessageIds.size > 0;
     if (selected) runtime.selectedMessageIds.add(text(id)); else runtime.selectedMessageIds.delete(text(id));
-    enhanceMessages();
+    if (wasSelecting && runtime.selectedMessageIds.size > 0) {
+      const bubble = documentRef.querySelector(`#messages .message[data-message-id="${CSS.escape(text(id))}"]`);
+      if (bubble) applySelectionToBubble(bubble, text(id));
+    } else {
+      enhanceMessages();
+    }
     const count = documentRef.getElementById('feature-selection-count');
     if (count) count.textContent = `${runtime.selectedMessageIds.size} ${runtime.selectedMessageIds.size === 1 ? 'seleccionado' : 'seleccionados'}`;
   }
