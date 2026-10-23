@@ -9,6 +9,7 @@ import {
   buildMessagesUrl,
   collectMessages,
   createPageFetcher,
+  createWholeExportFetcher,
   exportConversationText,
   formatExportTimestamp,
   renderTranscript,
@@ -198,6 +199,36 @@ test('createPageFetcher usa before en la URL, valida HTTP y traduce aborts', asy
   );
 
   const aborted = createPageFetcher({
+    fetchImpl: async () => {
+      const error = new Error('aborted');
+      error.name = 'AbortError';
+      throw error;
+    },
+  });
+  await assert.rejects(aborted({ account: ACCOUNT, chat: CHAT }), ChatExportCanceled);
+});
+
+test('createWholeExportFetcher pide /api/chat-export una vez, traduce el 413 y los aborts (#95)', async () => {
+  const urls = [];
+  const fetchImpl = async url => {
+    urls.push(url);
+    return Response.json({ messages: [message('a', 1)], nextCursor: null });
+  };
+  const fetchPage = createWholeExportFetcher({ fetchImpl });
+  const page = await fetchPage({ account: ACCOUNT, chat: CHAT });
+  assert.equal(urls.length, 1);
+  assert.ok(urls[0].startsWith('/api/chat-export?'));
+  assert.equal(queryOf(urls[0]).get('account'), ACCOUNT);
+  assert.equal(queryOf(urls[0]).get('chat'), CHAT);
+  assert.equal(page.nextCursor, null);
+  const collected = await collectMessages({ fetchPage, account: ACCOUNT, chat: CHAT });
+  assert.equal(collected.messages.length, 1);
+
+  const overflow = createWholeExportFetcher({ fetchImpl: async () => Response.json({ error: { message: 'Export overflow' } }, { status: 413 }) });
+  await assert.rejects(overflow({ account: ACCOUNT, chat: CHAT }), error => error instanceof ChatExportError && /50 000/.test(error.message));
+  const broken = createWholeExportFetcher({ fetchImpl: async () => ({ ok: false, status: 500, json: async () => null }) });
+  await assert.rejects(broken({ account: ACCOUNT, chat: CHAT }), error => error instanceof ChatExportError && /HTTP 500/.test(error.message));
+  const aborted = createWholeExportFetcher({
     fetchImpl: async () => {
       const error = new Error('aborted');
       error.name = 'AbortError';

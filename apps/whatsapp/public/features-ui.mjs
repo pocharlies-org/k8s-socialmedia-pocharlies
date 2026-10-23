@@ -1,6 +1,6 @@
 'use strict';
 
-import { createPageFetcher, exportConversationText, ChatExportCanceled } from './chat-export.mjs';
+import { createWholeExportFetcher, exportConversationText, ChatExportCanceled } from './chat-export.mjs';
 import { installNotificationSettings } from './notification-settings.mjs';
 import { createStatusNotificationMonitor } from './status-notifications.mjs';
 import { installContactDirectoryUI } from './contact-directory-ui.mjs';
@@ -1883,7 +1883,7 @@ export function installFeatureUI({
       start.disabled = true;
       try {
         const result = await exportConversationText({
-          fetchPage: createPageFetcher({ fetchImpl: windowRef.fetch.bind(windowRef) }),
+          fetchPage: createWholeExportFetcher({ fetchImpl: windowRef.fetch.bind(windowRef) }),
           account, chat, signal: controller.signal,
           onProgress: ({ messages }) => { if (!controller.signal.aborted) progress.textContent = `Preparando ${messages} mensajes…`; },
         });
