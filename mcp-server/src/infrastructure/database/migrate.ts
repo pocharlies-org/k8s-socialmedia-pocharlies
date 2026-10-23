@@ -291,6 +291,10 @@ export async function runMigrations(
         (AUTHOR_COMPAT_CHECKSUMS[file] || file === '034_hindsight_conversations.sql') &&
         files.includes('039_shared_author_compat.sql')
       ) {
+        // SKIRM-261: realign mis-filed prefixed participants before 039
+        // materializes the contacts view (it aborts on a duplicate key).
+        if (files.includes('041_participants_prefixed_account.sql'))
+          await apply('041_participants_prefixed_account.sql');
         await apply('039_shared_author_compat.sql');
       }
       // The preserved prod 008 expects provider-text IDs although prod 001

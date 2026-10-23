@@ -23,13 +23,22 @@
 #                  el runner necesita la extensión vector)
 #   EXTRA_MIGRATIONS_DIR  directorio con *.sql extra que se aplican junto a las
 #                  del repo (para pruebas; no se escriben en el repo)
-#   KUBE_POD       pod de Postgres del que se vuelca (default: el primario de CNPG
-#                  postgres-shared, descubierto por etiqueta; los nombres rotan)
+#   KUBE_POD       pod de Postgres del que se vuelca (default: el que sirve el
+#                  Service postgres-shared-rw, por su selector: el clúster CNPG
+#                  y los nombres de pod rotan)
+#   SANDBOX_DATA   1 = copia también los DATOS de producción (todas las tablas
+#                  salvo el ledger, que va aparte) antes de migrar (SKIRM-261:
+#                  una migración puede pasar con el esquema y fallar con los datos)
+#   EMBEDDING_DIMENSION  la misma que el Job whatsapp-mcp-migrate (default 1024),
+#                  para que el runner configure los embeddings como en prod
 #
-# Seguridad: las únicas lecturas de producción son `pg_dump --schema-only` y
-# `pg_dump --data-only -t _migrations` (solo nombres de fichero, fechas y flag;
-# ningún dato de mensajes). Los volcados viven en /tmp del x86 y se borran al
-# terminar. El Postgres del sandbox se publica solo en 127.0.0.1.
+# Seguridad: por defecto las únicas lecturas de producción son `pg_dump
+# --schema-only` y `pg_dump --data-only -t _migrations` (solo nombres de fichero,
+# fechas y flag; ningún dato de mensajes). Con SANDBOX_DATA=1 se leen también los
+# datos (mensajes incluidos): COPY por trozos de prod directamente al psql del
+# sandbox, sin fichero en disco; viven solo en ese contenedor del x86 hasta `down`. Los
+# volcados de esquema viven en /tmp del x86 y se borran al terminar. El Postgres
+# del sandbox se publica solo en 127.0.0.1.
 
 set -euo pipefail
 
@@ -43,6 +52,8 @@ STAGE_DIR="/tmp/${SANDBOX_NAME}-migrations"
 KUBE_NS=databases
 KUBE_POD="${KUBE_POD:-}"
 PROD_DB=whatsappmcp
+SANDBOX_DATA="${SANDBOX_DATA:-0}"
+export EMBEDDING_DIMENSION="${EMBEDDING_DIMENSION:-1024}"
 
 case "$SANDBOX_NAME" in
   qa-schema-*|skirm89-*) ;;
@@ -56,16 +67,72 @@ require() {
 # Lectura de producción (solo pg_dump). PG17 emite `SET transaction_timeout = 0;`,
 # que PG16 (imagen del sandbox) no conoce: se filtra.
 prod_pod() {
-  [[ -n "$KUBE_POD" ]] || KUBE_POD=$(kubectl -n "$KUBE_NS" get pod \
-    -l cnpg.io/cluster=postgres-shared,cnpg.io/instanceRole=primary \
-    -o jsonpath='{.items[0].metadata.name}')
-  [[ -n "$KUBE_POD" ]] || { echo "no se encontró el primario de postgres-shared en $KUBE_NS" >&2; exit 1; }
+  if [[ -z "$KUBE_POD" ]]; then
+    # El DATABASE_URL de la app apunta a postgres-shared-rw: su selector es el
+    # primario vigente, se llame como se llame el clúster CNPG detrás.
+    local selector
+    selector=$(kubectl -n "$KUBE_NS" get svc postgres-shared-rw -o go-template \
+      --template='{{range $k, $v := .spec.selector}}{{$k}}={{$v}},{{end}}')
+    KUBE_POD=$(kubectl -n "$KUBE_NS" get pod -l "${selector%,}" \
+      -o jsonpath='{.items[0].metadata.name}')
+  fi
+  [[ -n "$KUBE_POD" ]] || { echo "no se encontró el pod de postgres-shared-rw en $KUBE_NS" >&2; exit 1; }
 }
 
 prod_dump() {
   kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- \
     pg_dump -U postgres -d "$PROD_DB" "$@" \
     | sed '/^SET transaction_timeout = 0;$/d'
+}
+
+prod_psql() {
+  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- \
+    psql -U postgres -d "$PROD_DB" -At -v ON_ERROR_STOP=1 -c "$1"
+}
+
+# SANDBOX_DATA=1: copia cada tabla de public (salvo el ledger) en trozos de
+# unos DATA_CHUNK_MB megas (el stream de `kubectl exec` muere a los ~70 s: medido
+# 23-10), calculados por tabla con su tamaño real, TOAST incluido; columnas
+# generadas fuera (COPY no las acepta). Un stream cortado puede dejar un COPY a
+# medias sin error, así que el reintento es de la tabla entera, vaciándola antes.
+DATA_CHUNK_MB="${DATA_CHUNK_MB:-40}"
+copy_table() {
+  local t=$1 pages=$2 step=$3 cols=$4 from to
+  for (( from = 0; from <= pages; from += step )); do
+    to=$(( from + step ))
+    # Primero a un fichero del contenedor y después COPY desde él: cargar en la
+    # misma tubería (índices GIN de messages) frena el stream y la API lo corta.
+    prod_psql "COPY (SELECT $cols FROM public.\"$t\" WHERE ctid >= '($from,0)'::tid AND ctid < '($to,0)'::tid) TO STDOUT" \
+      | docker exec -i -u postgres "$SANDBOX_NAME" sh -c 'umask 077; cat > /tmp/sandbox-chunk' \
+      || return 1
+    sandbox_psql -q -c 'SET session_replication_role = replica' \
+      -c "COPY public.\"$t\" ($cols) FROM '/tmp/sandbox-chunk'" >/dev/null 2>&1 || return 1
+  done
+  docker exec "$SANDBOX_NAME" rm -f /tmp/sandbox-chunk
+}
+copy_data() {
+  local t pages step cols try total=0
+  while read -r t pages step; do
+    [[ -n "$t" ]] || continue
+    cols=$(prod_psql "SELECT string_agg(quote_ident(attname), ',' ORDER BY attnum) FROM pg_attribute
+      WHERE attrelid = 'public.$t'::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = ''")
+    for try in 1 2 3; do
+      copy_table "$t" "$pages" "$step" "$cols" && break
+      (( try < 3 )) || { echo "   la copia de $t falló tres veces" >&2; exit 1; }
+      echo "   reintento $t (intento $(( try + 1 )))" >&2
+      sandbox_psql -q -c "SET session_replication_role = replica" -c "DELETE FROM public.\"$t\"" >/dev/null
+    done
+    total=$(( total + 1 ))
+  done < <(prod_psql "SELECT c.relname || ' ' || pages || ' ' ||
+        greatest(1, (pages * $DATA_CHUNK_MB * 1048576 / greatest(pg_table_size(c.oid), 1))::bigint)
+      FROM pg_class c
+      CROSS JOIN LATERAL (SELECT pg_relation_size(c.oid) / current_setting('block_size')::int AS pages) p JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname <> '_migrations' ORDER BY 1")
+  # Las secuencias, con el valor de prod (los COPY no las mueven).
+  prod_psql "SELECT format('SELECT setval(%L, %s, %s);', schemaname || '.' || sequencename, last_value, 'true')
+      FROM pg_sequences WHERE schemaname = 'public' AND last_value IS NOT NULL" \
+    | docker exec -i "$SANDBOX_NAME" psql -U postgres -d "$PROD_DB" -q -v ON_ERROR_STOP=1 >/dev/null
+  echo "   $total tablas copiadas"
 }
 
 # Puerto publicado en loopback. Con `-p 127.0.0.1::5432` docker devuelve
@@ -156,6 +223,17 @@ do_up() {
   rm -f "$DUMP_FILE" "$LEDGER_FILE"
   docker exec "$SANDBOX_NAME" rm -f /tmp/sandbox-dump.sql /tmp/sandbox-ledger.sql
 
+  # 3b. Datos (SANDBOX_DATA=1), tabla a tabla y en trozos por rango de páginas
+  #     (ctid): un único `pg_dump` de ~3,6 GB por `kubectl exec` lo corta la API
+  #     con i/o timeout (medido dos veces el 23-10, también con la restauración
+  #     fuera de la tubería). Cada trozo es un COPY atómico y se reintenta entero.
+  #     session_replication_role=replica: ni FKs ni triggers de prod al cargar.
+  if [[ "$SANDBOX_DATA" == "1" ]]; then
+    echo "== copiando los datos de producción al sandbox, por trozos (puede tardar) =="
+    copy_data
+    echo "   participants: $(sandbox_psql -At -c 'SELECT count(*) FROM participants') filas · messages: $(sandbox_psql -At -c 'SELECT count(*) FROM messages') filas"
+  fi
+
   # 4. Migraciones del repo con el runner real: el ledger salta lo aplicado en prod;
   #    cualquier migración nueva corre de verdad.
   echo "== aplicando migraciones del repo con migrate.ts =="
@@ -171,6 +249,16 @@ do_up() {
   echo "   tablas en public: $tables (producción: ~39)"
   echo "   conversations.id: $id_type (debe ser 'text', no 'uuid')"
   echo "   filas en _migrations: $ledger"
+  if [[ "$SANDBOX_DATA" == "1" ]]; then
+    # Segunda pasada: con todo aplicado no debe ejecutar nada.
+    local before after
+    before=$(sandbox_psql -At -c "SELECT count(*) FROM schema_migrations")
+    DATABASE_URL="postgres://postgres@127.0.0.1:$port/$PROD_DB" \
+      npx tsx "$REPO_ROOT/scripts/qa-schema-migrate.ts" | grep -E 'Applied|Adopted' && { echo "   la segunda pasada aplicó algo" >&2; exit 1; }
+    after=$(sandbox_psql -At -c "SELECT count(*) FROM schema_migrations")
+    echo "   segunda pasada sin cambios: schema_migrations $before -> $after"
+    [[ "$before" == "$after" ]] || exit 1
+  fi
   [[ "$id_type" == "text" ]] || { echo "   ESQUEMA INCORRECTO: conversations.id=$id_type" >&2; exit 1; }
   echo "sandbox arriba: docker exec -it $SANDBOX_NAME psql -U postgres -d $PROD_DB"
 }

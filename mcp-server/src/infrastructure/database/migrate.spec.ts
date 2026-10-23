@@ -94,10 +94,13 @@ describe('migrate.ts schema_migrations ledger', () => {
     const firstRun = [...db.executed];
     await runMigrations(db, MIGRATIONS_DIR);
 
-    const expectedOrder = ALL_FILES.filter(file => file !== COMPAT_FILE);
+    // SKIRM-261: the participant realignment runs right before the compatibility bootstrap.
+    const REPAIR_FILE = '041_participants_prefixed_account.sql';
+    const expectedOrder = ALL_FILES.filter(file => file !== COMPAT_FILE && file !== REPAIR_FILE);
     expectedOrder.splice(
       expectedOrder.indexOf('021_whatsapp_novedades_channels.sql'),
       0,
+      REPAIR_FILE,
       COMPAT_FILE
     );
     expect(db.ledgerFiles()).toEqual(expectedOrder);
