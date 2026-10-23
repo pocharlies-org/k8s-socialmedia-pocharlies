@@ -522,3 +522,19 @@ test('reenviar: buscador + hasta 5 destinos con contador, sin <select> de 1034 (
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.feature-forward-row \{[^}]*min-height: 44px/);
 });
+
+test('menú ⋮ de cabecera: role=menu con flechas, Bloquear compartido y Privacidad en Ajustes (UX #60)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  // El menú de cabecera es un menú, no un diálogo de botones sueltos.
+  assert.match(ui, /modal\.dialog\.setAttribute\('role', 'menu'\)/);
+  assert.match(ui, /item\.setAttribute\('role', 'menuitem'\); item\.tabIndex = -1;/);
+  assert.match(ui, /keyEvent\.key === 'ArrowDown' \? \(index \+ 1\) % items\.length/);
+  // Bloquear: una sola confirmación compartida, llamada desde fila y cabecera.
+  assert.match(ui, /function confirmBlockToggle\(account, chat, blocked\) \{/);
+  assert.equal((ui.match(/=> confirmBlockToggle\(account/g) || []).length, 2);
+  assert.match(ui, /add\(blocked \? 'Desbloquear' : 'Bloquear', \(\) => confirmBlockToggle\(account, blockChat, blocked\)\)/);
+  // Ajustes tiene la entrada de Privacidad global, con el mismo modal.
+  assert.match(html, /id="settings-privacy"/);
+  assert.match(ui, /getElementById\('settings-privacy'\)\?\.addEventListener\('click'/);
+});

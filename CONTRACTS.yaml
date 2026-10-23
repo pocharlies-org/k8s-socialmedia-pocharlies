@@ -2011,7 +2011,9 @@ contracts:
     referencia del shell no cambian. El <title> pasa a «WhatsApp» y la app lo
     reemplaza por «(N) WhatsApp» con no leídos (QA #74) — el título no es
     contrato. La etiqueta aria-expanded de los botones del rail Estados/Canales
-    tampoco (estado de selección del shell, UX #59).'
+    tampoco (estado de selección del shell, UX #59). La sección «Privacidad» del
+    popover de Ajustes (botón settings-privacy) es markup del shell que abre el
+    modal existente: no es contrato (UX #60, 23-10).'
 - id: http.hindsight.socialmedia-bank.v1
   kind: http-route
   value: /v1/default/banks/{bank_id}
