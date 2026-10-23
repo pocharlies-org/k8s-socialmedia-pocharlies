@@ -28,7 +28,7 @@ export function installPinnedUI({messages, getContext, api, openMessage, documen
     const preview = documentRef.createElement('span');
     // UX #8.3: el banner de fijado pinta los marcadores como los cuerpos.
     if (item.text) appendRichText(preview, item.text, documentRef, false);
-    else preview.textContent = ({IMAGE:'Foto',VIDEO:'Video',AUDIO:'Audio',POLL:'Encuesta',EVENT:'Evento',DOCUMENT:'Documento'}[item.type] || 'Mensaje');
+    else preview.textContent = ({IMAGE:'Foto',VIDEO:'Vídeo',AUDIO:'Audio',POLL:'Encuesta',EVENT:'Evento',DOCUMENT:'Documento'}[item.type] || 'Mensaje');
     link.append(label, preview);
     const capturedScope = scope;
     link.onclick = async () => {
