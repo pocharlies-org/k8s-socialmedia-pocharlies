@@ -7,7 +7,7 @@ import { REF, tsCanonico } from './cuerpo';
 import { verificarV2 } from './firma';
 import { CodigoError, ERRORES, leerCuerpo, responder } from './http';
 
-// CONTRACT: correo.connector.v1
+// CONTRACT: correo.connector-envios.v1 (POST /envios of correo.connector.v1)
 /**
  * POST /envios of correo.connector.v1 (DGX-1235 B2 (ii)): an answer a person
  * approved in Postia, sent once. The bridge only translates: it checks the

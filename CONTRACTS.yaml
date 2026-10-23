@@ -2500,7 +2500,6 @@ contracts:
   role: provider
   files:
   - connectors/correo-bridge/src/lectura.ts
-  - connectors/correo-bridge/src/envios.ts
   status: active
   note: 'DGX-1235 B1. correo-bridge serves the read routes of correo.connector.v1, the contract the correo
     core defines and calls (pocharlies-org/correo-core openapi/correo.connector.v1.yaml, publisher there):
@@ -2508,16 +2507,28 @@ contracts:
     with the key of the connector (X-Correo-Key-Id wa-*/tg-*, X-Correo-Timestamp ±60 s, X-Correo-Signature
     over "<ts>.<METHOD> <raw path?query>\n<body>"), 401/404/422/502 with {error, detalle} and never the text
     or the identity. MensajeLeido {ref, hilo_ref, direccion, ts, texto ≤4096, adjuntos [{tipo}] ≤20}. Reading
-    marks nothing as read. B2: POST /envios {destino_ref, texto, sha256, idempotencia} (closed body; destino_ref
-    canonical for the channel of the key that signed; sha256 of texto in UTF-8) answers 200 {ref, ts, deduplicado},
-    409 idempotencia_reutilizada / resultado_incierto, 422 no_procesable / primer_contacto (no inbound message
-    among the last 50 of the conversation; the connector is not called), 403 envio_desactivado (ENABLE_OUTBOUND
-    not true, or the connector''s sending gate) and 502 canal_no_responde. It stores nothing: it hands texto to
-    POST /api/v1/messages/send of the WhatsApp connector (conversationId = destino_ref as is) or POST
-    /api/v1/messages/:chatId of the Telegram one, with idempotencia as Idempotency-Key (their send-idempotency.v1).
-    The ref is the one the outbound echo brings. In the other direction the bridge POSTs /v2/mensajes/{conector}
+    marks nothing as read. POST /envios (B2) is correo.connector-envios.v1. In the other direction the bridge POSTs /v2/mensajes/{conector}
     of correo.ingest.v2 with the key of that connector''s producer. A breaking change is correo.connector.v2
     on both sides.'
+- id: correo.connector-envios.v1
+  kind: http-route
+  value: /envios
+  role: provider
+  files:
+  - connectors/correo-bridge/src/envios.ts
+  status: active
+  note: 'DGX-1235 B2. correo-bridge serves POST /envios of correo.connector.v1 (pocharlies-org/correo-core
+    openapi/correo.connector.v1.yaml, publisher there; caller CanalHttp.enviar), HMAC V2 with the key of the
+    connector like the read routes. Closed body {destino_ref, texto, sha256, idempotencia}: destino_ref canonical
+    for the channel of the key that signed, texto 1-4096 characters, sha256 of texto in UTF-8, idempotencia
+    ^[A-Za-z0-9_.:-]{1,200}$. Answers 200 {ref, ts, deduplicado}, 409 idempotencia_reutilizada / resultado_incierto,
+    422 no_procesable / primer_contacto (no inbound message among the last 50 of the conversation; the connector
+    is not called), 403 envio_desactivado (ENABLE_OUTBOUND not true, or the connector''s sending gate), 502
+    canal_no_responde, 401 unsigned; {error, detalle} never carries the text, the identity or the key. It stores
+    nothing: it hands texto to POST /api/v1/messages/send of the WhatsApp connector (conversationId = destino_ref
+    as is) or POST /api/v1/messages/:chatId of the Telegram one, with idempotencia as Idempotency-Key
+    (http.whatsapp-connector.send-idempotency.v1, http.telegram-connector.send-idempotency.v1). The ref is the
+    one the outbound echo brings to POST /v2/mensajes. A breaking change is correo.connector.v2 on both sides.'
 - id: nats.correo-bridge.whatsapp-message-received.v1
   kind: routing-key
   value: whatsapp.MessageReceived

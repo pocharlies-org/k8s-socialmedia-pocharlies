@@ -70,7 +70,7 @@ export function createPublicRouter(
         res.status(400).json({ error: 'topicId must be a positive integer' });
         return;
       }
-      // http.telegram-connector.send-idempotency.v1: the same opt-in key as /api/v1/messages/:chatId.
+      // CONTRACT: http.telegram-connector.send-idempotency.v1 — the same opt-in Idempotency-Key as /api/v1/messages/:chatId.
       const { key, error: keyError } = readIdempotencyKey(req.headers, req.body);
       if (keyError) {
         res.status(400).json({ error: keyError, failureClass: 'invalid_request' });
