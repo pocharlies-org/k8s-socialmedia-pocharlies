@@ -18,6 +18,9 @@ export interface NatsSubscriberOptions {
   subjects: string[];
   logger: pino.Logger;
   onMessage: (subject: string, data: Uint8Array) => Promise<void>;
+  /** Reconnect backoff; default NATS_RECONNECT_BASE_MS / NATS_RECONNECT_MAX_MS (2 s / 30 s). */
+  reconnectBaseMs?: number;
+  reconnectMaxMs?: number;
 }
 
 export class NatsSubscriber {
@@ -28,10 +31,13 @@ export class NatsSubscriber {
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
-  private readonly reconnectBaseMs = parseInt(process.env.NATS_RECONNECT_BASE_MS || '2000', 10);
-  private readonly reconnectMaxMs = parseInt(process.env.NATS_RECONNECT_MAX_MS || '30000', 10);
+  private readonly reconnectBaseMs: number;
+  private readonly reconnectMaxMs: number;
 
-  constructor(private readonly opts: NatsSubscriberOptions) {}
+  constructor(private readonly opts: NatsSubscriberOptions) {
+    this.reconnectBaseMs = opts.reconnectBaseMs ?? parseInt(process.env.NATS_RECONNECT_BASE_MS || '2000', 10);
+    this.reconnectMaxMs = opts.reconnectMaxMs ?? parseInt(process.env.NATS_RECONNECT_MAX_MS || '30000', 10);
+  }
 
   isConnected(): boolean {
     return this.connected;
@@ -64,6 +70,7 @@ export class NatsSubscriber {
     } catch (error) {
       logger.warn({ err: String(error) }, 'NATS unavailable; scheduling reconnect');
       this.connected = false;
+      // The guard goes down BEFORE scheduling: scheduleReconnect() no-ops while connecting.
       this.connecting = false;
       this.scheduleReconnect();
     } finally {
