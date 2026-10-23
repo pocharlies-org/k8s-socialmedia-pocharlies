@@ -48,6 +48,7 @@ export class NatsSubscriber {
     this.connecting = true;
     this.stopped = false;
     const logger = this.opts.logger;
+    let failed = false;
     try {
       const options: ConnectionOptions = {
         servers: this.opts.natsUrl,
@@ -70,12 +71,12 @@ export class NatsSubscriber {
     } catch (error) {
       logger.warn({ err: String(error) }, 'NATS unavailable; scheduling reconnect');
       this.connected = false;
-      // The guard goes down BEFORE scheduling: scheduleReconnect() no-ops while connecting.
-      this.connecting = false;
-      this.scheduleReconnect();
+      failed = true;
     } finally {
       this.connecting = false;
     }
+    // After the guard is down: scheduleReconnect() no-ops while connecting.
+    if (failed) this.scheduleReconnect();
   }
 
   private subscribe(nc: NatsConnection, subject: string): void {
