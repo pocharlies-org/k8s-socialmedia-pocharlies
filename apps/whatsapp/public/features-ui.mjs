@@ -1863,7 +1863,7 @@ export function installFeatureUI({
     const modal = openModal('Exportar chat');
     const controller = new AbortController();
     runtime.modal.onClose = () => controller.abort();
-    const progress = node('p', 'feature-muted', 'Se exportarán todos los mensajes sincronizados de este chat a un archivo de texto. Los archivos adjuntos se incluyen por su nombre, sin descargar su contenido.');
+    const progress = node('p', 'feature-muted', 'Se exportarán los mensajes sincronizados de este chat (hasta 50 000) a un archivo de texto. Los adjuntos se listan por su nombre, sin descargar su contenido; para exportar con multimedia usa la app del móvil.');
     progress.setAttribute('role', 'status');
     const start = button(documentRef, 'Exportar TXT', 'feature-button primary');
     const cancel = button(documentRef, 'Cancelar', 'feature-button subtle');
