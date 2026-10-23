@@ -2,7 +2,7 @@ import { join } from 'path';
 import { readdirSync, readFileSync, mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
-import { MigrationClient, runMigrations } from './migrate';
+import { MigrationClient, migrationLockTimeout, runMigrations } from './migrate';
 
 /** Fake pg client for the migration ledger and ordering behavior. */
 class FakeDb implements MigrationClient {
@@ -13,6 +13,7 @@ class FakeDb implements MigrationClient {
   commits = 0;
   rollbacks = 0;
   failOnBody: string | null = null;
+  settings: string[] = [];
 
   async query(sql: string, params?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> {
     const s = sql.trim();
@@ -31,6 +32,10 @@ class FakeDb implements MigrationClient {
       return { rows: [] };
     }
     if (/^SELECT pg_advisory_xact_lock/.test(s)) return { rows: [] };
+    if (/^SET LOCAL /.test(s)) {
+      this.settings.push(s);
+      return { rows: [] };
+    }
     if (/CREATE TABLE IF NOT EXISTS schema_migrations/.test(s)) return { rows: [] };
     if (/SELECT version, checksum FROM schema_migrations/.test(s)) {
       return {
@@ -258,4 +263,22 @@ test('production 001-020 retain the exact released bytes', () => {
         .update(readFileSync(join(MIGRATIONS_DIR, file)))
         .digest('hex')
     ).toBe(expected);
+});
+
+describe('SKIRM-261: the run never queues behind a lock', () => {
+  it('caps lock waits and checks the client connection inside the single transaction', async () => {
+    const db = new FakeDb();
+    await runMigrations(db);
+    expect(db.settings).toEqual([
+      "SET LOCAL lock_timeout = '10s'",
+      "SET LOCAL client_connection_check_interval = '5s'",
+    ]);
+  });
+
+  it('accepts MIGRATE_LOCK_TIMEOUT only as a plain duration', () => {
+    expect(migrationLockTimeout(undefined)).toBe('10s');
+    expect(migrationLockTimeout('500ms')).toBe('500ms');
+    expect(() => migrationLockTimeout("1s'; DROP TABLE messages; --")).toThrow();
+    expect(() => migrationLockTimeout('0s')).toThrow();
+  });
 });

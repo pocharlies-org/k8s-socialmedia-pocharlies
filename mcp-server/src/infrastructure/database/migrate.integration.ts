@@ -1093,6 +1093,33 @@ test('SKIRM-261: a prefixed participant filed under another account does not abo
   }
 });
 
+test('SKIRM-261: a reader holding messages makes the run fail fast instead of queueing ingest behind it', async () => {
+  const { client, url } = await database('lock_timeout');
+  const reader = new Client({ connectionString: url });
+  try {
+    await stageProduction(client, true);
+    await reader.connect();
+    // The orphaned sandbox COPY of 23-10: an open AccessShareLock on messages.
+    await reader.query('BEGIN');
+    await reader.query('LOCK TABLE messages IN ACCESS SHARE MODE');
+    process.env.MIGRATE_LOCK_TIMEOUT = '300ms';
+    const started = Date.now();
+    await assert.rejects(runMigrations(client), /lock timeout/);
+    assert.ok(Date.now() - started < 10_000, 'the run must not wait for the reader');
+    assert.equal(
+      (await client.query("SELECT to_regclass('public.telegram_send_attempts') AS t")).rows[0].t,
+      null,
+      'the failed run rolls back completely'
+    );
+    await reader.query('ROLLBACK');
+    await runMigrations(client);
+  } finally {
+    delete process.env.MIGRATE_LOCK_TIMEOUT;
+    await reader.end().catch(() => undefined);
+    await client.end();
+  }
+});
+
 test('legacy NAS send attempts retain token hashes and timestamps and accept prod inserts', async () => {
   const { client } = await database('send_legacy');
   try {
