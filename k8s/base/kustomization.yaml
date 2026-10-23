@@ -6,6 +6,8 @@ resources:
   # scripts/render-connectors.py (CI fails if stale: --check).
   - generated/connectors.yaml
   - whatsapp-synapse-bridge.yaml
+  # DGX-1235 B1: puente de correo.connector.v1 (inerte, replicas 0).
+  - correo-bridge.yaml
   # INFRA-364 fase 0: transcripción de notas de voz de WhatsApp (ruta viva +
   # backfill suspendido).
   - whatsapp-voice.yaml

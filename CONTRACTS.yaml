@@ -2460,3 +2460,40 @@ contracts:
     max-age); los demas 404 y los 5xx siguen no-store. capabilities gana un
     tercer flag aditivo changeSettings (announce/restrict de la ficha de grupo,
     UX #49.2, 23-10: solo administradores; la forma del resto no cambia).
+- id: correo.connector.v1
+  kind: http-route
+  value: /hilos/{hilo_ref}
+  role: provider
+  files:
+  - connectors/correo-bridge/src/lectura.ts
+  status: active
+  note: 'DGX-1235 B1. correo-bridge serves the read routes of correo.connector.v1, the contract the correo
+    core defines and calls (pocharlies-org/correo-core openapi/correo.connector.v1.yaml, publisher there):
+    GET /mensajes/{ref} and GET /hilos/{hilo_ref}?limite= (1-50, default 30, oldest to newest), HMAC V2
+    with the key of the connector (X-Correo-Key-Id wa-*/tg-*, X-Correo-Timestamp ±60 s, X-Correo-Signature
+    over "<ts>.<METHOD> <raw path?query>\n<body>"), 401/404/422/502 with {error, detalle} and never the text
+    or the identity. MensajeLeido {ref, hilo_ref, direccion, ts, texto ≤4096, adjuntos [{tipo}] ≤20}. Reading
+    marks nothing as read. POST /envios is B2. In the other direction the bridge POSTs /v2/mensajes/{conector}
+    of correo.ingest.v2 with the key of that connector''s producer. A breaking change is correo.connector.v2
+    on both sides.'
+- id: nats.correo-bridge.whatsapp-message-received.v1
+  kind: routing-key
+  value: whatsapp.MessageReceived
+  role: consumer
+  files:
+  - connectors/correo-bridge/src/filter.ts
+  status: active
+  note: 'DGX-1235 B1. correo-bridge consumes the core-NATS subject the WhatsApp connectors publish (MessageReceivedEvent
+    of shared/src/types/events.ts), queue group correo-bridge, and reads only account, conversationId, waMessageId,
+    waTimestamp, senderWaId, fromMe and, for the tracking opt-in control message, content (never forwarded).
+    Renaming the subject or those fields breaks it.'
+- id: nats.correo-bridge.telegram-message-received.v1
+  kind: routing-key
+  value: telegram.MessageReceived
+  role: consumer
+  files:
+  - connectors/correo-bridge/src/filter.ts
+  status: active
+  note: 'DGX-1235 B1. correo-bridge consumes the core-NATS subject the Telegram connectors publish (TelegramMessageReceivedEvent),
+    queue group correo-bridge, and reads only account, conversationId, chatType, telegramMessageId, telegramTimestamp,
+    senderTelegramId and isOutbound. Renaming the subject or those fields breaks it.'

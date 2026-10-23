@@ -1,0 +1,222 @@
+# DGX-1235 B1: correo-bridge, provider of correo.connector.v1 (contract in
+# pocharlies-org/correo-core openapi/correo.connector.v1.yaml).
+#
+# Subscribes `whatsapp.MessageReceived` and `telegram.MessageReceived` (NATS
+# core, queue group `correo-bridge`, never `synapse-bridge`), keeps only 1:1
+# messages of the professional accounts, and POSTs each one, without text, to
+# the correo core (POST /v2/mensajes/{conector}, HMAC V2 with that connector's
+# producer key). It serves the core the live read routes (GET /mensajes/{ref},
+# GET /hilos/{hilo_ref}) over the connectors' signed read API. It never sends
+# (that is B2) and it has no Postgres.
+#
+# INERT: replicas 0 until the core side (A6 in k8s-correo-pocharlies) and the
+# keys exist; ENABLE_OUTBOUND stays false until B2. Single replica + Recreate
+# when on: the dedup, the own-JID cache and the ref index are in memory.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: correo-bridge
+  namespace: whatsapp-mcp
+spec:
+  replicas: 0
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: correo-bridge } }
+  template:
+    metadata: { labels: { app: correo-bridge } }
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: correo-bridge
+          image: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge:latest
+          ports: [{ name: http, containerPort: 8080 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: NATS_URL, value: "nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222" }
+            - { name: NATS_QUEUE_GROUP, value: "correo-bridge" }
+            - { name: WA_CONNECTOR_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
+            - { name: TG_CONNECTOR_URL, value: "http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002" }
+            - { name: CORE_URL, value: "http://correo-machine.correo.svc.cluster.local" }
+            - { name: CORREO_CONECTOR_WA_ID, value: "wa-professional" }
+            - { name: CORREO_CONECTOR_TG_ID, value: "tg-professional" }
+            - { name: CORREO_PRODUCTOR_WA_ID, value: "correo-bridge-wa" }
+            - { name: CORREO_PRODUCTOR_TG_ID, value: "correo-bridge-tg" }
+            - { name: ENABLE_OUTBOUND, value: "false" }
+            # Only the one key of whatsapp-mcp-secrets it needs (no envFrom).
+            - name: CONNECTOR_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
+            - name: CORREO_CONECTOR_WA_SECRET
+              valueFrom: { secretKeyRef: { name: correo-bridge-wa-professional, key: conector } }
+            - name: CORREO_PRODUCTOR_WA_SECRET
+              valueFrom: { secretKeyRef: { name: correo-bridge-wa-professional, key: productor } }
+            - name: CORREO_CONECTOR_TG_SECRET
+              valueFrom: { secretKeyRef: { name: correo-bridge-tg-professional, key: conector } }
+            - name: CORREO_PRODUCTOR_TG_SECRET
+              valueFrom: { secretKeyRef: { name: correo-bridge-tg-professional, key: productor } }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 3
+---
+# The `url` of the connectors[] entries wa-professional and tg-professional in
+# the core's GitOps values.
+apiVersion: v1
+kind: Service
+metadata: { name: correo-bridge, namespace: whatsapp-mcp, labels: { app: correo-bridge } }
+spec:
+  selector: { app: correo-bridge }
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
+---
+# One ExternalSecret per connector: its key (the core signs its reads with it)
+# and the key of its producer (the bridge signs POST /v2/mensajes with it). The
+# same 1Password items feed the core's side (A6); `security` writes them. No
+# value lives in this repo. NATS needs none: the bus has no credentials today.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: correo-bridge-wa-professional
+  namespace: whatsapp-mcp
+spec:
+  refreshInterval: 24h
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: correo-bridge-wa-professional
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: conector
+      remoteRef: { key: correo-conector-wa-professional/clave }
+    - secretKey: productor
+      remoteRef: { key: correo-productor-correo-bridge-wa/clave }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: correo-bridge-tg-professional
+  namespace: whatsapp-mcp
+spec:
+  refreshInterval: 24h
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: correo-bridge-tg-professional
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: conector
+      remoteRef: { key: correo-conector-tg-professional/clave }
+    - secretKey: productor
+      remoteRef: { key: correo-productor-correo-bridge-tg/clave }
+---
+# Ingress: only the core's machine pods (ns correo) and the vmagent. The pod is
+# excluded from whatsapp-mcp-allow-same-namespace (networkpolicy.yaml), so no
+# other pod of this namespace reaches it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: correo-bridge-ingress
+  namespace: whatsapp-mcp
+spec:
+  podSelector: { matchLabels: { app: correo-bridge } }
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: correo } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: machine } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: vmagent } }
+      ports:
+        - { protocol: TCP, port: 8080 }
+  policyTypes:
+    - Ingress
+---
+# Egress: DNS, NATS, the two professional connectors and the core. Nothing
+# else: no Postgres, no internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: correo-bridge-egress
+  namespace: whatsapp-mcp
+spec:
+  podSelector: { matchLabels: { app: correo-bridge } }
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - podSelector: { matchLabels: { app: whatsapp-mcp-nats } }
+      ports:
+        - { protocol: TCP, port: 4222 }
+    - to:
+        - podSelector: { matchLabels: { app: whatsapp-connector-professional } }
+      ports:
+        - { protocol: TCP, port: 3001 }
+    - to:
+        - podSelector: { matchLabels: { app: telegram-connector-professional } }
+      ports:
+        - { protocol: TCP, port: 3002 }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: correo } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: machine } }
+      ports:
+        - { protocol: TCP, port: 8081 }
+  policyTypes:
+    - Egress
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: correo-bridge
+  namespace: whatsapp-mcp
+spec:
+  selector: { matchLabels: { app: correo-bridge } }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+# Architect finding 11 / security condition 6c: a message the core did not
+# take after 3 attempts in 30 s is discarded and counted. Not reconciled: this
+# alert is the only trace.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: correo-bridge
+  namespace: whatsapp-mcp
+spec:
+  groups:
+    - name: correo-bridge
+      rules:
+        - alert: CorreoBridgeMensajesPerdidos
+          expr: increase(correo_bridge_agotados_total[15m]) > 0
+          labels:
+            severity: warning
+            namespace: whatsapp-mcp
+          annotations:
+            summary: "correo-bridge descartó {{ $value }} mensajes de WhatsApp/Telegram sin entrar en el núcleo"
+            description: >-
+              correo-bridge (ns whatsapp-mcp) gave up on at least one message
+              after 3 attempts in 30 s against the correo core
+              (correo-machine.correo). The message is lost: there is no
+              reconciliation, and the case will not show it until the customer
+              writes again. Check the core's machine pod and the bridge logs
+              ("correo core unreachable"); /status of the bridge has the counts.

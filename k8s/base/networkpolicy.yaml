@@ -34,6 +34,8 @@ spec:
           - social-api
           - whatsapp-pairing
           - telegram-pairing
+          # DGX-1235 B1: solo el núcleo (ns correo) y el vmagent, por correo-bridge-ingress.
+          - correo-bridge
   ingress:
     - from:
         - podSelector: {}

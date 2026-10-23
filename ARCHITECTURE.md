@@ -11,6 +11,7 @@
 | `whatsapp-connector` (Baileys, :3001), `telegram-connector` (gramjs, :3002), `telegram-sync` (telethon, :3080), `instagram-connector` (:3003) | `connectors/*` | imágenes por `tag@digest` (p. ej. instagram `sha-985a199ea567@sha256:38c14176…`; pool `v1.3.57`) | ArgoCD app `socialmedia` |
 | `mcp-server` (:3000) y `mcp-sse` (:3010), superficie en `contracts/socialmedia-tools.json` | `mcp-server/src` | digest del `mcp-server`, compartido con los CronJobs de digest | ídem |
 | Puente Synapse | `connectors/whatsapp-synapse-bridge` | digest | ídem |
+| `correo-bridge` (:8080), provider de `correo.connector.v1` (DGX-1235) | `connectors/correo-bridge`, `k8s/base/correo-bridge.yaml` | inerte (`replicas: 0`); el pin `tag@digest` entra con su primer release | ídem |
 | API de emparejamientos por sub: `social-api` (:3020, imagen `mcp-server`), `whatsapp-pairing` (:3001, imagen del conector, `src/pairing/main.ts`), `telegram-pairing` (:3002) | `k8s/base/social-pairing.yaml` | `social-api`: el `images:` del overlay prod (el pin de `mcp-server`); `whatsapp-pairing` y `telegram-pairing`: sus propias secciones de `k8s/overlays/prod/patch-image.yaml`, que no siguen a los conectores de la casa | ídem |
 | `dgx-messages` (consola, ns `messages`) | fuera de este repo | su propia imagen | cliente de `social-api` (`SOCIAL_API_ALLOWED_AZP=dgx-messages`, `networkpolicy-social-pairing.yaml`); lee los adjuntos de `socialmedia-media` (:9000, `networkpolicy.yaml`) |
 
@@ -28,6 +29,9 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
   `BRAIN_MESSAGING_SEARCH_KEY`, Secret `whatsapp-mcp-brain-search` (item 1Password `brain-messaging-search`) montado solo en `mcp-sse`, INFRA-637:
   el brain exige `filters.account`). Hacia el otro lado, el brain depende de
   `brain-windows` (este repo) para su contenido.
+- **Núcleo de «correo» (DGX-1235)** — `correo-bridge` mete en el núcleo (`correo-machine.correo`, `POST /v2/mensajes/{conector}` de
+  `correo.ingest.v2`) cada mensaje 1:1 de las cuentas profesionales de WhatsApp y Telegram, sin texto, y le sirve la lectura en vivo de
+  `correo.connector.v1`. Hacia el otro lado, el núcleo llama a sus rutas de lectura con la clave de cada conector.
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
   (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 105 entradas** (`grep -c '^  - id:' CONTRACTS.yaml`) (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
   más `contracts/socialmedia-tools.json`): nunca renombrar, solo `.vN+1` + `Contract-Change:`.
@@ -104,6 +108,20 @@ Total de casos Jest: **pendiente de medir**.
 
 ## 8. Decisiones y trampas
 
+- **`correo-bridge` (DGX-1235 B1).** Sin Postgres y sin estado más allá de memoria (dedup, jid propio, índice `ref → hilo_ref`). Entrada:
+  `whatsapp.MessageReceived` y `telegram.MessageReceived` con su propio grupo de cola `correo-bridge` (nunca `synapse-bridge`, que se
+  repartiría los mensajes con el puente de Synapse); filtro cerrado por defecto copiado de `whatsapp-synapse-bridge` (solo `professional`, solo
+  1:1, sin grupos, difusiones, canales ni estados) y un cuerpo cerrado sin texto, con la identidad en la forma canónica del contrato (los
+  vectores de `correo-core` viven copiados en `connectors/correo-bridge/fixtures/`). NATS es core, sin JetStream, y el bucle es secuencial:
+  la entrega al núcleo hace 3 intentos en menos de 30 s (un 4xx no se reintenta) y luego descarta y cuenta en `correo_bridge_agotados_total`
+  (`/status`, `/metrics` y la alerta `CorreoBridgeMensajesPerdidos` de `k8s/base/correo-bridge.yaml`): un mensaje de entrada puede perderse si el puente o el núcleo están caídos más de 30 s; no hay reconciliación.
+  Lectura: `GET /mensajes/{ref}` y `GET /hilos/{hilo_ref}` con HMAC V2 verificado sobre la URL cruda (`req.url` de `node:http`, `@` y `:` sin
+  reescribir), leyendo de `/api/public/history/:chatId` (WhatsApp) y `/api/public/messages/:chatId` (Telegram) del conector profesional. El texto
+  vive solo en memoria y en la respuesta. **Leer no marca nada como leído**: el cliente HTTP del puente tiene una lista cerrada de rutas, todas
+  GET (`conectores.ts`, `RUTAS_CONECTOR`), y `src/sin-lectura.test.ts` falla si aparece una llamada de marcar leído, otra ruta o un envío. Esa
+  lista es una restricción de código, no de credencial: `CONNECTOR_SHARED_SECRET` abre todas las rutas de todos los conectores (riesgo residual
+  aceptado por security, DGX-1210). `GET /mensajes/{ref}` solo conoce los `ref` que el proceso reenvió desde que arrancó (los conectores no leen un
+  mensaje por id); tras un reinicio, uno anterior da 404. El envío (`POST /envios`, `ENABLE_OUTBOUND`) es de B2.
 - Nombres heredados: directorio `mcp-socialmedia`, repo `whatsappmcp`, imágenes `whatsappmcp-*`: no renombrar (rompe pins y contratos).
 - Hosts `*.lan.e-dani.com` de los conectores de WhatsApp (`whatsapp`, `whatsapp-pro`, `whatsapp-leila`; IngressRoutes generadas por `render-connectors.py`): `/api/public` va a `connector-public-api-deny`; `/qr` **y el resto del host** (`/api/v1/*`, `/status`) van tras `sso-chain` (ns `keycloak`, SKIRM-110; antes solo `/qr`, y `GET /api/v1/auth/qr` de leila respondía 200 sin credencial en la LAN). Los clientes de máquina no usan esos hosts: llaman al Service interno (`<conector>.whatsapp-mcp.svc.cluster.local:3001`, con el HMAC); un cliente nuevo que apunte a un host `.lan` recibe la redirección a Keycloak.
 - WhatsApp Web personal usa sesión persistente: perderla exige re-emparejar (`http.whatsapp-pairing…`).
