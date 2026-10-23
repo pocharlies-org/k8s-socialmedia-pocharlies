@@ -1249,3 +1249,18 @@ test('el término de búsqueda escapa los comodines SQL antes del ILIKE (QA 22-1
   const src = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
   assert.match(src, /const args = \[a\.accountId, `%\$\{q\.replace\(\/\[\\\\%_\]\/g, '\\\\\$&'\)}%`\];/);
 });
+
+test('ficha: sin nombre útil sale teléfono o null, nunca el jid crudo (UX #32.1/#56.2)', async t => {
+  const calls = [];
+  const db = fixtureDatabase(calls);
+  const lidId = '12345678901234@lid';
+  db.conversations[lidId] = { id: lidId, account: 'personal', name: lidId, wa_chat_id: '34600111222@c.us', is_group: false, archived: false, unread: 0, avatar_url: null };
+  const { request } = await fixture(t, { db });
+  const body = await (await request(`/api/chat-details?account=personal&chat=${encodeURIComponent(lidId)}`)).json();
+  assert.equal(body.name, '+34600111222');
+  assert.equal(body.contact.name, null);
+  db.conversations[lidId].wa_chat_id = null;
+  const bare = await (await request(`/api/chat-details?account=personal&chat=${encodeURIComponent(lidId)}`)).json();
+  assert.equal(bare.name, null);
+  assert.equal(bare.chat, lidId);
+});

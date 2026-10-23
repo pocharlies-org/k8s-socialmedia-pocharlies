@@ -320,6 +320,8 @@ function renderChats() {
     nameRow.append(node('span', 'chat-name', chat.name || chat.id));
     if (featureUI?.isChatPinned?.(chat) || chat.pinned === true || chat.isPinned === true) {
       const pin = node('span', 'chat-pin');
+      // UX #58.4: un span con aria-label sin rol se lo salta NVDA en modo formulario.
+      pin.setAttribute('role', 'img');
       pin.setAttribute('aria-label', 'Chat fijado');
       pin.title = 'Chat fijado';
       nameRow.append(pin);
@@ -611,6 +613,12 @@ function renderMessages() {
     }
   }
   pane.scrollTop = first || atBottom ? pane.scrollHeight : oldTop;
+  // UX #58.1: al abrir el primer chat el scroll-al-final corría antes de que el
+  // navegador asentara el layout (scrollHeight aún pequeño) y quedabas arriba.
+  // Se re-ancla al fondo en el siguiente frame si el usuario no ha subido.
+  if (first) requestAnimationFrame(() => {
+    if (pane.scrollHeight - pane.scrollTop - pane.clientHeight < 100) pane.scrollTop = pane.scrollHeight;
+  });
 }
 $('messages').addEventListener('click', async event => {
   const option = event.target.closest?.('button.message-poll-option');
@@ -1238,7 +1246,7 @@ const novedadesReady = import('./novedades-ui.mjs').then(({installNovedadesUI}) 
     entry.disabled = false;
   }
   return novedadesUI;
-}).catch(err => { error(`No se pudieron cargar las novedades: ${err.message}`); return null; });
+}).catch(err => { error(`No se pudieron cargar las actualizaciones: ${err.message}`); return null; });
 const mediaLibraryReady = import('./media-library-ui.mjs').then(({installMediaLibraryUI}) => {
   mediaLibraryUI = installMediaLibraryUI({getAccount: () => state.account, getChats: () => state.chats, api, selectChat: async chat => {
     const source = state.chats.find(item => item.id === chat.id) || { ...chat, isGroup: chat.id.endsWith('@g.us') };
