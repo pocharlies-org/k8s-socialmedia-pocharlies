@@ -709,6 +709,10 @@ export function installFeatureUI({
   function openModal(title, { wide = false, opener = documentRef.activeElement, variant = '' } = {}) {
     closeModal();
     closeContactDirectory();
+    // UX #71: abrir un diálogo desde otro (Exportar desde el menú ⋮) desprende el
+    // opener capturado — closeModal acaba de devolver el foco al disparador real
+    // (el ⋯); si no se reencadena, al cerrar el foco cae en body (WCAG 2.4.3).
+    if (opener?.isConnected === false) opener = documentRef.activeElement;
     const overlay = node('div', `feature-modal ${wide ? 'feature-modal-wide' : ''} ${variant ? `feature-modal-${variant}` : ''}`);
     overlay.setAttribute('role', 'presentation');
     const dialog = node('section', 'feature-dialog');
