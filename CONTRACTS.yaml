@@ -2398,8 +2398,10 @@ contracts:
   note: >-
     POST /api/messages/delete de la app whatsapp.e-dani.com (scope me|
     everyone). El espejo local escribe la revocacion en metadata
-    (deleted_for_me / deleted_at como texto): la casa no tiene columna
-    deleted_at (42703 medido 20-10); el conector es la fuente de verdad.
+    (deleted_for_me / deleted_at como texto). La casa no tenía columna
+    deleted_at (42703 medido 20-10); desde SKIRM-257 (037) existe, nula,
+    solo para que corra la 038: la fuente de verdad sigue siendo metadata
+    y el conector.
     Esta entrada cubre la ruta batched de acciones (reply, react, forward,
     edit, delete y alias): el espejo de edicion escribe content,
     is_edited y updated_at, nunca edited_at como columna (42703, QA #5
