@@ -461,7 +461,7 @@ function PrivateChat({ctx, request, useDraft, active, api, draftPrompt, draftLab
             const effort = model?.reasoningEfforts.some(item => item.value === settings.reasoningEffort) ? settings.reasoningEffort : 'default';
             saveSettings(event.target.value, effort);
           }}>{!models.length && <option value="">{settingsLoading ? 'Cargando…' : 'No disponible'}</option>}{models.map(model => <option key={model.id} value={model.id}>{model.label || model.id}</option>)}</select></label>
-          <label>Thinking<select aria-label="Thinking" value={settings?.reasoningEffort || 'default'} disabled={settingsDisabled || thinkingOptions.length < 2} onChange={event => saveSettings(settings.model, event.target.value)}>
+          <label>Razonamiento<select aria-label="Razonamiento" value={settings?.reasoningEffort || 'default'} disabled={settingsDisabled || thinkingOptions.length < 2} onChange={event => saveSettings(settings.model, event.target.value)}>
             {!thinkingOptions.length && <option value="default">Predeterminado</option>}{thinkingOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select></label>
           {(settingsLoading || settingsSaving) && <span className="ai-settings-status" role="status">{settingsSaving ? 'Guardando…' : 'Cargando…'}</span>}

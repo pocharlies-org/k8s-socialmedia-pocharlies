@@ -2385,7 +2385,9 @@ contracts:
     (claves en singular contact/poll/event → {kind,…}, phones[0] → phone,
     isCanceled → isCancelled) y deriva viewOnce del message_type
     (QA #79/#77): aditivo, filas que antes salían con metadata {} salen
-    ahora con su payload.
+    ahora con su payload. Desde 23-10 la respuesta lleva ETag fuerte y
+    cache-control no-cache (tambien en GET /api/chats): un If-None-Match
+    igual responde 304 sin cuerpo — aditivo, el 200 sigue igual (#160/#142).
 - id: http.whatsapp-app.messages-delete.v1
   kind: http-route
   value: /api/messages/delete

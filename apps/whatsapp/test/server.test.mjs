@@ -871,3 +871,14 @@ test('access log records method, path (query stripped) and status; /health is no
   assert(/^GET \/api\/chats 200 \d+ms$/.test(access), `unexpected access line: ${access}`);
   assert(!lines.some(l => l.includes(' /health ')), '/health must not be logged (probe spam)');
 });
+test('/api/chats revalida con ETag: el ciclo sin cambios responde 304 (#160, #142)', async t => {
+  const { request } = await fixture(t);
+  const response = await request('/api/chats?account=personal');
+  assert.equal(response.status, 200);
+  const etag = response.headers.get('etag');
+  assert.match(etag, /^"[A-Za-z0-9_-]{16,}"$/);
+  assert.equal(response.headers.get('cache-control'), 'no-cache');
+  const revalidated = await request('/api/chats?account=personal', null, { 'if-none-match': etag });
+  assert.equal(revalidated.status, 304);
+  assert.equal(revalidated.headers.get('etag'), etag);
+});

@@ -130,7 +130,7 @@ spec:
     - secretKey: productor
       remoteRef: { key: correo-productor-correo-bridge-tg/clave }
 ---
-# Ingress: only the core's machine pods (ns correo) and the vmagent. The pod is
+# Ingress: only the core pod (ns correo, component=core) and the vmagent. The pod is
 # excluded from whatsapp-mcp-allow-same-namespace (networkpolicy.yaml), so no
 # other pod of this namespace reaches it.
 apiVersion: networking.k8s.io/v1
@@ -143,7 +143,7 @@ spec:
   ingress:
     - from:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: correo } }
-          podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: machine } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: core } }
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
           podSelector: { matchLabels: { app.kubernetes.io/name: vmagent } }
       ports:
@@ -181,7 +181,7 @@ spec:
         - { protocol: TCP, port: 3002 }
     - to:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: correo } }
-          podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: machine } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: core } }
       ports:
         - { protocol: TCP, port: 8081 }
   policyTypes:

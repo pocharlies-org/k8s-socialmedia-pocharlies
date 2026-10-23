@@ -149,6 +149,11 @@ images:
   # SC-2760: app de WhatsApp del fork de Jordi. El base la deja en :latest (no
   # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija. v1.3.126
   # (run 39508533271) lleva el enrutado de media por bucket (skirmshop-drive vs legacy).
+  # DGX-1235: correo-bridge por tag@digest antes de escalarlo (condición de security). v1.3.129 =
+  # Release Production run 39912746266 de deploy/prod@a19d042 (B2). ENABLE_OUTBOUND sigue "false".
+  - name: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge
+    newTag: v1.3.129
+    digest: sha256:0983a4be18cee811a67b314897df6d79214cfd27ab986898011356e162f5aa3f
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
     newTag: v1.3.126
     digest: sha256:fd41746515dd6c867e0c5514cc2c072fd9f7cf9eb92815d795981c4a8037be18
