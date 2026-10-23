@@ -748,28 +748,21 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     ) : [];
     const attachedIds = new Set(attachments.map(item => item.message_id));
     const missingImages = rows.filter(row => row.type === 'IMAGE' && !attachedIds.has(row.id)).map(row => row.id);
-    const thumbnails = missingImages.length ? await query(
-      `SELECT m.id FROM messages m JOIN whatsapp_message_payloads p
+    // UX #63: una sola consulta de payloads — previsualización de imágenes sin adjunto y póster de los vídeos.
+    const thumbIds = [...new Set([...missingImages, ...rows.filter(row => row.type === 'VIDEO').map(row => row.id)])];
+    const thumbs = thumbIds.length ? await query(
+      `SELECT m.id, m.message_type FROM messages m JOIN whatsapp_message_payloads p
          ON p.wa_message_id=m.wa_message_id AND p.account=m.account
         WHERE m.id=ANY($1::${messageIdType}[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
           AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}
-          AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
-          AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000`,
-      [missingImages, account.accountId, readIds]
+          AND ((m.message_type='IMAGE' AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
+                AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000)
+            OR (m.message_type='VIDEO' AND jsonb_typeof(p.message_payload->'videoMessage'->'jpegThumbnail') IN ('string','object')
+                AND pg_column_size(p.message_payload->'videoMessage'->'jpegThumbnail') <= 300000))`,
+      [thumbIds, account.accountId, readIds]
     ) : [];
-    const thumbnailIds = new Set(thumbnails.map(item => item.id));
-    // UX #63: poster de los vídeos desde el jpegThumbnail del payload (mismo endpoint que la previsualización de imágenes).
-    const posterVideoIds = rows.filter(row => row.type === 'VIDEO').map(row => row.id);
-    const posterRows = posterVideoIds.length ? await query(
-      `SELECT m.id FROM messages m JOIN whatsapp_message_payloads p
-         ON p.wa_message_id=m.wa_message_id AND p.account=m.account
-        WHERE m.id=ANY($1::${messageIdType}[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
-          AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}
-          AND jsonb_typeof(p.message_payload->'videoMessage'->'jpegThumbnail') IN ('string','object')
-          AND pg_column_size(p.message_payload->'videoMessage'->'jpegThumbnail') <= 300000`,
-      [posterVideoIds, account.accountId, readIds]
-    ) : [];
-    const posterIds = new Set(posterRows.map(item => item.id));
+    const thumbnailIds = new Set(thumbs.filter(item => item.message_type === 'IMAGE').map(item => item.id));
+    const posterIds = new Set(thumbs.filter(item => item.message_type === 'VIDEO').map(item => item.id));
     const textIds = rows.filter(row => row.type === 'TEXT' && /https?:\/\//i.test(row.text || '')).map(row => row.id);
     const previewRows = textIds.length ? await query(
       `SELECT m.id, p.message_payload->'extendedTextMessage' AS preview_payload
