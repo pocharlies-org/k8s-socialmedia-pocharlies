@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import pino from 'pino';
-import { DedupCache, MeCache, NatsSubscriber } from '@mcp-socialmedia/shared';
+import { DedupCache, MeCache, NatsSubscriber, stopOnSignals } from '@mcp-socialmedia/shared';
 import { loadConfig, BridgeConfig, ConfigError } from './config';
 import { procesar, SUBJECT_TELEGRAM, SUBJECT_WHATSAPP } from './filter';
 import { Entrega } from './entrega';
@@ -28,60 +28,11 @@ function countDrop(reason: string): void {
   metrics.droppedByReason.set(reason, (metrics.droppedByReason.get(reason) ?? 0) + 1);
 }
 
-class Bridge {
-  // One sequential loop per subject (NatsSubscriber): a dead core costs each
-  // loop at most TOPE_MS per event (entrega.ts), never an unbounded block.
-  private readonly nats: NatsSubscriber;
-
-  constructor(
-    private readonly config: BridgeConfig,
-    private readonly meCache: MeCache,
-    private readonly dedup: DedupCache,
-    private readonly refs: IndiceRefs,
-    private readonly entrega: Entrega
-  ) {
-    this.nats = new NatsSubscriber({
-      natsUrl: config.natsUrl,
-      natsCaCert: config.natsCaCert,
-      queue: config.natsQueueGroup,
-      subjects: [SUBJECT_WHATSAPP, SUBJECT_TELEGRAM],
-      logger,
-      onMessage: (subject, data) => this.handle(subject, data),
-    });
-  }
-
-  isConnected(): boolean {
-    return this.nats.isConnected();
-  }
-
-  start(): Promise<void> {
-    return this.nats.start();
-  }
-
-  stop(): Promise<void> {
-    return this.nats.stop();
-  }
-
-  private async handle(subject: string, data: Uint8Array): Promise<void> {
-    metrics.received++;
-    const ownJid = subject === SUBJECT_WHATSAPP ? await this.meCache.getOwnJid() : '';
-    const r = procesar(subject, data, ownJid, this.dedup);
-    if (!r.forward) {
-      countDrop(r.reason);
-      logger.info({ subject, reason: r.reason }, 'dropped');
-      return;
-    }
-    metrics.forwarded++;
-    this.refs.guardar(r.cuerpo.ref, r.cuerpo.hilo_ref);
-    await this.entrega.entregar(this.config.conectorPorCanal[r.canal], r.cuerpo);
-  }
-}
-
-function statusPayload(bridge: Bridge, meCache: MeCache, dedup: DedupCache, refs: IndiceRefs, entrega: Entrega): Record<string, unknown> {
+function statusPayload(nats: NatsSubscriber, meCache: MeCache, dedup: DedupCache, refs: IndiceRefs, entrega: Entrega): Record<string, unknown> {
   return {
-    status: bridge.isConnected() && meCache.isReady() ? 'ok' : 'degraded',
+    status: nats.isConnected() && meCache.isReady() ? 'ok' : 'degraded',
     service: 'correo-bridge',
-    natsConnected: bridge.isConnected(),
+    natsConnected: nats.isConnected(),
     ownJidKnown: meCache.isReady(),
     dedupSize: dedup.size(),
     refsSize: refs.size(),
@@ -152,19 +103,41 @@ async function main(): Promise<void> {
     refs,
     logger,
   });
-  const bridge = new Bridge(config, meCache, dedup, refs, entrega);
+  // One NATS message, start to end. One sequential loop per subject: a dead
+  // core costs each loop at most TOPE_MS per event (entrega.ts).
+  const handle = async (subject: string, data: Uint8Array): Promise<void> => {
+    metrics.received++;
+    const ownJid = subject === SUBJECT_WHATSAPP ? await meCache.getOwnJid() : '';
+    const r = procesar(subject, data, ownJid, dedup);
+    if (!r.forward) {
+      countDrop(r.reason);
+      logger.info({ subject, reason: r.reason }, 'dropped');
+      return;
+    }
+    metrics.forwarded++;
+    refs.guardar(r.cuerpo.ref, r.cuerpo.hilo_ref);
+    await entrega.entregar(config.conectorPorCanal[r.canal], r.cuerpo);
+  };
+  const nats = new NatsSubscriber({
+    natsUrl: config.natsUrl,
+    natsCaCert: config.natsCaCert,
+    queue: config.natsQueueGroup,
+    subjects: [SUBJECT_WHATSAPP, SUBJECT_TELEGRAM],
+    logger,
+    onMessage: handle,
+  });
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = req.url || '/';
     if (url === '/health' || url === '/healthz') {
-      const ready = bridge.isConnected();
+      const ready = nats.isConnected();
       res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: ready ? 'ok' : 'degraded', natsConnected: ready }));
       return;
     }
     if (url === '/status') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(statusPayload(bridge, meCache, dedup, refs, entrega)));
+      res.end(JSON.stringify(statusPayload(nats, meCache, dedup, refs, entrega)));
       return;
     }
     if (url === '/metrics') {
@@ -181,15 +154,8 @@ async function main(): Promise<void> {
   server.listen(config.port, () => logger.info({ port: config.port }, 'listening'));
 
   void meCache.getOwnJid();
-  await bridge.start();
-
-  const shutdown = (signal: string): void => {
-    logger.info({ signal }, 'shutting down');
-    server.close();
-    void bridge.stop().finally(() => process.exit(0));
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  await nats.start();
+  stopOnSignals(server, () => nats.stop(), logger);
 }
 
 void main();

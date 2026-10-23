@@ -1,5 +1,5 @@
 import { JSONCodec } from 'nats';
-import { normalizeJid, trackingOptInBaseUrl } from '@mcp-socialmedia/shared';
+import { isTrackingOptInControlMessage, normalizeJid } from '@mcp-socialmedia/shared';
 import type { MessageReceivedEvent, TelegramMessageReceivedEvent } from '@mcp-socialmedia/shared';
 import type { Canal } from './config';
 import { cuerpoTelegram, cuerpoWhatsapp, MensajeCanal } from './cuerpo';
@@ -24,26 +24,11 @@ export type Resultado =
 const ALLOWED_1TO1_SUFFIXES = ['@s.whatsapp.net', '@c.us', '@lid'] as const;
 const GROUP_LIKE_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'] as const;
 const STATUS_BROADCAST = 'status@broadcast';
-const TRACKING_OPT_IN_PREFIX =
-  'hola skirmshop, quiero recibir seguimiento por whatsapp del pedido ';
-const TRACKING_OPT_IN_ORDER_RE = /\bord\d{3,}\b/i;
 
 const codec = JSONCodec<unknown>();
 
 function hasSuffix(jid: string, suffixes: readonly string[]): boolean {
   return suffixes.some(s => jid.endsWith(s));
-}
-
-function isTrackingOptInControlMessage(content: string | null | undefined): boolean {
-  if (!content || typeof content !== 'string') return false;
-  const trackingBase = trackingOptInBaseUrl();
-  if (!trackingBase) return false;
-  const text = content.trim().toLowerCase();
-  return (
-    text.startsWith(TRACKING_OPT_IN_PREFIX) &&
-    TRACKING_OPT_IN_ORDER_RE.test(text) &&
-    text.includes(trackingBase.toLowerCase())
-  );
 }
 
 const drop = (reason: string): Resultado => ({ forward: false, reason });
