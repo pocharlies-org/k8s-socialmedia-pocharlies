@@ -21,7 +21,7 @@ function fixture(requestInfo, getContext = () => scope, isOpen = () => true, tim
   const panel = createMessageInfoPanel({ documentRef, container, message, context: scope, requestInfo, ...timers,
     isCurrent: () => isOpen() && ['account', 'chat', 'generation'].every(key => getContext()[key] === scope[key]),
   });
-  return { ...panel, container, notice: container.children[1], retry: container.children[2], content: container.children[3] };
+  return { ...panel, container, notice: container.children[0], retry: container.children[1], content: container.children[2] };
 }
 
 test('information action only applies to persisted outgoing messages including BIGINT and UUID ids', () => {
@@ -56,7 +56,8 @@ test('render actual local times, newest read first and untrusted names as text',
   const time = read.children[1].children[1];
   assert.equal(time.textContent, new Date(receipts[1].readAt).toLocaleString());
   assert.equal(time.attributes.datetime, receipts[1].readAt);
-  assert.equal(ui.container.children[0].children[0].textContent, message.text);
+  // UX #72: el diálogo no duplica el texto del mensaje (solo los relojes).
+  assert.ok(!flatten(ui.container).includes(message.text));
   assert.match(flatten(ui.container), /Reproducido por · 1 \/ 3/);
   assert.equal(ui.content.children[1].children.length, 2, 'read-only receipt must not fabricate delivery');
 });

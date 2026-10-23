@@ -1779,8 +1779,6 @@ body[data-theme="light"] .ai-panel-avatar { background: #d8e0e3; color: #34464f;
 .feature-modal-menu .feature-action-grid .feature-button.danger { color: var(--danger); }
 .feature-message-info-action { display: flex; align-items: center; gap: 10px; }
 .feature-message-info-action svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; flex-shrink: 0; }
-.feature-message-info-summary { padding: 12px; border-radius: 8px; background: var(--surface-raised); }
-.feature-message-info-preview { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
 .feature-message-info-section { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .feature-message-info-readAt .feature-section-title, .feature-message-info-playedAt .feature-section-title { color: var(--accent); }
 .feature-message-info-receipt { display: grid; gap: 5px; padding: 12px 0; }

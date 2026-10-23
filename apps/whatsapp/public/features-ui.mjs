@@ -403,13 +403,13 @@ export function messageInfoSections(info = {}) {
 export function createMessageInfoPanel({ documentRef, container, message, context, requestInfo, isCurrent,
   schedule = (callback, delay) => setTimeout(callback, delay), cancel = timer => clearTimeout(timer) }) {
   const node = (tag, className, value) => makeElement(documentRef, tag, className, value);
-  const summary = node('div', 'feature-message-info-summary');
-  summary.append(node('p', 'feature-message-info-preview', messageText(message)));
+  // UX #72: el diálogo no repite el texto del mensaje (la burbuja ya lo muestra);
+  // en WhatsApp la información solo enseña los relojes de acuse.
   const notice = node('p', 'feature-muted');
   notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
   const retry = button(documentRef, 'Reintentar', 'feature-button subtle');
   const content = node('div', 'feature-message-info-content');
-  container.append(summary, notice, retry, content);
+  container.append(notice, retry, content);
   let version = 0;
   let timer = null;
   let automaticRefreshes = 0;
