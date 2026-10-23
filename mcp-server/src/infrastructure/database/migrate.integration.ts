@@ -1046,6 +1046,53 @@ test('SKIRM-257: the hand-made prod message table without deleted_at runs 038 an
   }
 });
 
+test('SKIRM-261: a prefixed participant filed under another account does not abort 039 on prod data', async () => {
+  const { client } = await database('prod_contacts_collision');
+  try {
+    await stageProduction(client, true);
+    // Prod still holds the author's read-only view, ledgered with the author files.
+    await client.query('DROP TABLE whatsapp_contacts');
+    await client.query(readFileSync(join(dir, '022_whatsapp_contacts_view.sql'), 'utf8'));
+    await client.query(
+      `INSERT INTO _migrations(file) VALUES('021_whatsapp_novedades_channels.sql'),
+         ('022_whatsapp_contacts_view.sql'),('023_whatsapp_chat_time_index.sql')`
+    );
+    await client.query(
+      `INSERT INTO social_accounts(id,channel,account_key,label,legacy_namespace) VALUES
+         ('telegram:personal','telegram','personal','personal','personal'),
+         ('telegram:professional','telegram','professional','professional','professional')
+       ON CONFLICT DO NOTHING`
+    );
+    // Measured on prod (23-10): the professional row was written with account='personal',
+    // so the view yields (personal, tg_3401402332) twice.
+    await client.query(
+      `INSERT INTO participants(id,account,account_id,external_id,name) VALUES
+         ('tg_3401402332','personal','telegram:personal','tg_3401402332','Sauvage Club'),
+         ('professional:tg_3401402332','personal','telegram:professional','tg_3401402332','Sauvage Club')`
+    );
+    await runMigrations(client);
+    await runMigrations(client);
+    assert.deepEqual(
+      (
+        await client.query(
+          "SELECT account,jid FROM whatsapp_contacts WHERE jid='tg_3401402332' ORDER BY account"
+        )
+      ).rows,
+      [
+        { account: 'personal', jid: 'tg_3401402332' },
+        { account: 'professional', jid: 'tg_3401402332' },
+      ]
+    );
+    assert.equal(
+      (await client.query("SELECT account FROM participants WHERE id='professional:tg_3401402332'"))
+        .rows[0].account,
+      'professional'
+    );
+  } finally {
+    await client.end();
+  }
+});
+
 test('legacy NAS send attempts retain token hashes and timestamps and accept prod inserts', async () => {
   const { client } = await database('send_legacy');
   try {
