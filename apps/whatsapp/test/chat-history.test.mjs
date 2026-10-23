@@ -191,3 +191,8 @@ test('UX #58: re-ancla al fondo tras asentar el layout, cita a 1 línea y chat f
   assert.match(app, /pin\.setAttribute\('role', 'img'\)/);
   assert.match(css, /\.message-reply-reference \.message-kind-label \{[^}]*text-overflow: ellipsis/);
 });
+
+test('cambiar de cuenta vuelve a la lista principal de chats (UX #62.1)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /featureUI\?\.setView\?\.\('all'\)/);
+});
