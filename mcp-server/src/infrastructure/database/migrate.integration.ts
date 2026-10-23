@@ -1012,6 +1012,40 @@ test('upgrade imports prod 001-020 ledger, retains bigint rows, and preserves al
   }
 });
 
+test('SKIRM-257: the hand-made prod message table without deleted_at runs 038 and keeps metadata revocations', async () => {
+  const { client } = await database('prod_no_deleted_at');
+  try {
+    await stageProduction(client, true);
+    // The deployed table never had 001's column (42703 measured on prod, 23-10).
+    await client.query('ALTER TABLE messages DROP COLUMN deleted_at');
+    await client.query(
+      "INSERT INTO conversations(id,account,name) VALUES('prod:peer','personal','Peer')"
+    );
+    await client.query(
+      `INSERT INTO messages(conversation_id,wa_message_id,wa_timestamp,direction,sender_wa_id,message_type,
+         platform,is_deleted,metadata)
+       VALUES('prod:peer','revoked',now(),'INBOUND','prod:peer','TEXT','whatsapp',true,
+         '{"deleted_at":"2026-10-20T13:00:00Z"}')`
+    );
+    await runMigrations(client);
+    await runMigrations(client);
+    const row = (
+      await client.query(
+        `SELECT to_char(deleted_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS deleted_at, metadata->>'deleted_at' AS meta
+           FROM messages WHERE wa_message_id='revoked'`
+      )
+    ).rows[0];
+    assert.equal(row.meta, '2026-10-20T13:00:00Z');
+    assert.equal(row.deleted_at, '2026-10-20T13:00:00');
+    assert.equal(
+      (await client.query('SELECT count(*) FROM schema_migrations')).rows[0].count,
+      String(migrationFiles().length)
+    );
+  } finally {
+    await client.end();
+  }
+});
+
 test('legacy NAS send attempts retain token hashes and timestamps and accept prod inserts', async () => {
   const { client } = await database('send_legacy');
   try {

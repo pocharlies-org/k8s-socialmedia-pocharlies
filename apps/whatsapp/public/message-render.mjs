@@ -629,7 +629,7 @@ function createAudioPlayer(url, name, parent, documentRef) {
   const current = makeElement(documentRef, 'span', 'audio-current', '0:00');
   const duration = makeElement(documentRef, 'span', 'audio-duration', '--:--');
   const speed = makeElement(documentRef, 'select', 'audio-speed');
-  speed.setAttribute('aria-label', 'Velocidad de reproduccion');
+  speed.setAttribute('aria-label', 'Velocidad de reproducción');
   for (const value of [0.5, 1, 1.5, 2]) {
     const option = makeElement(documentRef, 'option', '', `${value}x`);
     option.value = String(value);
@@ -639,7 +639,10 @@ function createAudioPlayer(url, name, parent, documentRef) {
   const time = makeElement(documentRef, 'span', 'audio-time');
   time.append(current, documentRef.createTextNode(' / '), duration);
   const controls = makeElement(documentRef, 'div', 'audio-controls');
-  controls.append(toggle, progress, time, speed);
+  // El chevron del select nativo se pinta fatal sobre la burbuja: appearance:none y flecha propia (mask + currentColor).
+  const speedWrap = makeElement(documentRef, 'span', 'audio-speed-wrap');
+  speedWrap.append(speed);
+  controls.append(toggle, progress, time, speedWrap);
   player.append(audio, controls);
   const update = () => {
     const total = Number.isFinite(audio.duration) ? audio.duration : 0;

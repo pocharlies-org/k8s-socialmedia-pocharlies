@@ -23,6 +23,8 @@
 #                  el runner necesita la extensión vector)
 #   EXTRA_MIGRATIONS_DIR  directorio con *.sql extra que se aplican junto a las
 #                  del repo (para pruebas; no se escriben en el repo)
+#   KUBE_POD       pod de Postgres del que se vuelca (default: el primario de CNPG
+#                  postgres-shared, descubierto por etiqueta; los nombres rotan)
 #
 # Seguridad: las únicas lecturas de producción son `pg_dump --schema-only` y
 # `pg_dump --data-only -t _migrations` (solo nombres de fichero, fechas y flag;
@@ -39,7 +41,7 @@ DUMP_FILE="/tmp/${SANDBOX_NAME}.sql"
 LEDGER_FILE="/tmp/${SANDBOX_NAME}-ledger.sql"
 STAGE_DIR="/tmp/${SANDBOX_NAME}-migrations"
 KUBE_NS=databases
-KUBE_POD=postgres-shared-2
+KUBE_POD="${KUBE_POD:-}"
 PROD_DB=whatsappmcp
 
 case "$SANDBOX_NAME" in
@@ -53,8 +55,15 @@ require() {
 
 # Lectura de producción (solo pg_dump). PG17 emite `SET transaction_timeout = 0;`,
 # que PG16 (imagen del sandbox) no conoce: se filtra.
+prod_pod() {
+  [[ -n "$KUBE_POD" ]] || KUBE_POD=$(kubectl -n "$KUBE_NS" get pod \
+    -l cnpg.io/cluster=postgres-shared,cnpg.io/instanceRole=primary \
+    -o jsonpath='{.items[0].metadata.name}')
+  [[ -n "$KUBE_POD" ]] || { echo "no se encontró el primario de postgres-shared en $KUBE_NS" >&2; exit 1; }
+}
+
 prod_dump() {
-  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -- \
+  kubectl -n "$KUBE_NS" exec "$KUBE_POD" -c postgres -- \
     pg_dump -U postgres -d "$PROD_DB" "$@" \
     | sed '/^SET transaction_timeout = 0;$/d'
 }
@@ -113,6 +122,7 @@ do_up() {
     echo "sandbox ya estaba arriba: scripts/qa-schema-sandbox.sh down para tirarlo"
     return 0
   fi
+  prod_pod
   echo "== volcando esquema de producción ($KUBE_NS/$KUBE_POD, bd $PROD_DB) =="
   prod_dump --schema-only --no-owner --no-privileges > "$DUMP_FILE"
   echo "   $(wc -c < "$DUMP_FILE") bytes de esquema en $DUMP_FILE"

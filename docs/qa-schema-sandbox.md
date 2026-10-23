@@ -61,7 +61,7 @@ migración rota no se arrastra a la siguiente ejecución. Al terminar, `down`.
 
 ## Qué hace exactamente
 
-1. Lecturas de producción, solo `pg_dump` vía `kubectl -n databases exec postgres-shared-2`:
+1. Lecturas de producción, solo `pg_dump` vía `kubectl -n databases exec <primario de postgres-shared>` (descubierto por la etiqueta `cnpg.io/instanceRole=primary`; `KUBE_POD` lo fija):
    - `--schema-only --no-owner --no-privileges` → `/tmp/qa-schema-whatsappmcp.sql`
      (esquema puro, ~88 KB);
    - `--data-only -t _migrations` → `/tmp/qa-schema-whatsappmcp-ledger.sql`: las 20

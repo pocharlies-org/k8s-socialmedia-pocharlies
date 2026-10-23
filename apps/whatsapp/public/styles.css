@@ -1099,14 +1099,28 @@ body[data-theme="light"] .sender-palette-7 { color: #a35a05; }
   white-space: nowrap;
 }
 
+.audio-speed-wrap { position: relative; display: inline-flex; }
 .audio-speed {
+  appearance: none;
   min-height: 30px;
   border: 1px solid var(--line);
   border-radius: 15px;
   background: var(--surface-raised);
   color: var(--muted-strong);
-  padding: 3px 5px;
+  padding: 3px 20px 3px 9px;
   font-size: 11px;
+}
+.audio-speed-wrap::after {
+  content: "";
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  translate: 0 -55%;
+  pointer-events: none;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 .attachment-document {
