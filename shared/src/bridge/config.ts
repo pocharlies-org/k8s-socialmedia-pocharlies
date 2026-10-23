@@ -27,10 +27,16 @@ function optionalEnv(name: string, fallback: string): string {
 
 function httpUrl(name: string, value: string, httpsOnly = false): string {
   let url: URL;
-  try { url = new URL(value); } catch { throw new ConfigError(`${name} must be an absolute URL`); }
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ConfigError(`${name} must be an absolute URL`);
+  }
   const protocols = httpsOnly ? ['https:'] : ['http:', 'https:'];
   if (!protocols.includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new ConfigError(`${name} must use ${httpsOnly ? 'HTTPS' : 'HTTP(S)'} without credentials, query or fragment`);
+    throw new ConfigError(
+      `${name} must use ${httpsOnly ? 'HTTPS' : 'HTTP(S)'} without credentials, query or fragment`
+    );
   }
   return url.toString().replace(/\/$/, '');
 }

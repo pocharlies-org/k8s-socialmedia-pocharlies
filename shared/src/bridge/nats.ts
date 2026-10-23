@@ -35,8 +35,10 @@ export class NatsSubscriber {
   private readonly reconnectMaxMs: number;
 
   constructor(private readonly opts: NatsSubscriberOptions) {
-    this.reconnectBaseMs = opts.reconnectBaseMs ?? parseInt(process.env.NATS_RECONNECT_BASE_MS || '2000', 10);
-    this.reconnectMaxMs = opts.reconnectMaxMs ?? parseInt(process.env.NATS_RECONNECT_MAX_MS || '30000', 10);
+    this.reconnectBaseMs =
+      opts.reconnectBaseMs ?? parseInt(process.env.NATS_RECONNECT_BASE_MS || '2000', 10);
+    this.reconnectMaxMs =
+      opts.reconnectMaxMs ?? parseInt(process.env.NATS_RECONNECT_MAX_MS || '30000', 10);
   }
 
   isConnected(): boolean {

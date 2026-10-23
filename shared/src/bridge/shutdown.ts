@@ -1,7 +1,11 @@
 import type pino from 'pino';
 
 /** SIGTERM/SIGINT: close the HTTP server, stop the bridge, exit 0 (DGX-1235 B0, moved from whatsapp-synapse-bridge/src/main.ts). */
-export function stopOnSignals(server: { close(): unknown }, stop: () => Promise<void>, logger: pino.Logger): void {
+export function stopOnSignals(
+  server: { close(): unknown },
+  stop: () => Promise<void>,
+  logger: pino.Logger
+): void {
   const shutdown = (signal: string): void => {
     logger.info({ signal }, 'shutting down');
     server.close();
