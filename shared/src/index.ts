@@ -28,3 +28,4 @@ export async function notifyDashboard(
     console.warn(`[dashboard-notifier] ${path} failed: ${(error as Error).message}`);
   }
 }
+export * from './bridge';

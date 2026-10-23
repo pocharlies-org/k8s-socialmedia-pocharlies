@@ -1,6 +1,6 @@
 import { createHmac } from 'crypto';
 import type pino from 'pino';
-import { withTimeout } from '@mcp-socialmedia/shared';
+import { withTimeout } from '../utils/with-timeout';
 
 /**
  * Caches the bridge account's own WhatsApp JID, fetched from the professional

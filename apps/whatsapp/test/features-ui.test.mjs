@@ -484,6 +484,16 @@ test('el badge de no leídos pasa AA: blanco sobre el verde (UX #51.1)', async (
   assert.doesNotMatch(badge, /color: #07170f/);
 });
 
+test('«Reaccionar» abre fila rápida de 6 y el picker solo tras «+» (UX #55.1)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /const QUICK_REACTIONS = \['👍', '❤️', '😂', '😮', '😢', '🙏'\]/);
+  assert.match(ui, /button\.onclick = \(\) => reactTo\(message, emoji\)/);
+  assert.match(ui, /more\.onclick = showFullPicker/);
+  assert.match(ui, /modal\.body\.append\(row\)/);
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.feature-quick-reactions button \{[^}]*min-height: 44px/);
+});
+
 test('subtítulo de cabecera y paleta de emisor pasan AA (UX #52)', async () => {
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   const subtitle = css.match(/#chat-subtitle \{[^}]*\}/)[0];

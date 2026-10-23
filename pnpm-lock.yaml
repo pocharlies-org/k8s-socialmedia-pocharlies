@@ -418,9 +418,15 @@ importers:
       crypto:
         specifier: ^1.0.1
         version: 1.0.1
+      nats:
+        specifier: ^2.10.0
+        version: 2.29.3
       pg:
         specifier: ^8.13.0
         version: 8.22.0
+      pino:
+        specifier: ^8.16.0
+        version: 8.21.0
     devDependencies:
       '@types/express':
         specifier: ^4.17.21

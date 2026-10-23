@@ -1394,13 +1394,33 @@ export function installFeatureUI({
     return Boolean(result);
   }
 
+  // UX #55.1: fila rápida de WhatsApp (6 + «+»); el picker completo solo tras «+».
+  const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   function openReactionPicker(message) {
     const modal = openModal('Reaccionar', { opener: documentRef.activeElement });
-    const context = {account: runtime.account, chat: runtime.chat, generation: runtime.generation};
-    modal.body.append(createEmojiPicker({documentRef, account: context.account,
-      isCurrent: () => runtime.modal?.body === modal.body && runtime.account === context.account && runtime.chat === context.chat && runtime.generation === context.generation,
-      onSelect: emoji => reactTo(message, emoji),
-    }));
+    const showFullPicker = () => {
+      const context = {account: runtime.account, chat: runtime.chat, generation: runtime.generation};
+      modal.body.replaceChildren(createEmojiPicker({documentRef, account: context.account,
+        isCurrent: () => runtime.modal?.body === modal.body && runtime.account === context.account && runtime.chat === context.chat && runtime.generation === context.generation,
+        onSelect: emoji => reactTo(message, emoji),
+      }));
+    };
+    const row = node('div', 'feature-quick-reactions');
+    for (const emoji of QUICK_REACTIONS) {
+      const button = documentRef.createElement('button');
+      button.type = 'button';
+      button.textContent = emoji;
+      button.setAttribute('aria-label', `Reaccionar con ${emoji}`);
+      button.onclick = () => reactTo(message, emoji);
+      row.append(button);
+    }
+    const more = documentRef.createElement('button');
+    more.type = 'button';
+    more.textContent = '+';
+    more.setAttribute('aria-label', 'Más reacciones');
+    more.onclick = showFullPicker;
+    row.append(more);
+    modal.body.append(row);
   }
 
   function openForwardPicker(ids) {

@@ -1,12 +1,9 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import * as fs from 'fs';
-import { connect, NatsConnection, JSONCodec, Codec, ConnectionOptions, Subscription } from 'nats';
+import { JSONCodec, Codec } from 'nats';
 import pino from 'pino';
-import { MessageReceivedEvent } from '@mcp-socialmedia/shared';
+import { MessageReceivedEvent, DedupCache, MeCache, NatsSubscriber } from '@mcp-socialmedia/shared';
 import { loadConfig, BridgeConfig, ConfigError } from './config';
 import { shouldForward } from './filter';
-import { DedupCache } from './dedup';
-import { MeCache } from './me-cache';
 import { GatewayClient } from './gateway-client';
 
 const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
@@ -33,76 +30,47 @@ function countDrop(reason: string): void {
 }
 
 class Bridge {
-  private nc: NatsConnection | null = null;
-  private sub: Subscription | null = null;
-  private connected = false;
-  private connecting = false;
-  private stopped = false;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectAttempts = 0;
-  private readonly reconnectBaseMs = parseInt(process.env.NATS_RECONNECT_BASE_MS || '2000', 10);
-  private readonly reconnectMaxMs = parseInt(process.env.NATS_RECONNECT_MAX_MS || '30000', 10);
+  private readonly nats: NatsSubscriber;
 
   constructor(
     private readonly config: BridgeConfig,
     private readonly meCache: MeCache,
     private readonly dedup: DedupCache,
     private readonly gateway: GatewayClient
-  ) {}
+  ) {
+    this.nats = new NatsSubscriber({
+      natsUrl: config.natsUrl,
+      natsCaCert: config.natsCaCert,
+      queue: config.natsQueueGroup,
+      subjects: ['whatsapp.MessageReceived'],
+      logger,
+      onMessage: (_subject, data) => this.receive(data),
+    });
+  }
 
   isConnected(): boolean {
-    return this.connected;
+    return this.nats.isConnected();
   }
 
-  async start(): Promise<void> {
-    if (this.connecting || this.connected) return;
-    this.connecting = true;
-    this.stopped = false;
+  start(): Promise<void> {
+    return this.nats.start();
+  }
+
+  stop(): Promise<void> {
+    return this.nats.stop();
+  }
+
+  private async receive(data: Uint8Array): Promise<void> {
+    let event: MessageReceivedEvent;
     try {
-      const options: ConnectionOptions = {
-        servers: this.config.natsUrl,
-        maxReconnectAttempts: -1,
-        reconnectTimeWait: this.reconnectBaseMs,
-        timeout: 2000,
-      };
-      if (this.config.natsUrl.startsWith('tls://') && this.config.natsCaCert) {
-        options.tls = { ca: fs.readFileSync(this.config.natsCaCert, 'utf-8') };
-      }
-      this.nc = await connect(options);
-      this.connected = true;
-      this.reconnectAttempts = 0;
-      logger.info(
-        { subject: 'whatsapp.MessageReceived', queue: this.config.natsQueueGroup },
-        'connected to NATS, subscribing'
-      );
-      this.subscribe(this.nc);
-      void this.watchClosed(this.nc);
+      event = jsonCodec.decode(data);
     } catch (error) {
-      logger.warn({ err: String(error) }, 'NATS unavailable; scheduling reconnect');
-      this.connected = false;
-      this.connecting = false;
-      this.scheduleReconnect();
-    } finally {
-      this.connecting = false;
+      // Undecodable payload => fail-closed drop.
+      countDrop('decode-error');
+      logger.error({ err: String(error) }, 'FAIL-CLOSED: undecodable NATS payload, dropping');
+      return;
     }
-  }
-
-  private subscribe(nc: NatsConnection): void {
-    this.sub = nc.subscribe('whatsapp.MessageReceived', { queue: this.config.natsQueueGroup });
-    void (async (): Promise<void> => {
-      for await (const msg of this.sub as Subscription) {
-        let event: MessageReceivedEvent;
-        try {
-          event = jsonCodec.decode(msg.data);
-        } catch (error) {
-          // Undecodable payload => fail-closed drop.
-          countDrop('decode-error');
-          logger.error({ err: String(error) }, 'FAIL-CLOSED: undecodable NATS payload, dropping');
-          continue;
-        }
-        await this.handle(event);
-      }
-    })();
+    await this.handle(event);
   }
 
   private async handle(event: MessageReceivedEvent): Promise<void> {
@@ -144,50 +112,6 @@ class Bridge {
     } else {
       metrics.gatewayExhausted++;
     }
-  }
-
-  private async watchClosed(nc: NatsConnection): Promise<void> {
-    const err = await nc.closed();
-    if (this.nc !== nc) return;
-    this.connected = false;
-    this.nc = null;
-    this.sub = null;
-    if (err) logger.warn({ err: String(err) }, 'NATS connection closed');
-    else logger.info('NATS connection closed');
-    this.scheduleReconnect();
-  }
-
-  private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer || this.connecting) return;
-    const delayMs = Math.min(
-      this.reconnectMaxMs,
-      this.reconnectBaseMs * Math.max(1, 2 ** this.reconnectAttempts)
-    );
-    this.reconnectAttempts += 1;
-    logger.warn({ delayMs }, 'scheduling NATS reconnect');
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      void this.start();
-    }, delayMs);
-    (this.reconnectTimer as unknown as { unref?: () => void }).unref?.();
-  }
-
-  async stop(): Promise<void> {
-    this.stopped = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    try {
-      if (this.sub) await this.sub.drain();
-    } catch {
-      /* ignore drain errors on shutdown */
-    }
-    if (this.nc) {
-      await this.nc.close();
-      this.nc = null;
-    }
-    this.connected = false;
   }
 }
 
