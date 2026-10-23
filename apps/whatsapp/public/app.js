@@ -1285,4 +1285,6 @@ window.addEventListener('beforeunload', event => { if ([...state.outgoing.values
 document.addEventListener('click', event => { if (event.target.closest?.('a[href^="/auth/logout"]')) { try { sessionStorage.removeItem(OUTBOX_STORAGE_KEY); } catch {} } });
 window.addEventListener('pagehide', () => { liveUpdates?.stop(); cancelRecording(); cameraController?.close(); cancelAttachment(); });
 window.addEventListener('pageshow', event => { if (event.persisted && state.account) liveUpdates?.start(state.account); });
+// QA velocidad 1c: estáticos desde caché al instante (sw.js); sin SW el sitio sigue igual.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 init();
