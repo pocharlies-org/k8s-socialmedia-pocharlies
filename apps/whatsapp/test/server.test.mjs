@@ -405,7 +405,7 @@ test('an image without a stored attachment exposes its scoped thumbnail in messa
       id, waMessageId: 'provider-image', text: null, fromMe: true,
       timestamp: new Date('2026-09-23T14:09:36Z'), type: 'IMAGE', metadata: null,
     }] };
-    if (/SELECT m\.id, m\.message_type FROM messages m JOIN whatsapp_message_payloads/.test(sql)) {
+    if (/SELECT m\.id, m\.message_type FROM messages m\s+WHERE/.test(sql)) {
       assert.deepEqual(args, [[id], 'personal', ['personal-chat']]);
       return { rows: [{ id, message_type: 'IMAGE' }] };
     }

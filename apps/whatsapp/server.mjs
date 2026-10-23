@@ -751,14 +751,18 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
     // UX #63: una sola consulta de payloads — previsualización de imágenes sin adjunto y póster de los vídeos.
     const thumbIds = [...new Set([...missingImages, ...rows.filter(row => row.type === 'VIDEO').map(row => row.id)])];
     const thumbs = thumbIds.length ? await query(
-      `SELECT m.id, m.message_type FROM messages m JOIN whatsapp_message_payloads p
-         ON p.wa_message_id=m.wa_message_id AND p.account=m.account
+      // EXISTS (no JOIN): el JOIN con el OR IMAGE/VIDEO invierte el orden en el planner y pierde messages_pkey (rojo en CI 23-10).
+      `SELECT m.id, m.message_type FROM messages m
         WHERE m.id=ANY($1::${messageIdType}[]) AND m.account=$2 AND m.conversation_id=ANY($3::text[])
           AND m.platform='whatsapp' AND ${MESSAGE_RETAINED_SQL}
-          AND ((m.message_type='IMAGE' AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
-                AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000)
-            OR (m.message_type='VIDEO' AND jsonb_typeof(p.message_payload->'videoMessage'->'jpegThumbnail') IN ('string','object')
-                AND pg_column_size(p.message_payload->'videoMessage'->'jpegThumbnail') <= 300000))`,
+          AND ((m.message_type='IMAGE' AND EXISTS (SELECT 1 FROM whatsapp_message_payloads p
+                WHERE p.account=m.account AND p.wa_message_id=m.wa_message_id
+                  AND jsonb_typeof(p.message_payload->'imageMessage'->'jpegThumbnail') IN ('string','object')
+                  AND pg_column_size(p.message_payload->'imageMessage'->'jpegThumbnail') <= 300000))
+            OR (m.message_type='VIDEO' AND EXISTS (SELECT 1 FROM whatsapp_message_payloads p
+                WHERE p.account=m.account AND p.wa_message_id=m.wa_message_id
+                  AND jsonb_typeof(p.message_payload->'videoMessage'->'jpegThumbnail') IN ('string','object')
+                  AND pg_column_size(p.message_payload->'videoMessage'->'jpegThumbnail') <= 300000)))`,
       [thumbIds, account.accountId, readIds]
     ) : [];
     const thumbnailIds = new Set(thumbs.filter(item => item.message_type === 'IMAGE').map(item => item.id));
