@@ -929,9 +929,11 @@ export function installFeatureUI({
     modal.body.replaceChildren();
     const identity = node('div', 'feature-profile-head');
     const photo = node('span', 'feature-profile-photo');
-    initialsAvatar(photo, info.name || profile.name || runtime.chat, profile.avatarUrl || profile.avatar_url || info.avatarUrl || info.avatar_url);
+    // UX #32.1/#56.2: sin nombre útil se pone la etiqueta, nunca el jid/LID crudo.
+    const title = info.name || profile.name || (isGroup ? 'Grupo' : 'Contacto');
+    initialsAvatar(photo, title, profile.avatarUrl || profile.avatar_url || info.avatarUrl || info.avatar_url);
     const copy = node('div', 'feature-profile-copy');
-    copy.append(node('h3', '', info.name || profile.name || runtime.chat), node('p', 'feature-muted', isGroup ? 'Grupo' : visiblePresenceLabel(presence, 'es-ES')));
+    copy.append(node('h3', '', title), node('p', 'feature-muted', isGroup ? 'Grupo' : visiblePresenceLabel(presence, 'es-ES')));
     identity.append(photo, copy);
     modal.body.append(identity);
     if (isGroup) {

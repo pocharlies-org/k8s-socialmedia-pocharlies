@@ -2459,4 +2459,7 @@ contracts:
     aparece de un render a otro, y si pone foto se ve al expirar el
     max-age); los demas 404 y los 5xx siguen no-store. capabilities gana un
     tercer flag aditivo changeSettings (announce/restrict de la ficha de grupo,
-    UX #49.2, 23-10: solo administradores; la forma del resto no cambia).
+    UX #49.2, 23-10: solo administradores; la forma del resto no cambia). name
+    puede salir null cuando no hay nombre util (UX #32.1/#56.2, 23-10: el jid/LID
+    crudo dejo de ser nombre visible; con telefono guardado sale +E164; la ficha
+    pinta «Grupo»/«Contacto»; el id crudo sigue en chat).

@@ -505,3 +505,9 @@ test('subtítulo de cabecera y paleta de emisor pasan AA (UX #52)', async () => 
   }
   assert.match(css, /\.sender-palette-0 \{ color: #f06ab8; \}/);
 });
+
+test('ficha de contacto: sin nombre útil pinta «Grupo»/«Contacto», nunca el jid (UX #32.1)', async () => {
+  const ui = await readFile(new URL('../public/features-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /const title = info\.name \|\| profile\.name \|\| \(isGroup \? 'Grupo' : 'Contacto'\);/);
+  assert.doesNotMatch(ui, /node\('h3', '', info\.name \|\| profile\.name \|\| runtime\.chat\)/);
+});
