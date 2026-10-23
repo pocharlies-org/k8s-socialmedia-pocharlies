@@ -4,3 +4,5 @@ export * from './dedup';
 export * from './jid';
 export * from './me-cache';
 export * from './nats';
+export * from './opt-in';
+export * from './shutdown';

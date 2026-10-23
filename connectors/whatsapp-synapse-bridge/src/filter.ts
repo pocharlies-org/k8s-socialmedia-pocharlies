@@ -1,6 +1,5 @@
 import { MessageReceivedEvent } from '@mcp-socialmedia/shared';
-import { trackingOptInBaseUrl } from './config';
-import { normalizeJid } from '@mcp-socialmedia/shared';
+import { normalizeJid, isTrackingOptInControlMessage } from '@mcp-socialmedia/shared';
 
 export { normalizeJid };
 
@@ -43,24 +42,9 @@ const ALLOWED_1TO1_SUFFIXES = ['@s.whatsapp.net', '@c.us', '@lid'] as const;
 /** Multi-party / non-personal endpoints we always drop. */
 const GROUP_LIKE_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'] as const;
 const STATUS_BROADCAST = 'status@broadcast';
-const TRACKING_OPT_IN_PREFIX =
-  'hola skirmshop, quiero recibir seguimiento por whatsapp del pedido ';
-const TRACKING_OPT_IN_ORDER_RE = /\bord\d{3,}\b/i;
 
 function hasSuffix(jid: string, suffixes: readonly string[]): boolean {
   return suffixes.some(s => jid.endsWith(s));
-}
-
-function isTrackingOptInControlMessage(content: string | null | undefined): boolean {
-  if (!content || typeof content !== 'string') return false;
-  const trackingBase = trackingOptInBaseUrl();
-  if (!trackingBase) return false;
-  const text = content.trim().toLowerCase();
-  return (
-    text.startsWith(TRACKING_OPT_IN_PREFIX) &&
-    TRACKING_OPT_IN_ORDER_RE.test(text) &&
-    text.includes(trackingBase.toLowerCase())
-  );
 }
 
 /**

@@ -1,7 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { JSONCodec, Codec } from 'nats';
 import pino from 'pino';
-import { MessageReceivedEvent, DedupCache, MeCache, NatsSubscriber } from '@mcp-socialmedia/shared';
+import { MessageReceivedEvent, DedupCache, MeCache, NatsSubscriber, stopOnSignals } from '@mcp-socialmedia/shared';
 import { loadConfig, BridgeConfig, ConfigError } from './config';
 import { shouldForward } from './filter';
 import { GatewayClient } from './gateway-client';
@@ -203,13 +203,7 @@ async function main(): Promise<void> {
 
   await bridge.start();
 
-  const shutdown = (signal: string): void => {
-    logger.info({ signal }, 'shutting down');
-    server.close();
-    void bridge.stop().finally(() => process.exit(0));
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  stopOnSignals(server, () => bridge.stop(), logger);
 }
 
 void main();
