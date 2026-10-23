@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import http from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createApp } from '../server.mjs';
@@ -70,6 +72,31 @@ test('UI modules are served with a browser executable MIME type and require auth
   const shell = await request('/');
   assert.equal(shell.status, 200);
   assert.equal(shell.headers.get('cache-control'), 'no-store');
+});
+test('QA velocidad: estáticos y JSON grandes salen gzip si el cliente lo acepta', async t => {
+  const rows = Array.from({length: 40}, (_, i) => ({id: `chat-${i}`, name: `Contacto con un nombre largo de prueba ${i}`, preview: 'texto de previsualización repetido para pasar del umbral', previewType: 'TEXT', archived: false, _sortTimestamp: '2026-09-27 12:00:00.123456'}));
+  const db = {query: async (sql, args) => ({rows: /FROM conversations c/.test(sql) ? rows : []})};
+  const { app, request } = await fixture(t, {db});
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  // fetch descomprime a escondidas: el crudo se pide con node:http.
+  const raw = (path, headers = {}) => new Promise((resolve, reject) => {
+    http.get(base + path, {headers: {authorization: auth, ...headers}}, res => {
+      const chunks = []; res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks)}));
+    }).on('error', reject);
+  });
+  const asset = await raw('/message-render.mjs', {'accept-encoding': 'gzip'});
+  assert.equal(asset.headers['content-encoding'], 'gzip');
+  assert.equal(asset.headers.vary, 'accept-encoding');
+  assert.ok(asset.body.subarray(0, 2).equals(Buffer.from([0x1f, 0x8b])));
+  assert.ok(gunzipSync(asset.body).length > asset.body.length);
+  assert.equal((await raw('/message-render.mjs')).headers['content-encoding'], undefined);
+  const chats = await raw('/api/chats?account=personal', {'accept-encoding': 'gzip'});
+  assert.equal(chats.status, 200);
+  assert.equal(chats.headers['content-encoding'], 'gzip');
+  assert.ok(JSON.parse(gunzipSync(chats.body)).chats.length === 40);
+  // Un JSON pequeño (health) no merece el coste de comprimir.
+  assert.equal((await raw('/health', {'accept-encoding': 'gzip'})).headers['content-encoding'], undefined);
 });
 test('authenticated media preserves partial responses for audio seeking and rejects invalid ranges', async t => {
   const id = '11111111-1111-1111-1111-111111111111';

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Readable } from 'node:stream';
@@ -1450,8 +1451,23 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       };
     }
   }
+  // QA velocidad: ni la app ni Traefik comprimían (medido 23-10): el navegador bajaba
+  // los 2,33 MB de public/ y el JSON de /api/chats (42,5 KB) en crudo. Solo texto: la
+  // media ya viene comprimida y el SSE se transmite. Caché por fichero: son inmutables
+  // dentro del pod; si cambia el contenido cambia el ETag y se regenera la entrada.
+  const GZIP_TEXT = /\.(?:js|mjs|css|html|json|webmanifest|svg)$/;
+  const acceptsGzip = req2 => /\bgzip\b/.test(req2.headers['accept-encoding'] || '');
+  const gzippedStatic = new Map();
   const server = http.createServer(async (req, res) => {
-    const json = (status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
+    const gzipJson = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-encoding': 'gzip', vary: 'accept-encoding' });
+      res.end(gzipSync(body));
+    };
+    const json = (status, value) => {
+      const body = JSON.stringify(value);
+      if (body.length > 1024 && acceptsGzip(req)) return gzipJson(status, body);
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); res.end(body);
+    };
     // #160/#142: SSE re-avisa y el cliente re-pide /api/chats y /api/messages en cada ciclo.
     // Con ETag el ciclo sin cambios cuesta un 304, no 42.5 KB. no-cache: se revalida siempre, nunca sirve viejo.
     const conditionalJson = (status, value) => {
@@ -1459,6 +1475,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       const etag = `"${createHash('sha256').update(body).digest('base64url').slice(0, 22)}"`;
       const headers = { etag, 'cache-control': 'no-cache' };
       if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
+      if (body.length > 1024 && acceptsGzip(req)) return gzipJson(status, body);
       res.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8' });
       res.end(body);
     };
@@ -3210,7 +3227,14 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       if (!file.endsWith('.html')) res.setHeader('cache-control', 'private, max-age=300');
       if (req.headers['if-none-match'] === etag) { res.statusCode = 304; return res.end(); }
       res.setHeader('etag', etag);
-      res.setHeader('content-type', types[extname(file)] || 'application/octet-stream'); res.end(bytes);
+      res.setHeader('content-type', types[extname(file)] || 'application/octet-stream');
+      if (acceptsGzip(req) && GZIP_TEXT.test(extname(file))) {
+        let entry = gzippedStatic.get(file);
+        if (!entry || entry.etag !== etag) { entry = { etag, bytes: gzipSync(bytes) }; gzippedStatic.set(file, entry); }
+        res.setHeader('content-encoding', 'gzip'); res.setHeader('vary', 'accept-encoding');
+        return res.end(entry.bytes);
+      }
+      res.end(bytes);
     } catch (e) {
       if (res.headersSent) { res.destroy(); return; }
       json(e.status || 500, { error: e.status ? e.message : 'Internal server error', ...(e.code ? { code: e.code } : {}), ...(e.details ? { details: e.details } : {}), ...(e.outcomeUncertain ? { outcomeUncertain: true } : {}) });
