@@ -82,7 +82,7 @@ const liveReady = import('./live-updates.mjs').then(({createLiveUpdates}) => {
     await Promise.all([loadChats({background: true}), hidden ? null : loadMessages(), hidden ? null : pinnedUI?.refresh()]);
   }});
 });
-const state = {account: '', chat: '', chats: [], messages: [], historyMode: false, historyCursor: null, historyInitialized: false, loadingOlder: false, chatFilter: 'all', chatRequestToken: 0, messageRequestToken: 0, selectedChat: null, sending: false, version: 0, busy: false, suggesting: false, signature: '', drafts: new Map(), outgoing: new Map(), pollSelections: new Map(), pollSubmitted: new Map(), pollDirty: new Set(), pollAttempts: new Map(), pollBusy: new Set(), recorder: null, stream: null, blob: null, recordingUrl: '', recordingToken: 0, recordingSendToken: null};
+const state = {account: '', chat: '', chats: [], messages: [], historyMode: false, historyCursor: null, historyInitialized: false, loadingOlder: false, chatFilter: 'all', chatSearch: '', chatRequestToken: 0, messageRequestToken: 0, selectedChat: null, sending: false, version: 0, busy: false, suggesting: false, signature: '', drafts: new Map(), outgoing: new Map(), pollSelections: new Map(), pollSubmitted: new Map(), pollDirty: new Set(), pollAttempts: new Map(), pollBusy: new Set(), recorder: null, stream: null, blob: null, recordingUrl: '', recordingToken: 0, recordingSendToken: null};
 function node(tag, className, text) { const element = document.createElement(tag); if (className) element.className = className; if (text !== undefined) element.textContent = text; return element; }
 const historyNotice = node('div', 'notice');
 const recoveryStates = new Map();
@@ -350,7 +350,11 @@ function renderChats() {
   const numberMatches = chat => numeric && [chat.id, chat.waChatId].some(value => String(value ?? '').replace(/\D/g, '').includes(digits));
   const filter = chatFilterValue();
   state.chatFilter = filter;
-  const chats = pinnedFirst(state.chats.filter(chat => chatMatchesFilter(chat, filter) && (foldSearch(`${chat.name || ''} ${chat.preview || ''}`).includes(search) || numberMatches(chat))));
+  // Con búsqueda del servidor activa, la lista ya viene filtrada: no se vuelve a
+  // filtrar en local (el filtro local no ve los chats que faltaban por cargar).
+  const chats = pinnedFirst(state.chatSearch
+    ? state.chats.filter(chat => chatMatchesFilter(chat, filter))
+    : state.chats.filter(chat => chatMatchesFilter(chat, filter) && (foldSearch(`${chat.name || ''} ${chat.preview || ''}`).includes(search) || numberMatches(chat))));
   $('chat-count').textContent = String(state.chats.length);
   // QA #74: la pestaña no avisaba de los no leídos (title fijo «SocialMedia»).
   const unreadTotal = state.chats.reduce((sum, chat) => sum + (chat.unread === true ? 1 : Math.max(0, Number(chat.unread) || 0)), 0);
@@ -466,7 +470,9 @@ function rememberChats(scope, chats) {
   try { localStorage.setItem(CHATS_CACHE_PREFIX + scope, JSON.stringify(chats)); } catch { /* cuota: la memoria de la sesión basta */ }
 }
 async function loadChats({background = false} = {}) {
-  if (!state.account || (background && state.chatLoading)) return;
+  // Con la búsqueda del servidor activa, un refresco (SSE, eco) no debe pisar los
+  // resultados; al vaciar el buscador se recarga la lista normal.
+  if (!state.account || state.chatSearch || (background && state.chatLoading)) return;
   const account = state.account;
   const archivedView = featureUI?.isFeatureView?.() === 'archived';
   const scope = `${account}:${archivedView}`;
@@ -507,6 +513,23 @@ async function loadChats({background = false} = {}) {
   })();
   chatLoads.set(scope, run);
   try { return await run; } finally { chatLoads.delete(scope); }
+}
+// UX #62.2: el buscador del lateral busca en el servidor (antes solo filtraba la
+// página cargada: 100 de 1033 chats). Vaciar el término restaura la lista normal.
+async function searchChatsOnServer(query, account) {
+  if (account !== state.account) return;
+  state.chatSearch = query;
+  if (!query) { void loadChats(); return; }
+  const requestToken = ++state.chatRequestToken;
+  try {
+    const data = await api(`/api/chats?${new URLSearchParams({ account, q: query, limit: '100' })}`);
+    if (account !== state.account || requestToken !== state.chatRequestToken || state.chatSearch !== query) return;
+    state.chats = Array.isArray(data.chats) ? data.chats : [];
+    featureUI?.chatsChanged?.(state.chats);
+    renderChats();
+  } catch (err) {
+    if (requestToken === state.chatRequestToken && state.chatSearch === query) $('chat-status').textContent = err.message;
+  }
 }
 function outgoingKey(account, chat) { return `${account}:${chat}`; }
 function outgoingFor(account, chat) { return state.outgoing.get(outgoingKey(account, chat)) || []; }
@@ -952,6 +975,7 @@ const sidebarSearchReady = import('./sidebar-search.mjs').then(({installSidebarM
     }
   },
   showError: error,
+  onChatSearch: (query, account) => { void searchChatsOnServer(query, account); },
 }); return sidebarSearch; }).catch(err => { error(`No se pudo cargar la b\u00fasqueda: ${err.message}`); return null; });
 // UX #9.5: renderChats reconstruye ~720 filas pesadas; sin debounce cada tecla
 // la pagaba entera (hielo medido de ~25 s). La pausa de 150 ms basta.

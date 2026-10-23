@@ -297,3 +297,23 @@ test('en archivados la pestaña dice que no se busca ahí (QA 22-10)', async () 
   const src = await readFile(new URL('../public/sidebar-search.mjs', import.meta.url), 'utf8');
   assert.match(src, /'Mensajes \(no se busca en archivados\)'/);
 });
+
+test('el buscador delega la búsqueda de chats al servidor tras el retardo (UX #62.2)', async () => {
+  const document = {activeElement: null, createElement(tag) { return new FakeElement(tag, this); }, createTextNode(text) { const node = new FakeElement('#text', this); node.textContent = text; return node; }};
+  const sidebar = document.createElement('aside'); sidebar.className = 'chat-sidebar';
+  document.querySelector = () => sidebar;
+  const input = document.createElement('input');
+  const chats = document.createElement('div'); chats.id = 'chats';
+  sidebar.append(input, chats);
+  const calls = [];
+  const ui = installSidebarMessageSearch({documentRef: document, input, chatList: chats,
+    getAccount: () => 'personal', getChats: () => [], delay: 0,
+    request: () => Promise.resolve({results: []}), openMessage: async () => {}, showError: assert.fail,
+    onChatSearch: (query, account) => calls.push([query, account])});
+  input.value = 'lola'; ui.changed();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['lola', 'personal']);
+  input.value = ''; ui.changed();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['', 'personal']);
+});

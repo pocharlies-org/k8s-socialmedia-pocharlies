@@ -71,7 +71,7 @@ export function createMessageSearch({request, onChange, delay = 220}) {
   };
 }
 
-export function installSidebarMessageSearch({documentRef, input, chatList, getAccount, getChats, request, openMessage, showError, delay = 220}) {
+export function installSidebarMessageSearch({documentRef, input, chatList, getAccount, getChats, request, openMessage, showError, onChatSearch, delay = 220}) {
   let archived = false;
   const make = (tag, className, label = '') => {
     const element = documentRef.createElement(tag);
@@ -114,6 +114,7 @@ export function installSidebarMessageSearch({documentRef, input, chatList, getAc
   section.id = 'sidebar-message-search';
 
   const search = createMessageSearch({request, onChange: render, delay});
+  let chatSearchTimer = null;
   function updateView(snapshot = search.snapshot()) {
     const visible = Boolean(snapshot.query && snapshot.account);
     const currentChats = new Set(getChats().map(chat => String(chat.id)));
@@ -235,6 +236,12 @@ export function installSidebarMessageSearch({documentRef, input, chatList, getAc
       manualSelection = false;
     }
     search.setQuery(query, account);
+    // UX #62.2: la búsqueda de chats va al servidor (filtraba solo la página cargada).
+    // Mismo retardo que la de mensajes: teclear no dispara una petición por tecla.
+    if (onChatSearch) {
+      clearTimeout(chatSearchTimer);
+      chatSearchTimer = setTimeout(() => onChatSearch(query, account), delay);
+    }
     updateView();
   }
   function viewChanged(isArchived) {

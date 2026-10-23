@@ -1681,7 +1681,7 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const requestedArchive = url.searchParams.get('archived');
         const includeArchived = requestedArchive === 'true' || requestedArchive === '1' || requestedArchive === 'only';
         const onlyArchived = requestedArchive === 'only' || requestedArchive === 'true' || requestedArchive === '1';
-        const page = await readChatDirectory({ query, account: a.accountId, archived: onlyArchived, cursor: url.searchParams.get('cursor'), limit: url.searchParams.get('limit') });
+        const page = await readChatDirectory({ query, account: a.accountId, archived: onlyArchived, cursor: url.searchParams.get('cursor'), limit: url.searchParams.get('limit'), q: url.searchParams.get('q') });
         let chats = page.chats;
         chats = chats.map(chat => {
           const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, ...safeChat } = chat;

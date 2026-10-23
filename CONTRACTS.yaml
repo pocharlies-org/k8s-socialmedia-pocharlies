@@ -2393,6 +2393,21 @@ contracts:
     acepta — variante de representacion HTTP: la forma del 200 no cambia;
     quien llame sin accept-encoding (o un proxy que la quite) recibe el
     crudo de siempre.
+- id: http.whatsapp-app.chats-list.v1
+  kind: http-route
+  value: /api/chats
+  role: provider
+  files:
+    - apps/whatsapp/server.mjs
+  status: active
+  note: >-
+    GET /api/chats de la app whatsapp.e-dani.com: pagina de conversaciones de
+    una cuenta (cursor opuesto, limite <=500) con nombre legible, avatar
+    proxied, fijado/silenciado y favoritos. Desde 23-10 (UX #62.2) admite q:
+    filtra el servidor por nombre, id, wa_chat_id y alias PN (ILIKE escapado,
+    tope 100 caracteres) y responde una sola pagina con nextCursor null —
+    aditivo: sin q el comportamiento es el de siempre. La app la llama con q
+    para el buscador del lateral, que antes solo filtraba la pagina cargada.
 - id: http.whatsapp-app.chat-export.v1
   kind: http-route
   value: /api/chat-export

@@ -17,11 +17,21 @@ function decodeCursor(value, account, archived) {
   } catch { throw invalid(); }
 }
 
-export async function readChatDirectory({ query, account, archived = false, cursor: rawCursor, limit: rawLimit }) {
+export async function readChatDirectory({ query, account, archived = false, cursor: rawCursor, limit: rawLimit, q: rawQ }) {
   const limit = rawLimit == null || rawLimit === '' ? 100 : Number(rawLimit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw Object.assign(new Error('Invalid chat page size'), { status: 400 });
-  const cursor = decodeCursor(rawCursor, account, archived);
+  // UX #62.2 (velocidad): el buscador del lateral filtraba solo la página cargada
+  // (100 de 1033 chats). Con q filtra el servidor por nombre/id/número/alias PN.
+  // shortcut: una sola página de resultados (el cliente no paginaba el filtro);
+  // si algún día hace falta, el cursor codificaría también q.
+  const q = typeof rawQ === 'string' ? rawQ.trim().slice(0, 100) : '';
+  const cursor = q ? null : decodeCursor(rawCursor, account, archived);
   const args = [account, archived];
+  let search = '';
+  if (q) {
+    args.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`);
+    search = `AND (c.name ILIKE $${args.length} OR c.id ILIKE $${args.length} OR c.wa_chat_id ILIKE $${args.length} OR pn_alias.name ILIKE $${args.length})`;
+  }
   let after = '';
   if (cursor) {
     args.push(cursor.id);
@@ -34,6 +44,7 @@ export async function readChatDirectory({ query, account, archived = false, curs
   args.push(limit + 1);
   const rows = await query(chatListDecorated(`${CHAT_LIST_BASE_SQL}
 AND (COALESCE(c.archived, false) OR COALESCE(pn_alias.archived, false)) = $2
+${search}
 ${after}
 ORDER BY ${sortTime} DESC NULLS LAST, c.id DESC
 LIMIT $${args.length}`), args);

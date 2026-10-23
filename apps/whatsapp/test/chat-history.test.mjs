@@ -198,3 +198,10 @@ test('cambiar de cuenta vuelve a la lista principal de chats (UX #62.1)', async 
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /featureUI\?\.setView\?\.\('all'\)/);
 });
+
+test('la búsqueda de chats va al servidor y no vuelve a filtrar en local (UX #62.2)', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /\/api\/chats\?\$\{new URLSearchParams\(\{ account, q: query, limit: '100' \}\)\}/);
+  assert.match(app, /if \(!state\.account \|\| state\.chatSearch \|\| \(background && state\.chatLoading\)\) return;/);
+  assert.match(app, /pinnedFirst\(state\.chatSearch\n\s*\? state\.chats\.filter\(chat => chatMatchesFilter\(chat, filter\)\)\n/);
+});

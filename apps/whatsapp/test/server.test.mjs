@@ -26,6 +26,20 @@ test('chat API returns scoped continuation cursors and rejects malformed paginat
   assert.equal((await request('/api/chats?account=personal&limit=501')).status,400);
   assert.equal((await request('/api/chats?account=personal&cursor=garbage')).status,400);
 });
+test('/api/chats con q filtra en el servidor y escapa el patrón LIKE (UX #62.2)', async t => {
+  const calls = [];
+  const db = {query:async (sql,args) => { calls.push({sql,args}); return {rows:[{id:'chat-lola',name:'Lola',preview:'hola',previewType:'TEXT',archived:false,_sortTimestamp:'2026-09-27 12:00:00.123456'}]}; }};
+  const {request} = await fixture(t,{db});
+  const body = await (await request('/api/chats?account=personal&q=lola')).json();
+  assert.deepEqual(body.chats.map(chat => chat.id), ['chat-lola']);
+  assert.equal(body.nextCursor, null);
+  const chatCalls = calls.filter(({sql}) => /FROM conversations c/.test(sql));
+  assert.match(chatCalls[0].sql, /ILIKE \$3/);
+  assert.deepEqual(chatCalls[0].args, ['personal', false, '%lola%', 101]);
+  await request('/api/chats?account=personal&q=100%25_');
+  const escaped = calls.filter(({sql}) => /FROM conversations c/.test(sql)).at(-1);
+  assert.deepEqual(escaped.args, ['personal', false, '%100\\%\\_%', 101]);
+});
 async function fixture(t, extra = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'whatsapp-test-')); const calls = [];
   const env = { HERMES_RUNS_ENABLED: 'false', DATA_DIR: dir, UI_AUTH_USERNAME: 'operator', UI_AUTH_PASSWORD: 'password', APP_PUBLIC_URL: 'https://wa.example', APP_ENABLE_SENDING: 'true', PERSONAL_SECRET: 'test-secret', ...extra.env };
