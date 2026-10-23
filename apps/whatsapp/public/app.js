@@ -153,10 +153,20 @@ scrollBottom.setAttribute('aria-label', 'Ir al final del chat');
 scrollBottom.title = 'Ir al final del chat';
 scrollBottom.hidden = true;
 scrollBottom.onclick = () => $('messages').scrollTo({top: $('messages').scrollHeight, behavior: 'smooth'});
+// UX #70.1: WhatsApp cuenta los mensajes que llegan mientras estás lejos del final.
+const scrollCount = node('span', 'scroll-bottom-count');
+scrollCount.hidden = true;
+scrollBottom.append(scrollCount);
 $('messages').after(scrollBottom);
+let unseenScroll = 0;
+let lastRemoteCount = 0;
 function updateScrollBottom() {
   const pane = $('messages');
-  scrollBottom.hidden = !state.chat || pane.scrollHeight - pane.scrollTop - pane.clientHeight < 300;
+  const hidden = !state.chat || pane.scrollHeight - pane.scrollTop - pane.clientHeight < 300;
+  scrollBottom.hidden = hidden;
+  if (hidden) unseenScroll = 0;
+  scrollCount.hidden = unseenScroll <= 0;
+  scrollCount.textContent = unseenScroll > 0 ? String(unseenScroll) : '';
 }
 $('messages').addEventListener('scroll', () => {
   if ($('messages').scrollTop < 80) updateOlderControl();
@@ -548,6 +558,10 @@ function renderMessages() {
   const signature = JSON.stringify([visible, pending.map(item => [item.id, item.state])]);
   if (signature === state.signature) return;
   state.signature = signature;
+  // UX #70.1: los mensajes que llegan mientras estás lejos del final se cuentan en el botón «↓».
+  if (first) { unseenScroll = 0; lastRemoteCount = remote.length; }
+  else if (!atBottom) unseenScroll += Math.max(0, remote.length - lastRemoteCount);
+  lastRemoteCount = remote.length;
   if (!visible.length) pane.replaceChildren(node('div', 'welcome', 'No hay mensajes sincronizados en esta conversación.'));
   else messageRenderer.reconcileMessageList(pane, visible, {
     showSenderNames: state.selectedChat?.isGroup === true,
@@ -623,6 +637,7 @@ function renderMessages() {
   if (first) requestAnimationFrame(() => {
     if (pane.scrollHeight - pane.scrollTop - pane.clientHeight < 100) pane.scrollTop = pane.scrollHeight;
   });
+  updateScrollBottom();
 }
 $('messages').addEventListener('click', async event => {
   const option = event.target.closest?.('button.message-poll-option');

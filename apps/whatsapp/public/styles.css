@@ -723,6 +723,8 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
 
 .scroll-bottom {
   position: absolute;
+  display: grid;
+  place-items: center;
   right: 20px;
   bottom: 14px;
   z-index: 6;
@@ -738,6 +740,21 @@ body[data-theme="light"] .conversation-avatar { background: #d8e0e3; color: #344
   box-shadow: 0 1px 4px rgb(0 0 0 / 28%);
 }
 .scroll-bottom:hover { background: var(--surface); }
+/* UX #70.1: contador de mensajes recibidos lejos del final (verde, como el badge de chat). */
+.scroll-bottom-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+}
 
 .messages {
   position: relative;
@@ -1198,6 +1215,8 @@ body[data-theme="light"] .date-chip {
   color: #54656f;
   box-shadow: 0 1px 1px rgba(17, 27, 33, .08);
 }
+/* UX #70.2: WhatsApp fija la fecha de la sección visible arriba mientras haces scroll. */
+.message-date { position: sticky; top: 0; z-index: 2; }
 
 .composer {
   position: relative;
