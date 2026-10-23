@@ -140,9 +140,13 @@ images:
   # CronJobs de brain-windows y voz, y el Job de migracion.
   # INFRA-926 17-10: v1.3.110 -> v1.3.111 (run 39055381833, deploy/prod@c4a0e32): tool MCP de lectura
   # social_get_reactions (recuento de reacciones de Telegram). Digest comprobado en Harbor (crane).
+  # SKIRM-257 / DGX-1235 23-10: v1.3.115 -> v1.3.130 (run 39927963792, deploy/prod@SKIRM-257). Trae el runner de
+  # migraciones de #74 y las 022-040: la 037 nueva (SKIRM-257) añade messages.deleted_at, que la 038 necesita contra el
+  # esquema de prod, y la 040 es telegram_send_attempts (idempotencia de envio de B2). Sandbox sobre el esquema y el ledger
+  # reales: 021-040 sin errores. Digest comprobado en Harbor (crane). Mueve mcp-server, mcp-sse, social-api, CronJobs y el Job.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.115
-    digest: sha256:9ecb6c3593a8309de24809c6e3d8e1471489e419cca0dd0bd9d27e902c29f984
+    newTag: v1.3.130
+    digest: sha256:fd63674f845bc57c2ec92a0342231356b3edce3fe51d0a5a7f30a0ea366c8ad1
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
