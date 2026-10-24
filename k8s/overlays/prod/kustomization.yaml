@@ -160,6 +160,12 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge
     newTag: v1.3.129
     digest: sha256:0983a4be18cee811a67b314897df6d79214cfd27ab986898011356e162f5aa3f
+  # SC-2760 24-10: v1.3.126 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): el join del listado (#384),
+  # los ETag/304 (#371), los ticks (#354), el rail (#375), el <select> del audio (#376), el service worker
+  # cache-first (#385) y la lista de chats virtualizada (#387). Lo fusionado despues de 4a97da6 (gzip #386,
+  # archivo instantaneo #389, export por servidor #391, seleccion rapida #392, busqueda de chats #394) no
+  # esta en ninguna imagen: entra con la siguiente release (gate Trivy #133, decision de Dani).
+  # Digest comprobado en Harbor (docker manifest inspect) y contra el log del run.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
-    newTag: v1.3.126
-    digest: sha256:fd41746515dd6c867e0c5514cc2c072fd9f7cf9eb92815d795981c4a8037be18
+    newTag: v1.3.131
+    digest: sha256:a9e18e81c582349db5df0214606dceabedac87390e5436529a4bb2b41e7460e1
