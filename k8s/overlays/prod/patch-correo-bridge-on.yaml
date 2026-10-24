@@ -1,0 +1,12 @@
+# DGX-1235: encendido de correo-bridge en prod, solo de entrada. Los 4 ítems de
+# 1Password existen (security, DGX-1234) y el núcleo ya declara los conectores
+# (k8s-correo-pocharlies#44). ENABLE_OUTBOUND sigue en "false": la salida se
+# enciende en otra PR, después de probar la entrada en vivo (B2.8).
+# Rollback = revert de este fichero y de su línea en el `patches:`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: correo-bridge
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
