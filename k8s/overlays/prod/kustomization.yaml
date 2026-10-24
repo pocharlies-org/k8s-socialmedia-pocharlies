@@ -16,7 +16,7 @@ patches:
   # SC-1197 encendido: SOCIAL_PAIRING_API=on + replicas 1 + CREDENTIAL_STORE_ENABLED
   # en social-api y los dos pools. Rollback = revert de este fichero y su linea.
   - path: patch-social-pairing-on.yaml
-  # DGX-1235: correo-bridge a 1 réplica, solo de entrada (ENABLE_OUTBOUND "false").
+  # DGX-1235: correo-bridge a 1 réplica, con entrada y salida (ENABLE_OUTBOUND "true").
   - path: patch-correo-bridge-on.yaml
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
