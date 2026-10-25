@@ -953,3 +953,19 @@ test('/api/chat-export responde 413 si la conversación pasa de 50 000 mensajes,
   const { request } = await fixture(t, { db: exportDb(rows) });
   assert.equal((await request('/api/chat-export?account=personal&chat=34600112234%40s.whatsapp.net')).status, 413);
 });
+test('GET /api/chats/one proyecta una fila y 404 si no está en la vista (#271)', async t => {
+  const row = {id:'34600@lid', name:'34600@lid', preview:'hola', previewType:'TEXT', unread:2, isGroup:false, archived:false, timestamp:'2026-09-27T12:00:00.000Z', fromMe:false};
+  const calls = [];
+  const db = {query: async (sql, args) => { calls.push({sql, args}); return {rows: /FROM conversations c/.test(sql) && args.includes('34600@lid') ? [row] : []}; }};
+  const {request} = await fixture(t,{db});
+  const body = await (await request('/api/chats/one?account=personal&chat=34600%40lid')).json();
+  assert.equal(body.chat.id, '34600@lid');
+  assert.equal(body.chat.unread, 2);
+  assert.equal(body.chat.avatarUrl, null);
+  assert.equal(body.chat.pinned, false);
+  const chatCall = calls.find(({sql}) => /FROM conversations c/.test(sql));
+  assert.match(chatCall.sql, /AND c\.id = \$3/);
+  assert.deepEqual(chatCall.args, ['personal', false, '34600@lid', 2]);
+  assert.equal((await request('/api/chats/one?account=personal')).status, 400);
+  assert.equal((await request('/api/chats/one?account=personal&chat=no-existe')).status, 404);
+});

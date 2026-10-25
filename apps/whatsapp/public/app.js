@@ -78,7 +78,14 @@ let novedadesUI = null;
 let pinnedUI = null;
 let liveUpdates = null;
 const liveReady = import('./live-updates.mjs').then(({createLiveUpdates}) => {
-  liveUpdates = createLiveUpdates({onHint: hint => featureUI?.reactionHint?.(hint), refresh: async ({hidden}) => {
+  liveUpdates = createLiveUpdates({onHint: hint => featureUI?.reactionHint?.(hint), refresh: async ({hidden, conversations}) => {
+    // #271: con conversaciones anunciadas solo se leen esas filas (y el hilo si
+    // es el chat abierto); null = resync/tormenta → recarga como siempre.
+    if (conversations) {
+      await Promise.all(conversations.map(id => refreshChatRow(id)));
+      if (!hidden && conversations.includes(state.chat)) await loadMessages();
+      return;
+    }
     await Promise.all([loadChats({background: true}), hidden ? null : loadMessages(), hidden ? null : pinnedUI?.refresh()]);
   }});
 });
@@ -513,6 +520,33 @@ async function loadChats({background = false} = {}) {
   })();
   chatLoads.set(scope, run);
   try { return await run; } finally { chatLoads.delete(scope); }
+}
+// Refresco dirigido del SSE (#271): una fila de la lista en vez del listado
+// completo. Fuera de la vista de archivo, gemelo PN/LID oculto o fila nueva →
+// 404/ausente → recarga normal (es el camino lento, no el roto).
+async function refreshChatRow(conversationId) {
+  if (!state.account || state.chatSearch) return;
+  const account = state.account;
+  const archivedView = featureUI?.isFeatureView?.() === 'archived';
+  let chat;
+  try {
+    ({chat} = await api(`/api/chats/one?${new URLSearchParams({account, chat: conversationId, ...(archivedView ? {archived: 'only'} : {})})}`));
+  } catch { await loadChats({background: true}); return; }
+  const index = account === state.account && chat?.id ? state.chats.findIndex(row => row.id === chat.id) : -1;
+  if (index === -1) { await loadChats({background: true}); return; }
+  state.chats.splice(index, 1);
+  // La lista viene ordenada por último mensaje: la fila vuelve a su sitio.
+  const time = Date.parse(chat.timestamp || '') || 0;
+  const at = state.chats.findIndex(row => (Date.parse(row.timestamp || '') || 0) < time);
+  state.chats.splice(at === -1 ? state.chats.length : at, 0, chat);
+  featureUI?.chatsChanged?.(state.chats);
+  renderChats();
+}
+// Con el stream SSE vivo el eco del envío llega por NOTIFY (refresco dirigido);
+// recargar aquí sería el sondeo de siempre. Sin stream, se recarga igual que antes.
+async function reloadAfterSend() {
+  if (liveUpdates?.live?.()) return;
+  await Promise.all([loadMessages(), loadChats()]);
 }
 // UX #62.2: el buscador del lateral busca en el servidor (antes solo filtraba la
 // página cargada: 100 de 1033 chats). Vaciar el término restaura la lista normal.
@@ -1006,7 +1040,7 @@ async function switchAccount(accountId) {
   communitiesUI?.accountChanged?.(); profileUI?.accountChanged?.(); mediaLibraryUI?.accountChanged?.(); novedadesUI?.accountChanged?.(); error(); renderChats(); updateControls(); await loadChats();
 }
 $('account').onchange = () => switchAccount($('account').value);
-async function sendPayload(path, payload, onSuccess, onConfirmed) { const ctx = context(); state.busy = true; error(); updateControls(); try { const body = typeof payload === 'function' ? await payload() : payload; if (!current(ctx)) return; await api(path, {...ctx, version: undefined, ...body}); onConfirmed?.(ctx); if (current(ctx)) { onSuccess?.(ctx); await Promise.all([loadMessages(), loadChats()]); } } catch (err) { if (current(ctx)) error(err.message); } finally { state.busy = false; updateControls(); } }
+async function sendPayload(path, payload, onSuccess, onConfirmed) { const ctx = context(); state.busy = true; error(); updateControls(); try { const body = typeof payload === 'function' ? await payload() : payload; if (!current(ctx)) return; await api(path, {...ctx, version: undefined, ...body}); onConfirmed?.(ctx); if (current(ctx)) { onSuccess?.(ctx); await reloadAfterSend(); } } catch (err) { if (current(ctx)) error(err.message); } finally { state.busy = false; updateControls(); } }
 async function sendOptimistic(item, path, payload) {
   let result;
   try {
@@ -1048,7 +1082,7 @@ async function sendOptimistic(item, path, payload) {
   if (current(item.ctx)) {
     state.signature = '';
     renderMessages();
-    await Promise.all([loadMessages(), loadChats()]);
+    await reloadAfterSend();
   }
   return true;
 }
