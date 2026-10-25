@@ -10,6 +10,11 @@
 import pg from 'pg';
 
 export const REALTIME_CHANNEL = 'socialmedia_changes';
+// Legacy channel (migrations 013/015/017/030/035): poll votes, event responses
+// and reaction merges write outside the columns the 024 UPDATE trigger watches,
+// so they only ever announce on this one. Its payload carries no account, so it
+// is resolved by message id before it can reach a subscriber.
+export const MESSAGE_UPDATED_CHANNEL = 'message_updated';
 
 const HINT_KINDS = new Set(['message', 'chat']);
 // An allowlist, so a future trigger field can never reach a browser by
@@ -34,6 +39,7 @@ export function createChangeBus({
   connectionString = '',
   clientFactory = null,
   channel = REALTIME_CHANNEL,
+  resolveAccount = null,
   enabled = true,
   coalesceMs = 120,
   stormLimit = 50,
@@ -112,15 +118,36 @@ export function createChangeBus({
     return true;
   }
 
-  function accept(rawPayload) {
-    let parsed;
-    try { parsed = JSON.parse(rawPayload); }
-    catch { discarded += 1; return; }
-    const event = sanitize(parsed);
-    if (!event) { discarded += 1; return; }
+  function enqueue(event) {
     if (stormCollapsed(event.account)) return;
     pending.set(`${event.kind}|${event.account}|${event.conversation_id || ''}`, event);
     if (!flushTimer) flushTimer = setTimeoutRef(flush, coalesceMs);
+  }
+
+  function accept(rawPayload, channel) {
+    let parsed;
+    try { parsed = JSON.parse(rawPayload); }
+    catch { discarded += 1; return; }
+    if (channel === MESSAGE_UPDATED_CHANNEL) { acceptLegacy(parsed); return; }
+    const event = sanitize(parsed);
+    if (!event) { discarded += 1; return; }
+    enqueue(event);
+  }
+
+  // The legacy payload is {id, conversation_id, kind} with no account: an
+  // account-scoped subscriber must never see a hint it cannot be filtered by, so
+  // an unresolvable id is dropped, not broadcast.
+  function acceptLegacy(parsed) {
+    const conversationId = typeof parsed?.conversation_id === 'string' ? parsed.conversation_id.slice(0, 512) : '';
+    const messageId = parsed?.id == null ? '' : String(parsed.id).slice(0, 64);
+    const reason = typeof parsed.kind === 'string' ? parsed.kind.slice(0, 32) : 'change';
+    if (!conversationId || !messageId || !resolveAccount) { discarded += 1; return; }
+    void Promise.resolve(resolveAccount(messageId))
+      .then(account => {
+        if (closing || typeof account !== 'string' || !account) { discarded += 1; return; }
+        enqueue({ kind: 'message', account, conversation_id: conversationId, message_id: messageId, reason });
+      })
+      .catch(() => { discarded += 1; });
   }
 
   function scheduleReconnect(reason) {
@@ -155,7 +182,7 @@ export function createChangeBus({
     }
     next.on('notification', message => {
       if (closing || client !== next) return;
-      accept(message.payload);
+      accept(message.payload, message.channel);
     });
     next.on('error', error => {
       if (closing) return;
@@ -176,6 +203,7 @@ export function createChangeBus({
       // Never wrap LISTEN in a transaction: a listener that stays inside one
       // stops PostgreSQL from cleaning the notification queue.
       await next.query(`LISTEN "${channelName}"`);
+      if (channelName !== MESSAGE_UPDATED_CHANNEL) await next.query(`LISTEN "${MESSAGE_UPDATED_CHANNEL}"`);
     }
     catch (error) {
       try { next.removeAllListeners?.(); } catch { /* already gone */ }

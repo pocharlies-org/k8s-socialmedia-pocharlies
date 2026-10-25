@@ -2408,6 +2408,21 @@ contracts:
     tope 100 caracteres) y responde una sola pagina con nextCursor null —
     aditivo: sin q el comportamiento es el de siempre. La app la llama con q
     para el buscador del lateral, que antes solo filtraba la pagina cargada.
+- id: http.whatsapp-app.chat-one.v1
+  kind: http-route
+  value: /api/chats/one
+  role: provider
+  files:
+    - apps/whatsapp/server.mjs
+  status: active
+  note: >-
+    GET /api/chats/one?account&chat[&archived] de la app whatsapp.e-dani.com: la
+    misma proyeccion que /api/chats sobre UNA conversacion (id exacto, misma
+    vista de archivo), para el refresco dirigido del SSE (#271) sin pagar el
+    listado completo. 404 chat_not_found si la fila no esta en esa vista (fuera
+    de la vista de archivo, gemelo PN/LID oculto o conversacion nueva): el
+    consumidor vuelve al listado. Consumidor: apps/whatsapp/public/app.js
+    (refreshChatRow).
 - id: http.whatsapp-app.chat-export.v1
   kind: http-route
   value: /api/chat-export

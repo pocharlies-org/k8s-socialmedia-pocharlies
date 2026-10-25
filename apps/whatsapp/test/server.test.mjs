@@ -953,3 +953,32 @@ test('/api/chat-export responde 413 si la conversación pasa de 50 000 mensajes,
   const { request } = await fixture(t, { db: exportDb(rows) });
   assert.equal((await request('/api/chat-export?account=personal&chat=34600112234%40s.whatsapp.net')).status, 413);
 });
+test('GET /api/chats/one proyecta una fila y 404 si no está en la vista (#271)', async t => {
+  const row = {id:'34600@lid', name:'34600@lid', preview:'hola', previewType:'TEXT', unread:2, isGroup:false, archived:false, timestamp:'2026-09-27T12:00:00.000Z', fromMe:false};
+  const calls = [];
+  const db = {query: async (sql, args) => { calls.push({sql, args}); return {rows: /FROM conversations c/.test(sql) && args.includes('34600@lid') ? [row] : []}; }};
+  const {request} = await fixture(t,{db});
+  const body = await (await request('/api/chats/one?account=personal&chat=34600%40lid')).json();
+  assert.equal(body.chat.id, '34600@lid');
+  assert.equal(body.chat.unread, 2);
+  assert.equal(body.chat.avatarUrl, null);
+  assert.equal(body.chat.pinned, false);
+  const chatCall = calls.find(({sql}) => /FROM conversations c/.test(sql));
+  assert.match(chatCall.sql, /AND c\.id = \$3/);
+  assert.deepEqual(chatCall.args, ['personal', false, '34600@lid', 2]);
+  assert.equal((await request('/api/chats/one?account=personal')).status, 400);
+  assert.equal((await request('/api/chats/one?account=personal&chat=no-existe')).status, 404);
+});
+test('GET /api/chats/archived usa la misma proyección que el listado (#271)', async t => {
+  const row = {id:'archivado@lid', name:'archivado@lid', waChatId:'34600@c.us', preview:'adios', previewType:'TEXT', unread:3, isGroup:false, archived:true, timestamp:'2026-09-27T12:00:00.000Z', _sortTimestamp:'2026-09-27 12:00:00.123456', avatar_url:'https://proveedor/foto.jpg'};
+  const db = {query: async (sql) => ({rows: /FROM conversations c/.test(sql) ? [row] : []})};
+  const {request} = await fixture(t,{db});
+  const body = await (await request('/api/chats/archived?account=personal')).json();
+  assert.equal(body.archived, true);
+  assert.deepEqual(body.chats.map(chat => chat.id), ['archivado@lid']);
+  assert.equal(body.chats[0].archived, true);
+  assert.equal(body.chats[0].unread, 3);
+  assert.equal(body.chats[0].avatarUrl, '/api/chats/archivado%40lid/avatar?account=personal');
+  assert.equal('_sortTimestamp' in body.chats[0], false, 'el cursor interno no sale a la vista');
+  assert.equal('avatar_url' in body.chats[0], false, 'la URL cruda del proveedor no sale a la vista');
+});

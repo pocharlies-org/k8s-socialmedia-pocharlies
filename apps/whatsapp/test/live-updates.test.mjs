@@ -89,7 +89,7 @@ test('SSE coalesces change hints, filters accounts and resyncs after opening', a
   item.sources[0].onopen();
   assert.equal(item.intervals.size, 0);
   await item.flush();
-  assert.deepEqual(item.calls, [{account:'personal', hidden:false}]);
+  assert.deepEqual(item.calls, [{account:'personal', hidden:false, conversations:null}]);
   for (let i = 0; i < 3; i++) item.sources[0].listeners.get('message')({data:JSON.stringify({account:'personal'})});
   item.sources[0].listeners.get('chat')({data:JSON.stringify({account:'secondary'})});
   await item.flush();
@@ -115,7 +115,7 @@ test('switching accounts closes the old stream and a failed stream restores poll
   assert.equal(item.calls.length, 0, 'stale account events are ignored');
   item.sources[1].onopen();
   await item.flush();
-  assert.deepEqual(item.calls, [{account:'secondary', hidden:false}]);
+  assert.deepEqual(item.calls, [{account:'secondary', hidden:false, conversations:null}]);
   item.sources[1].readyState = 2;
   item.sources[1].onerror();
   assert.equal(item.intervals.size, 1);
@@ -148,7 +148,7 @@ test('an unavailable EventSource keeps polling and retries without aborting the 
   assert.equal(timeouts.size, 1);
   for (const tick of intervals.values()) tick();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(calls, [{account:'personal',hidden:false}]);
+  assert.deepEqual(calls, [{account:'personal',hidden:false, conversations:null}]);
   updates.destroy();
   assert.equal(intervals.size, 0);
   assert.equal(timeouts.size, 0);
@@ -180,5 +180,73 @@ test('an event during a fetch schedules another refresh so the last change is no
   await new Promise(resolve => setImmediate(resolve));
   await item.flush();
   assert.equal(calls.length, 2, 'the later change is read after the first query');
+  updates.destroy();
+});
+
+test('un hint dirigido refresca solo sus chats y un resync vuelve a la recarga completa', async () => {
+  const item = fixture();
+  item.updates.start('personal');
+  item.sources[0].onopen();
+  await item.flush();
+  item.calls.length = 0;
+  item.sources[0].listeners.get('message')({data:JSON.stringify({account:'personal', conversation_id:'a@lid'})});
+  item.sources[0].listeners.get('chat')({data:JSON.stringify({account:'personal', conversation_id:'b@g.us'})});
+  await item.flush();
+  assert.deepEqual(item.calls, [{account:'personal', hidden:false, conversations:['a@lid','b@g.us']}],
+    'las conversaciones anunciadas viajan juntas, una sola pasada');
+  item.calls.length = 0;
+  item.sources[0].listeners.get('resync')({data:JSON.stringify({account:'personal', reason:'reconnect'})});
+  await item.flush();
+  assert.deepEqual(item.calls, [{account:'personal', hidden:false, conversations:null}]);
+  item.updates.destroy();
+});
+
+test('demasiadas filas anunciadas vuelven a la recarga: un listado cuesta menos que N lecturas', async () => {
+  const item = fixture();
+  item.updates.start('personal');
+  item.sources[0].onopen();
+  await item.flush();
+  item.calls.length = 0;
+  for (let i = 0; i < 9; i++) {
+    item.sources[0].listeners.get('message')({data:JSON.stringify({account:'personal', conversation_id:`${i}@lid`})});
+  }
+  await item.flush();
+  assert.equal(item.calls[0].conversations, null);
+  item.updates.destroy();
+});
+
+test('la reconexión crece con backoff y live() solo es cierto con el stream abierto', () => {
+  const scheduled = [];
+  const sources = [];
+  let next = 0;
+  const updates = createLiveUpdates({
+    documentRef: {hidden: false, addEventListener() {}, removeEventListener() {}},
+    refresh: async () => {},
+    eventSource: () => {
+      const source = {readyState: 1, addEventListener(type, cb) { this[type] = cb; }, close() { this.readyState = 2; }};
+      sources.push(source);
+      return source;
+    },
+    setIntervalRef: () => ++next,
+    clearIntervalRef: () => {},
+    setTimeoutRef: (cb, ms) => { scheduled.push({cb, ms}); return ++next; },
+    clearTimeoutRef: () => {},
+    reconnectBaseMs: 1000,
+    reconnectMaxMs: 8000,
+  });
+  const reconnects = () => scheduled.map(item => item.ms).filter(ms => ms !== 250);
+  assert.equal(updates.live(), false, 'sin stream abierto no se puede prometer el eco');
+  updates.start('personal');
+  sources[0].onopen();
+  assert.equal(updates.live(), true);
+  sources[0].readyState = 2;
+  sources[0].onerror();
+  assert.equal(updates.live(), false, 'un stream caído no puede sustituir la recarga');
+  assert.deepEqual(reconnects(), [1000]);
+  scheduled.find(item => item.ms === 1000).cb();
+  assert.equal(sources.length, 2);
+  sources[1].readyState = 2;
+  sources[1].onerror();
+  assert.deepEqual(reconnects(), [1000, 2000], 'el segundo intento espera el doble');
   updates.destroy();
 });

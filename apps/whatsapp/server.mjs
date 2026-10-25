@@ -373,6 +373,9 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
   // keeps its existing polling fallback.
   const realtimeBus = realtime || createChangeBus({
     connectionString: env.DATABASE_URL || '',
+    // The legacy message_updated channel names no account; it is resolved by
+    // message id (primary key) so every hint stays filterable per account.
+    resolveAccount: async messageId => (await query('SELECT account FROM messages WHERE id=$1', [messageId]))[0]?.account || null,
     enabled: env.APP_REALTIME_ENABLED !== 'false',
     log: message => console.warn(`[realtime] ${message}`),
   });
@@ -1016,6 +1019,37 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       // app actions remain available until the provider migration lands.
       return new Map();
     }
+  }
+  // Proyección de una fila de conversaciones a lo que lee el navegador: avatar
+  // proxied, preview de media y fijado/silenciado/favoritos. Compartida por el
+  // listado, el archivo y la fila única del SSE (#271), para que las tres no
+  // puedan divergir.
+  async function decorateChatRows(rows, a, { includeArchived, onlyArchived }) {
+    let chats = rows.map(chat => {
+      const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, _sortTimestamp: _sort, ...safeChat } = chat;
+      return {
+      ...safeChat,
+      name: readableChatName(chat),
+      // Never return a provider/storage URL to the browser; avatars always
+      // flow through the authenticated account-scoped proxy. Pero solo cuando
+      // hay foto guardada: forzar la URL en los ~500 chats del listado
+      // disparaba 985 peticiones al abrir (931×404 + 54×502 del conector,
+      // medido 20-10). Sin foto: iniciales, como WhatsApp; la búsqueda al
+      // proveedor queda para la cabecera del chat abierto.
+      avatarUrl: (chat.avatarUrl || chat.avatar_url)
+        ? `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}` : null,
+      archived: chat.archived === true,
+      unread: chat.unread ?? 0,
+      };
+    });
+    chats = await fillMediaPreviews(chats.filter(chat => includeArchived ? (onlyArchived ? chat.archived : true) : !chat.archived), a.accountId);
+    const local = appState.get(a.accountId);
+    const providerState = await providerChatState(a);
+    return chats.map(chat => {
+      const localState = local.localChatActions[chat.id] || {};
+      const remoteState = providerState.get(providerChatId(chat));
+      return { ...chat, pinned: remoteState?.pinned ?? (localState.pinned === true), muted: remoteState?.muted ?? (localState.muted === true), favorite: local.favorites.includes(chat.id) };
+    });
   }
   function normalizePresence(result) {
     const value = result?.data && typeof result.data === 'object' ? result.data : result;
@@ -1682,41 +1716,28 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
         const includeArchived = requestedArchive === 'true' || requestedArchive === '1' || requestedArchive === 'only';
         const onlyArchived = requestedArchive === 'only' || requestedArchive === 'true' || requestedArchive === '1';
         const page = await readChatDirectory({ query, account: a.accountId, archived: onlyArchived, cursor: url.searchParams.get('cursor'), limit: url.searchParams.get('limit'), q: url.searchParams.get('q') });
-        let chats = page.chats;
-        chats = chats.map(chat => {
-          const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, ...safeChat } = chat;
-          return {
-          ...safeChat,
-          name: readableChatName(chat),
-          // Never return a provider/storage URL to the browser; avatars always
-          // flow through the authenticated account-scoped proxy. Pero solo cuando
-          // hay foto guardada: forzar la URL en los ~500 chats del listado
-          // disparaba 985 peticiones al abrir (931×404 + 54×502 del conector,
-          // medido 20-10). Sin foto: iniciales, como WhatsApp; la búsqueda al
-          // proveedor queda para la cabecera del chat abierto.
-          avatarUrl: (chat.avatarUrl || chat.avatar_url)
-            ? `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}` : null,
-          archived: chat.archived === true,
-          unread: chat.unread ?? 0,
-          };
-        });
-        chats = await fillMediaPreviews(chats.filter(chat => includeArchived ? (onlyArchived ? chat.archived : true) : !chat.archived), a.accountId);
-        const local = appState.get(a.accountId);
-        const providerState = await providerChatState(a);
-        chats = chats.map(chat => {
-          const localState = local.localChatActions[chat.id] || {};
-          const remoteState = providerState.get(providerChatId(chat));
-          return { ...chat, pinned: remoteState?.pinned ?? (localState.pinned === true), muted: remoteState?.muted ?? (localState.muted === true), favorite: local.favorites.includes(chat.id) };
-        });
+        const chats = await decorateChatRows(page.chats, a, { includeArchived, onlyArchived });
         return conditionalJson(200, { chats, archived: includeArchived, nextCursor: page.nextCursor });
+      }
+      // Fila única para el refresco dirigido del SSE (#271): el mismo proyecto
+      // que /api/chats sobre una conversación, sin pagar el listado completo.
+      // El cliente pasa la vista de archivo en la que está; si la fila no está
+      // en esa vista (o es el gemelo PN/LID oculto) sale 404 y recarga la lista.
+      if (req.method === 'GET' && path === '/api/chats/one') {
+        const a = accountParam(url.searchParams.get('account'));
+        const chatId = String(url.searchParams.get('chat') || '').trim().slice(0, 512);
+        if (!chatId) throw fail(400, 'chat is required');
+        const requestedArchive = url.searchParams.get('archived');
+        const onlyArchived = requestedArchive === 'only' || requestedArchive === 'true' || requestedArchive === '1';
+        const page = await readChatDirectory({ query, account: a.accountId, archived: onlyArchived, chat: chatId, limit: 1 });
+        const chats = await decorateChatRows(page.chats, a, { includeArchived: true, onlyArchived });
+        if (!chats.length) throw fail(404, 'chat_not_found');
+        return json(200, { chat: chats[0] });
       }
       if (req.method === 'GET' && (path === '/api/chats/archived' || path === '/api/archived-chats')) {
         const a = accountParam(url.searchParams.get('account'));
-        let chats = await query(CHAT_LIST_ARCHIVED_SQL, [a.accountId]);
-        chats = await fillMediaPreviews(chats.filter(chat => chat.archived === true).map(chat => {
-          const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, _sortTimestamp, ...safeChat } = chat;
-          return { ...safeChat, name: readableChatName(chat), avatarUrl: (chat.avatarUrl || chat.avatar_url) ? `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}` : null, archived: true };
-        }), a.accountId);
+        const rows = await query(CHAT_LIST_ARCHIVED_SQL, [a.accountId]);
+        const chats = await decorateChatRows(rows, a, { includeArchived: true, onlyArchived: true });
         return json(200, { chats, archived: true });
       }
       // CONTRACT: http.whatsapp-app.messages-list.v1

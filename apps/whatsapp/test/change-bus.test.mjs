@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { createChangeBus, REALTIME_CHANNEL } from '../lib/change-bus.mjs';
+import { createChangeBus, REALTIME_CHANNEL, MESSAGE_UPDATED_CHANNEL } from '../lib/change-bus.mjs';
 
 // The bus is driven entirely by injected timers so coalescing, storm collapse
 // and backoff are asserted without waiting on the wall clock.
@@ -48,7 +48,7 @@ class FakeClient extends EventEmitter {
   }
   async query(sql) { this.queries.push(sql); }
   async end() { this.ended = true; this.emit('end'); }
-  notify(payload) { this.emit('notification', { payload }); }
+  notify(payload, channel) { this.emit('notification', { payload, channel }); }
 }
 
 function harness(options = {}) {
@@ -76,7 +76,10 @@ test('one LISTEN per process and repeated start stays a no-op', async () => {
   assert.equal(bus.start(), true);
   await settle();
   assert.equal(clients.length, 1);
-  assert.deepEqual(clients[0].queries, [`LISTEN "${REALTIME_CHANNEL}"`]);
+  assert.deepEqual(clients[0].queries, [
+    `LISTEN "${REALTIME_CHANNEL}"`,
+    `LISTEN "${MESSAGE_UPDATED_CHANNEL}"`,
+  ]);
   assert.equal(bus.state().connected, true);
   assert.equal(bus.enabled, true);
   await bus.close();
@@ -188,7 +191,10 @@ test('connection loss re-listens and every re-listen resyncs subscribers', async
   clock.advance(1000);
   await settle();
   assert.equal(clients.length, 2);
-  assert.deepEqual(clients[1].queries, [`LISTEN "${REALTIME_CHANNEL}"`]);
+  assert.deepEqual(clients[1].queries, [
+    `LISTEN "${REALTIME_CHANNEL}"`,
+    `LISTEN "${MESSAGE_UPDATED_CHANNEL}"`,
+  ]);
   assert.deepEqual(events, [{ kind: 'resync', account: null, reason: 'reconnect' }]);
   await bus.close();
 });
@@ -272,6 +278,47 @@ test('close drops timers, ends the connection and ignores late hints', async () 
   clock.advance(100);
   assert.deepEqual(events, []);
   assert.equal(unsubscribe(), false, 'the subscriber set is already gone');
+});
+
+test('a legacy message_updated hint is resolved to its account before it can reach anyone', async () => {
+  const resolved = [];
+  const { bus, clock, clients } = harness({
+    resolveAccount: async messageId => { resolved.push(messageId); return messageId === '42' ? 'personal' : null; },
+  });
+  const personal = [];
+  const secondary = [];
+  bus.subscribe('personal', event => personal.push(event));
+  bus.subscribe('secondary', event => secondary.push(event));
+  bus.start();
+  await settle();
+  personal.length = 0;
+  secondary.length = 0;
+  clients[0].notify(JSON.stringify({ id: 42, conversation_id: 'a@lid', kind: 'reactions' }), MESSAGE_UPDATED_CHANNEL);
+  clients[0].notify(JSON.stringify({ id: 7, conversation_id: 'b@lid', kind: 'poll' }), MESSAGE_UPDATED_CHANNEL);
+  await settle();
+  clock.advance(10);
+  assert.deepEqual(resolved, ['42', '7']);
+  assert.deepEqual(personal, [{
+    kind: 'message', account: 'personal', conversation_id: 'a@lid', message_id: '42', reason: 'reactions',
+  }]);
+  assert.deepEqual(secondary, [], 'an unresolvable id must not reach any subscriber');
+  await bus.close();
+});
+
+test('legacy hints without a resolver are discarded, not broadcast', async () => {
+  const { bus, clock, clients } = harness();
+  const events = [];
+  bus.subscribe('personal', event => events.push(event));
+  bus.start();
+  await settle();
+  events.length = 0;
+  clients[0].notify(JSON.stringify({ id: 1, conversation_id: 'a@lid', kind: 'edit' }), MESSAGE_UPDATED_CHANNEL);
+  clients[0].notify(JSON.stringify({ conversation_id: 'a@lid', kind: 'edit' }), MESSAGE_UPDATED_CHANNEL);
+  await settle();
+  clock.advance(10);
+  assert.deepEqual(events, []);
+  assert.equal(bus.state().discarded, 2);
+  await bus.close();
 });
 
 test('a bus without a connection string stays disabled and opens nothing', async () => {

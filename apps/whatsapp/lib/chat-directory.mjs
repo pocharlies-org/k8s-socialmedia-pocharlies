@@ -17,7 +17,7 @@ function decodeCursor(value, account, archived) {
   } catch { throw invalid(); }
 }
 
-export async function readChatDirectory({ query, account, archived = false, cursor: rawCursor, limit: rawLimit, q: rawQ }) {
+export async function readChatDirectory({ query, account, archived = false, cursor: rawCursor, limit: rawLimit, q: rawQ, chat: rawChat }) {
   const limit = rawLimit == null || rawLimit === '' ? 100 : Number(rawLimit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw Object.assign(new Error('Invalid chat page size'), { status: 400 });
   // UX #62.2 (velocidad): el buscador del lateral filtraba solo la página cargada
@@ -25,13 +25,17 @@ export async function readChatDirectory({ query, account, archived = false, curs
   // shortcut: una sola página de resultados (el cliente no paginaba el filtro);
   // si algún día hace falta, el cursor codificaría también q.
   const q = typeof rawQ === 'string' ? rawQ.trim().slice(0, 100) : '';
-  const cursor = q ? null : decodeCursor(rawCursor, account, archived);
+  // Fila única por id exacto (refresco dirigido del SSE, #271): sin cursor.
+  const chatId = typeof rawChat === 'string' ? rawChat.trim().slice(0, 512) : '';
+  const cursor = (chatId || q) ? null : decodeCursor(rawCursor, account, archived);
   const args = [account, archived];
   let search = '';
   if (q) {
     args.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`);
     search = `AND (c.name ILIKE $${args.length} OR c.id ILIKE $${args.length} OR c.wa_chat_id ILIKE $${args.length} OR pn_alias.name ILIKE $${args.length})`;
   }
+  let one = '';
+  if (chatId) { args.push(chatId); one = `AND c.id = $${args.length}`; }
   let after = '';
   if (cursor) {
     args.push(cursor.id);
@@ -45,6 +49,7 @@ export async function readChatDirectory({ query, account, archived = false, curs
   const rows = await query(chatListDecorated(`${CHAT_LIST_BASE_SQL}
 AND (COALESCE(c.archived, false) OR COALESCE(pn_alias.archived, false)) = $2
 ${search}
+${one}
 ${after}
 ORDER BY ${sortTime} DESC NULLS LAST, c.id DESC
 LIMIT $${args.length}`), args);
