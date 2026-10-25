@@ -969,3 +969,16 @@ test('GET /api/chats/one proyecta una fila y 404 si no está en la vista (#271)'
   assert.equal((await request('/api/chats/one?account=personal')).status, 400);
   assert.equal((await request('/api/chats/one?account=personal&chat=no-existe')).status, 404);
 });
+test('GET /api/chats/archived usa la misma proyección que el listado (#271)', async t => {
+  const row = {id:'archivado@lid', name:'archivado@lid', waChatId:'34600@c.us', preview:'adios', previewType:'TEXT', unread:3, isGroup:false, archived:true, timestamp:'2026-09-27T12:00:00.000Z', _sortTimestamp:'2026-09-27 12:00:00.123456', avatar_url:'https://proveedor/foto.jpg'};
+  const db = {query: async (sql) => ({rows: /FROM conversations c/.test(sql) ? [row] : []})};
+  const {request} = await fixture(t,{db});
+  const body = await (await request('/api/chats/archived?account=personal')).json();
+  assert.equal(body.archived, true);
+  assert.deepEqual(body.chats.map(chat => chat.id), ['archivado@lid']);
+  assert.equal(body.chats[0].archived, true);
+  assert.equal(body.chats[0].unread, 3);
+  assert.equal(body.chats[0].avatarUrl, '/api/chats/archivado%40lid/avatar?account=personal');
+  assert.equal('_sortTimestamp' in body.chats[0], false, 'el cursor interno no sale a la vista');
+  assert.equal('avatar_url' in body.chats[0], false, 'la URL cruda del proveedor no sale a la vista');
+});

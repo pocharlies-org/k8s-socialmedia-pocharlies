@@ -1022,11 +1022,11 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
   }
   // Proyección de una fila de conversaciones a lo que lee el navegador: avatar
   // proxied, preview de media y fijado/silenciado/favoritos. Compartida por el
-  // listado y por la fila única que refresca el SSE (#271), para que las dos
-  // fuentes no puedan divergir.
+  // listado, el archivo y la fila única del SSE (#271), para que las tres no
+  // puedan divergir.
   async function decorateChatRows(rows, a, { includeArchived, onlyArchived }) {
     let chats = rows.map(chat => {
-      const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, ...safeChat } = chat;
+      const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, _sortTimestamp: _sort, ...safeChat } = chat;
       return {
       ...safeChat,
       name: readableChatName(chat),
@@ -1736,11 +1736,8 @@ export async function createApp({ env = process.env, db, fetchImpl = fetch, regi
       }
       if (req.method === 'GET' && (path === '/api/chats/archived' || path === '/api/archived-chats')) {
         const a = accountParam(url.searchParams.get('account'));
-        let chats = await query(CHAT_LIST_ARCHIVED_SQL, [a.accountId]);
-        chats = await fillMediaPreviews(chats.filter(chat => chat.archived === true).map(chat => {
-          const { avatar_url: _avatarUrl, avatarUrl: _storedAvatarUrl, _sortTimestamp, ...safeChat } = chat;
-          return { ...safeChat, name: readableChatName(chat), avatarUrl: (chat.avatarUrl || chat.avatar_url) ? `/api/chats/${encodeURIComponent(chat.id)}/avatar?account=${encodeURIComponent(a.accountId)}` : null, archived: true };
-        }), a.accountId);
+        const rows = await query(CHAT_LIST_ARCHIVED_SQL, [a.accountId]);
+        const chats = await decorateChatRows(rows, a, { includeArchived: true, onlyArchived: true });
         return json(200, { chats, archived: true });
       }
       // CONTRACT: http.whatsapp-app.messages-list.v1
