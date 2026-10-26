@@ -12,8 +12,9 @@ let mergeRecentMessages;
 let pinnedFirst;
 let shouldSubmitMessageKey;
 let visibleOutgoingMessages;
+let inboundCount;
 const historyReady = import('./chat-history.mjs').then(module => {
-  ({mergeMessages, compareMessages, mergeRecentMessages, pinnedFirst, shouldSubmitMessageKey, visibleOutgoingMessages} = module);
+  ({mergeMessages, compareMessages, mergeRecentMessages, pinnedFirst, shouldSubmitMessageKey, visibleOutgoingMessages, inboundCount} = module);
 });
 const $ = id => document.getElementById(id);
 function safeLocalStorage() { try { return globalThis.localStorage; } catch { return null; } }
@@ -166,7 +167,7 @@ scrollCount.hidden = true;
 scrollBottom.append(scrollCount);
 $('messages').after(scrollBottom);
 let unseenScroll = 0;
-let lastRemoteCount = 0;
+let lastInboundCount = 0;
 function updateScrollBottom() {
   const pane = $('messages');
   const hidden = !state.chat || pane.scrollHeight - pane.scrollTop - pane.clientHeight < 300;
@@ -659,10 +660,12 @@ function renderMessages() {
   const signature = JSON.stringify([visible, pending.map(item => [item.id, item.state])]);
   if (signature === state.signature) return;
   state.signature = signature;
-  // UX #70.1: los mensajes que llegan mientras estás lejos del final se cuentan en el botón «↓».
-  if (first) { unseenScroll = 0; lastRemoteCount = remote.length; }
-  else if (!atBottom) unseenScroll += Math.max(0, remote.length - lastRemoteCount);
-  lastRemoteCount = remote.length;
+  // UX #70.1: el botón «↓» cuenta los mensajes que LLEGAN mientras estás lejos
+  // del final. Los propios no llegan: enviar desde arriba no era un sin leer.
+  const inbound = inboundCount(remote);
+  if (first) { unseenScroll = 0; lastInboundCount = inbound; }
+  else if (!atBottom) unseenScroll += Math.max(0, inbound - lastInboundCount);
+  lastInboundCount = inbound;
   if (!visible.length) pane.replaceChildren(node('div', 'welcome', 'No hay mensajes sincronizados en esta conversación.'));
   else messageRenderer.reconcileMessageList(pane, visible, {
     showSenderNames: state.selectedChat?.isGroup === true,

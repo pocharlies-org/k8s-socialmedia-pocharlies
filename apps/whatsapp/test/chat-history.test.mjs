@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-import {mergeMessages, mergeRecentMessages, pinnedFirst, shouldSubmitMessageKey, visibleOutgoingMessages} from '../public/chat-history.mjs';
+import {mergeMessages, mergeRecentMessages, pinnedFirst, shouldSubmitMessageKey, visibleOutgoingMessages, inboundCount} from '../public/chat-history.mjs';
 
 const message = (id, minute, extra = {}) => ({id, timestamp: `2026-09-27T12:${String(minute).padStart(2, '0')}:00Z`, text: id, ...extra});
 
@@ -69,7 +69,19 @@ test('hay botón «ir abajo» cuando el chat está lejos del final (QA 22-10)', 
   assert.match(app, /scrollTo\(\{top: \$\('messages'\)\.scrollHeight, behavior: 'smooth'\}\)/);
   assert.match(app, /const hidden = !state\.chat \|\| pane\.scrollHeight - pane\.scrollTop - pane\.clientHeight < 300/);
   // UX #70.1: el botón trae contador de mensajes recibidos lejos del final.
-  assert.match(app, /unseenScroll \+= Math\.max\(0, remote\.length - lastRemoteCount\)/);
+  assert.match(app, /unseenScroll \+= Math\.max\(0, inbound - lastInboundCount\)/);
+});
+
+test('el contador «↓» cuenta lo que llega, no lo que envío yo', () => {
+  assert.equal(inboundCount([message('a', 1, {fromMe: true})]), 0, 'un hilo solo con mensajes propios no tiene nada sin leer');
+  assert.equal(inboundCount([message('a', 1), message('b', 2, {fromMe: true}), message('c', 3)]), 2);
+  // El bug: enviar desde arriba hacía crecer el hilo y el contador sumaba 1 por
+  // el mensaje propio. Con la cuenta de ajenos, el delta es 0.
+  const before = inboundCount([message('a', 1)]);
+  const after = inboundCount([message('a', 1), message('yo', 2, {fromMe: true})]);
+  assert.equal(Math.max(0, after - before), 0);
+  // Y un entrante sí cuenta.
+  assert.equal(Math.max(0, inboundCount([message('a', 1), message('otro', 2)]) - before), 1);
 });
 
 test('el favorito se marca en la fila y Favoritos vacío explica cómo marcarlo (QA 22-10)', async () => {

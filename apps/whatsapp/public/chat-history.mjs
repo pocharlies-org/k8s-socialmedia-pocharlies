@@ -14,6 +14,12 @@ export function compareMessages(left, right) {
   return messageTime(left) - messageTime(right) || String(left.id).localeCompare(String(right.id));
 }
 
+// UX #70.1: el contador «↓» cuenta mensajes QUE LLEGAN. Los propios no llegan:
+// enviar y estar lejos del final no es un mensaje sin leer (era el bug).
+export function inboundCount(messages) {
+  return messages.reduce((total, message) => total + (message.fromMe === true ? 0 : 1), 0);
+}
+
 export function mergeMessages(existing, incoming) {
   const byId = new Map();
   for (const message of existing.concat(incoming)) {
