@@ -164,10 +164,15 @@ images:
     digest: sha256:0983a4be18cee811a67b314897df6d79214cfd27ab986898011356e162f5aa3f
   # SC-2760 24-10: v1.3.126 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): el join del listado (#384),
   # los ETag/304 (#371), los ticks (#354), el rail (#375), el <select> del audio (#376), el service worker
-  # cache-first (#385) y la lista de chats virtualizada (#387). Lo fusionado despues de 4a97da6 (gzip #386,
-  # archivo instantaneo #389, export por servidor #391, seleccion rapida #392, busqueda de chats #394) no
-  # esta en ninguna imagen: entra con la siguiente release (gate Trivy #133, decision de Dani).
-  # Digest comprobado en Harbor (docker manifest inspect) y contra el log del run.
+  # cache-first (#385) y la lista de chats virtualizada (#387).
+  # SC-2760 27-10: v1.3.131 -> v1.3.132 (run 40439506470, deploy/prod@ec9e645): todo lo fusionado despues de
+  # 4a97da6 — gzip (#386), archivo instantaneo (#389), export por servidor (#391), seleccion rapida (#392),
+  # busqueda de chats (#394), exportacion con aviso de tope (#377), el contador «↓» con fecha sticky (#379),
+  # el refresco dirigido por SSE (#398) y que «↓» no cuente el mensaje propio (#399). La release pudo salir
+  # porque #400 y #401 pasaron la puerta Trivy (body-parser 1.20.9/2.4.0, multer 2.5.0, zod 4.6.7), que la
+  # tenia bloqueada desde el 26-10 (#133). Solo se avanza esta imagen: mcp-server y los conectores siguen
+  # con sus digests de v1.3.131, que no cambian de bytes.
+  # Digest comprobado en Harbor (docker manifest inspect) y contra la evidencia firmada del run.
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
-    newTag: v1.3.131
-    digest: sha256:a9e18e81c582349db5df0214606dceabedac87390e5436529a4bb2b41e7460e1
+    newTag: v1.3.132
+    digest: sha256:4278e4cefe65f37e1e709a2f2bd993fc8c04b9d2ccaaf13649f54c0346cd19bc
