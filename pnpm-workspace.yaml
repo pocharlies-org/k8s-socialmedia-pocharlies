@@ -27,9 +27,11 @@ overrides:
   # Scoped to the 9.x line on purpose: eslint pulls minimatch 3.x, whose API
   # differs, and 3.1.5 is already past the fixed 3.1.4.
   minimatch@9: ^9.0.9
-  # Reaches us through @nestjs/platform-express, which still ships 2.0.2.
-  # CVE-2026-77037, CVE-2026-77078 and CVE-2026-82333 are fixed in 2.3.0.
-  multer: ^2.3.0
+  # Reaches us through @nestjs/platform-express, which pins the version itself.
+  # CVE-2026-77037, CVE-2026-77078 and CVE-2026-82333 are fixed in 2.3.0, and
+  # CVE-2026-113872 (unhandled stream error when a request aborts during an async
+  # fileFilter) in 2.5.0. Same major, same API; 2.5.0 is past all four.
+  multer: ^2.5.0
   # GHSA-wq5f-xc86-pv6w (librsvg) is fixed in 0.35.5. Reaches us as a peer of the image
   # pipeline; the 0.35.x API is unchanged.
   sharp: ^0.35.5
@@ -44,12 +46,15 @@ overrides:
   # ask for. `pnpm update proxy-addr` will not move a transitive, so the resolver
   # is pointed at it here. Drop this entry when express ships a lock on 2.0.8.
   proxy-addr: ^2.0.8
-  # CVE-2026-111181 is fixed in 1.20.9 (and on the 2.x line). body-parser is transitive:
-  # express 4.22.2 declares `~1.20.5`, so 1.20.9 is inside the range its parent already
-  # asks for. Scoped to `@1` because express 5.2.1 runs on 2.3.0, a different major.
-  # `pnpm update body-parser` will not move a transitive, so the resolver is pointed at
-  # it here. Drop this entry when express ships a lock on 1.20.9.
+  # CVE-2026-111181 (unhandled decompression-stream error on a gzip body with trailing
+  # bytes) is fixed in 1.20.9 and, on the other major, in 2.4.0. body-parser is transitive
+  # and `pnpm update body-parser` will not move it, so the resolver is pointed at it here.
+  # Both targets are inside the ranges the parents already ask for: express 4.22.2 declares
+  # `~1.20.5` (→ 1.20.9) and express 5.2.1 declares `^2.2.1` (→ 2.4.0). Two majors, so two
+  # scoped entries: a single `body-parser` key would push express 4 onto the 2.x API.
+  # Drop these when express ships locks on 1.20.9 / 2.4.0.
   body-parser@1: ^1.20.9
+  body-parser@2: ^2.4.0
   # CVE-2026-106445 and CVE-2026-106446 are fixed in 4.7.10. handlebars is transitive:
   # ts-jest (devDependency of the test packages) pins `^4.7.9`, so 4.7.10 is inside the
   # range its parent already asks for. Drop this entry when ts-jest ships a lock on 4.7.10.
