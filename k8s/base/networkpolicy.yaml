@@ -189,3 +189,25 @@ spec:
           port: 3002
   policyTypes:
     - Ingress
+---
+# SC-3488: el puente WhatsApp→Zammad del spike (namespace zammad) consume
+# whatsapp.MessageReceived en el NATS. Fuera del spike, retirar.
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: whatsapp-mcp-allow-zammad-nats
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: whatsapp-mcp-nats
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: zammad
+      ports:
+        - protocol: TCP
+          port: 4222
+  policyTypes:
+    - Ingress
