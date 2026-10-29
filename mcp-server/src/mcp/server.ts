@@ -1668,12 +1668,15 @@ export class MCPServer {
     }
     if (channelName === 'telegram') {
       if (source === 'provider') {
+        // INFRA-1008: before/after travel in the query (unsigned, like limit);
+        // the connector pages past the 100-per-call cap of messages.getHistory.
+        const query = new URLSearchParams({ limit: String(args.limit || 50) });
+        if (args.before !== undefined) query.set('before', String(args.before));
+        if (args.after !== undefined) query.set('after', String(args.after));
         return this.jsonResponse(
           await this.providerGet(
             this.tgUrl(accountIdValue),
-            `/api/public/messages/${encodeURIComponent(conversationTarget)}?limit=${
-              args.limit || 50
-            }`
+            `/api/public/messages/${encodeURIComponent(conversationTarget)}?${query}`
           )
         );
       }

@@ -693,30 +693,51 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
-   * Get message history for a chat
+   * Get message history for a chat.
+   *
+   * `offsetId` pages backwards (messages with id < offsetId, newest first);
+   * `afterId` pages forwards (id > afterId, oldest first) and wins when both
+   * are set. `iterHistory` chunks `messages.getHistory` at 100 per API call
+   * and follows its pagination cursor, so `limit` above 100 returns more than
+   * 100 (INFRA-1008). The boundary id itself is dropped on both sides so the
+   * caller can feed any returned id back as the next cursor without overlap.
    */
   async getMessages(
     chatId: string,
     limit: number = 100,
-    offsetId?: number
+    offsetId?: number,
+    afterId?: number
   ): Promise<TelegramMessage[]> {
     if (!this.connected) throw new Error('Not connected to Telegram');
-    const params: { limit: number; offset?: { id: number; date: number } } = { limit };
-    if (offsetId) params.offset = { id: offsetId, date: 0 };
+    const forward = afterId !== undefined && afterId > 0;
+    const params: {
+      limit: number;
+      offset?: { id: number; date: number };
+      reverse?: boolean;
+    } = { limit };
+    if (forward) {
+      params.offset = { id: afterId, date: 0 };
+      params.reverse = true;
+    } else if (offsetId) {
+      params.offset = { id: offsetId, date: 0 };
+    }
 
-    const messages = await withDownloadDeadline(
-      signal =>
-        telegramReadClient(this.client.withParams({ abortSignal: signal }), signal).getHistory(
-          toMtcutePeer(chatId),
-          params
-        ),
+    const out: TelegramMessage[] = [];
+    await withDownloadDeadline(
+      async signal => {
+        const client = telegramReadClient(
+          this.client.withParams({ abortSignal: signal }),
+          signal
+        );
+        for await (const m of client.iterHistory(toMtcutePeer(chatId), params)) {
+          if (forward && m.id <= (afterId ?? 0)) continue;
+          if (!forward && offsetId && m.id >= offsetId) continue;
+          const p = await this.parseMessage(m);
+          if (p) out.push(p);
+        }
+      },
       mediaDeadlineMs()
     );
-    const out: TelegramMessage[] = [];
-    for (const m of messages) {
-      const p = await this.parseMessage(m);
-      if (p) out.push(p);
-    }
     return out;
   }
 

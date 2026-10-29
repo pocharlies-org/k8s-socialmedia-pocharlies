@@ -51,6 +51,33 @@ describe('the Telegram reads of /api/public are signed', () => {
     }
   });
 
+  it('INFRA-1008: before/after travel in the query, unsigned, so the connector can page', async () => {
+    const tg = await connector('gated');
+    try {
+      await telegramServer(tg.url).canonicalListMessages({
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '-1001234567890',
+        readSource: 'provider',
+        limit: 500,
+        before: 20200,
+      });
+      await telegramServer(tg.url).canonicalListMessages({
+        channel: 'telegram',
+        accountId: 'personal',
+        target: '-1001234567890',
+        readSource: 'provider',
+        after: '100',
+      });
+      expect(tg.seen.map(s => [s.method, s.url, s.signatureOk])).toEqual([
+        ['GET', '/api/public/messages/-1001234567890?limit=500&before=20200', true],
+        ['GET', '/api/public/messages/-1001234567890?limit=50&after=100', true],
+      ]);
+    } finally {
+      await tg.close();
+    }
+  });
+
   it('with another key the gate answers 401 and the read fails', async () => {
     const tg = await connector('gated');
     try {
