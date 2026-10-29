@@ -38,7 +38,7 @@ export function createPublicRouter(
     }
   });
 
-  // CONTRACT: http.telegram-connector.public-messages.v1 — GET /api/public/messages/:chatId?limit=, HMAC over "<ts>:{}", 200 {messages}
+  // CONTRACT: http.telegram-connector.public-messages.v1 — GET /api/public/messages/:chatId?limit=&before=&after=, HMAC over "<ts>:{}", 200 {messages}
   router.get('/messages/:chatId', async (req: Request, res: Response) => {
     try {
       if (!client.isClientConnected()) {
@@ -46,7 +46,16 @@ export function createPublicRouter(
         return;
       }
       const limit = parseInt(req.query.limit as string) || 50;
-      const messages = await client.getMessages(req.params.chatId, limit);
+      const positiveId = (value: unknown) => {
+        const id = parseInt(value as string);
+        return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+      };
+      const messages = await client.getMessages(
+        req.params.chatId,
+        limit,
+        positiveId(req.query.before),
+        positiveId(req.query.after)
+      );
       res.json({ messages });
     } catch (e) {
       res.status(500).json({ error: String(e) });

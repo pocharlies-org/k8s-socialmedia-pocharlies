@@ -2248,16 +2248,20 @@ contracts:
     - connectors/telegram/src/api/public-routes.ts
   status: active
   note: >-
-    GET /api/public/messages/:chatId?limit= of the house Telegram connectors
-    (limit default 50): the latest messages of one chat, consumed by the MCP
-    server's providerGet (mcp-server/src/mcp/server.ts canonicalListMessages:
-    social_list_messages with readSource provider). Signed like
-    http.telegram-connector.public-dialogs.v1 (over "<ts>:{}", the limit
-    travels in the query and is not signed): without it 401, with it 200
-    {messages}, 503 {error} while Telegram is not connected, 500 {error}.
-    dgx-infra services/dashboard/api/routes_history.py names it too and sends
-    no signature. The path, the signature scheme and the 200 shape are
+    GET /api/public/messages/:chatId?limit=&before=&after= of the house
+    Telegram connectors (limit default 50): the messages of one chat, consumed
+    by the MCP server's providerGet (mcp-server/src/mcp/server.ts
+    canonicalListMessages: social_list_messages with readSource provider).
+    before <id> returns messages with id < id (newest first), after <id>
+    messages with id > id (oldest first); either cursor paginates past the
+    100-per-call cap of messages.getHistory (INFRA-1008). Signed like
+    http.telegram-connector.public-dialogs.v1 (over "<ts>:{}", the query is
+    not signed): without it 401, with it 200 {messages}, 503 {error} while
+    Telegram is not connected, 500 {error}. dgx-infra
+    services/dashboard/api/routes_history.py names it too and sends no
+    signature. The path, the signature scheme and the 200 shape are
     contract: changing any is breaking — a new `.v2` entry beside this one.
+    The optional query cursors are additive, not a new version.
 - id: http.telegram-connector.public-send.v1
   kind: http-route
   value: /api/public/send/:chatId

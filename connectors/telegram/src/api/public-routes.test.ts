@@ -45,8 +45,8 @@ async function serve(options: { log?: (line: string) => void; now?: () => number
       calls.push('dialogs');
       return [{ id: '1', name: 'A', type: 'private', unreadCount: 0 }];
     },
-    getMessages: async (chatId: string, limit: number) => {
-      calls.push(`messages:${chatId}:${limit}`);
+    getMessages: async (chatId: string, limit: number, before?: number, after?: number) => {
+      calls.push(`messages:${chatId}:${limit}${before ? `:before=${before}` : ''}${after ? `:after=${after}` : ''}`);
       return [{ telegramMessageId: 1 }];
     },
     sendMessage: async (chatId: string, text: string, topicId?: number) => {
@@ -101,6 +101,33 @@ test('firmadas como providerGet ("{}") las lecturas dan 200; el límite viaja en
   assert.deepEqual(await withLimit.json(), { messages: [{ telegramMessageId: 1 }] });
   await request(base, ['GET', `/api/public/messages/${CHAT}`], signed());
   assert.deepEqual(calls, ['dialogs', `messages:${CHAT}:5`, `messages:${CHAT}:50`]);
+});
+
+test('INFRA-1008: before/after viajan en la query (sin firmar) y llegan al cliente; basura → sin cursor', async () => {
+  const { base, calls } = await serve();
+  const before = await request(
+    base,
+    ['GET', `/api/public/messages/${CHAT}?limit=500&before=20200`],
+    signed()
+  );
+  assert.equal(before.status, 200);
+  const after = await request(
+    base,
+    ['GET', `/api/public/messages/${CHAT}?limit=20&after=100`],
+    signed()
+  );
+  assert.equal(after.status, 200);
+  const garbage = await request(
+    base,
+    ['GET', `/api/public/messages/${CHAT}?before=no-es-id&after=-3`],
+    signed()
+  );
+  assert.equal(garbage.status, 200);
+  assert.deepEqual(calls, [
+    `messages:${CHAT}:500:before=20200`,
+    `messages:${CHAT}:20:after=100`,
+    `messages:${CHAT}:50`,
+  ]);
 });
 
 test('POST /send/:chatId firmado sobre su cuerpo → 200 y llega tal cual; con topicId también', async () => {
