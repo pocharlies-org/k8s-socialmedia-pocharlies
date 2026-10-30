@@ -148,9 +148,11 @@ images:
   # reales: 021-040 sin errores. Digest comprobado en Harbor (crane). Mueve mcp-server, mcp-sse, social-api, CronJobs y el Job.
   # SKIRM-261 23-10: v1.3.130 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): la 041 realinea el participante mal
   # archivado antes de la 039 (duplicate key en prod). Sandbox con DATOS reales: 021-040 sin errores. Digest con crane.
+  # SC-3681 30-10: v1.3.131 -> v1.3.133 (run 40988750820, deploy/prod@a1b2544): social_manage_group
+  # action=setPhoto (#406) y override decode-uri-component 0.5.1 (CVE-2026-118664, #407). Digest con la API de Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.131
-    digest: sha256:540e79f14b42edcf21b640f673de1cc270534116a37499d10e36e2fc409928b0
+    newTag: v1.3.133
+    digest: sha256:60f9fca117f047277e931ffe262d0370f75f096711b9d1e5ab4a30a32a97ac04
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

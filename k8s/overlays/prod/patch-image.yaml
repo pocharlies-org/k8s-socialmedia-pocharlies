@@ -45,6 +45,10 @@
 # alias de rutas parametrizadas de la app whatsapp.e-dani.com (PR #282): fin del 501 en
 # silenciar/archivar/fijar/leído, borrar para mí, desaparecientes y asunto de grupo.
 # Digest checked against Harbor (docker manifest). whatsapp-pairing intacto.
+#
+# SC-3681 30-10: los tres house whatsapp-connector* avanzan v1.3.120 -> v1.3.133 (run 40988750820,
+# deploy/prod@a1b2544): POST /groups/photo (foto de grupo, #406) y override decode-uri-component 0.5.1
+# (CVE-2026-118664, #407). Digest comprobado en Harbor (API artifacts).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,7 +59,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.133@sha256:659ab48d0d2aca6184c2c57cc92b23d6b97cc5da798bb9bfacee7cf4e566209b
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
@@ -72,7 +76,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.133@sha256:659ab48d0d2aca6184c2c57cc92b23d6b97cc5da798bb9bfacee7cf4e566209b
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 # SKIRM-103 10-10: whatsapp-connector-leila advances v1.3.103 -> v1.3.109 (run 38008072969,
@@ -90,7 +94,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-leila
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.133@sha256:659ab48d0d2aca6184c2c57cc92b23d6b97cc5da798bb9bfacee7cf4e566209b
 ---
 # SKIRM-102 08-10: instagram-connector advances instagram-e69969eb -> v1.3.106
 # (Release Production run 37744603591, deploy/prod@897435e: #231 verifies
