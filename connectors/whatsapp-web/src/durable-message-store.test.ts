@@ -7,6 +7,7 @@ import type { WAMessage } from '@whiskeysockets/baileys';
 import pg from 'pg';
 import {
   ensureDurableTables,
+  resetDurableTablesForTests,
   adoptPayloadTimestampShape,
   resetDurableStoreStateForTests,
   deserializeDurableValue,
@@ -64,6 +65,32 @@ test('durable table bootstrap holds one transaction advisory lock on a dedicated
     assert.match(calls[widenAt]!, /ADD COLUMN IF NOT EXISTS from_me boolean/);
   } finally {
     (pg.Pool.prototype as any).connect = original;
+  }
+});
+
+test('the chat bootstrap index keys on the timestamp column the table carries', async () => {
+  // The NAS table orders by message_timestamp_ms; the fresh migration-015
+  // shape (prod since the nvme cutover) only has wa_timestamp. Hardcoding the
+  // legacy column made connect() crash with 42703 (SC-3681).
+  for (const [hasLegacy, column] of [[1, 'message_timestamp_ms'], [0, 'wa_timestamp']] as const) {
+    const queries: string[] = [];
+    const original = pg.Pool.prototype.connect;
+    (pg.Pool.prototype as any).connect = async () => ({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return /information_schema.columns/.test(sql) ? { rowCount: hasLegacy, rows: [] } : { rows: [] };
+      },
+      release: () => {},
+    });
+    try {
+      resetDurableTablesForTests();
+      await ensureDurableTables();
+      const index = queries.find(sql => sql.includes('idx_whatsapp_message_payloads_chat'))!;
+      assert.match(index, new RegExp(`conversation_id, ${column} DESC`), `hasLegacy=${hasLegacy}`);
+    } finally {
+      (pg.Pool.prototype as any).connect = original;
+      resetDurableTablesForTests();
+    }
   }
 });
 
