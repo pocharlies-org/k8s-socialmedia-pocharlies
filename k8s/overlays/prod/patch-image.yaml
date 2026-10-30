@@ -49,6 +49,11 @@
 # SC-3681 30-10: los tres house whatsapp-connector* avanzan v1.3.120 -> v1.3.133 (run 40988750820,
 # deploy/prod@a1b2544): POST /groups/photo (foto de grupo, #406) y override decode-uri-component 0.5.1
 # (CVE-2026-118664, #407). Digest comprobado en Harbor (API artifacts).
+#
+# INFRA-1008 30-10: los dos house telegram-connector* avanzan v1.3.130 -> v1.3.133 (mismo run
+# 40988750820, deploy/prod@a1b2544, que ya trae la fusión 3afe07d del PR #405): getMessages pagina
+# con iterHistory (before/after sobre /api/public/messages/:chatId, sin tope de 100 por llamada).
+# Digest comprobado en Harbor (crane). telegram-pairing sigue en v1.3.57.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -128,7 +133,7 @@ spec:
         # dead code); spelled out here now that the block dropped the name.
         # Same digest as the live pod — zero rollout.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.130@sha256:8814cdaf92a99447e15ca1b7ec5af6a27f33d15e3212c3937232601c0a4ea912
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.133@sha256:d21bb7e8efba8c8eaa8865f5b5aa5cdfd18ffdde7fcc01f6c1f12402a633915d
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -143,7 +148,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.130@sha256:8814cdaf92a99447e15ca1b7ec5af6a27f33d15e3212c3937232601c0a4ea912
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.133@sha256:d21bb7e8efba8c8eaa8865f5b5aa5cdfd18ffdde7fcc01f6c1f12402a633915d
 ---
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
