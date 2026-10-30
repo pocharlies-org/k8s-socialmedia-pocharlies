@@ -27,6 +27,9 @@ overrides:
   # Scoped to the 9.x line on purpose: eslint pulls minimatch 3.x, whose API
   # differs, and 3.1.5 is already past the fixed 3.1.4.
   minimatch@9: ^9.0.9
+  # CVE-2026-118664 (HIGH) is fixed in 0.5.1. Reaches us through minio ->
+  # query-string@7, which pins ^0.2.2 itself; the package is one function.
+  decode-uri-component: ^0.5.1
   # Reaches us through @nestjs/platform-express, which pins the version itself.
   # CVE-2026-77037, CVE-2026-77078 and CVE-2026-82333 are fixed in 2.3.0, and
   # CVE-2026-113872 (unhandled stream error when a request aborts during an async
