@@ -6,9 +6,10 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
-    // jose v6 (SC-1227 JWT verifier) is ESM-only: ts-jest compiles it down to
+    // jose v6 (SC-1227 JWT verifier) and decode-uri-component 0.5.1 (SC-3681,
+    // via minio -> query-string) are ESM-only: ts-jest compiles them down to
     // CJS for this suite. The transformIgnorePatterns below is what lets ONLY
-    // jose through — everything else in node_modules stays untransformed.
+    // them through — everything else in node_modules stays untransformed.
     '^.+\\.js$': [
       'ts-jest',
       {
@@ -21,7 +22,7 @@ module.exports = {
       },
     ],
   },
-  transformIgnorePatterns: ['/node_modules/\\.pnpm/(?!jose@)'],
+  transformIgnorePatterns: ['/node_modules/\\.pnpm/(?!jose@|decode-uri-component@)'],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
