@@ -20,6 +20,11 @@ export { deserializeDurableValue, serializeDurableValue } from './whatsapp-capab
 
 let tablesReady = false;
 
+/** Lets the bootstrap specs re-run `ensureDurableTables` against a fresh fake pool. */
+export function resetDurableTablesForTests(): void {
+  tablesReady = false;
+}
+
 function pool(): Pool {
   return getPool();
 }
@@ -82,9 +87,18 @@ export async function ensureDurableTables(): Promise<void> {
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `);
+    // The chat index keys on the timestamp column this table actually carries:
+    // the NAS table orders by message_timestamp_ms, the fresh migration-015
+    // shape only has wa_timestamp (the same two shapes adoptPayloadTimestampShape
+    // picks for inserts). Probing beats assuming: on the fresh shape the
+    // hardcoded column aborted connect() with 42703 (SC-3681, prod 30-10).
+    const legacyTs = await client.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'whatsapp_message_payloads' AND column_name = 'message_timestamp_ms'`
+    );
     await client.query(`
     CREATE INDEX IF NOT EXISTS idx_whatsapp_message_payloads_chat
-      ON whatsapp_message_payloads (account, conversation_id, message_timestamp_ms DESC)
+      ON whatsapp_message_payloads (account, conversation_id, ${legacyTs.rowCount ? 'message_timestamp_ms' : 'wa_timestamp'} DESC)
   `);
     for (const ddl of PAYLOAD_PARTIAL_INDEX_DDL) await client.query(ddl);
     await client.query(`
