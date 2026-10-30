@@ -534,14 +534,19 @@ spec:
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_LEILA_URL, value: "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001" }
-            # SC-1144 fase 2: vinculos sub->cuentas (k8s/base/social-identity-bindings.yaml
-            # -> ConfigMap social-identity-bindings, montado en /identity). La bandera
-            # sale OFF del repo: con OFF el enrutado es byte-identico al de hoy (cero
-            # lecturas del fichero). Volcarla a "on" es decision del operador, y exige
-            # que el llamante traiga el x-user-sub que estampa el AgentGateway — por la
-            # LAN con el bearer compartido no hay sub => fail-closed. Ver el riesgo
-            # residual documentado en CLAUDE.md (lo cierra SC-1146, parte 5).
-            - { name: SOCIAL_IDENTITY_BINDING, value: "off" }
+            # SC-1144 (SC-705 P1): vinculos sub->cuentas (k8s/base/social-identity-bindings.yaml
+            # -> ConfigMap social-identity-bindings, montado en /identity). ON desde el
+            # flip de P1 (10-plan v3.2, APROBADO por el architect): cada llamante de
+            # /social trae el x-user-sub que estampa el AgentGateway (JWT verificado de
+            # Keycloak edani) y solo obtiene las cuentas ligadas a su sub — fail-closed
+            # por ausencia. Los tres subs vigentes estan reconciliados y ligados (CM):
+            # maquina 2379d025 (casa, via auth-proxy), Daniel e51253a7 y Leila 66ec6f4f
+            # (ambos con el rol de realm agentgateway-read:social concedido el 30-10,
+            # prerrequisito de la puerta INFRA-142). Un llamante sin sub verificado
+            # (bearer compartido por LAN) queda fuera => fail-closed; la retirada del
+            # bearer es SC-1146 (parte 5). Rollback = revert de este commit (el CM se
+            # relee en caliente; el flag es env del Deployment: rueda mcp-sse).
+            - { name: SOCIAL_IDENTITY_BINDING, value: "on" }
             - { name: SOCIAL_IDENTITY_BINDINGS_FILE, value: "/identity/social-identity-bindings.yaml" }
             # Registro de cuentas: catalogo, enrutado a conectores, health y
             # politica de envio en frio salen de aqui (account-registry.ts).
