@@ -59,6 +59,12 @@
 # deploy/prod@7f3fc60): el arranque del 133 murió con 42703 (el índice de chat fijaba
 # message_timestamp_ms y la tabla de prod, forma fresca de la 015, solo tiene wa_timestamp) —
 # CrashLoop de los tres hasta aquí. Fix #409. Digest comprobado en Harbor (API artifacts).
+#
+# SC-3681 30-10: RETROCESO de los tres a v1.3.120 (deploy/prod@917626b). El tronco del 133/134 trae el
+# fail-closed de SC-2092 (createConnectorAccess rechaza CONNECTOR_SHARED_SECRET == placeholder), y el
+# item de 1Password `whatsapp-mcp` sigue con el placeholder del repo: con el 134 toda la API del
+# conector responde 401 (también los envíos del mcp-server). Con el 120, que no tiene ese gate, el
+# HMAC con placeholder funciona como siempre. Avanzar de nuevo exige clave real en 1Password primero.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -69,7 +75,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.134@sha256:952f3161eda3ebe0f1358a0252346ebf1e35c706493eab0434ce480ca35461d7
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
@@ -86,7 +92,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.134@sha256:952f3161eda3ebe0f1358a0252346ebf1e35c706493eab0434ce480ca35461d7
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 # SKIRM-103 10-10: whatsapp-connector-leila advances v1.3.103 -> v1.3.109 (run 38008072969,
@@ -104,7 +110,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-leila
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.134@sha256:952f3161eda3ebe0f1358a0252346ebf1e35c706493eab0434ce480ca35461d7
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
 ---
 # SKIRM-102 08-10: instagram-connector advances instagram-e69969eb -> v1.3.106
 # (Release Production run 37744603591, deploy/prod@897435e: #231 verifies
