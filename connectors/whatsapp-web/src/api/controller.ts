@@ -2299,6 +2299,32 @@ export function createRouter(
     })();
   });
 
+  // Set the icon of a group: admins only (restrict locks it too), the bytes
+  // decoded and sniffed like the own-profile photo, confirmed by picture
+  // identity. Validated (400) → sending gate (403) → connection (503).
+  // CONTRACT: http.whatsapp-connector.groups-photo.v1 — body {groupId, fileUrl | imageBase64 + mimeType (jpeg|png|webp, ≤ 8 MB), confirm: true, actor?}, 200 {updated, groupId, photo: {available, accepted, confirmed, reason}, mimeType, bytes}
+  router.post('/groups/photo', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const request = parseProfilePhotoRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const input =
+          request.kind === 'url'
+            ? await fetchProfilePhoto(request.fileUrl)
+            : { imageBase64: request.imageBase64, mimeType: request.mimeType };
+        const result = await client.setGroupPhoto(groupId, input, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        profileErrorResponse(res, e, 'set the group photo');
+      }
+    })();
+  });
+
   // Communities. Ids inside the signed body (communityId / groupId:
   // …@g.us). Reads are not gated; create / link / unlink / leave reach every
   // member: validated first (400, leave also needs confirm: true), then the

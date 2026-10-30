@@ -1418,6 +1418,25 @@ contracts:
     only). The path, the body fields, the 200 shape, the reasons and the failureClass values are contract:
     changing any is breaking — a new `.v2` entry beside this one. Also consumed by the MCP tool social_invite_to_group
     (mcp-server/src/mcp/server.ts canonicalInviteToGroup; added later, surface unchanged).'
+- id: http.whatsapp-connector.groups-photo.v1
+  kind: http-route
+  value: /groups/photo
+  role: provider
+  files:
+  - connectors/whatsapp-web/src/api/controller.ts
+  status: active
+  note: 'POST /api/v1/groups/photo of the house WhatsApp connectors: set a group''s icon (Baileys
+    updateProfilePicture, which points the w:profile:picture IQ at the group target; sharp re-encodes).
+    HMAC-signed body {groupId, fileUrl | imageBase64 + mimeType, confirm: true, actor?}: groupId a
+    `…@g.us` (account prefix allowed); the photo exactly like profile-me-photo.v1 (jpeg|png|webp,
+    ≤ 8 MB, bytes sniffed; confirm: true required). 400 invalid_request first, then the sending gate
+    (403 disabled_sending), then 503 disconnected. Fresh metadata: 403 not_group_member / not_group_admin
+    (admins only — restrict locks the icon too), 422 community_unsupported. The write is confirmed by
+    picture identity (photo {available, accepted, confirmed, reason}, same shape as profile-me-photo.v1).
+    200 {updated: true, groupId, photo, mimeType, bytes}. No DB write, no NATS event. The path, the body
+    fields, the 200 shape and the failureClass values are contract: changing any is breaking — a new
+    `.v2` entry beside this one. Also consumed by the MCP tool social_manage_group (action setPhoto,
+    mcp-server/src/mcp/server.ts canonicalManageGroup).'
 - id: http.whatsapp-connector.messages-star.v1
   kind: http-route
   value: /messages/star

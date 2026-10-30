@@ -113,7 +113,8 @@ Writes pass through the connector's `ENABLE_SENDING` /
 - `social_set_chat_state`: `archive`, `unarchive`, `pin`, `unpin`, `mute`
   (optional `durationMs` or `muteUntil`), `unmute`, `markRead`, `markUnread`.
 - `social_get_group` / `social_manage_group`: `create`, `update` (subject,
-  description, `announce`, `restrict`), `add|remove|promote|demoteParticipants`.
+  description, `announce`, `restrict`), `add|remove|promote|demoteParticipants`,
+  `setPhoto` (`photoUrl`, admins only — WhatsApp's own crop and rules apply).
   An add WhatsApp refuses for someone's privacy lists them in `inviteRequired`
   (in `data`, or in `error.details` when nobody was added).
 - `social_invite_to_group` (admins only): sends WhatsApp's private "join group"

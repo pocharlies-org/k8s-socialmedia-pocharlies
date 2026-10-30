@@ -352,6 +352,41 @@ describe('social_get_group / social_manage_group', () => {
     );
   });
 
+  it('sets the group icon through POST /groups/photo with confirm (SC-3681)', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({
+      updated: true,
+      groupId: '1203@g.us',
+      photo: { available: true, accepted: true, confirmed: true, reason: 'IDENTITY_CHANGED' },
+      mimeType: 'image/png',
+      bytes: 67,
+    });
+    const out = await run('social_manage_group', {
+      ...wa,
+      target: '1203@g.us',
+      action: 'setPhoto',
+      photoUrl: 'https://cdn.example/x.png',
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/groups/photo',
+      { groupId: '1203@g.us', fileUrl: 'https://cdn.example/x.png', confirm: true }
+    );
+    expect(out.structuredContent).toMatchObject({
+      status: 'accepted',
+      data: { photo: { confirmed: true } },
+    });
+  });
+
+  it('refuses setPhoto without a photoUrl (SC-3681)', async () => {
+    const { run, connectorCall } = serverWith();
+    await expect(
+      run('social_manage_group', { ...wa, target: '1203@g.us', action: 'setPhoto' })
+    ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    expect(connectorCall).not.toHaveBeenCalled();
+  });
+
   it('refuses another account participant and an update with nothing to change', async () => {
     const { run, connectorCall } = serverWith();
     const foreign = await run('social_manage_group', {

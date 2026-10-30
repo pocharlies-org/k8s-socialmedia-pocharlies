@@ -336,12 +336,14 @@ import {
   applyProfileUpdates,
   OwnProfilePhotoProvider,
   ProfileIo,
+  ProfilePhotoOutcome,
   ProfileUpdateInput,
   ProfileUpdateResult,
   readOwnProfile,
   readOwnProfilePhotoBytes,
   removeOwnProfilePhoto,
   setOwnProfilePhoto,
+  setPhotoForJid,
 } from './profile-service';
 import {
   buildPrivacyUpdate,
@@ -6789,6 +6791,33 @@ export class BaileysClient extends EventEmitter {
       group: refreshed ? this.groupView(refreshed, own) : null,
       ...(inviteRequired ? { inviteRequired } : {}),
     };
+  }
+
+  /**
+   * Set the group's icon (POST /groups/photo): admins only — the same
+   * capability as the settings, because `restrict` locks the icon too. The
+   * bytes are decoded and sniffed exactly like an own-profile photo and the
+   * write is confirmed by picture identity.
+   */
+  async setGroupPhoto(
+    groupId: string,
+    input: { imageBase64?: unknown; mimeType?: unknown },
+    request: MessageMutationRequest = {}
+  ): Promise<{ groupId: string; photo: ProfilePhotoOutcome; mimeType: string; bytes: number }> {
+    const raw = parseGroupJid(groupId);
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    if (!capabilities.changeSettings) {
+      throw new GroupActionError(
+        `Only admins can change the photo of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+    const result = await setPhotoForJid(this.ownProfileProvider(), raw, input);
+    this.logger.info(`Group ${raw} photo set${request.actor ? ` by ${request.actor}` : ''}`);
+    return { groupId: this.normalizeJid(raw), ...result };
   }
 
   /**
