@@ -112,6 +112,25 @@ spec:
         - name: whatsapp-connector-leila
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
 ---
+# SC-1144 (SC-705 P1): alta del despliegue de servicio de WhatsApp de Daniel
+# (whatsapp-connector-daniel, generado desde social-accounts.json). El generador
+# lo dejaría en v1.3.115; la autoridad de imágenes es este fichero y el pin es el
+# mismo digest v1.3.120 que corre en los tres Baileys de la casa (SC-3681: techo
+# del whatsapp-connector — el tronco del 133+ trae el fail-closed de SC-2092 y el
+# item 1Password `whatsapp-mcp` sigue con CONNECTOR_SHARED_SECRET placeholder;
+# subir de aquí es trabajo de security con 1Password, no de esta historia).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-connector-daniel
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-connector-daniel
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
+---
 # SKIRM-102 08-10: instagram-connector advances instagram-e69969eb -> v1.3.106
 # (Release Production run 37744603591, deploy/prod@897435e: #231 verifies
 # x-hub-signature-256 on POST /webhook). Since e69969eb that is the only commit
