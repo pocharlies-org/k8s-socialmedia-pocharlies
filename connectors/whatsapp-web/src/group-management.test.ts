@@ -115,8 +115,6 @@ interface Behaviour {
   descriptionError?: unknown;
   subjectError?: unknown;
   lid?: Record<string, string>;
-  photoError?: unknown;
-  photoUrls?: string[];
 }
 
 function makeClient(
@@ -185,11 +183,10 @@ function makeClient(
     },
     updateProfilePicture: async (jid: string, image: Buffer) => {
       calls.photos.push([jid, image]);
-      if (behaviour.photoError) throw behaviour.photoError;
     },
     // The stored picture changes identity after a successful write.
     profilePictureUrl: async () => {
-      const urls = behaviour.photoUrls ?? ['https://cdn.example/a', 'https://cdn.example/b'];
+      const urls = ['https://cdn.example/a', 'https://cdn.example/b'];
       return urls[Math.min(calls.photos.length, urls.length - 1)];
     },
     end: () => {},
