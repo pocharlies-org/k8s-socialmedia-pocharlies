@@ -104,6 +104,7 @@ interface SockCalls {
   description: Array<[string, string | undefined]>;
   settings: Array<[string, string]>;
   participants: Array<{ jid: string; participants: string[]; action: string }>;
+  photos: Array<[string, Buffer]>;
 }
 
 interface Behaviour {
@@ -114,6 +115,8 @@ interface Behaviour {
   descriptionError?: unknown;
   subjectError?: unknown;
   lid?: Record<string, string>;
+  photoError?: unknown;
+  photoUrls?: string[];
 }
 
 function makeClient(
@@ -128,6 +131,7 @@ function makeClient(
     description: [],
     settings: [],
     participants: [],
+    photos: [],
   };
   const handlers: Record<string, (u: any) => unknown> = {};
   const lid = behaviour.lid || {};
@@ -179,6 +183,15 @@ function makeClient(
         ? behaviour.participantsAnswer(participants, action)
         : participants.map(p => ({ status: '200', jid: p }));
     },
+    updateProfilePicture: async (jid: string, image: Buffer) => {
+      calls.photos.push([jid, image]);
+      if (behaviour.photoError) throw behaviour.photoError;
+    },
+    // The stored picture changes identity after a successful write.
+    profilePictureUrl: async () => {
+      const urls = behaviour.photoUrls ?? ['https://cdn.example/a', 'https://cdn.example/b'];
+      return urls[Math.min(calls.photos.length, urls.length - 1)];
+    },
     end: () => {},
   };
   const internals = client as unknown as { sock: unknown; ready: boolean };
@@ -205,7 +218,8 @@ function sockCallsToWhatsApp(calls: SockCalls): number {
     calls.subject.length +
     calls.description.length +
     calls.settings.length +
-    calls.participants.length
+    calls.participants.length +
+    calls.photos.length
   );
 }
 
@@ -1240,6 +1254,19 @@ function recordingClient(): { client: Partial<BaileysClient>; seen: unknown[] } 
       seen.push({ participants: groupId, action, list: participants, ...request });
       return { groupId, action, succeeded: 1 } as never;
     },
+    setGroupPhoto: async (
+      groupId: string,
+      input: { imageBase64?: unknown; mimeType?: unknown },
+      request?: { actor?: string }
+    ) => {
+      seen.push({ photo: groupId, input, ...request });
+      return {
+        groupId,
+        photo: { available: true, accepted: true, confirmed: true, reason: 'IDENTITY_CHANGED' },
+        mimeType: 'image/png',
+        bytes: 67,
+      } as never;
+    },
   };
   return { client: client as unknown as Partial<BaileysClient>, seen };
 }
@@ -1515,4 +1542,94 @@ test('HTTP: the existing group reads are untouched', async () => {
     });
   });
   assert.deepEqual(seen, [`info ${GROUP}`, `participants ${GROUP}`]);
+});
+
+// ---------------------------------------------------------------------------
+// Group photo (SC-3681)
+// ---------------------------------------------------------------------------
+
+const PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('photo: admin sets the icon and the identity confirms; member and community never touch WhatsApp', async () => {
+  useAccount('professional');
+  const input = { imageBase64: PNG_B64, mimeType: 'image/png' };
+  const admin = makeClient({}, { meta: () => groupMeta({ selfAdmin: 'admin' }) });
+  const res = await admin.client.setGroupPhoto(GROUP, input, { actor: 'dani' });
+  assert.equal(res.groupId, GROUP);
+  assert.equal(res.photo.confirmed, true);
+  assert.equal(res.bytes, Buffer.from(PNG_B64, 'base64').length);
+  assert.deepEqual(admin.calls.photos, [[GROUP, Buffer.from(PNG_B64, 'base64')]]);
+
+  const member = makeClient({}, { meta: () => groupMeta({ selfAdmin: null }) });
+  await assert.rejects(
+    member.client.setGroupPhoto(GROUP, input),
+    (e: any) => e.status === 403 && e.failureClass === 'not_group_admin'
+  );
+  assert.equal(sockCallsToWhatsApp(member.calls), 0);
+
+  const community = makeClient(
+    {},
+    { meta: () => groupMeta({ selfAdmin: 'admin', community: true }) }
+  );
+  await assert.rejects(
+    community.client.setGroupPhoto(GROUP, input),
+    (e: any) => e.status === 422 && e.failureClass === 'community_unsupported'
+  );
+  assert.equal(sockCallsToWhatsApp(community.calls), 0);
+});
+
+test('photo HTTP: validated before the gate; 200 carries the identity confirmation', async () => {
+  useAccount('professional');
+  const valid = { groupId: GROUP, imageBase64: PNG_B64, mimeType: 'image/png', confirm: true };
+  const { client, seen } = recordingClient();
+  await withRouter(
+    client,
+    { ENABLE_SENDING: 'false', EMERGENCY_DISABLE_SENDING: undefined },
+    async call => {
+      // A bad request answers 400 even with the gate closed: validation comes first.
+      for (const bad of [
+        { groupId: GROUP, imageBase64: PNG_B64, mimeType: 'image/png' },
+        { groupId: '34600@s.whatsapp.net', imageBase64: PNG_B64, mimeType: 'image/png', confirm: true },
+        {
+          groupId: GROUP,
+          imageBase64: PNG_B64,
+          mimeType: 'image/png',
+          confirm: true,
+          fileUrl: 'https://cdn.example/x.png',
+        },
+        { groupId: GROUP, confirm: true },
+      ]) {
+        const res = await call('POST', '/groups/photo', bad);
+        assert.equal(res.status, 400, JSON.stringify(bad));
+      }
+      assert.deepEqual(seen, []);
+      const gated = await call('POST', '/groups/photo', valid);
+      assert.equal(gated.status, 403);
+      assert.equal(
+        ((await gated.json()) as { failureClass: string }).failureClass,
+        'disabled_sending'
+      );
+    }
+  );
+  await withRouter(client, ON, async call => {
+    const ok = await call('POST', '/groups/photo', { ...valid, actor: 'dani' });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), {
+      updated: true,
+      groupId: GROUP,
+      photo: { available: true, accepted: true, confirmed: true, reason: 'IDENTITY_CHANGED' },
+      mimeType: 'image/png',
+      bytes: 67,
+    });
+    assert.deepEqual(seen, [
+      { photo: GROUP, input: { imageBase64: PNG_B64, mimeType: 'image/png' }, actor: 'dani' },
+    ]);
+  });
+  const offline = recordingClient();
+  (offline.client as any).isConnected = () => false;
+  await withRouter(offline.client, ON, async call => {
+    const res = await call('POST', '/groups/photo', valid);
+    assert.equal(res.status, 503);
+  });
 });

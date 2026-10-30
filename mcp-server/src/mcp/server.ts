@@ -2481,6 +2481,16 @@ export class MCPServer {
         })
       );
     }
+    if (action === 'setPhoto') {
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/groups/photo', {
+          groupId,
+          fileUrl: this.string(args, 'photoUrl'),
+          confirm: true,
+          ...this.connectorActor(),
+        })
+      );
+    }
     const participantAction: Record<string, string> = {
       addParticipants: 'add',
       removeParticipants: 'remove',

@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:bb9c14c82e2c7de7beafc01abeee1a59b938d91c7856f25b88ba35cc45ddfeaa",
+  "digest": "sha256:d6465bb5a49b38085ae01e1393c445a6d896a4bae850c17eda3cdbbfe25a2323",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -8642,7 +8642,7 @@
     {
       "name": "social_manage_group",
       "title": "Manage group",
-      "description": "Create a group, change its subject, description or settings, or add, remove, promote or demote participants (WhatsApp). Members see every change. People an add cannot reach because of their privacy come back in inviteRequired: invite them with social_invite_to_group.",
+      "description": "Create a group, change its subject, description or settings, set its icon (action setPhoto with photoUrl), or add, remove, promote or demote participants (WhatsApp). Members see every change. People an add cannot reach because of their privacy come back in inviteRequired: invite them with social_invite_to_group.",
       "effect": "destructive",
       "authScope": "social.write",
       "capability": "groups.manage",
@@ -8680,11 +8680,16 @@
             "enum": [
               "create",
               "update",
+              "setPhoto",
               "addParticipants",
               "removeParticipants",
               "promoteParticipants",
               "demoteParticipants"
             ]
+          },
+          "photoUrl": {
+            "type": "string",
+            "description": "setPhoto only: http(s) URL of the new group icon (jpeg, png or webp, ≤ 8 MB)."
           },
           "subject": {
             "type": "string",
@@ -8769,6 +8774,21 @@
                     "restrict"
                   ]
                 }
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "setPhoto"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "target",
+                "photoUrl"
               ]
             }
           },

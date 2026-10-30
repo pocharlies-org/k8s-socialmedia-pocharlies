@@ -1628,10 +1628,10 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     name: 'social_manage_group',
     title: 'Manage group',
     description:
-      'Create a group, change its subject, description or settings, or add, remove, ' +
-      'promote or demote participants (WhatsApp). Members see every change. People an add ' +
-      'cannot reach because of their privacy come back in inviteRequired: invite them ' +
-      'with social_invite_to_group.',
+      'Create a group, change its subject, description or settings, set its icon ' +
+      '(action setPhoto with photoUrl), or add, remove, promote or demote participants ' +
+      '(WhatsApp). Members see every change. People an add cannot reach because of their ' +
+      'privacy come back in inviteRequired: invite them with social_invite_to_group.',
     effect: 'destructive',
     authScope: 'social.write',
     capability: 'groups.manage',
@@ -1644,11 +1644,17 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
           enum: [
             'create',
             'update',
+            'setPhoto',
             'addParticipants',
             'removeParticipants',
             'promoteParticipants',
             'demoteParticipants',
           ],
+        },
+        photoUrl: {
+          type: 'string',
+          description:
+            'setPhoto only: http(s) URL of the new group icon (jpeg, png or webp, ≤ 8 MB).',
         },
         subject: { type: 'string', minLength: 1, maxLength: 100 },
         description: {
@@ -1687,6 +1693,10 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
                 { required: ['restrict'] },
               ],
             },
+          },
+          {
+            if: { properties: { action: { const: 'setPhoto' } } },
+            then: { required: ['target', 'photoUrl'] },
           },
           {
             if: {
