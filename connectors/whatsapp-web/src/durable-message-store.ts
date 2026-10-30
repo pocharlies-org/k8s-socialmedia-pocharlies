@@ -94,7 +94,7 @@ export async function ensureDurableTables(): Promise<void> {
     // hardcoded column aborted connect() with 42703 (SC-3681, prod 30-10).
     const legacyTs = await client.query(
       `SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'whatsapp_message_payloads' AND column_name = 'message_timestamp_ms'`,
+        WHERE table_name = 'whatsapp_message_payloads' AND column_name = 'message_timestamp_ms'`
     );
     await client.query(`
     CREATE INDEX IF NOT EXISTS idx_whatsapp_message_payloads_chat

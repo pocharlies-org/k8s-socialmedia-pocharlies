@@ -72,13 +72,18 @@ test('the chat bootstrap index keys on the timestamp column the table carries', 
   // The NAS table orders by message_timestamp_ms; the fresh migration-015
   // shape (prod since the nvme cutover) only has wa_timestamp. Hardcoding the
   // legacy column made connect() crash with 42703 (SC-3681).
-  for (const [hasLegacy, column] of [[1, 'message_timestamp_ms'], [0, 'wa_timestamp']] as const) {
+  for (const [hasLegacy, column] of [
+    [1, 'message_timestamp_ms'],
+    [0, 'wa_timestamp'],
+  ] as const) {
     const queries: string[] = [];
     const original = pg.Pool.prototype.connect;
     (pg.Pool.prototype as any).connect = async () => ({
       query: async (sql: string) => {
         queries.push(sql);
-        return /information_schema.columns/.test(sql) ? { rowCount: hasLegacy, rows: [] } : { rows: [] };
+        return /information_schema.columns/.test(sql)
+          ? { rowCount: hasLegacy, rows: [] }
+          : { rows: [] };
       },
       release: () => {},
     });
@@ -130,8 +135,7 @@ function stubPool(input: Record<string, unknown>[] | Responder = []): {
 } {
   const calls: QueryCall[] = [];
   const original = pg.Pool.prototype.query;
-  const responder: Responder =
-    typeof input === 'function' ? input : async () => ({ rows: input });
+  const responder: Responder = typeof input === 'function' ? input : async () => ({ rows: input });
   (pg.Pool.prototype as any).query = function (sql: string, params: unknown[] = []) {
     calls.push({ sql, params });
     return responder(sql, params);
@@ -177,8 +181,6 @@ function textMessage(id: string, remoteJid: string, ts = nowSeconds()): WAMessag
 
 const payloadInserts = (calls: QueryCall[]): QueryCall[] =>
   calls.filter(c => /INSERT INTO whatsapp_message_payloads/i.test(c.sql));
-
-
 
 test('raw chat storage ignores Novedades IDs that may collide with chat messages', async () => {
   const { calls, restore } = stubPool();
@@ -840,10 +842,18 @@ test('timestamp shape probe supports the legacy, fresh-migration, and expanded N
       const insert = payloadInserts(calls).at(-1)!;
       assert.match(insert.sql, schema.insert, schema.name);
       if (schema.excludes) assert.doesNotMatch(insert.sql, schema.excludes, schema.name);
-      assert.equal(insert.params[5] instanceof Date, schema.timestampParam instanceof Date, schema.name);
-      assert.equal(insert.params[5] instanceof Date ? insert.params[5].getTime() : insert.params[5],
-        schema.timestampParam instanceof Date ? schema.timestampParam.getTime() : schema.timestampParam,
-        schema.name);
+      assert.equal(
+        insert.params[5] instanceof Date,
+        schema.timestampParam instanceof Date,
+        schema.name
+      );
+      assert.equal(
+        insert.params[5] instanceof Date ? insert.params[5].getTime() : insert.params[5],
+        schema.timestampParam instanceof Date
+          ? schema.timestampParam.getTime()
+          : schema.timestampParam,
+        schema.name
+      );
     } finally {
       restore();
       restoreAccount();
