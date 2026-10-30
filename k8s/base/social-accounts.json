@@ -74,6 +74,28 @@
     "brainInstance": "personal"
   },
   {
+    "channel": "whatsapp",
+    "accountId": "daniel",
+    "label": "WhatsApp daniel",
+    "profile": "daniel",
+    "connectorUrl": "http://whatsapp-connector-daniel.whatsapp-mcp.svc.cluster.local:3001",
+    "deploy": {
+      "emitAudioAttachments": true,
+      "allowWebRenew": false,
+      "env": [
+        {
+          "name": "WA_RECONNECT_BACKFILL_WINDOW_HOURS",
+          "value": "6"
+        },
+        {
+          "name": "WA_RECONNECT_BACKFILL_MAX_MESSAGES",
+          "value": "500"
+        }
+      ]
+    },
+    "brainInstance": "personal"
+  },
+  {
     "channel": "telegram",
     "accountId": "personal",
     "label": "Telegram personal",

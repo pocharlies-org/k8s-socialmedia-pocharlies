@@ -40,11 +40,14 @@ bindings:
     label: operator-machines (agentgateway-mcp service-account via auth-proxy)
     accounts: [personal, professional, skirmshop, barbelpapis]
 
-  # Daniel — usuario humano de Keycloak (me@e-dani.com). Mismas cuentas que las
-  # maquinas de operador; `leila` deliberadamente NO.
+  # Daniel — usuario humano de Keycloak (me@e-dani.com). Las mismas cuentas que
+  # las maquinas de operador MAS su cuenta propia `daniel` (SC-1144: el
+  # despliegue de servicio whatsapp-connector-daniel con CREDENTIAL_SESSION_KEY
+  # = este sub; fail-closed por ausencia — si la cuenta no estuviera aqui, su
+  # sesion nueva quedaria rechazada). `leila` deliberadamente NO.
   - sub: e51253a7-c137-4c6c-9fb9-af9cecd3b147
     label: daniel
-    accounts: [personal, professional, skirmshop, barbelpapis]
+    accounts: [personal, professional, skirmshop, barbelpapis, daniel]
 
   # Leila (lays84.mv@gmail.com) — solo su cuenta. `personal` y `professional`
   # deliberadamente NO. Su WhatsApp se empareja a mano por el QR de

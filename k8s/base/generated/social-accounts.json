@@ -24,6 +24,14 @@
     "brainInstance": "personal"
   },
   {
+    "channel": "whatsapp",
+    "accountId": "daniel",
+    "label": "WhatsApp daniel",
+    "profile": "daniel",
+    "connectorUrl": "http://whatsapp-connector-daniel.whatsapp-mcp.svc.cluster.local:3001",
+    "brainInstance": "personal"
+  },
+  {
     "channel": "telegram",
     "accountId": "personal",
     "label": "Telegram personal",

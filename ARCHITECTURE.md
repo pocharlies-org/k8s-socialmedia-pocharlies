@@ -198,6 +198,38 @@ Total de casos Jest: **pendiente de medir**.
 - Canales de WhatsApp que sigue la cuenta (SKIRM-106, migración 021): Baileys rc13 no puede preguntar a WhatsApp qué canales sigue una cuenta, así que `GET /channels` (`social_list_channels`) parte de candidatos y confirma cada uno con su metadata. `whatsapp_novedades_channels` es la memoria de esos candidatos (una fila `(account, channel_jid)` por canal que el conector vio seguir: la escribe `lookupChannel` o `setChannelSubscription` al confirmarlo y la borra la confirmación contraria, solo con `ingest`); no es la respuesta: cada fila se vuelve a confirmar en cada listado, así que una fila vieja nunca lista un canal que no se sigue. Sin tabla (021 sin aplicar) el conector avisa una vez, no recuerda nada y vuelve a preguntar cada pocos minutos, sin reiniciar: el orden conector / migración no importa. No hay backfill: un canal seguido antes de la 021 se recuerda la próxima vez que se consulte o se siga.
 - Identidad de un post de canal de WhatsApp (SKIRM-106): el id de un mensaje de `<id>@newsletter` solo es único dentro de su canal, y `messages.wa_message_id` es una clave por cuenta con `ON CONFLICT DO NOTHING`. `channelPostMessageId` (`connectors/whatsapp-web/src/statuses.ts`) deja el id tal cual salvo que otro canal ya lo tenga: entonces el post se guarda, con su `whatsapp_message_keys`, bajo `<jid del canal>:<id>` (sin migración y sin tocar filas existentes). El ingest y el revoke o la edición que nombran el post usan la misma función, así que llegan a la fila de SU canal; `social_list_channel_posts` devuelve ese `messageId` compuesto. `whatsapp_message_payloads` guarda una copia por id y su `key.id` es el de WhatsApp, así que el payload de un post guardado con id compuesto no se escribe (el del primer canal queda intacto).
 - Un borrado que llega antes de su post (SKIRM-106): para un post de canal o un estado, `handleInboundMutation` anota en memoria (`noteRevokeBeforePost` en `statuses.ts`) el revoke que no encontró fila, con clave `<chat>|<id de WhatsApp>` tal como llega (antes de componer el id y sin prefijo de cuenta, así ni el orden de llegada ni el id compuesto dan la tumba a otro canal), y `ingestMessage` la consume (`takeRevokeBeforePost`) justo después de guardar el post y lo marca borrado como cualquier revoke (el contenido se queda y sale `message-update DELETED`). Como mucho 2000 anotaciones (sale la más antigua) y 24 h de vida. **Límite**: no sobrevive a un reinicio y cubre la carrera dentro de un proceso (lote de reconexión, historia); una tumba durable sería una migración 022 aparte. Dos líneas `info` para medirla: «found no post: remembered» y «arrived before its post: applied».
+- **Serving por sub (SC-705/SC-1144, WhatsApp por usuario).** Un usuario humano no comparte el proceso del
+  conector de casa: cada sesión emparejada se sirve desde SU Deployment nombrado
+  (`whatsapp-connector-<accountId>`, p. ej. `whatsapp-connector-daniel` / `-leila` en ns `whatsapp-mcp`),
+  generado desde `k8s/base/social-accounts.json` con `python3 scripts/render-connectors.py` (única vía a
+  `k8s/base/generated/connectors.yaml`; nunca a mano — CI `--check`). La sesión del almacén cifrado
+  (`shared/src/session-store/`, tabla `user_channel_credentials` en la DB `whatsappmcp`) se selecciona por
+  `CREDENTIAL_SESSION_KEY` = el **sub JWT de Keycloak** del usuario (convención
+  `shared/src/session-store/credential-session-key.ts`: `<sub>` o `<sub>:<cuenta>`; el pool de pairing
+  estampa siempre el sub del JWT en la fila). Esos dos envs (`CREDENTIAL_STORE_ENABLED=true` +
+  `CREDENTIAL_SESSION_KEY=<sub>`) van en `k8s/overlays/prod/patch-credential-store.yaml` — no en el
+  registro ni en `generated/` — y el pin de imagen del conector en `k8s/overlays/prod/patch-image.yaml`
+  (atomicidad CTO: el flag ON solo viaja con un pin que lleve `payload-crypto`; techo actual del
+  whatsapp-connector **v1.3.120**: el tronco del 133+ trae el fail-closed de SC-2092 y
+  `CONNECTOR_SHARED_SECRET` sigue placeholder en 1Password — subirlo es trabajo de `security`). La clave
+  maestra del store llega por el `envFrom` compartido `whatsapp-mcp-secrets` (patrón SC-1197: cero
+  ExternalSecrets nuevos por cuenta). El enrutado por identidad lo decide
+  `mcp-server/src/domain/identity-bindings.ts` (`resolveBoundAccount`, `canonicalCode 'forbidden'`) cuando
+  `SOCIAL_IDENTITY_BINDING=on` (`k8s/base/manifest.yaml`, Deployment `mcp-sse`), leyendo el ConfigMap
+  `social-identity-bindings` generado desde `k8s/base/social-identity-bindings.yaml` (nombre estático a
+  propósito: el código relee por mtime, editar un vínculo no reinicia el pod; cambiar el flag sí, es env
+  del Deployment). **El mismo sub tiene que coincidir en los tres sitios**: la entrada del CM de bindings,
+  el `CREDENTIAL_SESSION_KEY` de su Deployment y el sub del JWT que estampa el AgentGateway (`/social`,
+  `x-user-sub`); un sub distinto en cualquiera deja la sesión fail-closed o la fila huérfana. Con la
+  bandera OFF el fichero no se lee y el enrutado es el camino legacy byte-idéntico. Los conectores de
+  casa (`whatsapp-connector` personal/professional) **no** se encienden al store (decisión 2 del spec:
+  sus credenciales siguen en el Secret hasta migrar el canal) y la vía de máquina (service-account
+  `agentgateway-mcp`, sub `2379d025-…`) se conserva ligada a las cuentas de casa. El emparejamiento QR es
+  un gesto humano fuera de los manifiestos (API de pairing SC-1197; páginas `/qr` tras `sso-chain`).
+  Guardrail vivo: `python3 scripts/check-social-isolation.py` (token de máquina por `/social`: las cuentas
+  no ligadas al sub devuelven rechazo explícito, nunca datos; rojo con la bandera off, verde tras el flip).
+  Prerrequisito de la puerta INFRA-142: cada sub humano necesita el rol de realm
+  `agentgateway-read:social` en Keycloak `edani` (imperativo, fuera del repo), o recibe 403 en `/social`.
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
 Última verificación contra el código: 2026-10-10 · 523a9e8 (origin/deploy/prod)
