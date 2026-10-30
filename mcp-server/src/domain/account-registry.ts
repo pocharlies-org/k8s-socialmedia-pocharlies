@@ -243,6 +243,11 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       connectorUrl: env.WHATSAPP_LEILA_URL || 'http://whatsapp-connector-leila:3001',
     },
     {
+      channel: 'whatsapp',
+      accountId: 'daniel',
+      connectorUrl: env.WHATSAPP_DANIEL_URL || 'http://whatsapp-connector-daniel:3001',
+    },
+    {
       channel: 'telegram',
       accountId: 'personal',
       connectorUrl: env.TELEGRAM_PERSONAL_URL || tg,
