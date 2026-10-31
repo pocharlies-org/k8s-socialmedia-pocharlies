@@ -261,6 +261,18 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       brainInstance: 'skirmshop',
     },
     {
+      channel: 'telegram',
+      accountId: 'daniel',
+      connectorUrl: env.TELEGRAM_DANIEL_URL || 'http://telegram-connector-daniel:3002',
+      bridgeUrl: env.TELEGRAM_BRIDGE_DANIEL_URL || 'http://telegram-sync-daniel:3080',
+    },
+    {
+      channel: 'telegram',
+      accountId: 'leila',
+      connectorUrl: env.TELEGRAM_LEILA_URL || 'http://telegram-connector-leila:3002',
+      bridgeUrl: env.TELEGRAM_BRIDGE_LEILA_URL || 'http://telegram-sync-leila:3080',
+    },
+    {
       channel: 'instagram',
       accountId: 'skirmshop',
       namespace: 'professional',
