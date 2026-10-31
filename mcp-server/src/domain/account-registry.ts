@@ -241,6 +241,7 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       channel: 'whatsapp',
       accountId: 'leila',
       connectorUrl: env.WHATSAPP_LEILA_URL || 'http://whatsapp-connector-leila:3001',
+      brainInstance: 'leila',
     },
     {
       channel: 'whatsapp',
@@ -271,6 +272,7 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       accountId: 'leila',
       connectorUrl: env.TELEGRAM_LEILA_URL || 'http://telegram-connector-leila:3002',
       bridgeUrl: env.TELEGRAM_BRIDGE_LEILA_URL || 'http://telegram-sync-leila:3080',
+      brainInstance: 'leila',
     },
     {
       channel: 'instagram',

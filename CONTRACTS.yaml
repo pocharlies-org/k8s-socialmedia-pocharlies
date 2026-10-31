@@ -1890,7 +1890,10 @@ contracts:
   status: active
   note: 'INFRA-364. Evento en el exchange topic `events` del vhost /synapse (RabbitMQ compartido; usuario
     whatsapp_mcp_brain_windows, solo escritura en `events`). tenant = family si la instancia del brain
-    de la cuenta (registro de cuentas) es personal, skirmshop si es skirmshop. Cuerpo JSON {data: {adapter
+    de la cuenta (registro de cuentas) es personal, skirmshop si es skirmshop. INFRA-554 (31-10): aditivo
+    sobre esta misma entrada — instancia leila → tenant leila (routing brain_window.leila.*, consumidor
+    el workflow leila.brain.conversation-window-* de synapse); el mapeo personal→family y skirmshop→skirmshop
+    no cambia. Cuerpo JSON {data: {adapter
     (whatsapp|telegram), source_id (el del primer documento), payload_hash (sha256 hex del array documents),
     documents: [{source_id, content, metadata}]}}, con los MISMOS documentos que describe http.brain.push-ingest.conversation-window.v1
     y como mucho 25 por evento. Propiedades AMQP: persistent, content_type application/json, message_id

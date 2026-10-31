@@ -71,7 +71,7 @@
         }
       ]
     },
-    "brainInstance": "personal"
+    "brainInstance": "leila"
   },
   {
     "channel": "whatsapp",
@@ -139,7 +139,7 @@
     "connectorUrl": "http://telegram-connector-leila.whatsapp-mcp.svc.cluster.local:3002",
     "bridgeUrl": "http://telegram-sync-leila.whatsapp-mcp.svc.cluster.local:3080",
     "deploy": { "sessionSecretKey": null },
-    "brainInstance": "personal"
+    "brainInstance": "leila"
   },
   {
     "channel": "instagram",
