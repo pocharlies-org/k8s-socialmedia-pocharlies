@@ -230,6 +230,24 @@ Total de casos Jest: **pendiente de medir**.
   no ligadas al sub devuelven rechazo explícito, nunca datos; rojo con la bandera off, verde tras el flip).
   Prerrequisito de la puerta INFRA-142: cada sub humano necesita el rol de realm
   `agentgateway-read:social` en Keycloak `edani` (imperativo, fuera del repo), o recibe 403 en `/social`.
+- **Serving por sub en Telegram (SC-705/SC-1145, P2 del mismo camino).** Mismo patrón que WhatsApp (arriba) con tres
+  particularidades. (1) La entrada del registro lleva `deploy.sessionSecretKey: null` **obligado**: por defecto el
+  renderizador pediría la clave `TELEGRAM_SESSION_STRING_<ID>` del Secret `whatsapp-mcp-secrets`, que no existe para
+  los subs → `CreateContainerConfigError`; el generador emite connector+sync por cuenta (`telegram-connector-<id>` :3002,
+  `telegram-sync-<id>` :3080 en sauvage), y el bloque `deploy` de Telegram **no admite env extra** (a diferencia del de
+  WhatsApp): flag, session key y vaciado van en el overlay. (2) **H2 — vaciado `TELEGRAM_SESSION_STRING=""`** en
+  `k8s/overlays/prod/patch-credential-store.yaml`: con `sessionSecretKey: null` la sesión de casa entraría por el
+  `envFrom` compartido y `resolveCredential` (`connectors/telegram/src/credential-session.ts`) haría
+  adopt-on-first-use — crearía la fila del sub con la sesión de casa y serviría la cuenta equivocada (viola la
+  decisión 2). `env` manda sobre `envFrom`, por eso el vacío tiene que ser un env fijado, no una ausencia. (3) **H3 —
+  CrashLoopBackOff esperado** hasta el gesto de pairing: sin fila en `user_channel_credentials` y sin env, `main.ts`
+  loguea «MTProto pairing gesture for this user is still pending» y sale con exit(1); es la señal visible de
+  emparejamiento pendiente (ArgoCD lo muestra rojo), no un defecto — con WhatsApp no pasa (sin fila queda arriba
+  sirviendo el QR). Pines: `telegram-connector-daniel/-leila` en `patch-image.yaml` al MISMO digest que la casa
+  (v1.3.133@sha256:d21bb7e8…, INFRA-1008); `telegram-sync-*` los mueve el bloque `images:` (v1.3.110) por nombre de
+  imagen. El techo H1 (no subir de v1.3.120) es solo de los conectores Baileys. El guardrail
+  `scripts/check-social-isolation.py` sondea por par (canal, cuenta) y pasa `channel: telegram` explícito en las
+  entradas de Telegram (una cuenta puede vivir en dos canales con el mismo `accountId` — N2).
 - [DECISION: k8s-socialmedia-pocharlies: el componente canónico de búsqueda semántica de mensajes es mcp-server/src/application/search.service.ts]
 
 Última verificación contra el código: 2026-10-10 · 523a9e8 (origin/deploy/prod)
