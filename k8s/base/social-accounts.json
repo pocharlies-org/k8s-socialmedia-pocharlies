@@ -122,6 +122,26 @@
     "brainInstance": "skirmshop"
   },
   {
+    "channel": "telegram",
+    "accountId": "daniel",
+    "label": "Telegram daniel",
+    "profile": "daniel",
+    "connectorUrl": "http://telegram-connector-daniel.whatsapp-mcp.svc.cluster.local:3002",
+    "bridgeUrl": "http://telegram-sync-daniel.whatsapp-mcp.svc.cluster.local:3080",
+    "deploy": { "sessionSecretKey": null },
+    "brainInstance": "personal"
+  },
+  {
+    "channel": "telegram",
+    "accountId": "leila",
+    "label": "Telegram leila",
+    "profile": "leila",
+    "connectorUrl": "http://telegram-connector-leila.whatsapp-mcp.svc.cluster.local:3002",
+    "bridgeUrl": "http://telegram-sync-leila.whatsapp-mcp.svc.cluster.local:3080",
+    "deploy": { "sessionSecretKey": null },
+    "brainInstance": "personal"
+  },
+  {
     "channel": "instagram",
     "accountId": "skirmshop",
     "label": "Instagram skirmshopes",

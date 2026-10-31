@@ -1142,3 +1142,357 @@ spec:
   - name: http
     port: 3080
     targetPort: 3080
+# ── telegram:daniel — Telegram daniel ──
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector-daniel
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: telegram-connector-daniel
+  template:
+    metadata:
+      labels:
+        app: telegram-connector-daniel
+    spec:
+      enableServiceLinks: false
+      nodeSelector:
+        topology: lan
+        kubernetes.io/arch: amd64
+      containers:
+      - name: telegram-connector
+        image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest
+        ports:
+        - name: http
+          containerPort: 3002
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3002
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
+        env:
+        - name: NATS_URL
+          value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: CONNECTOR_ACCOUNT
+          value: daniel
+        envFrom:
+        - secretRef:
+            name: whatsapp-mcp-secrets
+        resources:
+          requests:
+            cpu: 30m
+            memory: 256Mi
+          limits:
+            memory: 3Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telegram-connector-daniel
+  namespace: whatsapp-mcp
+spec:
+  selector:
+    app: telegram-connector-daniel
+  ports:
+  - name: http
+    port: 3002
+    targetPort: 3002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-sync-daniel
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: telegram-sync-daniel
+  template:
+    metadata:
+      labels:
+        app: telegram-sync-daniel
+    spec:
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/hostname: sauvage
+        kubernetes.io/arch: amd64
+      containers:
+      - name: telegram-sync
+        image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:latest
+        ports:
+        - name: http
+          containerPort: 3080
+        env:
+        - name: NATS_URL
+          value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: CONNECTOR_ACCOUNT
+          value: daniel
+        - name: CONNECTOR_BASE_URL
+          value: http://telegram-connector-daniel.whatsapp-mcp.svc.cluster.local:3002
+        - name: S3_ENDPOINT
+          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+        - name: S3_BUCKET
+          value: skirmshop-drive
+        - name: S3_REGION
+          value: us-east-1
+        - name: S3_PREFIX
+          value: socialmedia
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: skirmshop-drive-s3-socialmedia
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: skirmshop-drive-s3-socialmedia
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LEGACY_MINIO_ENDPOINT
+          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+        - name: LEGACY_MINIO_ACCESS_KEY
+          value: $(MINIO_ROOT_USER)
+        - name: LEGACY_MINIO_SECRET_KEY
+          value: $(MINIO_ROOT_PASSWORD)
+        - name: LEGACY_MINIO_USE_SSL
+          value: 'false'
+        - name: LEGACY_MINIO_BUCKET
+          value: socialmedia-media
+        - name: MINIO_ENDPOINT
+          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+        - name: MINIO_ACCESS_KEY
+          value: $(MINIO_ROOT_USER)
+        - name: MINIO_SECRET_KEY
+          value: $(MINIO_ROOT_PASSWORD)
+        - name: MINIO_USE_SSL
+          value: 'false'
+        - name: MINIO_BUCKET
+          value: socialmedia-media
+        envFrom:
+        - secretRef:
+            name: whatsapp-mcp-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 1Gi
+          limits:
+            memory: 3Gi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+      tolerations:
+      - key: role
+        operator: Equal
+        value: edge
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telegram-sync-daniel
+  namespace: whatsapp-mcp
+spec:
+  selector:
+    app: telegram-sync-daniel
+  ports:
+  - name: http
+    port: 3080
+    targetPort: 3080
+# ── telegram:leila — Telegram leila ──
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector-leila
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: telegram-connector-leila
+  template:
+    metadata:
+      labels:
+        app: telegram-connector-leila
+    spec:
+      enableServiceLinks: false
+      nodeSelector:
+        topology: lan
+        kubernetes.io/arch: amd64
+      containers:
+      - name: telegram-connector
+        image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest
+        ports:
+        - name: http
+          containerPort: 3002
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3002
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
+        env:
+        - name: NATS_URL
+          value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: CONNECTOR_ACCOUNT
+          value: leila
+        envFrom:
+        - secretRef:
+            name: whatsapp-mcp-secrets
+        resources:
+          requests:
+            cpu: 30m
+            memory: 256Mi
+          limits:
+            memory: 3Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telegram-connector-leila
+  namespace: whatsapp-mcp
+spec:
+  selector:
+    app: telegram-connector-leila
+  ports:
+  - name: http
+    port: 3002
+    targetPort: 3002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-sync-leila
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: telegram-sync-leila
+  template:
+    metadata:
+      labels:
+        app: telegram-sync-leila
+    spec:
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/hostname: sauvage
+        kubernetes.io/arch: amd64
+      containers:
+      - name: telegram-sync
+        image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:latest
+        ports:
+        - name: http
+          containerPort: 3080
+        env:
+        - name: NATS_URL
+          value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: CONNECTOR_ACCOUNT
+          value: leila
+        - name: CONNECTOR_BASE_URL
+          value: http://telegram-connector-leila.whatsapp-mcp.svc.cluster.local:3002
+        - name: S3_ENDPOINT
+          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+        - name: S3_BUCKET
+          value: skirmshop-drive
+        - name: S3_REGION
+          value: us-east-1
+        - name: S3_PREFIX
+          value: socialmedia
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: skirmshop-drive-s3-socialmedia
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: skirmshop-drive-s3-socialmedia
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LEGACY_MINIO_ENDPOINT
+          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+        - name: LEGACY_MINIO_ACCESS_KEY
+          value: $(MINIO_ROOT_USER)
+        - name: LEGACY_MINIO_SECRET_KEY
+          value: $(MINIO_ROOT_PASSWORD)
+        - name: LEGACY_MINIO_USE_SSL
+          value: 'false'
+        - name: LEGACY_MINIO_BUCKET
+          value: socialmedia-media
+        - name: MINIO_ENDPOINT
+          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+        - name: MINIO_ACCESS_KEY
+          value: $(MINIO_ROOT_USER)
+        - name: MINIO_SECRET_KEY
+          value: $(MINIO_ROOT_PASSWORD)
+        - name: MINIO_USE_SSL
+          value: 'false'
+        - name: MINIO_BUCKET
+          value: socialmedia-media
+        envFrom:
+        - secretRef:
+            name: whatsapp-mcp-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 1Gi
+          limits:
+            memory: 3Gi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+      tolerations:
+      - key: role
+        operator: Equal
+        value: edge
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telegram-sync-leila
+  namespace: whatsapp-mcp
+spec:
+  selector:
+    app: telegram-sync-leila
+  ports:
+  - name: http
+    port: 3080
+    targetPort: 3080
