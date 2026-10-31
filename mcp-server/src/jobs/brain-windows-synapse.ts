@@ -8,8 +8,9 @@
  *   brain_window.<tenant>.deleted  → brain.delete_document (one doc per event)
  *
  * tenant: follows the account's brain instance in the account registry —
- * instance `personal` → family, anything else (`skirmshop`) → skirmshop. Workflows live in pocharlies-org/synapse
- * `workflows/{family,skirmshop}/brain/conversation-window-*.v1.yaml`.
+ * instance `personal` → family, instance `leila` → leila (INFRA-554), anything
+ * else (`skirmshop`) → skirmshop. Workflows live in pocharlies-org/synapse
+ * `workflows/{family,leila,skirmshop}/brain/conversation-window-*.v1.yaml`.
  *
  * Publishing goes straight to the `events` topic exchange of vhost /synapse
  * with a write-only user (configure ^$, read ^$): never assert the exchange.
@@ -24,7 +25,13 @@ export const UPSERT_BATCH = 25;
 
 /** Synapse tenant of an account: its brain instance decides (registry), not its name. */
 export function tenantForAccount(account: string): string {
-  return instanceForNamespace(account) === 'personal' ? 'family' : 'skirmshop';
+  const instance = instanceForNamespace(account);
+  if (instance === 'personal') return 'family';
+  // INFRA-554: Leila's own vault. Additive on amqp.synapse.brain-window-upserted.v1
+  // (routing key brain_window.{tenant}.*): the leila workflows in synapse bind
+  // this key with instance `leila`. Never fall through to skirmshop.
+  if (instance === 'leila') return 'leila';
+  return 'skirmshop';
 }
 
 export interface SynapseEvent {

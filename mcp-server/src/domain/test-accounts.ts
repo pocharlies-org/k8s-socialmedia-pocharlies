@@ -18,6 +18,8 @@ export function useTestAccounts(maps: {
   secretEnv?: string;
   bridge?: UrlMap;
   requireInboundBeforeSend?: Record<string, boolean>;
+  /** Per-namespace brain instance override (e.g. { leila: 'leila' } for INFRA-554 routing). */
+  brainInstance?: Record<string, string>;
 }): void {
   state = {
     whatsapp: maps.whatsapp ?? state.whatsapp,
@@ -29,7 +31,7 @@ export function useTestAccounts(maps: {
   const entries: unknown[] = [];
   // Same brain routing as prod: the professional namespace feeds 'skirmshop'.
   const brain = (ns: string) => ({
-    brainInstance: ns === 'professional' ? 'skirmshop' : 'personal',
+    brainInstance: maps.brainInstance?.[ns] ?? (ns === 'professional' ? 'skirmshop' : 'personal'),
   });
   const wa = { personal: 'http://wa-personal', ...state.whatsapp };
   for (const [accountId, connectorUrl] of Object.entries(wa)) {

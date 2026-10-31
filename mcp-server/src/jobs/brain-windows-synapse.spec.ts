@@ -12,6 +12,8 @@ import {
 
 useTestAccounts({
   whatsapp: { personal: 'http://wa', professional: 'http://wa-pro', leila: 'http://wa-leila' },
+  // INFRA-554: prod routes the leila namespace to its own brain instance.
+  brainInstance: { leila: 'leila' },
 });
 
 const doc = (id: string, platform = 'telegram', content = 'hola'): BrainDoc => ({
@@ -24,8 +26,23 @@ describe('brain-windows-synapse', () => {
   it('maps accounts to Synapse tenants through their brain instance', () => {
     expect(tenantForAccount('personal')).toBe('family');
     expect(tenantForAccount('professional')).toBe('skirmshop');
-    // leila comparte la instancia personal y es de la familia, no de la tienda
-    expect(tenantForAccount('leila')).toBe('family');
+    // INFRA-554: leila tiene su propia instancia y su propio tenant, no la
+    // familia ni la tienda
+    expect(tenantForAccount('leila')).toBe('leila');
+  });
+
+  it('publishes leila windows on brain_window.leila.* and never on skirmshop (INFRA-554)', () => {
+    const ups = upsertEvents('leila', [doc('win:w:1', 'whatsapp')]);
+    expect(ups.map(e => e.routingKey)).toEqual(['brain_window.leila.upserted']);
+    expect(ups.every(e => e.tenant === 'leila')).toBe(true);
+    const dels = deleteEvents('leila', 'whatsapp', 'win:w:1', 1);
+    expect(dels.map(e => e.routingKey)).toEqual([
+      'brain_window.leila.deleted',
+      'brain_window.leila.deleted',
+    ]);
+    expect(
+      [...ups, ...dels].some(e => e.routingKey.includes('skirmshop') || e.tenant === 'skirmshop')
+    ).toBe(false);
   });
 
   it('rejects an account the registry does not know', () => {
