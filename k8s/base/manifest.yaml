@@ -254,7 +254,10 @@ spec:
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 2
-  failedJobsHistoryLimit: 1
+  # SC-3002 (30-10): con TTL 3600 el job fallido y su pod se borraban a la hora
+  # del fallo y el RCA quedaba pendiente (6 fallos en 5 días sin evidencia: el
+  # collector de logs ya no alcanzaba al contenedor). 3 fallos se ven enteros.
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 0
@@ -264,7 +267,9 @@ spec:
       # min with 240 s x 3 attempts, 6 of ~20 passes overran on 02-10-2026 while
       # the reindex LLM phase shared the resident model.
       activeDeadlineSeconds: 1500
-      ttlSecondsAfterFinished: 3600
+      # SC-3002: 1 h no daba tiempo a capturar el pod fallido (ver arriba).
+      # 24 h: el job fallido y su pod sobreviven a la jornada de guardia.
+      ttlSecondsAfterFinished: 86400
       template:
         spec:
           restartPolicy: Never
