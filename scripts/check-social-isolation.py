@@ -39,6 +39,16 @@ daniel) as B: it needs no human credentials and no pairings, so it is runnable
 before the QR gestures. The A/B with real pairings per human is measured at the
 epic close (spec C2, last line).
 
+SC-1145 C3 (Telegram por sub): the B probe runs per (channel, accountId)
+registry entry, not per deduplicated accountId — an id can live on two channels
+(whatsapp:daniel and telegram:daniel share accountId `daniel`, N2 of the P0
+note) — and the telegram entries are probed with the explicit `channel`
+argument so the Telegram route is exercised, not just the first account the
+bare id resolves to. The gate (identity-bindings.ts) rejects by accountId
+before routing, so an unbound telegram account must come back as the same
+explicit `forbidden` rejection, never data; whatsapp probes stay byte-identical
+to P1 (bare accountId) so the green P1 result cannot drift.
+
 Usage:
   python3 scripts/check-social-isolation.py            # live against prod
 Env overrides: GATEWAY_MCP_URL (default https://agentgateway-mcp.lan.e-dani.com/social),
@@ -216,7 +226,6 @@ def serves_data(message: dict | None) -> bool:
 def main() -> int:
     bindings = yaml.safe_load(BINDINGS_FILE.read_text(encoding="utf-8"))["bindings"]
     registry = json.loads(RUNTIME_REGISTRY.read_text(encoding="utf-8"))
-    registry_accounts = sorted({a["accountId"] for a in registry})
 
     client_id, client_secret = machine_client_credentials()
     token = mint_token(client_id, client_secret)
@@ -227,13 +236,19 @@ def main() -> int:
         die(1, f"token sub {sub} has no entry in {BINDINGS_FILE.name}; the check "
                "identity (agentgateway-mcp service-account) must be bound")
     bound = set(entry.get("accounts") or [])
-    b_accounts = [a for a in registry_accounts if a not in bound]
-    if not b_accounts:
+    # SC-1145 C3: one probe per (channel, accountId) registry entry — the same
+    # accountId can be served on two channels (whatsapp:daniel, telegram:daniel).
+    probes = [
+        (a["channel"], a["accountId"])
+        for a in registry
+        if a.get("enabled", True) is not False and a["accountId"] not in bound
+    ]
+    if not probes:
         die(2, "every registry account is bound to the check identity: nothing to "
               "probe as B — the fixture is wrong")
 
     print(f"A = {entry['label']} (sub {sub}); bound accounts: {sorted(bound)}")
-    print(f"B (unbound accounts probed): {b_accounts}")
+    print(f"B (unbound (channel, account) probes): {probes}")
     print(f"gateway: {GATEWAY_MCP_URL}")
 
     status, message, session_id = mcp_post(
@@ -262,25 +277,31 @@ def main() -> int:
     else:
         print("PASS social_list_accounts answers for A")
 
-    # 4. every B account is an explicit rejection, never data.
-    for account in b_accounts:
+    # 4. every B (channel, account) is an explicit rejection, never data.
+    for channel, account in probes:
+        arguments = {"accountId": account}
+        if channel == "telegram":
+            # SC-1145 C3: exercise the Telegram route explicitly; whatsapp
+            # probes stay byte-identical to P1.
+            arguments["channel"] = "telegram"
         status, message = call_tool(
-            token, session_id, "social_list_conversations", {"accountId": account}
+            token, session_id, "social_list_conversations", arguments
         )
+        label = f"social_list_conversations({arguments})"
         text = rejection_text(message)
         if status == 200 and serves_data(message):
             failures.append(
-                f"social_list_conversations(accountId={account}) -> served data to A "
+                f"{label} -> served data to A "
                 f"(HTTP {status}). SOCIAL_IDENTITY_BINDING is OFF: the bindings file "
                 "is never read and any verified caller is served any account. "
                 "This is the expected RED before the flip."
             )
         elif BINDING_REJECT.search(text):
-            print(f"PASS social_list_conversations(accountId={account}) -> explicit "
+            print(f"PASS {label} -> explicit "
                   f"binding rejection: {text.splitlines()[0][:120]}")
         else:
             failures.append(
-                f"social_list_conversations(accountId={account}) -> neither data nor "
+                f"{label} -> neither data nor "
                 f"an identity-binding rejection (HTTP {status}): "
                 f"{json.dumps(message, ensure_ascii=False)[:300] if message else '(no body)'}"
             )
