@@ -50,16 +50,14 @@ describe('account registry', () => {
     expect(accounts.find(account => account.channel === 'instagram')?.namespace).toBe('personal');
   });
 
-  it('default registry reproduces the ten accounts prod serves (SC-1145: telegram daniel and leila join)', () => {
+  it('default registry reproduces the eight accounts prod serves (SC-1145 retired telegram:daniel/whatsapp:daniel)', () => {
     const accounts = defaultRegistry({});
     expect(accounts.map(a => `${a.channel}:${a.accountId}`)).toEqual([
       'whatsapp:personal',
       'whatsapp:professional',
       'whatsapp:leila',
-      'whatsapp:daniel',
       'telegram:personal',
       'telegram:professional',
-      'telegram:daniel',
       'telegram:leila',
       'instagram:skirmshop',
       'instagram:barbelpapis',
@@ -67,11 +65,7 @@ describe('account registry', () => {
     const byKey = Object.fromEntries(accounts.map(a => [`${a.channel}:${a.accountId}`, a]));
     expect(byKey['whatsapp:personal'].connectorUrl).toBe('http://whatsapp-connector:3001');
     expect(byKey['whatsapp:professional']).not.toHaveProperty('requireInboundBeforeSend');
-    expect(byKey['whatsapp:daniel'].connectorUrl).toBe('http://whatsapp-connector-daniel:3001');
-    expect(byKey['whatsapp:daniel'].profile).toBe('daniel');
     expect(byKey['telegram:professional'].bridgeUrl).toBe('http://telegram-sync-professional:3080');
-    expect(byKey['telegram:daniel'].connectorUrl).toBe('http://telegram-connector-daniel:3002');
-    expect(byKey['telegram:daniel'].bridgeUrl).toBe('http://telegram-sync-daniel:3080');
     expect(byKey['telegram:leila'].connectorUrl).toBe('http://telegram-connector-leila:3002');
     expect(byKey['telegram:leila'].profile).toBe('leila');
     expect(byKey['instagram:skirmshop'].namespace).toBe('professional');
@@ -92,16 +86,12 @@ describe('account registry', () => {
       WHATSAPP_PROFESSIONAL_URL:
         'http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001',
       WHATSAPP_LEILA_URL: 'http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001',
-      WHATSAPP_DANIEL_URL: 'http://whatsapp-connector-daniel.whatsapp-mcp.svc.cluster.local:3001',
       TELEGRAM_CONNECTOR_URL: 'http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002',
       TELEGRAM_PROFESSIONAL_URL:
         'http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002',
       TELEGRAM_BRIDGE_URL: 'http://telegram-sync.whatsapp-mcp.svc.cluster.local:3080',
       TELEGRAM_BRIDGE_PROFESSIONAL_URL:
         'http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080',
-      TELEGRAM_DANIEL_URL: 'http://telegram-connector-daniel.whatsapp-mcp.svc.cluster.local:3002',
-      TELEGRAM_BRIDGE_DANIEL_URL:
-        'http://telegram-sync-daniel.whatsapp-mcp.svc.cluster.local:3080',
       TELEGRAM_LEILA_URL: 'http://telegram-connector-leila.whatsapp-mcp.svc.cluster.local:3002',
       TELEGRAM_BRIDGE_LEILA_URL:
         'http://telegram-sync-leila.whatsapp-mcp.svc.cluster.local:3080',

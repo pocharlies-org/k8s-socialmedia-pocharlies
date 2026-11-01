@@ -24,14 +24,6 @@
     "brainInstance": "leila"
   },
   {
-    "channel": "whatsapp",
-    "accountId": "daniel",
-    "label": "WhatsApp daniel",
-    "profile": "daniel",
-    "connectorUrl": "http://whatsapp-connector-daniel.whatsapp-mcp.svc.cluster.local:3001",
-    "brainInstance": "personal"
-  },
-  {
     "channel": "telegram",
     "accountId": "personal",
     "label": "Telegram personal",
@@ -48,15 +40,6 @@
     "connectorUrl": "http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002",
     "bridgeUrl": "http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080",
     "brainInstance": "skirmshop"
-  },
-  {
-    "channel": "telegram",
-    "accountId": "daniel",
-    "label": "Telegram daniel",
-    "profile": "daniel",
-    "connectorUrl": "http://telegram-connector-daniel.whatsapp-mcp.svc.cluster.local:3002",
-    "bridgeUrl": "http://telegram-sync-daniel.whatsapp-mcp.svc.cluster.local:3080",
-    "brainInstance": "personal"
   },
   {
     "channel": "telegram",

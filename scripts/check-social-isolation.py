@@ -34,15 +34,14 @@ check pins — is that no account-routed tool serves B's data to A. If the list
 itself must be actor-filtered, that is an mcp-server code change, not a
 manifest change, and belongs to its own story.
 
-A/B here uses the machine token as A and the unbound human accounts (leila,
-daniel) as B: it needs no human credentials and no pairings, so it is runnable
+A/B here uses the machine token as A and the unbound human account (leila) as
+B: it needs no human credentials and no pairings, so it is runnable
 before the QR gestures. The A/B with real pairings per human is measured at the
 epic close (spec C2, last line).
 
 SC-1145 C3 (Telegram por sub): the B probe runs per (channel, accountId)
 registry entry, not per deduplicated accountId — an id can live on two channels
-(whatsapp:daniel and telegram:daniel share accountId `daniel`, N2 of the P0
-note) — and the telegram entries are probed with the explicit `channel`
+— and the telegram entries are probed with the explicit `channel`
 argument so the Telegram route is exercised, not just the first account the
 bare id resolves to. The gate (identity-bindings.ts) rejects by accountId
 before routing, so an unbound telegram account must come back as the same
@@ -237,7 +236,7 @@ def main() -> int:
                "identity (agentgateway-mcp service-account) must be bound")
     bound = set(entry.get("accounts") or [])
     # SC-1145 C3: one probe per (channel, accountId) registry entry — the same
-    # accountId can be served on two channels (whatsapp:daniel, telegram:daniel).
+    # accountId can be served on two channels.
     probes = [
         (a["channel"], a["accountId"])
         for a in registry
