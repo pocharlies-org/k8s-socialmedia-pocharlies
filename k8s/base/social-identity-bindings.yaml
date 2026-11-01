@@ -56,3 +56,16 @@ bindings:
   - sub: 66ec6f4f-5f2c-44f6-a3db-0dccba6e1748
     label: leila
     accounts: [leila]
+
+  # Analisis (ns `analisis`, deploy k8s-analisis-pocharlies) — service-account
+  # del cliente `analisis` de Keycloak (client_credentials, verificado por API
+  # admin el 01-11-2026). El revisor novedades lee el chat «Ideas» de Telegram
+  # (social_list_messages, telegram/personal, target -1004489906310 = IDEAS_CHAT
+  # del Deployment); su cliente ChatIdeas rechaza cualquier otro destino. Ligado
+  # SOLO a `personal` (SC-3962): el vinculo es por cuenta — no hay granularidad
+  # por chat ni por herramienta en este formato —, asi que el riesgo residual es
+  # que un analisis comprometido pueda tambien ESCRIBIR en `personal`. `professional`,
+  # las de Instagram y `daniel`/`leila` deliberadamente NO.
+  - sub: 2f2acbc0-abc3-4e11-814d-88552885bb12
+    label: analisis (service-account del cliente analisis, revisor novedades)
+    accounts: [personal]
