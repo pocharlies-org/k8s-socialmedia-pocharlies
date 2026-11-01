@@ -41,13 +41,13 @@ bindings:
     accounts: [personal, professional, skirmshop, barbelpapis]
 
   # Daniel — usuario humano de Keycloak (me@e-dani.com). Las mismas cuentas que
-  # las maquinas de operador MAS su cuenta propia `daniel` (SC-1144: el
-  # despliegue de servicio whatsapp-connector-daniel con CREDENTIAL_SESSION_KEY
-  # = este sub; fail-closed por ausencia — si la cuenta no estuviera aqui, su
-  # sesion nueva quedaria rechazada). `leila` deliberadamente NO.
+  # las maquinas de operador: `personal` ya ES su Telegram/WhatsApp (paxanguero),
+  # asi que su `sub` no lleva una cuenta `daniel` propia (SC-1145 la dio de alta
+  # como ranura por usuario y se retiro: misma bandeja en dos sesiones, ingesta
+  # duplicada). `leila` deliberadamente NO.
   - sub: e51253a7-c137-4c6c-9fb9-af9cecd3b147
     label: daniel
-    accounts: [personal, professional, skirmshop, barbelpapis, daniel]
+    accounts: [personal, professional, skirmshop, barbelpapis]
 
   # Leila (lays84.mv@gmail.com) — solo su cuenta. `personal` y `professional`
   # deliberadamente NO. Su WhatsApp se empareja a mano por el QR de
@@ -65,7 +65,7 @@ bindings:
   # SOLO a `personal` (SC-3962): el vinculo es por cuenta — no hay granularidad
   # por chat ni por herramienta en este formato —, asi que el riesgo residual es
   # que un analisis comprometido pueda tambien ESCRIBIR en `personal`. `professional`,
-  # las de Instagram y `daniel`/`leila` deliberadamente NO.
+  # las de Instagram y `leila` deliberadamente NO.
   - sub: 2f2acbc0-abc3-4e11-814d-88552885bb12
     label: analisis (service-account del cliente analisis, revisor novedades)
     accounts: [personal]

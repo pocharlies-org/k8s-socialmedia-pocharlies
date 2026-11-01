@@ -244,11 +244,6 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       brainInstance: 'leila',
     },
     {
-      channel: 'whatsapp',
-      accountId: 'daniel',
-      connectorUrl: env.WHATSAPP_DANIEL_URL || 'http://whatsapp-connector-daniel:3001',
-    },
-    {
       channel: 'telegram',
       accountId: 'personal',
       connectorUrl: env.TELEGRAM_PERSONAL_URL || tg,
@@ -260,12 +255,6 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       connectorUrl: env.TELEGRAM_PROFESSIONAL_URL || 'http://telegram-connector-professional:3002',
       bridgeUrl: env.TELEGRAM_BRIDGE_PROFESSIONAL_URL || 'http://telegram-sync-professional:3080',
       brainInstance: 'skirmshop',
-    },
-    {
-      channel: 'telegram',
-      accountId: 'daniel',
-      connectorUrl: env.TELEGRAM_DANIEL_URL || 'http://telegram-connector-daniel:3002',
-      bridgeUrl: env.TELEGRAM_BRIDGE_DANIEL_URL || 'http://telegram-sync-daniel:3080',
     },
     {
       channel: 'telegram',

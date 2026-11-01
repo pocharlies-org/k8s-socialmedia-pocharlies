@@ -74,28 +74,6 @@
     "brainInstance": "leila"
   },
   {
-    "channel": "whatsapp",
-    "accountId": "daniel",
-    "label": "WhatsApp daniel",
-    "profile": "daniel",
-    "connectorUrl": "http://whatsapp-connector-daniel.whatsapp-mcp.svc.cluster.local:3001",
-    "deploy": {
-      "emitAudioAttachments": true,
-      "allowWebRenew": false,
-      "env": [
-        {
-          "name": "WA_RECONNECT_BACKFILL_WINDOW_HOURS",
-          "value": "6"
-        },
-        {
-          "name": "WA_RECONNECT_BACKFILL_MAX_MESSAGES",
-          "value": "500"
-        }
-      ]
-    },
-    "brainInstance": "personal"
-  },
-  {
     "channel": "telegram",
     "accountId": "personal",
     "label": "Telegram personal",
@@ -120,16 +98,6 @@
     "bridgeUrl": "http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080",
     "deploy": {},
     "brainInstance": "skirmshop"
-  },
-  {
-    "channel": "telegram",
-    "accountId": "daniel",
-    "label": "Telegram daniel",
-    "profile": "daniel",
-    "connectorUrl": "http://telegram-connector-daniel.whatsapp-mcp.svc.cluster.local:3002",
-    "bridgeUrl": "http://telegram-sync-daniel.whatsapp-mcp.svc.cluster.local:3080",
-    "deploy": { "sessionSecretKey": null },
-    "brainInstance": "personal"
   },
   {
     "channel": "telegram",
