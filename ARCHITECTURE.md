@@ -35,6 +35,14 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 - **Dependen de él** — AgentGateway `/social` (`social_*`), Synapse (eventos `whatsapp.MessageReceived`), Hermes, `auto-reply-worker`
   (tombstone), skirmshop-chatbot. **`CONTRACTS.yaml` con 105 entradas** (`grep -c '^  - id:' CONTRACTS.yaml`) (`http.whatsapp-connector.*`, `http.telegram-pairing.*`, subjects NATS…,
   más `contracts/socialmedia-tools.json`): nunca renombrar, solo `.vN+1` + `Contract-Change:`.
+- **Consumidor nuevo `sauvage-verificacion` (INFRA-745, INFRA-125 A)** — CronJob `sauvage-verificacion-diaria`
+  (ns `whatsapp-mcp`, miembro del workspace `sauvage-verificacion/`, imagen `whatsappmcp-sauvage-verificacion`):
+  auditoría diaria de la cara visible en la foto de perfil de los miembros del grupo Sauvage verificado e informe a
+  Dani. Depende de: rutas HTTP del conector Telegram (`GET /chats/:id/participants`, `GET /peers/:id/photo` por
+  `professional`; `POST /messages/:chatId` por `personal`, firma `CONNECTOR_SHARED_SECRET`), LiteLLM con
+  `qwen38-flash-next-uncensored` (`OPENAI_API_KEY` = clave `socialmedia`; el alta del alias en la clave es de devops),
+  y Postgres `whatsappmcp` (tablas propias de la migración 042). Cero clientes MTProto: la sesión es propiedad del
+  proceso del conector (`sauvage-verificacion/src/sin-mtproto.test.ts`). Runbook: `docs/sauvage-verificacion.md`.
 - **Quién llama a qué, y con qué firma.** La API de los conectores se firma con una sola clave, `CONNECTOR_SHARED_SECRET`: HMAC-SHA256 de
   `<ts>:<cuerpo JSON>` en `x-connector-timestamp` y `x-connector-signature`, ventana de 5 min. `mcp-sse` (código de `mcp-server`) firma
   sus llamadas al conector de WhatsApp, `providerGet` incluido (un GET no tiene cuerpo: firma `{}`); el conector exige la firma en
@@ -67,6 +75,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Catálogo de tools | `contracts/socialmedia-tools.json` / `.md` | `contracts/` | gateway, Hermes |
 | Registro de contratos | `CONTRACTS.yaml` | raíz | todos |
 | Doc de la API social | `docs/social-api.md`, ADRs en `docs/adr` | `docs/` | operadores |
+| Estado del bot Sauvage (veredictos y acciones de moderación) | tablas `savage_verdicts` (account, user_id, verdict, raw_text, audited_at) y `savage_actions` (user_id, action, at, confirmed, motivo), migración 042; una fila por miembro y pasada, el índice `(account, user_id, audited_at DESC)` da el veredicto actual | `mcp-server/src/infrastructure/database/migrations/042_sauvage_verificacion.sql` | CronJob `sauvage-verificacion-diaria` (único escritor; la parte B —INFRA-746— escribirá `savage_actions`) |
 | ¿Es un primer contacto 1:1? (evidencia de contacto conocido) | `BaileysClient.knownDirectContactEvidence` + `chat-state.ts` `hasInboundHistory` / `hasOutboundHistory` | `connectors/whatsapp-web/src/` | todas las rutas de envío 1:1, vía `guardDirectSend` |
 | Estado de un chat que informa el móvil o causa el dueño al leerlo (archivo, no leídos, fijado, silencio) | `setCanonicalChatState`: resuelve la conversación canónica una vez con `resolveCanonicalConversation` y escribe en ella archivo y no leídos (`setConversationState`) y fijado y silencio (`writeChatState`) | `connectors/whatsapp-web/src/chat-state.ts` | `chats.update`, `chats.upsert`, historia y `markAsRead` de `baileys-client.ts` |
 | Canales de WhatsApp que sigue la cuenta (memoria de candidatos de `GET /channels`, no la respuesta) | `rememberedChannels` / `rememberChannel` / `forgetChannel` sobre `whatsapp_novedades_channels` (migración 021, PK `(account, channel_jid)`) | `connectors/whatsapp-web/src/channels.ts` | `BaileysClient.listChannels`, `lookupChannel`, `setChannelSubscription` (solo con `ingest`) |

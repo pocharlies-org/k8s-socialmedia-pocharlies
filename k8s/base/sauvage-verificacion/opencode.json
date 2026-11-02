@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "litellm/qwen38-flash-next-uncensored",
+  "autoupdate": false,
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM",
+      "options": {
+        "baseURL": "http://litellm.litellm.svc.cluster.local:4000/v1",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "qwen38-flash-next-uncensored": {
+          "tool_call": true,
+          "vision": true
+        }
+      }
+    }
+  },
+  "permission": {
+    "bash": "allow",
+    "edit": "deny",
+    "write": "deny",
+    "webfetch": "deny"
+  }
+}

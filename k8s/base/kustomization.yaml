@@ -18,6 +18,8 @@ resources:
   # SC-1197 P3 (SC-1226): API de emparejamientos por sub, inerte (replicas 0, flag off).
   - social-pairing.yaml
   - networkpolicy-social-pairing.yaml
+  # INFRA-745: CronJob diario de verificacion facial del grupo Sauvage (A).
+  - sauvage-verificacion.yaml
 
 # SC-1144 fase 2: la tabla de vinculos sub->cuentas vive en
 # social-identity-bindings.yaml (el fichero checked-in es el trace GitOps: cada
@@ -46,6 +48,17 @@ configMapGenerator:
   - name: brain-windows
     files:
       - brain-windows-config.yaml
+  # INFRA-745: prompt de la pasada, criterio de vision y opencode.json del bot
+  # Sauvage. Mismo criterio de nombre estatico: cambiar el criterio es un git
+  # diff que la proxima pasada lee sin rebuild (patrón brain-windows).
+  - name: sauvage-verificacion-prompt
+    options:
+      labels:
+        app: sauvage-verificacion
+    files:
+      - prompt-pasada.md=sauvage-verificacion/prompt-pasada.md
+      - prompt-vision.md=sauvage-verificacion/prompt-vision.md
+      - opencode.json=sauvage-verificacion/opencode.json
 
 generatorOptions:
   disableNameSuffixHash: true

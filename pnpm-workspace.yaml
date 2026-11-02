@@ -8,6 +8,10 @@ packages:
   - 'workers/*'
   - 'mcp-server'
   - 'shared'
+  # INFRA-745: bot diario de verificacion facial del grupo Sauvage (CronJob
+  # sauvage-verificacion-diaria). Miembro del workspace para que `pnpm -r test`
+  # corra sus tests en CI.
+  - 'sauvage-verificacion'
 # Transitive packages pinned forward so the release scan finds no fixable
 # HIGH/CRITICAL. Each entry is a transitive dep we cannot bump via a direct
 # dependency; revisit when the parent package ships the fix itself.
