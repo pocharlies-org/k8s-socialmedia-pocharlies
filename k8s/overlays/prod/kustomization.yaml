@@ -150,6 +150,11 @@ images:
   # archivado antes de la 039 (duplicate key en prod). Sandbox con DATOS reales: 021-040 sin errores. Digest con crane.
   # SC-3681 30-10: v1.3.131 -> v1.3.133 (run 40988750820, deploy/prod@a1b2544): social_manage_group
   # action=setPhoto (#406) y override decode-uri-component 0.5.1 (CVE-2026-118664, #407). Digest con la API de Harbor.
+  # INFRA-745: avance EXIGIBLE en el PR de release de P1 al build que lleve la migracion 042
+  # (savage_verdicts/savage_actions). Es este bloque —no patch-image.yaml— el que mueve el Job PreSync
+  # whatsapp-mcp-migrate; sin el avance el CronJob sauvage-verificacion-diaria muere con «relation
+  # savage_verdicts does not exist» y C6 no puede pasar (nota del architect, punto 1 de no bloqueantes).
+  # No se avanza en este PR: el build no existe hasta el despacho de release.yml (norma de la casa).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
     newTag: v1.3.133
     digest: sha256:60f9fca117f047277e931ffe262d0370f75f096711b9d1e5ab4a30a32a97ac04
@@ -178,3 +183,14 @@ images:
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
     newTag: v1.3.132
     digest: sha256:4278e4cefe65f37e1e709a2f2bd993fc8c04b9d2ccaaf13649f54c0346cd19bc
+  # INFRA-745 (INFRA-125 A): bot diario de verificacion facial del grupo Sauvage (CronJob
+  # sauvage-verificacion-diaria). El base lo deja en :latest (no existe en Harbor); este bloque es
+  # el sitio de su pin — patch-image.yaml solo parchea kind: Deployment y no haria match con el
+  # CronJob (nota del architect, punto 2). Nace con tag y SIN digest: la imagen no existe hasta el
+  # primer despacho de release.yml, que debe usar image_tag=v1.3.135 (comprobado libre en Harbor el
+  # 02-11; v1.3.134 ya existe) o actualizar este newTag al tag despachado. El digest se anade en el
+  # PR de release junto al avance de whatsappmcp-mcp-server (runbook docs/sauvage-verificacion.md).
+  # Hasta ese despacho el CronJob falla al pull: fallo inocuo (pasada de solo lectura, backoffLimit
+  # 0, ningun efecto sobre nadie) y C1 empieza a contar desde la release.
+  - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
+    newTag: v1.3.135
