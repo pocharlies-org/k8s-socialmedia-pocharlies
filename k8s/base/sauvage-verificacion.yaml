@@ -1,0 +1,112 @@
+# INFRA-745 (parte A de INFRA-125) — auditoria diaria de la cara visible en la
+# foto de perfil de los miembros del grupo Sauvage verificado (-1003365295248)
+# e informe a Dani. Sin expulsion: el unico envio del bot es el informe (C5).
+#
+# Patron canónico de CronJob de la casa (k8s/base/whatsapp-voice.yaml):
+# timeZone Europe/Madrid, concurrencyPolicy Forbid, activeDeadlineSeconds,
+# ttlSecondsAfterFinished, restartPolicy Never, enableServiceLinks false y
+# nodeSelector lan+amd64 (nada se programa en los Sparks).
+#
+# Cada pasada es SU sesion de opencode (C1): `opencode run` headless con
+# qwen38-flash-next-uncensored via LiteLLM (OPENAI_API_KEY del Secret
+# whatsapp-mcp-secrets = clave virtual `socialmedia`, item 1Password `litellm`
+# campo SOCIALMEDIA_KEY). El prompt y opencode.json viajan en el ConfigMap
+# `sauvage-verificacion-prompt` (patrón brain-windows-config): cambiar el
+# criterio es un git diff, sin rebuild.
+#
+# El bot habla con Telegram SOLO por las rutas HTTP del conector (barrido
+# GET /chats/:id/participants y foto GET /peers/:id/photo por `professional`;
+# informe POST /messages/:chatId por `personal`), firmadas con
+# CONNECTOR_SHARED_SECRET del mismo Secret. Cero clientes MTProto en el bot
+# (lo afirma sauvage-verificacion/src/sin-mtproto.test.ts).
+#
+# Estado: Postgres whatsappmcp, tablas savage_verdicts / savage_actions
+# (migracion 042 del Job PreSync whatsapp-mcp-migrate).
+#
+# IMPORTANTE (C8): el pin `tag@digest` de la imagen va en el bloque `images:`
+# de k8s/overlays/prod/kustomization.yaml (NO en patch-image.yaml, que solo
+# parchea kind: Deployment), y el avance del pin de whatsappmcp-mcp-server a
+# la version que lleve la 042 es condicion de este CronJob: sin ella el job
+# muere con «relation savage_verdicts does not exist».
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sauvage-verificacion-diaria
+  namespace: whatsapp-mcp
+  labels:
+    app: sauvage-verificacion
+spec:
+  # 06:30 Europe/Madrid: el informe llega a Dani por la mañana. Una pasada al
+  # dia (C1 pide al menos tres consecutivas; es calendario).
+  schedule: "30 6 * * *"
+  timeZone: Europe/Madrid
+  # suspend: false desde P1 (veredicto del architect): C1 exige tres pasadas
+  # reales ANTES de que la parte B exista. La pausa del operador es `suspend:
+  # true` por GitOps (runbook docs/sauvage-verificacion.md).
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata:
+      labels:
+        app: sauvage-verificacion
+    spec:
+      backoffLimit: 0
+      # ~350 miembros x (foto + vision con reintentos): 2 h de techo. Si se
+      # agota, la pasada queda interrumpida y la siguiente reanuda desde el
+      # estado (C6).
+      activeDeadlineSeconds: 7200
+      # 7 dias: C1 lee los jobs de tres dias consecutivos.
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app: sauvage-verificacion
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+          containers:
+            - name: sauvage-verificacion
+              image: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion:latest
+              command:
+                - sh
+                - -c
+                - |
+                  cd /app/sauvage-verificacion
+                  opencode run --pure --auto --print-logs \
+                    -m litellm/qwen38-flash-next-uncensored \
+                    "$(cat /sauvage-prompt/prompt-pasada.md)"
+              env:
+                # Mismo patron que el Job PreSync y los CronJobs de voz: el
+                # kubelet expande $(DB_USER)/$(DB_PASSWORD) del envFrom.
+                - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+                # Salida cruda del bash tool en el log del job (C2 busca
+                # `^barrido total=` al principio de linea).
+                - { name: NO_COLOR, value: "1" }
+                - { name: HOME, value: "/tmp" }
+                - { name: XDG_DATA_HOME, value: "/tmp/.local/share" }
+                - { name: SAUVAGE_GROUP_ID, value: "-1003365295248" }
+                - { name: SAUVAGE_ACCOUNT, value: "professional" }
+                - { name: SAUVAGE_VISION_MODEL, value: "qwen38-flash-next-uncensored" }
+                - { name: SAUVAGE_PROMPT_FILE, value: "/sauvage-prompt/prompt-vision.md" }
+              envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+              volumeMounts:
+                - { name: prompt, mountPath: /sauvage-prompt, readOnly: true }
+                # opencode.json en la raiz del paquete (donde lo busca
+                # `opencode run`), via subPath para no tapar el codigo.
+                - { name: prompt, mountPath: /app/sauvage-verificacion/opencode.json, subPath: opencode.json, readOnly: true }
+                # Fotos de trabajo y el estado efimero de opencode (la DB es
+                # el unico estado duradero).
+                - { name: tmp, mountPath: /tmp }
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { memory: 1Gi }
+          volumes:
+            - name: prompt
+              configMap:
+                name: sauvage-verificacion-prompt
+            - name: tmp
+              emptyDir: {}

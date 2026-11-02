@@ -201,7 +201,8 @@ jobs:
           {"name":"whatsappmcp-instagram-connector","context":".","dockerfile":"connectors/instagram/Dockerfile"},
           {"name":"whatsappmcp-whatsapp-open-worker","context":".","dockerfile":"workers/whatsapp-open-worker/Dockerfile"},
           {"name":"whatsappmcp-mcp-server","context":".","dockerfile":"mcp-server/Dockerfile"},
-          {"name":"whatsappmcp-whatsapp-app","context":"apps/whatsapp","dockerfile":"apps/whatsapp/Dockerfile"}
+          {"name":"whatsappmcp-whatsapp-app","context":"apps/whatsapp","dockerfile":"apps/whatsapp/Dockerfile"},
+          {"name":"whatsappmcp-sauvage-verificacion","context":".","dockerfile":"sauvage-verificacion/Dockerfile"}
         ]
     secrets:
       # Fork PRs receive no repository secrets. The checker repository is public,
