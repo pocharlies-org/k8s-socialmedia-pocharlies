@@ -30,7 +30,8 @@ spec:
     spec:
       enableServiceLinks: false
       automountServiceAccountToken: false
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      # atlantic (INFRA-1103): fuera del x86; solo habla con NATS, los conectores y el core, todos del clúster
+      nodeSelector: { node-pool: ovh-heavy, kubernetes.io/arch: amd64 }
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

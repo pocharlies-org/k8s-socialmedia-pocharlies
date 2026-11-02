@@ -209,7 +209,7 @@ Total de casos Jest: **pendiente de medir**.
 - Un borrado que llega antes de su post (SKIRM-106): para un post de canal o un estado, `handleInboundMutation` anota en memoria (`noteRevokeBeforePost` en `statuses.ts`) el revoke que no encontró fila, con clave `<chat>|<id de WhatsApp>` tal como llega (antes de componer el id y sin prefijo de cuenta, así ni el orden de llegada ni el id compuesto dan la tumba a otro canal), y `ingestMessage` la consume (`takeRevokeBeforePost`) justo después de guardar el post y lo marca borrado como cualquier revoke (el contenido se queda y sale `message-update DELETED`). Como mucho 2000 anotaciones (sale la más antigua) y 24 h de vida. **Límite**: no sobrevive a un reinicio y cubre la carrera dentro de un proceso (lote de reconexión, historia); una tumba durable sería una migración 022 aparte. Dos líneas `info` para medirla: «found no post: remembered» y «arrived before its post: applied».
 - **Serving por sub (SC-705/SC-1144, WhatsApp por usuario).** Un usuario humano no comparte el proceso del
   conector de casa: cada sesión emparejada se sirve desde SU Deployment nombrado
-  (`whatsapp-connector-<accountId>`, p. ej. `whatsapp-connector-daniel` / `-leila` en ns `whatsapp-mcp`),
+  (`whatsapp-connector-<accountId>`, p. ej. `whatsapp-connector-leila` en ns `whatsapp-mcp`),
   generado desde `k8s/base/social-accounts.json` con `python3 scripts/render-connectors.py` (única vía a
   `k8s/base/generated/connectors.yaml`; nunca a mano — CI `--check`). La sesión del almacén cifrado
   (`shared/src/session-store/`, tabla `user_channel_credentials` en la DB `whatsappmcp`) se selecciona por
@@ -252,7 +252,7 @@ Total de casos Jest: **pendiente de medir**.
   CrashLoopBackOff esperado** hasta el gesto de pairing: sin fila en `user_channel_credentials` y sin env, `main.ts`
   loguea «MTProto pairing gesture for this user is still pending» y sale con exit(1); es la señal visible de
   emparejamiento pendiente (ArgoCD lo muestra rojo), no un defecto — con WhatsApp no pasa (sin fila queda arriba
-  sirviendo el QR). Pines: `telegram-connector-daniel/-leila` en `patch-image.yaml` al MISMO digest que la casa
+  sirviendo el QR). Pines: `telegram-connector-leila` en `patch-image.yaml` al MISMO digest que la casa
   (v1.3.133@sha256:d21bb7e8…, INFRA-1008); `telegram-sync-*` los mueve el bloque `images:` (v1.3.110) por nombre de
   imagen. El techo H1 (no subir de v1.3.120) es solo de los conectores Baileys. El guardrail
   `scripts/check-social-isolation.py` sondea por par (canal, cuenta) y pasa `channel: telegram` explícito en las
