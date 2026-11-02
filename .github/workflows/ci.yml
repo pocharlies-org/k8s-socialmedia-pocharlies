@@ -32,6 +32,33 @@ jobs:
       - run: python3 scripts/render-connectors.py --check
       - run: python3 -m unittest scripts/test_render_connectors.py
 
+  # SC-705 regression (SC-1144 C1/C5, SC-1145 C2/C4): per-sub serving contract
+  # asserted on the rendered prod overlay — store ON + session key = declared
+  # bindings sub on the per-sub connectors (H5), TELEGRAM_SESSION_STRING="" on
+  # the per-sub Telegram connector (H2 adoption trap), house connectors on the
+  # legacy path. Runner: same public-runner convention as the other PR
+  # verifiers in this file (line above the jobs).
+  per-sub-serving-contract:
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
+      - name: Install pinned kustomize
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl --retry 3 --retry-all-errors -fsSL \
+            'https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.5.0/kustomize_v5.5.0_linux_amd64.tar.gz' \
+            -o "$RUNNER_TEMP/kustomize.tar.gz"
+          echo "6703a3a70a0c47cf0b37694030b54f1175a9dfeb17b3818b623ed58b9dbc2a77  $RUNNER_TEMP/kustomize.tar.gz" | sha256sum --check --strict
+          tar xzf "$RUNNER_TEMP/kustomize.tar.gz" -C "$RUNNER_TEMP/bin" kustomize
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: python3 -m unittest scripts/test_prod_overlay_per_sub.py
+
   # telegram-sync (Python): the unit tests and the SQL of the edits against a
   # throwaway Postgres (tests/test_edits.py; without the DSN those are skipped).
   telegram-sync-tests:
