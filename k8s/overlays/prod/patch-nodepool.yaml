@@ -11,16 +11,12 @@
 #    dedicated=llm toleration on the Longhorn CSI/engine DaemonSets and (b) a WIP-free arm64
 #    image rebuild (the whatsapp-web source has active uncommitted work as of 2026-06-04).
 #
-# MOVED 2026-06-04 to the arm64 nvidia-dgx GPU node (residential LAN, SAME NAT egress IP as
-# ubuntu → NOT a datacenter IP → no telethon AuthKeyDuplicatedError, which was a cross-IP
-# issue during a prior ks5 attempt, not cross-node-same-IP):
-#  - telegram-connector{,-professional}: gramjs, PVC-free, session in the Vault-synced secret
-#    whatsapp-mcp-secrets (TELEGRAM_SESSION_STRING[_PROFESSIONAL]) → recreating the pod reuses
-#    the same session. RollingUpdate maxSurge:0 (terminate old before new) so old+new never
-#    hold the authkey simultaneously — a true Recreate transition errors on a live
-#    RollingUpdate Deployment via server-side apply (rollingUpdate Forbidden under Recreate).
-#    Image is now multi-arch (see kustomization images:). The ks5 EMFILE was tsx watch-mode
-#    (dev), irrelevant in prod (pnpm start). Tolerate dedicated=llm; drop topology+arch keys.
+# telegram-connector{,-professional,-leila}: on sauvage since INFRA-1103 (03-11), rendered by
+#  scripts/render-connectors.py (connectorNodeSelector / connectorTolerations), not patched here.
+#  gramjs, PVC-free, session in the Vault-synced secret whatsapp-mcp-secrets
+#  (TELEGRAM_SESSION_STRING[_<ID>]) → recreating the pod reuses the same session. Recreate releases
+#  the authkey before the new pod connects, so two IPs never hold it at once (the telethon
+#  AuthKeyDuplicatedError of the earlier ks5 attempt was that cross-IP overlap, not the IP itself).
 # MOVED 2026-06-04 to sauvage (edge node, role=edge:NoSchedule → toleration):
 #  - telegram-sync{,-professional}: SESSION-LESS since v1.3.38 (ingests via NATS + the connector
 #    HTTP API, holds no Telethon session) → no IP binding → safe on the OVH edge node (amd64).

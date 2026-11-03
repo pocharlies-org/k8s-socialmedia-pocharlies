@@ -242,8 +242,8 @@ Total de casos Jest: **pendiente de medir**.
 - **Serving por sub en Telegram (SC-705/SC-1145, P2 del mismo camino).** Mismo patrón que WhatsApp (arriba) con tres
   particularidades. (1) La entrada del registro lleva `deploy.sessionSecretKey: null` **obligado**: por defecto el
   renderizador pediría la clave `TELEGRAM_SESSION_STRING_<ID>` del Secret `whatsapp-mcp-secrets`, que no existe para
-  los subs → `CreateContainerConfigError`; el generador emite connector+sync por cuenta (`telegram-connector-<id>` :3002,
-  `telegram-sync-<id>` :3080 en sauvage), y el bloque `deploy` de Telegram **no admite env extra** (a diferencia del de
+  los subs → `CreateContainerConfigError`; el generador emite connector+sync por cuenta (`telegram-connector-<id>` :3002 y
+  `telegram-sync-<id>` :3080, los dos en sauvage), y el bloque `deploy` de Telegram **no admite env extra** (a diferencia del de
   WhatsApp): flag, session key y vaciado van en el overlay. (2) **H2 — vaciado `TELEGRAM_SESSION_STRING=""`** en
   `k8s/overlays/prod/patch-credential-store.yaml`: con `sessionSecretKey: null` la sesión de casa entraría por el
   `envFrom` compartido y `resolveCredential` (`connectors/telegram/src/credential-session.ts`) haría
