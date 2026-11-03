@@ -1,0 +1,46 @@
+name: Social isolation canary
+
+# SC-1144 C2 / SC-1145 C3 (SC-705): scripts/check-social-isolation.py, the
+# committed live guardrail for per-sub isolation on the /social MCP route,
+# wired into CI. It mints the machine token and exercises the REAL gateway
+# (read-only MCP calls: initialize, tools/list, tools/call
+# social_list_conversations on unbound accounts — never a write, never B's
+# data). Exit 1 = the binding gate stopped rejecting (isolation regression);
+# exit 2 = cannot run (gateway/Keycloak unreachable).
+#
+# Deliberately NOT a PR gate: it measures live prod, and a prod outage must
+# not turn unrelated PRs red. Schedule + manual dispatch; the scheduled run
+# is the regression tripwire after each deploy.
+#
+# arc-k8s: the check needs the in-cluster network path to
+# agentgateway-mcp.lan.e-dani.com and auth-next.e-dani.com (public runners
+# cannot reach the LAN host).
+on:
+  schedule:
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  check-social-isolation:
+    # Dormant until the repo secret exists: client_credentials of the
+    # `agentgateway-mcp` Keycloak client (same value as the k8s secret
+    # agentgateway/agentgateway-oidc-client). The script's kubectl fallback
+    # needs a kubeconfig the ARC runner does not have.
+    if: ${{ secrets.KC_CLIENT_SECRET != '' }}
+    runs-on: arc-k8s
+    env:
+      KC_CLIENT_SECRET: ${{ secrets.KC_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
+      - run: python3 scripts/check-social-isolation.py
