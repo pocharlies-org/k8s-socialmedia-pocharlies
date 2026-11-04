@@ -37,3 +37,19 @@ PASS/FAIL: PASS — 935 tests en verde, 0 fallos (los 7 suites / 19 tests skippe
 ## Verificación en vivo
 
 Fuera de esta PR: la verificación en vivo es INFRA-348 (P5), y la publicación en el gateway es INFRA-346 (P3).
+
+## Addendum 2026-11-04: corrección de prettier/prettier (CI run 41790130720)
+
+Fallo real en «standard / Lint, test, build»: 4 errores `prettier/prettier` (auto-fixables),
+no de test ni de build:
+- `mcp-server/src/mcp/tool-registry.ts` 1151:7 (comillas), 1220:28 y 1225:18 (objeto >100 cols)
+- `mcp-server/src/mcp/server.ts` 3525:81 (línea sobrante)
+
+Causa de no verse en local en la P1/P2: eslint en el worktree anidado sube al checkout padre
+(sin node_modules) y falla al cargar plugins; con `--resolve-plugins-relative-to` el plugin
+prettier no aplica la config del repo. La comprobación fiable es el CLI de prettier del repo
+(misma versión 3.9.6 y mismo `.prettierrc` que CI).
+
+Comprobaciones locales tras `prettier --write` sobre los dos ficheros:
+- `node_modules/.bin/prettier --check mcp-server/src/mcp/tool-registry.ts mcp-server/src/mcp/server.ts` → All matched files use Prettier code style! (exit 0)
+- `jest src/mcp/tool-registry.contract.spec.ts` → PASS, 5/5 (byte-contract del manifest intacto)

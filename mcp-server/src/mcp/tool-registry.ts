@@ -1148,7 +1148,7 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     title: 'Moderate Telegram members',
     description:
       'Ban, unban, kick, restrict or unrestrict one member of a Telegram supergroup or ' +
-      'channel, or read this account\'s own admin rights (get_admin_rights). Telegram only. ' +
+      "channel, or read this account's own admin rights (get_admin_rights). Telegram only. " +
       'target (chat) and userId are numeric Telegram ids — marked ids like -1001234567890 ' +
       'included — never @usernames. ban, kick and restrict require reason and confirm=true: ' +
       'a missing or false confirm is refused with confirmation_required and nothing goes out ' +
@@ -1217,12 +1217,16 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
           },
           {
             if: {
-              properties: { action: { enum: ['ban', 'unban', 'kick', 'unrestrict', 'get_admin_rights'] } },
+              properties: {
+                action: { enum: ['ban', 'unban', 'kick', 'unrestrict', 'get_admin_rights'] },
+              },
             },
             then: { not: { required: ['restriction'] } },
           },
           {
-            if: { properties: { action: { enum: ['unban', 'kick', 'unrestrict', 'get_admin_rights'] } } },
+            if: {
+              properties: { action: { enum: ['unban', 'kick', 'unrestrict', 'get_admin_rights'] } },
+            },
             then: { not: { required: ['until'] } },
           },
         ],

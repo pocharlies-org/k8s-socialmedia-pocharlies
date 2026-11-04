@@ -3522,8 +3522,7 @@ export class MCPServer {
     if (channelName !== 'telegram') {
       throw this.canonicalError(
         'unsupported_platform',
-        'social_moderate_members only supports Telegram (this call asked for ' +
-          `'${channelName}')`
+        'social_moderate_members only supports Telegram (this call asked for ' + `'${channelName}')`
       );
     }
     const action = this.string(args, 'action');
