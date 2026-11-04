@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:d6465bb5a49b38085ae01e1393c445a6d896a4bae850c17eda3cdbbfe25a2323",
+  "digest": "sha256:aff4491145fc4a3ad34dc61a00c19ee93b2889ae2af98faa88e6fbe3fec2ea15",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -9335,6 +9335,314 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "social_moderate_members",
+      "title": "Moderate Telegram members",
+      "description": "Ban, unban, kick, restrict or unrestrict one member of a Telegram supergroup or channel, or read this account's own admin rights (get_admin_rights). Telegram only. target (chat) and userId are numeric Telegram ids — marked ids like -1001234567890 included — never @usernames. ban, kick and restrict require reason and confirm=true: a missing or false confirm is refused with confirmation_required and nothing goes out to Telegram. Every mutation writes one audit row (also failed ones) under the verified caller; if the audit row cannot be written the mutation is refused with audit_unavailable. get_admin_rights reads rights and is not audited.",
+      "effect": "destructive",
+      "authScope": "social.write",
+      "capability": "members.moderate",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "whatsapp",
+              "telegram",
+              "instagram"
+            ],
+            "description": "Provider channel. Numeric targets never imply a channel."
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider-native peer, group, conversation or media target."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Replay key. Reusing it with a different payload returns conflict."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "ban",
+              "unban",
+              "kick",
+              "restrict",
+              "unrestrict",
+              "get_admin_rights"
+            ]
+          },
+          "userId": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Numeric Telegram user id of the member (never @username). Required for every action except get_admin_rights, where it does not apply."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Why: required for ban, kick and restrict; stored in the audit row."
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 end of the ban or restriction. Only ban and restrict."
+          },
+          "restriction": {
+            "type": "string",
+            "enum": [
+              "mute",
+              "no_media",
+              "no_invite",
+              "read_only"
+            ],
+            "description": "Closed restriction set (mute = no sending of any kind; no_media = everything of mute except plain messages; no_invite = cannot invite; read_only = mute + no invite, pin or change info). Required for restrict, refused for other actions."
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be true for ban, kick and restrict; missing or false is refused with confirmation_required before any connector call."
+          }
+        },
+        "required": [
+          "channel",
+          "accountId",
+          "target",
+          "action"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "ban",
+                    "unban",
+                    "kick",
+                    "restrict",
+                    "unrestrict"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "userId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "ban",
+                    "kick",
+                    "restrict"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "restrict"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "restriction"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "ban",
+                    "unban",
+                    "kick",
+                    "unrestrict",
+                    "get_admin_rights"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "restriction"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "unban",
+                    "kick",
+                    "unrestrict",
+                    "get_admin_rights"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "until"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "accepted",
+              "delivered",
+              "read",
+              "conflict",
+              "outcome_unknown",
+              "failed"
+            ]
+          },
+          "data": {},
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "asOf",
+                  "completeness"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "providerQuery",
+                      "providerSync",
+                      "localIndex"
+                    ]
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completeness": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "replayed": {
+                "type": "boolean"
+              },
+              "partialErrors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "whatsapp",
+                        "telegram",
+                        "instagram"
+                      ],
+                      "description": "Provider channel. Numeric targets never imply a channel."
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Configured provider account, for example 'personal', 'professional' or 'leila' (WhatsApp), 'skirmshop'/'barbelpapis' (Instagram). With SOCIAL_IDENTITY_BINDING=on it must be bound to the verified caller."
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
         "openWorldHint": true
       }
     },

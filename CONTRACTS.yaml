@@ -971,7 +971,7 @@ contracts:
   - connectors/telegram/src/api/controller.ts
   status: active
   note: 'HMAC-signed routes of the house Telegram connectors (telegram-connector, telegram-connector-professional).
-    Member moderation (INFRA-218 / INFRA-344), to be consumed by the MCP moderation tool (INFRA-345):
+    Member moderation (INFRA-218 / INFRA-344), consumed by the MCP tool social_moderate_members (INFRA-345):
     POST /api/v1/chats/:id/moderation/{ban|unban|kick|restrict|unrestrict} (body {user_id, restriction?
     mute|no_media|no_invite|read_only, until? ISO-8601}) and GET /api/v1/chats/:id/moderation/admin-rights
     (this account''s own rights, read, ungated). Numeric ids only (@nombre → invalid_target). The five
@@ -1952,7 +1952,9 @@ contracts:
     al desplegarlo se debe actualizar la copia del catalogo de AgentGateway. INFRA-635: aditivo, sin tocar
     el digest ni los esquemas. El envelope de social_search_messages (handleSearchMessages en server.ts)
     puede llevar meta.partialErrors y source.completeness ''partial'' cuando una instancia del brain cae
-    y otras contestan; la respuesta completa no cambia de forma.'
+    y otras contestan; la respuesta completa no cambia de forma. INFRA-345: aditivo — social_moderate_members
+    (effect destructive, authScope social.write), catálogo 77→78; consume http.telegram-connector.moderation.v1
+    (P1, INFRA-344).'
 - id: http.whatsapp-connector.auth-qr.v2
   kind: http-route
   value: /api/v2/auth/qr

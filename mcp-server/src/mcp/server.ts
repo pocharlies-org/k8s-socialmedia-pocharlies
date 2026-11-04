@@ -909,6 +909,8 @@ export class MCPServer {
         return this.canonicalClickInteraction(args);
       case 'manageForum':
         return this.canonicalManageForum(args);
+      case 'moderateMembers':
+        return this.canonicalModerateMembers(args);
       case 'manageChat':
         return this.canonicalManageChat(args);
       case 'publishContent':
@@ -3502,6 +3504,158 @@ export class MCPServer {
         ).then(data => this.jsonResponse(data));
       default:
         throw this.canonicalError('invalid_request', `Unsupported forum action '${action}'`);
+    }
+  }
+
+  /**
+   * social_moderate_members (INFRA-218 P2, dictamen CTO §1-§4). The connector
+   * routes (http.telegram-connector.moderation.v1) answer {error, failureClass}
+   * and classifiedConnectorCall maps each failureClass to the canonical code;
+   * nothing here invents a code. The audit row is written HERE because the
+   * handler is the one that knows the gateway principal (getRequestActor): one
+   * row per mutation attempt — failures included — and a row that cannot be
+   * written refuses the mutation (audit_unavailable) before any connector
+   * call. get_admin_rights is a read and is not audited.
+   */
+  private async canonicalModerateMembers(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName !== 'telegram') {
+      throw this.canonicalError(
+        'unsupported_platform',
+        'social_moderate_members only supports Telegram (this call asked for ' + `'${channelName}')`
+      );
+    }
+    const action = this.string(args, 'action');
+    const account = this.account(args);
+    // C6: numeric ids are checked here, before the connector (invalid_target,
+    // never a 500 and never a raw FLOOD_WAIT from Telegram).
+    const chatId = this.moderationNumericId('target', args.target);
+    if (action === 'get_admin_rights') {
+      const data = await this.classifiedConnectorCall(
+        this.tgUrl(account),
+        'GET',
+        `/api/v1/chats/${encodeURIComponent(chatId)}/moderation/admin-rights`
+      );
+      return this.jsonResponse(data);
+    }
+    const userId = this.moderationNumericId('userId', args.userId);
+    if (['ban', 'kick', 'restrict'].includes(action) && args.confirm !== true) {
+      throw this.canonicalError(
+        'confirmation_required',
+        `${action} requiere confirm: true; ninguna llamada salió a Telegram`
+      );
+    }
+    if (['ban', 'kick', 'restrict'].includes(action) && typeof args.reason !== 'string') {
+      throw this.canonicalError(
+        'invalid_request',
+        `reason es obligatorio en ${action} y se guarda en la auditoría`
+      );
+    }
+    const body: Record<string, unknown> = { user_id: userId };
+    if (args.until !== undefined && (action === 'ban' || action === 'restrict')) {
+      body.until = args.until;
+    }
+    if (action === 'restrict') body.restriction = args.restriction;
+    const auditId = await this.openModerationAudit({
+      account,
+      chatId,
+      userId,
+      action,
+      restriction: action === 'restrict' ? String(args.restriction) : undefined,
+      until: typeof args.until === 'string' ? args.until : undefined,
+      reason: typeof args.reason === 'string' ? args.reason : undefined,
+    });
+    let data: any;
+    try {
+      data = await this.classifiedConnectorCall(
+        this.tgUrl(account),
+        'POST',
+        `/api/v1/chats/${encodeURIComponent(chatId)}/moderation/${action}`,
+        body
+      );
+    } catch (error) {
+      await this.closeModerationAudit(auditId, error);
+      throw error;
+    }
+    await this.closeModerationAudit(auditId, null);
+    return this.jsonResponse(data);
+  }
+
+  /** Numeric Telegram id (marked -100… included); @username and 'abc' → invalid_target. */
+  private moderationNumericId(name: string, value: unknown): string {
+    const text =
+      typeof value === 'number' && Number.isInteger(value) ? String(value) : String(value ?? '');
+    if (!/^-?\d{1,20}$/.test(text)) {
+      throw this.canonicalError(
+        'invalid_target',
+        `${name} debe ser id numérico de Telegram (no @nombre)`
+      );
+    }
+    return text;
+  }
+
+  /**
+   * Dictamen §4: the row exists before the mutation goes out (outcome
+   * 'pending', so an attempt interrupted between audit and connector stays
+   * visible); closeModerationAudit stamps the final outcome. A failed INSERT
+   * denies the mutation: audit_unavailable, zero connector calls.
+   */
+  private async openModerationAudit(entry: {
+    account: string;
+    chatId: string;
+    userId: string;
+    action: string;
+    restriction?: string;
+    until?: string;
+    reason?: string;
+  }): Promise<number> {
+    const actor = getRequestActor();
+    try {
+      const result = await this.dbClient.query(
+        `INSERT INTO moderation_audit
+           (actor, account_id, platform, chat_id, target_user_id, action, restriction, "until", reason, outcome)
+         VALUES ($1, $2, 'telegram', $3, $4, $5, $6, $7, $8, 'pending')
+         RETURNING id`,
+        [
+          actor.sub || actor.name || null,
+          socialAccountId('telegram', entry.account),
+          entry.chatId,
+          entry.userId,
+          entry.action,
+          entry.restriction ?? null,
+          entry.until ?? null,
+          entry.reason ?? null,
+        ]
+      );
+      return Number(result.rows?.[0]?.id);
+    } catch (error) {
+      this.logger.error(
+        { tool: 'social_moderate_members', error: safeError(error) },
+        'moderation_audit write failed: mutation refused'
+      );
+      throw this.canonicalError(
+        'audit_unavailable',
+        'No se pudo registrar la auditoría de moderación; la mutación no se ejecutó'
+      );
+    }
+  }
+
+  /** Stamps the final outcome ('ok' or the canonical error code). The mutation
+   * already happened: a failed UPDATE is logged, never rewritten as an error. */
+  private async closeModerationAudit(auditId: number, error: unknown): Promise<void> {
+    const outcome = error ? this.errorCode(error) : 'ok';
+    const details = (error as { canonicalDetails?: Record<string, any> })?.canonicalDetails;
+    const telegramError = typeof details?.code === 'string' ? details.code : null;
+    try {
+      await this.dbClient.query(
+        `UPDATE moderation_audit SET outcome = $2, telegram_error = $3 WHERE id = $1`,
+        [auditId, outcome, telegramError]
+      );
+    } catch (updateError) {
+      this.logger.error(
+        { tool: 'social_moderate_members', auditId, error: safeError(updateError) },
+        'moderation_audit outcome update failed (mutation already sent)'
+      );
     }
   }
 
