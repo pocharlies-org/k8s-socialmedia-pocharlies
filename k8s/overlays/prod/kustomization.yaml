@@ -195,6 +195,9 @@ images:
   # pines le fija el digest junto al avance de whatsappmcp-mcp-server (norma de la casa: tag@digest,
   # nunca tag suelto). Digest comprobado en Harbor (docker manifest inspect + crane). Runbook:
   # docs/sauvage-verificacion.md.
+  # INFRA-125 (INFRA-746 B): v1.3.135 -> v1.3.137 (run 41810030536, deploy/prod@dd75cfc, GREEN).
+  # El bot Sauvage ejecuta la cadena dm->ban->readmision de la parte B; sale con
+  # SAUVAGE_MODERATION=off (la activacion es del operador). Digest comprobado en Harbor (crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
-    newTag: v1.3.135
-    digest: sha256:c34124e7f369c8efe8f373dfb39004a4cbce294ee6345912a50198c79f2c4fee
+    newTag: v1.3.137
+    digest: sha256:431e15f132cbddb1128923c8c13c482bfc204ffea6a9e153461422c6e051feb6
