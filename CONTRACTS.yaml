@@ -963,6 +963,24 @@ contracts:
     ENABLE_SENDING = on), the gate of http.telegram-connector.messages-edit.v1. Registered with the sending
     gate (the route predates the registry). The path, the body fields and the 200 shape are contract:
     changing any is breaking — a new `.v2` entry beside this one.'
+- id: http.telegram-connector.moderation.v1
+  kind: http-route
+  value: /chats/:id/moderation/{action}
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'HMAC-signed routes of the house Telegram connectors (telegram-connector, telegram-connector-professional).
+    Member moderation (INFRA-218 / INFRA-344), to be consumed by the MCP moderation tool (INFRA-345):
+    POST /api/v1/chats/:id/moderation/{ban|unban|kick|restrict|unrestrict} (body {user_id, restriction?
+    mute|no_media|no_invite|read_only, until? ISO-8601}) and GET /api/v1/chats/:id/moderation/admin-rights
+    (this account''s own rights, read, ungated). Numeric ids only (@nombre → invalid_target). The five
+    POSTs carry the sending gate: 403 disabled_sending {error, failureClass} before Telegram is touched
+    when ENABLE_SENDING is set to anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING
+    = on), the gate of http.telegram-connector.messages-edit.v1. Failures answer {error, failureClass,
+    code?, retry_after_s?, missing_right?} with failureClass in invalid_target|invalid_request|not_admin|rate_limited|user_not_participant|unsupported_chat_type|telegram_error
+    — never 500, never outcome_unknown. The paths, the body fields, the 200 shapes and the failureClass
+    set are contract: changing any is breaking — a new `.v2` entry beside this one.'
 - id: http.telegram-connector.chats-ban.v1
   kind: http-route
   value: /chats/:id/ban

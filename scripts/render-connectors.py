@@ -307,7 +307,13 @@ def telegram_defaults(account_id):
         # del whatsappmcp, no tamaño.
         "connectorMemoryLimit": "3Gi",
         "syncMemoryLimit": "3Gi",
-        "connectorNodeSelector": {"topology": "lan", "kubernetes.io/arch": "amd64"},
+        # INFRA-1103 (03-11): el conector también va a sauvage. Su sesión gramjs vive en el
+        # Secret (sin PVC) y Recreate suelta el authkey antes de que conecte el pod nuevo, así
+        # que nunca la usan dos IPs a la vez (lo que dio AuthKeyDuplicated en el intento de ks5).
+        "connectorNodeSelector": {"kubernetes.io/hostname": "sauvage", "kubernetes.io/arch": "amd64"},
+        "connectorTolerations": [
+            {"key": "role", "operator": "Equal", "value": "edge", "effect": "NoSchedule"}
+        ],
         # telegram-sync is SESSION-LESS (ingests via NATS + the connector HTTP
         # API) → no IP binding → OVH edge node sauvage (role=edge taint).
         "syncNodeSelector": {"kubernetes.io/hostname": "sauvage", "kubernetes.io/arch": "amd64"},
@@ -331,33 +337,33 @@ def render_telegram(account):
         c_env.append(
             _secret_env("TELEGRAM_SESSION_STRING", "whatsapp-mcp-secrets", d["sessionSecretKey"])
         )
-    connector = _deployment(
-        cname,
-        {
-            "enableServiceLinks": False,
-            "nodeSelector": d["connectorNodeSelector"],
-            "containers": [
-                {
-                    "name": "telegram-connector",
-                    "image": TG_CONNECTOR_IMAGE,
-                    "ports": [{"name": "http", "containerPort": 3002}],
-                    "livenessProbe": {
-                        "httpGet": {"path": "/health", "port": 3002},
-                        "initialDelaySeconds": 60,
-                        "periodSeconds": 30,
-                        "timeoutSeconds": 10,
-                        "failureThreshold": 4,
-                    },
-                    "env": c_env,
-                    "envFrom": SECRETS_ENV_FROM,
-                    "resources": {
-                        "requests": {"cpu": "30m", "memory": "256Mi"},
-                        "limits": {"memory": d["connectorMemoryLimit"]},
-                    },
-                }
-            ],
-        },
-    )
+    connector_spec = {
+        "enableServiceLinks": False,
+        "nodeSelector": d["connectorNodeSelector"],
+        "containers": [
+            {
+                "name": "telegram-connector",
+                "image": TG_CONNECTOR_IMAGE,
+                "ports": [{"name": "http", "containerPort": 3002}],
+                "livenessProbe": {
+                    "httpGet": {"path": "/health", "port": 3002},
+                    "initialDelaySeconds": 60,
+                    "periodSeconds": 30,
+                    "timeoutSeconds": 10,
+                    "failureThreshold": 4,
+                },
+                "env": c_env,
+                "envFrom": SECRETS_ENV_FROM,
+                "resources": {
+                    "requests": {"cpu": "30m", "memory": "256Mi"},
+                    "limits": {"memory": d["connectorMemoryLimit"]},
+                },
+            }
+        ],
+    }
+    if d["connectorTolerations"]:
+        connector_spec["tolerations"] = d["connectorTolerations"]
+    connector = _deployment(cname, connector_spec)
 
     s_env = [NATS_ENV, DB_ENV]
     if d["connectorAccountEnv"]:

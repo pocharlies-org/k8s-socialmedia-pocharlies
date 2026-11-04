@@ -7,6 +7,13 @@ import {
   telegramDownloadRetryAfter,
 } from '../telegram-client';
 import { MessageMutationError, classifyEditError, sendingDisabledReason } from '../message-edit';
+import {
+  ADMIN_RIGHT_NAMES,
+  ModerationError,
+  classifyModerationError,
+  isRestriction,
+  requireNumericTarget,
+} from '../moderation';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import { readIdempotencyKey, sendOnce } from '../send-idempotency';
 import pino from 'pino';
@@ -124,6 +131,30 @@ export function requireSending(req: Request, res: Response, next: NextFunction):
     return;
   }
   next();
+}
+
+/** Error of a moderation route → status + canonical failureClass (INFRA-218), never an opaque 500. */
+function moderationErrorResponse(res: Response, error: unknown, action: string): void {
+  const e = error instanceof ModerationError ? error : classifyModerationError(error, action);
+  if (e.status >= 500) logger.error(`Error in Telegram ${action}: ${e.message}`);
+  if (e.retryAfterSeconds) res.setHeader('Retry-After', String(e.retryAfterSeconds));
+  res.status(e.status).json({
+    error: e.message,
+    failureClass: e.failureClass,
+    ...(e.code ? { code: e.code } : {}),
+    ...(e.retryAfterSeconds ? { retry_after_s: e.retryAfterSeconds } : {}),
+    ...(e.missingRight ? { missing_right: e.missingRight } : {}),
+  });
+}
+
+/** Optional ISO-8601 `until` of a moderation body → Date (undefined = no end). */
+function untilFromBody(value: unknown): Date | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const date = typeof value === 'string' ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime()) || !/^\d{4}-\d{2}-\d{2}/.test(value as string)) {
+    throw new ModerationError('invalid_request', 'until debe ser una fecha ISO-8601');
+  }
+  return date;
 }
 
 /**
@@ -344,24 +375,8 @@ export function createRouter(
           res.status(400).json({ error: 'rights must be an object of boolean permissions' });
           return;
         }
-        const allowedRights = new Set([
-          'changeInfo',
-          'postMessages',
-          'editMessages',
-          'deleteMessages',
-          'banUsers',
-          'inviteUsers',
-          'pinMessages',
-          'addAdmins',
-          'anonymous',
-          'manageCall',
-          'other',
-          'manageTopics',
-          'postStories',
-          'editStories',
-          'deleteStories',
-          'manageDirectMessages',
-        ]);
+        // Same 16 right names getChatMember reports (moderation.ts); one source.
+        const allowedRights = new Set<string>(ADMIN_RIGHT_NAMES);
         if (
           Object.entries(rights).some(
             ([name, value]) => !allowedRights.has(name) || typeof value !== 'boolean'
@@ -453,6 +468,64 @@ export function createRouter(
       } catch (e) {
         logger.error(`Error exporting Telegram chat invite: ${String(e)}`);
         res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * Member moderation (INFRA-218 / INFRA-344). Ids are numeric, in the path
+   * (chat) and the body (`user_id`); failures answer {error, failureClass,
+   * code?, retry_after_s?, missing_right?}, never a 500 nor outcome_unknown.
+   * POST /chats/:id/moderation/{ban|unban|kick|restrict|unrestrict}
+   * GET  /chats/:id/moderation/admin-rights   (this account's own rights)
+   */
+  // CONTRACT: http.telegram-connector.moderation.v1
+  const moderationRoute = (
+    action: 'ban' | 'unban' | 'kick' | 'restrict' | 'unrestrict',
+    run: (chatId: string, userId: string, body: Record<string, unknown>) => Promise<unknown>
+  ): void => {
+    router.post(
+      `/chats/:id/moderation/${action}`,
+      requireSending,
+      (req: Request, res: Response): void => {
+        void (async () => {
+          try {
+            const body = (req.body ?? {}) as Record<string, unknown>;
+            const chatId = requireNumericTarget('chat_id', req.params.id);
+            const userId = requireNumericTarget('user_id', body.user_id);
+            res.json(await run(chatId, userId, body));
+          } catch (e) {
+            moderationErrorResponse(res, e, action);
+          }
+        })();
+      }
+    );
+  };
+
+  moderationRoute('ban', (chat, user, body) =>
+    client.banChatMember(chat, user, untilFromBody(body.until))
+  );
+  moderationRoute('unban', (chat, user) => client.unbanChatMember(chat, user));
+  moderationRoute('kick', (chat, user) => client.kickChatMember(chat, user));
+  moderationRoute('restrict', (chat, user, body) => {
+    if (!isRestriction(body.restriction)) {
+      throw new ModerationError(
+        'invalid_request',
+        'restriction debe ser uno de: mute, no_media, no_invite, read_only'
+      );
+    }
+    return client.restrictChatMember(chat, user, body.restriction, untilFromBody(body.until));
+  });
+  moderationRoute('unrestrict', (chat, user) => client.unrestrictChatMember(chat, user));
+
+  router.get('/chats/:id/moderation/admin-rights', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        res.json(
+          await client.getOwnChatAdminRights(requireNumericTarget('chat_id', req.params.id))
+        );
+      } catch (e) {
+        moderationErrorResponse(res, e, 'get_admin_rights');
       }
     })();
   });
