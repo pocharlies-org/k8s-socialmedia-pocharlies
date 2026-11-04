@@ -2430,6 +2430,11 @@ contracts:
     the Synapse messaging adapter (services/synapse-adapter-messaging,
     channels/instagram.py) for POST /:account/messages/send and
     /:account/comments/:id/reply.
+    INFRA-1173: POST /:account/publish/reel accepts the optional reel container
+    options cover_url, thumb_offset (ms) and collaborators (up to 3 usernames),
+    forwarded to the Graph API REELS container; user_tags is not supported on
+    reels (Meta: images, videos and stories only). Additive — the required body
+    stays {video_url}.
     The prefix, the signature scheme and the 401/503 answers are contract:
     changing any is breaking — a new `.v2` entry beside this one.
 # SC-2760: superficies marcadas con `# CONTRACT:` en el codigo verbatim del
