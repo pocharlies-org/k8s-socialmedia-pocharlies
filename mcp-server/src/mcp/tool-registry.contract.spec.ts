@@ -60,6 +60,7 @@ const EXPECTED_TOOL_NAMES = [
   'social_manage_group',
   'social_manage_session',
   'social_mark_read',
+  'social_moderate_members',
   'social_pin_message',
   'social_publish_content',
   'social_publish_status',
@@ -140,6 +141,7 @@ const EXPECTED_EFFECTS: Record<(typeof EXPECTED_TOOL_NAMES)[number], SocialEffec
   social_manage_group: 'destructive',
   social_manage_session: 'externalWrite',
   social_mark_read: 'externalWrite',
+  social_moderate_members: 'destructive',
   social_pin_message: 'externalWrite',
   social_publish_content: 'externalWrite',
   social_publish_status: 'destructive',
@@ -485,6 +487,12 @@ const EXPECTED_ANNOTATIONS: Record<
     idempotentHint: true,
     openWorldHint: true,
   },
+  social_moderate_members: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
   social_pin_message: {
     readOnlyHint: false,
     destructiveHint: false,
@@ -734,11 +742,11 @@ describe('Socialmedia v2 tool contract', () => {
   const manifestPath = resolve(__dirname, '../../../contracts/socialmedia-tools.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContractManifest;
 
-  it('contains exactly the 77 canonical tools in deterministic order', () => {
+  it('contains exactly the 78 canonical tools in deterministic order', () => {
     const names = SOCIAL_TOOL_REGISTRY.map(tool => tool.name);
 
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
-    expect(new Set(names).size).toBe(77);
+    expect(new Set(names).size).toBe(78);
     expect(manifest.tools.map(tool => tool.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -764,7 +772,7 @@ describe('Socialmedia v2 tool contract', () => {
       tool => tool.effect !== 'read' && tool.effect !== 'compute'
     );
 
-    expect(writes).toHaveLength(40);
+    expect(writes).toHaveLength(41);
     // SC-1143 (SC-1194 P1): pairing is the one write whose account does not
     // exist yet — startPairing is reached before any Instagram credential is
     // stored, so it cannot carry an accountId. Every other action of the same

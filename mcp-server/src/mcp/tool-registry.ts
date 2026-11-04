@@ -1144,6 +1144,92 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     ),
   }),
   tool({
+    name: 'social_moderate_members',
+    title: 'Moderate Telegram members',
+    description:
+      'Ban, unban, kick, restrict or unrestrict one member of a Telegram supergroup or ' +
+      'channel, or read this account\'s own admin rights (get_admin_rights). Telegram only. ' +
+      'target (chat) and userId are numeric Telegram ids — marked ids like -1001234567890 ' +
+      'included — never @usernames. ban, kick and restrict require reason and confirm=true: ' +
+      'a missing or false confirm is refused with confirmation_required and nothing goes out ' +
+      'to Telegram. Every mutation writes one audit row (also failed ones) under the verified ' +
+      'caller; if the audit row cannot be written the mutation is refused with ' +
+      'audit_unavailable. get_admin_rights reads rights and is not audited.',
+    effect: 'destructive',
+    authScope: 'social.write',
+    capability: 'members.moderate',
+    handler: 'moderateMembers',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        action: {
+          type: 'string',
+          enum: ['ban', 'unban', 'kick', 'restrict', 'unrestrict', 'get_admin_rights'],
+        },
+        userId: {
+          type: ['string', 'integer'],
+          description:
+            'Numeric Telegram user id of the member (never @username). Required for every ' +
+            'action except get_admin_rights, where it does not apply.',
+        },
+        reason: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 500,
+          description: 'Why: required for ban, kick and restrict; stored in the audit row.',
+        },
+        until: {
+          type: 'string',
+          format: 'date-time',
+          description: 'ISO-8601 end of the ban or restriction. Only ban and restrict.',
+        },
+        restriction: {
+          type: 'string',
+          enum: ['mute', 'no_media', 'no_invite', 'read_only'],
+          description:
+            'Closed restriction set (mute = no sending of any kind; no_media = everything of ' +
+            'mute except plain messages; no_invite = cannot invite; read_only = mute + no ' +
+            'invite, pin or change info). Required for restrict, refused for other actions.',
+        },
+        confirm: {
+          type: 'boolean',
+          description:
+            'Must be true for ban, kick and restrict; missing or false is refused with ' +
+            'confirmation_required before any connector call.',
+        },
+      },
+      ['channel', 'accountId', 'target', 'action'],
+      {
+        allOf: [
+          {
+            if: {
+              properties: { action: { enum: ['ban', 'unban', 'kick', 'restrict', 'unrestrict'] } },
+            },
+            then: { required: ['userId'] },
+          },
+          {
+            if: { properties: { action: { enum: ['ban', 'kick', 'restrict'] } } },
+            then: { required: ['reason'] },
+          },
+          {
+            if: { properties: { action: { const: 'restrict' } } },
+            then: { required: ['restriction'] },
+          },
+          {
+            if: {
+              properties: { action: { enum: ['ban', 'unban', 'kick', 'unrestrict', 'get_admin_rights'] } },
+            },
+            then: { not: { required: ['restriction'] } },
+          },
+          {
+            if: { properties: { action: { enum: ['unban', 'kick', 'unrestrict', 'get_admin_rights'] } } },
+            then: { not: { required: ['until'] } },
+          },
+        ],
+      }
+    ),
+  }),
+  tool({
     name: 'social_manage_chat',
     title: 'Manage Telegram chat',
     description: 'Change Telegram title, description, photo or forum mode.',
