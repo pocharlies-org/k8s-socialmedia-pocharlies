@@ -58,12 +58,14 @@ images:
   # SC-1256: v1.3.55 -> v1.3.74 (run 36725155383, deploy/prod@7f0dd82 — merge #123):
   # /health por sub del conector IG (puerta por actor de social_list_accounts) y,
   # de paso, SC-1258 #96 (tolerar 0 cuentas de env con CREDENTIAL_STORE_ENABLED).
-  # SKIRM-102 08-10: instagram-e69969eb -> v1.3.106 (run 37744603591, deploy/prod@897435e):
-  # #231, POST /webhook exige x-hub-signature-256 valido (401 sin firma o firma ajena, 503 si
-  # no hay secreto de app). Es lo unico que cambia en connectors/instagram desde e69969eb.
+  # SC-4613 04-11: v1.3.106 -> instagram-33e39d5 (release-instagram run 41927395010,
+  # deploy/prod@33e39d5): #436 quita el paging de la Graph API, que llevaba access_token
+  # en claro a los transcripts. Desde 897435e el conector trae ademas #249 (SKIRM-112:
+  # /api/v1 exige firma HMAC; los consumidores ya la firmaban) y #74. Digest de la
+  # evidencia del release (sigstore-keyless).
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.106
-    digest: sha256:bbd49fd3a9bb60198d3e776b82dbfe0a899f761a249a0318df86ac40911e0fc0
+    newTag: instagram-33e39d50ebed6148ccb629289cd1c91d8de3aea9
+    digest: sha256:e23c269fe4b2f3898eb70bb5bd7670d31996a9ee680d00cdbf22e02607fb74cf
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
