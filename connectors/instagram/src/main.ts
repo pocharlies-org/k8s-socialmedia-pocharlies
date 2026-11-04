@@ -640,13 +640,26 @@ export async function createInstagramApp(opts: InstagramAppOptions): Promise<Exp
     const entry = res.locals.igEntry as AccountEntry | undefined;
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
     try {
-      const { video_url, caption, share_to_feed } = req.body as {
-        video_url: string;
-        caption?: string;
-        share_to_feed?: boolean;
-      };
+      const { video_url, caption, share_to_feed, cover_url, thumb_offset, collaborators } =
+        req.body as {
+          video_url: string;
+          caption?: string;
+          share_to_feed?: boolean;
+          cover_url?: string;
+          thumb_offset?: number;
+          collaborators?: string[];
+        };
       if (!video_url) return res.status(400).json({ error: '`video_url` is required' });
-      res.json(await entry.api.publishReel(video_url, caption, share_to_feed ?? true));
+      res.json(
+        await entry.api.publishReel({
+          videoUrl: video_url,
+          caption,
+          shareToFeed: share_to_feed,
+          coverUrl: cover_url,
+          thumbOffsetMs: thumb_offset,
+          collaborators,
+        })
+      );
     } catch (error) {
       res.status(500).json({ error: String(error) });
     }

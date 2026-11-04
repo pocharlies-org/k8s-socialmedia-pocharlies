@@ -221,6 +221,17 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         { channel: 'instagram', accountId: 'skirmshop', kind: 'reel' },
       ],
       [
+        'reel publish rejects more than three collaborators',
+        'social_publish_content',
+        {
+          channel: 'instagram',
+          accountId: 'skirmshop',
+          kind: 'reel',
+          videoUrl: 'https://example.test/reel.mp4',
+          collaborators: ['a', 'b', 'c', 'd'],
+        },
+      ],
+      [
         'story publish requires imageUrl or videoUrl',
         'social_publish_content',
         { channel: 'instagram', accountId: 'skirmshop', kind: 'story' },
@@ -325,6 +336,19 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         {
           channel: 'instagram',
           accountId: 'skirmshop',
+        },
+      ],
+      [
+        'reel publish accepts cover, thumb offset and collaborators',
+        'social_publish_content',
+        {
+          channel: 'instagram',
+          accountId: 'skirmshop',
+          kind: 'reel',
+          videoUrl: 'https://example.test/reel.mp4',
+          coverUrl: 'https://example.test/portada.jpg',
+          thumbOffset: 1500,
+          collaborators: ['skirmshopusa', 'skirmshopuk'],
         },
       ],
     ])('%s', (_label, toolName, args) => {

@@ -3717,6 +3717,9 @@ export class MCPServer {
           videoUrl: this.string(args, 'videoUrl'),
           caption: args.caption,
           shareToFeed: args.shareToFeed,
+          coverUrl: args.coverUrl,
+          thumbOffset: args.thumbOffset,
+          collaborators: args.collaborators,
         });
       case 'story':
         if (!args.imageUrl && !args.videoUrl) {
@@ -6632,11 +6635,21 @@ export class MCPServer {
     videoUrl: string;
     caption?: string;
     shareToFeed?: boolean;
+    coverUrl?: string;
+    thumbOffset?: number;
+    collaborators?: string[];
   }) {
     const data = await this.instagramCall(
       'POST',
       `/api/v1/${args.account}/publish/reel`,
-      { video_url: args.videoUrl, caption: args.caption, share_to_feed: args.shareToFeed ?? true },
+      {
+        video_url: args.videoUrl,
+        caption: args.caption,
+        share_to_feed: args.shareToFeed ?? true,
+        cover_url: args.coverUrl,
+        thumb_offset: args.thumbOffset,
+        collaborators: args.collaborators,
+      },
       120000
     );
     return this.jsonResponse(data);

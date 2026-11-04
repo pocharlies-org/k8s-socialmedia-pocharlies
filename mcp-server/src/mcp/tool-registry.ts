@@ -1298,6 +1298,15 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
           minItems: 2,
         },
         shareToFeed: { type: 'boolean' },
+        // Reel-only container options (Graph API: cover_url REELS only,
+        // thumb_offset videos/reels, collaborators up to 3 usernames).
+        coverUrl: { type: 'string', format: 'uri' },
+        thumbOffset: { type: 'integer', minimum: 0 },
+        collaborators: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+          maxItems: 3,
+        },
       },
       ['channel', 'accountId', 'kind'],
       {

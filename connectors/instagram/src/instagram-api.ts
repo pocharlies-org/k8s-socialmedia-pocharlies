@@ -137,7 +137,7 @@ export class InstagramAPI {
     endpoint: string,
     params: Record<string, string> = {},
     method: 'GET' | 'POST' = 'GET',
-    body?: Record<string, string>
+    body?: Record<string, string | string[]>
   ): Promise<T> {
     const url = new URL(`${this.primaryBaseUrl()}${endpoint}`);
     url.searchParams.set('access_token', this.primaryAccessToken());
@@ -375,13 +375,23 @@ export class InstagramAPI {
     return { container_id: carousel.id, media_id: published.id, child_container_ids: childIds };
   }
 
-  async publishReel(videoUrl: string, caption?: string, shareToFeed = true) {
-    const body: Record<string, string> = {
+  async publishReel(opts: {
+    videoUrl: string;
+    caption?: string;
+    shareToFeed?: boolean;
+    coverUrl?: string;
+    thumbOffsetMs?: number;
+    collaborators?: string[];
+  }) {
+    const body: Record<string, string | string[]> = {
       media_type: 'REELS',
-      video_url: videoUrl,
-      share_to_feed: String(shareToFeed),
+      video_url: opts.videoUrl,
+      share_to_feed: String(opts.shareToFeed ?? true),
     };
-    if (caption) body.caption = caption;
+    if (opts.caption) body.caption = opts.caption;
+    if (opts.coverUrl) body.cover_url = opts.coverUrl;
+    if (opts.thumbOffsetMs !== undefined) body.thumb_offset = String(opts.thumbOffsetMs);
+    if (opts.collaborators?.length) body.collaborators = opts.collaborators;
     const container = await this.request<{ id: string }>(
       `/${this.primaryAccountId()}/media`,
       {},
