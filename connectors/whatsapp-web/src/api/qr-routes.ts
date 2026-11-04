@@ -81,16 +81,16 @@ button:disabled{opacity:.5;cursor:default}
 </style>
 <script>
 async function checkStatus() {
+  let connected = false;
   try {
-    const res = await fetch('${uiPath('/status')}');
+    const res = await fetch('${uiPath('/status')}', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Status unavailable');
     const data = await res.json();
-    if (data.connected) {
-      document.getElementById('qr-section').style.display = 'none';
-      document.getElementById('connected-section').style.display = 'block';
-      return;
-    }
+    connected = data.connected === true;
   } catch(e) {}
-  document.getElementById('qr-img').src = '${uiPath('/qr')}?' + Date.now();
+  document.getElementById('qr-section').style.display = connected ? 'none' : 'block';
+  document.getElementById('connected-section').style.display = connected ? 'block' : 'none';
+  if (!connected) document.getElementById('qr-img').src = '${uiPath('/qr')}?' + Date.now();
   setTimeout(checkStatus, 3000);
 }
 window.onload = checkStatus;
