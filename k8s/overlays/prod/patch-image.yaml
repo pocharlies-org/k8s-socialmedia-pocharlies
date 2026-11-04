@@ -92,7 +92,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:skirm-373-3b4860e@sha256:25ddf684f81d5c6877d47a6ce9c03223ff14cda9b5fb5848ec2623f777000c4a
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 # SKIRM-103 10-10: whatsapp-connector-leila advances v1.3.103 -> v1.3.109 (run 38008072969,
