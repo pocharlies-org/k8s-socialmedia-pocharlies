@@ -159,9 +159,14 @@ images:
   # social-api, los CronJobs de brain-windows y voz, y el Job PreSync whatsapp-mcp-migrate (que aplica la
   # 042 con su ledger _migrations antes del CronJob). Digest comprobado en Harbor (docker manifest
   # inspect + crane).
+  # INFRA-218 04-11: v1.3.135 -> v1.3.136 (release.yml run 41799951731, deploy/prod@a8a46ca, GREEN):
+  # anade la tool social_moderate_members (INFRA-345 #429) y su migracion 043 (043_moderation_audit.sql),
+  # que aplica el Job PreSync whatsapp-mcp-migrate con su ledger _migrations. Mueve mcp-server, mcp-sse,
+  # social-api, los CronJobs de brain-windows y voz, y el Job PreSync. Digest comprobado en Harbor
+  # (crane + docker buildx imagetools inspect).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.135
-    digest: sha256:8165feb8061a01b541790719d5b312ae40c634c63d409aaf841fd7b653f2ad4c
+    newTag: v1.3.136
+    digest: sha256:56419788619033e04fb460d93d5434fd411a84ffa60bb35bc9148a75153ea4dd
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
