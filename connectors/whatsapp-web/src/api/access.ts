@@ -15,10 +15,9 @@ export function secretEquals(actual: string, expected: string): boolean {
 // The UI sits behind Traefik `sso-chain`, whose forwardAuth replaces Authorization with oauth2-proxy's
 // Bearer, so Basic never arrives from a browser. The browser's SSO cookie is re-checked against the same
 // oauth2-proxy instead of trusting X-Auth-Request-* headers: :3001 is open to every pod in 10.42.0.0/16.
-export const DEFAULT_UI_SSO_AUTH_URL = 'http://oauth2-proxy.keycloak.svc.cluster.local:4180/oauth2/auth';
+const DEFAULT_UI_SSO_AUTH_URL = 'http://oauth2-proxy.keycloak.svc.cluster.local:4180/oauth2/auth';
 
-export async function ssoSessionValid(authUrl: string, cookie: string): Promise<boolean> {
-  if (!authUrl || !cookie) return false;
+async function ssoSessionValid(authUrl: string, cookie: string): Promise<boolean> {
   try {
     const response = await fetch(authUrl, {
       headers: { cookie },
