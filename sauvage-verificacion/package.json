@@ -5,7 +5,7 @@
   "main": "dist/pasada.js",
   "scripts": {
     "build": "tsc",
-    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/connector-client.test.ts src/vision.test.ts src/informe.test.ts src/estado.test.ts src/sin-mtproto.test.ts"
+    "test": "pnpm --filter @mcp-socialmedia/shared run build && tsx --test src/connector-client.test.ts src/vision.test.ts src/informe.test.ts src/estado.test.ts src/moderacion.test.ts src/sin-mtproto.test.ts"
   },
   "dependencies": {
     "@mcp-socialmedia/shared": "workspace:*",

@@ -157,6 +157,34 @@ function untilFromBody(value: unknown): Date | undefined {
   return date;
 }
 
+/**
+ * Validation of the moderation bodies (INFRA-746), a middleware so it answers
+ * 400 BEFORE the sending gate's 403 (an invalid request is invalid with the
+ * door open or closed). The participant is a numeric Telegram id: the bot
+ * works with the ids the participants route gives it, never usernames.
+ */
+function moderationBody(req: Request, res: Response, next: NextFunction): void {
+  const { userId } = (req.body ?? {}) as { userId?: unknown };
+  if (typeof userId !== 'string' && typeof userId !== 'number') {
+    res.status(400).json({ error: 'userId is required (numeric Telegram id)' });
+    return;
+  }
+  if (!/^\d{1,20}$/.test(String(userId))) {
+    res.status(400).json({ error: 'userId must be a numeric Telegram id' });
+    return;
+  }
+  next();
+}
+
+/** Chat param of a moderation route: a numeric chat id or a @username. */
+function chatParam(req: Request, res: Response, next: NextFunction): void {
+  if (!TELEGRAM_PEER_RE.test(req.params.id)) {
+    res.status(400).json({ error: 'invalid chat id' });
+    return;
+  }
+  next();
+}
+
 export interface RouterOptions {
   /**
    * Hand an edit this connector made to NATS (telegram.MessageEdited, written
@@ -370,6 +398,75 @@ export function createRouter(
         res.json(result);
       } catch (e) {
         logger.error(`Error setting Telegram admin permissions: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /chats/:id/ban - Ban a member from a group, supergroup or channel
+   * (bot Sauvage verificacion, INFRA-746). Validation answers 400 before the
+   * sending gate's 403; the ban itself only after the gate.
+   */
+  // CONTRACT: http.telegram-connector.chats-ban.v1
+  router.post(
+    '/chats/:id/ban',
+    chatParam,
+    moderationBody,
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          const result = await client.banManagedChatMember(req.params.id, String(req.body.userId));
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error banning Telegram chat member: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
+
+  /**
+   * POST /chats/:id/unban - Lift a member's ban. Does NOT re-add them: the
+   * add is POST /chats/:id/members (chats-members.v1).
+   */
+  // CONTRACT: http.telegram-connector.chats-unban.v1
+  router.post(
+    '/chats/:id/unban',
+    chatParam,
+    moderationBody,
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          const result = await client.unbanManagedChatMember(
+            req.params.id,
+            String(req.body.userId)
+          );
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error unbanning Telegram chat member: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
+
+  /**
+   * POST /chats/:id/invite-export - Export the primary invite link of a
+   * channel/supergroup (fallback when the add is refused by the target's
+   * privacy: chats-members answers with `missing`). Telegram rotates the
+   * primary link on every export.
+   */
+  // CONTRACT: http.telegram-connector.chats-invite-export.v1
+  router.post('/chats/:id/invite-export', chatParam, requireSending, (req, res): void => {
+    void (async () => {
+      try {
+        const result = await client.exportManagedChatInvite(req.params.id);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error exporting Telegram chat invite: ${String(e)}`);
         res.status(500).json({ error: String(e) });
       }
     })();

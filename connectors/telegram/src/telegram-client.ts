@@ -1119,6 +1119,51 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * Ban a member from a group, supergroup or channel (INFRA-746, bot Sauvage).
+   * mtcute 0.29.7 takes an OBJECT {chatId, participantId} (positional args
+   * fail with "Invalid marked peer id: undefined" — measured in the PoC).
+   */
+  async banManagedChatMember(chatId: string, userId: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.banChatMember({
+      chatId: toMtcutePeer(chatId),
+      participantId: toMtcutePeer(userId),
+    });
+    return { chatId, userId, banned: true };
+  }
+
+  /** Lift a ban. Does NOT re-add the member: the add is a separate call. */
+  async unbanManagedChatMember(chatId: string, userId: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.unbanChatMember({
+      chatId: toMtcutePeer(chatId),
+      participantId: toMtcutePeer(userId),
+    });
+    return { chatId, userId, unbanned: true };
+  }
+
+  /**
+   * Export the primary invite link of a channel/supergroup (fallback when the
+   * add is silently refused by the target's privacy: addChatMembers answers
+   * with `missing`). mtcute's raw `messages.exportChatInvite` needs the REAL
+   * tl peer object (resolvePeer), not a plain serialized one — measured in the
+   * PoC. The old primary link is rotated by Telegram on every export.
+   */
+  async exportManagedChatInvite(chatId: string): Promise<{ chatId: string; link: string }> {
+    if (!this.connected) throw new Error('Not connected');
+    const peer = await this.client.resolvePeer(toMtcutePeer(chatId));
+    if (peer._ !== 'inputPeerChannel') {
+      throw new Error(`exportChatInvite requires a channel or supergroup (peer=${peer._})`);
+    }
+    const invite = await this.client.call({
+      _: 'messages.exportChatInvite',
+      peer,
+    });
+    if (invite._ === 'chatInviteExported') return { chatId, link: invite.link };
+    throw new Error(`exportChatInvite returned ${invite._} (no usable link)`);
+  }
+
+  /**
    * Member moderation (INFRA-218 / INFRA-344). Every call answers a canonical
    * ModerationError on failure (moderation.ts), never a raw mtcute error.
    */

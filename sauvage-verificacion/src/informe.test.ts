@@ -32,13 +32,15 @@ test('reunirInforme cuadra el total con los auditados de hoy y clasifica por ver
     { user_id: '5', verdict: 'sin_cara' },
   ];
   const db: EstadoDb = {
-    query: async () => ({ rows: filas }),
+    query: async sql => ({ rows: sql.includes('savage_actions') ? [{ user_id: '7' }] : filas }),
   };
   const nombres = new Map([['2', 'Ana (ana)']]);
   const d = await reunirInforme(db, 'professional', nombres);
   assert.equal(d.total, 5);
   assert.deepEqual(d.incumplidores, ['Ana (ana)', '5']);
-  assert.deepEqual(d.reingresos, []);
+  // C4→C5: reingresos = confirmado=true de hoy en savage_actions (la lista de
+  // participantes lo confirmo), no el retorno del add.
+  assert.deepEqual(d.reingresos, ['7']);
   assert.deepEqual(d.pendientes, ['3']);
   assert.deepEqual(d.ambiguedades, ['4']);
 });

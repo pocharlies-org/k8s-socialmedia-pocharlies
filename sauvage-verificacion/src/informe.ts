@@ -1,13 +1,14 @@
 import { ConnectorClient } from './connector-client';
 import type { EstadoDb } from './estado';
-import { auditadosDesde } from './estado';
+import { auditadosDesde, reingresosHoy } from './estado';
 
 /**
  * Informe diario a Dani (C5), por la cuenta personal.
  *
  * Cuatro apartados, con esos nombres exactos (los busca el criterio):
- *   incumplidores — sin_cara de hoy: candidatos a expulsion cuando exista B.
- *   reingresos    — cero hasta que exista la parte B (INFRA-746).
+ *   incumplidores — sin_cara de hoy: expulsados por B tras su aviso (C3).
+ *   reingresos    — readmisiones CONFIRMADAS hoy por la lista de
+ *                   participantes (C4, savage_actions confirmado=true).
  *   pendientes    — no_auditar de hoy: sin veredicto usable (504, modelo, no
  *                   parseable); se reintentan en la proxima pasada.
  *   ambiguedades  — dudoso de hoy: sin foto visible para la cuenta o foto que
@@ -44,8 +45,9 @@ export function construirInforme(d: ApartadosInforme): string {
 }
 
 /**
- * Reune los apartados desde el estado de hoy. `reingresos` es cero por
- * construccion hasta INFRA-746: no hay expulsiones que readmitir.
+ * Reune los apartados desde el estado de hoy. `reingresos` sale de
+ * savage_actions (confirmado=true de hoy, C4): la confirmacion la dio la
+ * lista de participantes, nunca el retorno del add.
  */
 export async function reunirInforme(
   db: EstadoDb,
@@ -53,11 +55,12 @@ export async function reunirInforme(
   nombres: Map<string, string>
 ): Promise<ApartadosInforme> {
   const hoy = await auditadosDesde(db, account);
+  const reingresos = await reingresosHoy(db);
   const nombre = (id: string) => nombres.get(id) ?? id;
   return {
     total: hoy.length,
     incumplidores: hoy.filter(v => v.verdict === 'sin_cara').map(v => nombre(v.userId)),
-    reingresos: [],
+    reingresos: reingresos.map(nombre),
     pendientes: hoy.filter(v => v.verdict === 'no_auditar').map(v => nombre(v.userId)),
     ambiguedades: hoy.filter(v => v.verdict === 'dudoso').map(v => nombre(v.userId)),
   };

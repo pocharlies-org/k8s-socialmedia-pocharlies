@@ -58,6 +58,7 @@ configMapGenerator:
     files:
       - prompt-pasada.md=sauvage-verificacion/prompt-pasada.md
       - prompt-vision.md=sauvage-verificacion/prompt-vision.md
+      - guia-dm.md=sauvage-verificacion/guia-dm.md
       - opencode.json=sauvage-verificacion/opencode.json
 
 generatorOptions:

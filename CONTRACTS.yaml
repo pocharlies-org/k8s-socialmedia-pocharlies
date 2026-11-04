@@ -981,6 +981,55 @@ contracts:
     code?, retry_after_s?, missing_right?} with failureClass in invalid_target|invalid_request|not_admin|rate_limited|user_not_participant|unsupported_chat_type|telegram_error
     — never 500, never outcome_unknown. The paths, the body fields, the 200 shapes and the failureClass
     set are contract: changing any is breaking — a new `.v2` entry beside this one.'
+- id: http.telegram-connector.chats-ban.v1
+  kind: http-route
+  value: /chats/:id/ban
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'HMAC-signed route of the house Telegram connectors (telegram-connector, telegram-connector-professional).
+    POST /api/v1/chats/:id/ban (ban a member), consumed by the Sauvage verificacion bot (INFRA-746,
+    savage-verificacion/). Body {userId: numeric Telegram id as string or number}. Validation answers
+    400 BEFORE the sending gate (an invalid body is invalid with the door open or closed); then 403
+    disabled_sending {error, failureClass} before Telegram is touched when ENABLE_SENDING is set to
+    anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+    http.telegram-connector.messages-edit.v1. 200 {chatId, userId, banned: true}. The path, the body
+    fields and the 200 shape are contract: changing any is breaking — a new `.v2` entry beside this
+    one.'
+- id: http.telegram-connector.chats-unban.v1
+  kind: http-route
+  value: /chats/:id/unban
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'HMAC-signed route of the house Telegram connectors (telegram-connector, telegram-connector-professional).
+    POST /api/v1/chats/:id/unban (lift a member ban; does NOT re-add the member — the add is
+    http.telegram-connector.chats-members.v1), consumed by the Sauvage verificacion bot (INFRA-746).
+    Body {userId: numeric Telegram id as string or number}. Validation answers 400 BEFORE the sending
+    gate; then 403 disabled_sending {error, failureClass} before Telegram is touched when ENABLE_SENDING
+    is set to anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the
+    gate of http.telegram-connector.messages-edit.v1. 200 {chatId, userId, unbanned: true}. The path,
+    the body fields and the 200 shape are contract: changing any is breaking — a new `.v2` entry beside
+    this one.'
+- id: http.telegram-connector.chats-invite-export.v1
+  kind: http-route
+  value: /chats/:id/invite-export
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'HMAC-signed route of the house Telegram connectors (telegram-connector, telegram-connector-professional).
+    POST /api/v1/chats/:id/invite-export (export the primary invite link of a channel/supergroup; the
+    fallback when the add of http.telegram-connector.chats-members.v1 is refused by the target privacy
+    and answers with `missing`), consumed by the Sauvage verificacion bot (INFRA-746). Empty body {};
+    the chat must be a channel/supergroup (400 otherwise before the gate). 403 disabled_sending {error,
+    failureClass} before Telegram is touched when ENABLE_SENDING is set to anything but "true" or
+    EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+    http.telegram-connector.messages-edit.v1. 200 {chatId, link}. Telegram rotates the primary link on
+    every export. The path and the 200 shape are contract: changing either is breaking — a new `.v2`
+    entry beside this one.'
 - id: http.telegram-connector.chats-topics.v1
   kind: http-route
   value: /chats/:id/topics

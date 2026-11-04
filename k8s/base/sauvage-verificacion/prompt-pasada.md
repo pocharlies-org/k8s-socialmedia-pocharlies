@@ -17,9 +17,20 @@ la herramienta bash y NO inventes resultados ni saltes pasos.
 3. `cd /app/sauvage-verificacion && node --import tsx src/main-informe.ts`
    Manda a Dani el informe por la cuenta personal (cuatro apartados).
 
-4. Responde con el resumen de la pasada: total, sin_cara, dudoso y no_auditar
-   leidos del log del paso 1.
+4. `cd /app/sauvage-verificacion && node --import tsx src/main-moderacion.ts`
+   Moderacion (INFRA-746). Con SAUVAGE_MODERATION distinto de "on" no toca a
+   nadie: loggea `moderacion off: ninguna accion` y termina. Con "on": envia la
+   guia por DM a los `sin_cara` que aun no la tengan y los expulsa (cada ban
+   con su dm previo); re-audita la foto de los expulsados y readmite a quien ya
+   muestra la cara (unban, add o enlace de invitacion, y confirmacion SOLO por
+   la lista de participantes). Puede tardar: espera a que termine y no lo
+   relances. Su log (`dm ID=`, `ban ID=`, `unban ID=`, `add ID=`, `link ID=`,
+   `confirmado ID=`, `omitido ID=... motivo=...`) es la evidencia de C3/C4/C7.
+
+5. Responde con el resumen de la pasada: total, sin_cara, dudoso y no_auditar
+   leidos del log del paso 1, y dm/ban/readmitidos/omitidos del log del paso 4.
 
 Reglas duras: no hables con Telegram directamente (todo va por los scripts),
-no escribas a ningun miembro, no expulses a nadie, no leas secretos del
-entorno ni los muestres.
+no escribas a ningun miembro ni expulses a nadie por tu cuenta — la moderacion
+solo la ejecuta el script del paso 4 —, no leas secretos del entorno ni los
+muestres.
