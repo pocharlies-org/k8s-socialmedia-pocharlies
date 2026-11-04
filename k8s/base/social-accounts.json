@@ -46,6 +46,24 @@
         {
           "name": "WA_RECONNECT_BACKFILL_MAX_MESSAGES",
           "value": "500"
+        },
+        {
+          "name": "UI_AUTH_USERNAME",
+          "valueFrom": {
+            "secretKeyRef": {
+              "name": "whatsapp-connector-professional-ui",
+              "key": "UI_AUTH_USERNAME"
+            }
+          }
+        },
+        {
+          "name": "UI_AUTH_PASSWORD",
+          "valueFrom": {
+            "secretKeyRef": {
+              "name": "whatsapp-connector-professional-ui",
+              "key": "UI_AUTH_PASSWORD"
+            }
+          }
         }
       ]
     },
