@@ -164,3 +164,56 @@ test('sends cover_url, thumb_offset and collaborators on the reel container', as
     globalThis.fetch = originalFetch;
   }
 });
+
+test('never returns Graph API paging URLs, which carry access_token in plaintext (SC-4613)', async () => {
+  const originalFetch = globalThis.fetch;
+  const paged = (path: string) =>
+    `https://graph.facebook.com/v22.0/${path}?after=CURSOR&access_token=IGAAsecret`;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/media')) {
+      return jsonResponse({
+        data: [{ id: 'media-1', caption: 'hola' }],
+        paging: { next: paged('media'), previous: paged('media') },
+      });
+    }
+    if (url.pathname.endsWith('/conversations')) {
+      return jsonResponse({
+        data: [
+          {
+            id: 'conv-1',
+            messages: {
+              data: [{ id: 'msg-1', message: 'hola' }],
+              paging: { next: paged('conv-1/messages') },
+            },
+          },
+        ],
+        paging: { next: paged('conversations') },
+      });
+    }
+    if (url.pathname.endsWith('/me/accounts')) {
+      return jsonResponse({
+        data: [{ id: 'page-1' }],
+        paging: { next: paged('me/accounts') },
+      });
+    }
+    return jsonResponse({ error: 'unexpected request' }, 500);
+  };
+  try {
+    const api = new InstagramAPI({
+      accessToken: 'IGAAsecret',
+      businessAccountId: 'legacy-scoped-id',
+      fbAccessToken: 'EAAsecret',
+    });
+    for (const result of [
+      await api.getRecentMedia(),
+      await api.getConversations(),
+      await api.getAccountPages(),
+    ]) {
+      assert.equal(JSON.stringify(result).includes('access_token'), false);
+      assert.equal('paging' in (result as object), false);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

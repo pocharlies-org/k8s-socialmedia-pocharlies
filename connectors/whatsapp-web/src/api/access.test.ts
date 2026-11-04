@@ -40,6 +40,47 @@ test('connector access protects pairing and history without giving UI sending pr
   }
 });
 
+test('SSO cookie opens the UI only when oauth2-proxy accepts it, never headers alone', async () => {
+  const sso = express();
+  sso.get('/oauth2/auth', (req, res) => {
+    res.status(req.headers.cookie === '_edani_sso=good' ? 202 : 401).end();
+  });
+  const ssoServer = sso.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => ssoServer.once('listening', resolve));
+  const ssoUrl = `http://127.0.0.1:${(ssoServer.address() as { port: number }).port}/oauth2/auth`;
+  const app = express();
+  app.use(express.json());
+  app.use(createConnectorAccess(secret, { username: '', password: '' }, '', ssoUrl));
+  app.all('*', (_req, res) => res.json({ private: true }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  try {
+    for (const path of ['/', '/qr', '/qr/page', '/status', '/api/v1/auth/qr']) {
+      const response = await fetch(base + path, { headers: { cookie: '_edani_sso=good' }, redirect: 'manual' });
+      assert.equal(response.status, 200, path);
+      assert.equal(response.headers.get('cache-control'), 'no-store', path);
+    }
+    assert.equal((await fetch(base + '/qr/renew', { method: 'POST', headers: { cookie: '_edani_sso=good' } })).status, 200);
+    assert.equal((await fetch(base + '/qr/page', { headers: { cookie: '_edani_sso=bad' } })).status, 401);
+    assert.equal((await fetch(base + '/qr/page', { headers: {
+      'x-auth-request-email': 'me@e-dani.com', 'x-auth-request-user': 'me', 'x-forwarded-user': 'me',
+    } })).status, 401);
+    for (const path of ['/api/v1/messages/send', '/api/v1/history/sync']) {
+      assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie: '_edani_sso=good' } })).status, 401, path);
+    }
+    assert.equal((await fetch(base + '/api/v1/history/chat', { headers: { cookie: '_edani_sso=good' } })).status, 401);
+  } finally {
+    await new Promise<void>(resolve => ssoServer.close(() => resolve()));
+  }
+  try {
+    // oauth2-proxy down: fail closed
+    assert.equal((await fetch(base + '/qr/page', { headers: { cookie: '_edani_sso=good' } })).status, 401);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test('missing configuration fails closed', async () => {
   const app = express();
   app.use(createConnectorAccess('', { username: '', password: '' }, ''));
