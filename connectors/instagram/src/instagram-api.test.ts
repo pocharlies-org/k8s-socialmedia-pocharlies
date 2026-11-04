@@ -12,6 +12,18 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function reelTestApi(): InstagramAPI {
+  const api = new InstagramAPI({
+    accessToken: 'expired-instagram-login-token',
+    businessAccountId: 'legacy-scoped-id',
+    fbAccessToken: 'system-user-token',
+    mediaProcessingPollIntervalMs: 0,
+    mediaProcessingTimeoutMs: 1_000,
+  });
+  api.setFacebookPrimary('17841444094675941');
+  return api;
+}
+
 test('discovers the only Instagram Business account assigned to a system user', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
@@ -92,16 +104,11 @@ test('waits for Meta to finish processing a reel before publishing it', async ()
     return jsonResponse({ error: 'unexpected request' }, 500);
   };
   try {
-    const api = new InstagramAPI({
-      accessToken: 'expired-instagram-login-token',
-      businessAccountId: 'legacy-scoped-id',
-      fbAccessToken: 'system-user-token',
-      mediaProcessingPollIntervalMs: 0,
-      mediaProcessingTimeoutMs: 1_000,
+    const api = reelTestApi();
+    const published = await api.publishReel({
+      videoUrl: 'https://cdn.example.test/reel.mp4',
+      caption: 'caption',
     });
-    api.setFacebookPrimary('17841444094675941');
-
-    const published = await api.publishReel('https://cdn.example.test/reel.mp4', 'caption');
 
     assert.deepEqual(published, {
       container_id: 'container-reel-1',
@@ -116,6 +123,43 @@ test('waits for Meta to finish processing a reel before publishing it', async ()
         '/v22.0/17841444094675941/media_publish',
       ]
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sends cover_url, thumb_offset and collaborators on the reel container', async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (typeof init?.body === 'string') bodies.push(JSON.parse(init.body));
+    if (url.pathname.endsWith('/media')) return jsonResponse({ id: 'container-reel-2' });
+    if (url.pathname.endsWith('/container-reel-2')) {
+      return jsonResponse({ id: 'container-reel-2', status_code: 'FINISHED' });
+    }
+    if (url.pathname.endsWith('/media_publish')) return jsonResponse({ id: 'media-reel-2' });
+    return jsonResponse({ error: 'unexpected request' }, 500);
+  };
+  try {
+    const api = reelTestApi();
+    await api.publishReel({
+      videoUrl: 'https://cdn.example.test/reel.mp4',
+      caption: 'caption',
+      coverUrl: 'https://cdn.example.test/portada.jpg',
+      thumbOffsetMs: 1500,
+      collaborators: ['skirmshopusa', 'skirmshopuk'],
+    });
+
+    assert.deepEqual(bodies[0], {
+      media_type: 'REELS',
+      video_url: 'https://cdn.example.test/reel.mp4',
+      share_to_feed: 'true',
+      caption: 'caption',
+      cover_url: 'https://cdn.example.test/portada.jpg',
+      thumb_offset: '1500',
+      collaborators: ['skirmshopusa', 'skirmshopuk'],
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
