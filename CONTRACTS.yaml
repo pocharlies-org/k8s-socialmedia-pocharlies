@@ -2032,7 +2032,9 @@ contracts:
   - connectors/whatsapp-web/src/api/access.ts
   status: active
   note: GET /api/v1/auth/qr now requires valid connector HMAC credentials or configured UI Basic authentication.
-    An unauthenticated request receives 401 with a Basic challenge. Success remains 200 {qrCode, expiresAt}
+    SKIRM-376 (additive) — the UI routes (this one, /, /qr, /qr/page, /status, POST /qr/renew) also accept
+    a browser SSO cookie that the shared oauth2-proxy (/oauth2/auth, keycloak ns) answers with 202; X-Auth-Request-*
+    headers are never trusted; oauth2-proxy down or slower than 3 s denies. An unauthenticated request receives 401 with a Basic challenge. Success remains 200 {qrCode, expiresAt}
     (PNG data URL and ISO timestamp); no current QR returns 404 {"error":"No QR code available"}. The
     path, access requirement and response shape are contract.
 - id: http.whatsapp-connector.poll-vote.v1

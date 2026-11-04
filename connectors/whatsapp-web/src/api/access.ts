@@ -12,13 +12,33 @@ export function secretEquals(actual: string, expected: string): boolean {
   );
 }
 
+// The UI sits behind Traefik `sso-chain`, whose forwardAuth replaces Authorization with oauth2-proxy's
+// Bearer, so Basic never arrives from a browser. The browser's SSO cookie is re-checked against the same
+// oauth2-proxy instead of trusting X-Auth-Request-* headers: :3001 is open to every pod in 10.42.0.0/16.
+const DEFAULT_UI_SSO_AUTH_URL = 'http://oauth2-proxy.keycloak.svc.cluster.local:4180/oauth2/auth';
+
+async function ssoSessionValid(authUrl: string, cookie: string): Promise<boolean> {
+  try {
+    const response = await fetch(authUrl, {
+      headers: { cookie },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(3000),
+    });
+    void response.body?.cancel();
+    return response.status === 202;
+  } catch {
+    return false; // unreachable or slow oauth2-proxy: deny
+  }
+}
+
 export function createConnectorAccess(
   sharedSecret: string,
   ui = {
     username: process.env.UI_AUTH_USERNAME || '',
     password: process.env.UI_AUTH_PASSWORD || '',
   },
-  adminToken = process.env.WA_MANUAL_OPEN_ADMIN_TOKEN || sharedSecret
+  adminToken = process.env.WA_MANUAL_OPEN_ADMIN_TOKEN || sharedSecret,
+  ssoAuthUrl = DEFAULT_UI_SSO_AUTH_URL
 ): RequestHandler {
   const hmac = createHMACAuth(sharedSecret);
   return (req, res, next): void => {
@@ -57,22 +77,34 @@ export function createConnectorAccess(
       next();
       return;
     }
-    const timestamp = req.headers['x-connector-timestamp'];
-    const signature = req.headers['x-connector-signature'];
-    if (
-      !sharedSecret ||
-      sharedSecret === 'dev-secret-change-in-production' ||
-      typeof timestamp !== 'string' ||
-      !/^\d+$/.test(timestamp) ||
-      typeof signature !== 'string' ||
-      !/^(sha256=)?[a-f0-9]{64}$/.test(signature)
-    ) {
-      if (uiPath)
-        res.setHeader('WWW-Authenticate', 'Basic realm="WhatsApp connector", charset="UTF-8"');
-      res.status(401).json({ error: 'Authentication required' });
+    const signedOrDenied = (): void => {
+      const timestamp = req.headers['x-connector-timestamp'];
+      const signature = req.headers['x-connector-signature'];
+      if (
+        !sharedSecret ||
+        sharedSecret === 'dev-secret-change-in-production' ||
+        typeof timestamp !== 'string' ||
+        !/^\d+$/.test(timestamp) ||
+        typeof signature !== 'string' ||
+        !/^(sha256=)?[a-f0-9]{64}$/.test(signature)
+      ) {
+        if (uiPath)
+          res.setHeader('WWW-Authenticate', 'Basic realm="WhatsApp connector", charset="UTF-8"');
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      hmac(req, res, next);
+    };
+    const cookie = req.headers.cookie || '';
+    if (uiPath && ssoAuthUrl && cookie) {
+      void ssoSessionValid(ssoAuthUrl, cookie).then(valid => {
+        if (!valid) return signedOrDenied();
+        res.setHeader('Cache-Control', 'no-store');
+        next();
+      });
       return;
     }
-    res.setHeader('Cache-Control', 'no-store');
-    hmac(req, res, next);
+    signedOrDenied();
   };
 }
