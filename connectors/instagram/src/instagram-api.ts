@@ -89,6 +89,23 @@ export interface Conversation {
   updated_time: string;
 }
 
+/**
+ * Graph API paging.next/previous URLs embed access_token in plaintext and end
+ * up in MCP transcripts; nothing here follows them, so they never leave the
+ * connector. Recursive because /conversations nests paging inside each
+ * conversation's messages (SC-4613).
+ */
+function stripPaging<T>(payload: T): T {
+  if (Array.isArray(payload)) {
+    for (const item of payload) stripPaging(item);
+  } else if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>;
+    delete obj.paging;
+    for (const value of Object.values(obj)) stripPaging(value);
+  }
+  return payload;
+}
+
 export class InstagramAPI {
   private config: InstagramConfig;
 
@@ -156,7 +173,7 @@ export class InstagramAPI {
       const error = await response.text();
       throw new Error(`Instagram API error (${response.status}): ${error}`);
     }
-    return response.json() as Promise<T>;
+    return stripPaging((await response.json()) as T);
   }
 
   /**
@@ -191,7 +208,7 @@ export class InstagramAPI {
       const error = await response.text();
       throw new Error(`Facebook API error (${response.status}): ${error}`);
     }
-    return response.json() as Promise<T>;
+    return stripPaging((await response.json()) as T);
   }
 
   async getProfile() {
