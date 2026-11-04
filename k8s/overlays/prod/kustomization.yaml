@@ -154,10 +154,14 @@ images:
   # (savage_verdicts/savage_actions). Es este bloque —no patch-image.yaml— el que mueve el Job PreSync
   # whatsapp-mcp-migrate; sin el avance el CronJob sauvage-verificacion-diaria muere con «relation
   # savage_verdicts does not exist» y C6 no puede pasar (nota del architect, punto 1 de no bloqueantes).
-  # No se avanza en este PR: el build no existe hasta el despacho de release.yml (norma de la casa).
+  # INFRA-125 04-11: v1.3.133 -> v1.3.135 (release.yml run 41458469268, deploy/prod@8f276da, GREEN):
+  # trae la migracion 042 (savage_verdicts/savage_actions), la exigida arriba. Mueve mcp-server, mcp-sse,
+  # social-api, los CronJobs de brain-windows y voz, y el Job PreSync whatsapp-mcp-migrate (que aplica la
+  # 042 con su ledger _migrations antes del CronJob). Digest comprobado en Harbor (docker manifest
+  # inspect + crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.133
-    digest: sha256:60f9fca117f047277e931ffe262d0370f75f096711b9d1e5ab4a30a32a97ac04
+    newTag: v1.3.135
+    digest: sha256:8165feb8061a01b541790719d5b312ae40c634c63d409aaf841fd7b653f2ad4c
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
@@ -186,11 +190,11 @@ images:
   # INFRA-745 (INFRA-125 A): bot diario de verificacion facial del grupo Sauvage (CronJob
   # sauvage-verificacion-diaria). El base lo deja en :latest (no existe en Harbor); este bloque es
   # el sitio de su pin — patch-image.yaml solo parchea kind: Deployment y no haria match con el
-  # CronJob (nota del architect, punto 2). Nace con tag y SIN digest: la imagen no existe hasta el
-  # primer despacho de release.yml, que debe usar image_tag=v1.3.135 (comprobado libre en Harbor el
-  # 02-11; v1.3.134 ya existe) o actualizar este newTag al tag despachado. El digest se anade en el
-  # PR de release junto al avance de whatsappmcp-mcp-server (runbook docs/sauvage-verificacion.md).
-  # Hasta ese despacho el CronJob falla al pull: fallo inocuo (pasada de solo lectura, backoffLimit
-  # 0, ningun efecto sobre nadie) y C1 empieza a contar desde la release.
+  # CronJob (nota del architect, punto 2). Nacio con tag y SIN digest (la imagen no existia hasta el
+  # despacho); release.yml run 41458469268 (deploy/prod@8f276da, GREEN) publico v1.3.135 y este PR de
+  # pines le fija el digest junto al avance de whatsappmcp-mcp-server (norma de la casa: tag@digest,
+  # nunca tag suelto). Digest comprobado en Harbor (docker manifest inspect + crane). Runbook:
+  # docs/sauvage-verificacion.md.
   - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
     newTag: v1.3.135
+    digest: sha256:c34124e7f369c8efe8f373dfb39004a4cbce294ee6345912a50198c79f2c4fee
