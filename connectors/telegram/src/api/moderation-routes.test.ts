@@ -5,7 +5,7 @@ import type { Server } from 'node:http';
 import express from 'express';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import { createRouter } from './controller';
-import { TelegramClientWrapper } from '../telegram-client';
+import { wrapperWith } from '../test-harness';
 
 /**
  * The three moderation routes of INFRA-746 (bot Sauvage verificacion):
@@ -55,14 +55,6 @@ class FakeMtcute {
     this.calls.push(['call', request]);
     return this.exportInviteResult;
   }
-}
-
-function wrapperWith(fake: FakeMtcute): TelegramClientWrapper {
-  const wrapper = new TelegramClientWrapper({ apiId: 1, apiHash: 'x', sessionString: 's' });
-  const internals = wrapper as unknown as { client: unknown; connected: boolean };
-  internals.client = fake;
-  internals.connected = true;
-  return wrapper;
 }
 
 const open: Array<() => Promise<void>> = [];

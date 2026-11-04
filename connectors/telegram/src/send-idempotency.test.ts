@@ -22,7 +22,7 @@ import pg from 'pg';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import { createRouter } from './api/controller';
 import { createPublicRouter } from './api/public-routes';
-import { TelegramClientWrapper } from './telegram-client';
+import { wrapperWith } from './test-harness';
 import { closePool } from './db-pool';
 import { idempotentRandomId, readIdempotencyKey } from './send-idempotency';
 
@@ -95,14 +95,6 @@ class FakeMtcute {
     }
     return { id: this.nextId++ };
   }
-}
-
-function wrapperWith(fake: FakeMtcute): TelegramClientWrapper {
-  const wrapper = new TelegramClientWrapper({ apiId: 1, apiHash: 'x', sessionString: 's' });
-  const internals = wrapper as unknown as { client: unknown; connected: boolean };
-  internals.client = fake;
-  internals.connected = true;
-  return wrapper;
 }
 
 const open: Array<() => Promise<void>> = [];
