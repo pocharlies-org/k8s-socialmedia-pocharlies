@@ -12,6 +12,18 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function reelTestApi(): InstagramAPI {
+  const api = new InstagramAPI({
+    accessToken: 'expired-instagram-login-token',
+    businessAccountId: 'legacy-scoped-id',
+    fbAccessToken: 'system-user-token',
+    mediaProcessingPollIntervalMs: 0,
+    mediaProcessingTimeoutMs: 1_000,
+  });
+  api.setFacebookPrimary('17841444094675941');
+  return api;
+}
+
 test('discovers the only Instagram Business account assigned to a system user', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
@@ -92,15 +104,7 @@ test('waits for Meta to finish processing a reel before publishing it', async ()
     return jsonResponse({ error: 'unexpected request' }, 500);
   };
   try {
-    const api = new InstagramAPI({
-      accessToken: 'expired-instagram-login-token',
-      businessAccountId: 'legacy-scoped-id',
-      fbAccessToken: 'system-user-token',
-      mediaProcessingPollIntervalMs: 0,
-      mediaProcessingTimeoutMs: 1_000,
-    });
-    api.setFacebookPrimary('17841444094675941');
-
+    const api = reelTestApi();
     const published = await api.publishReel({
       videoUrl: 'https://cdn.example.test/reel.mp4',
       caption: 'caption',
@@ -138,15 +142,7 @@ test('sends cover_url, thumb_offset and collaborators on the reel container', as
     return jsonResponse({ error: 'unexpected request' }, 500);
   };
   try {
-    const api = new InstagramAPI({
-      accessToken: 'expired-instagram-login-token',
-      businessAccountId: 'legacy-scoped-id',
-      fbAccessToken: 'system-user-token',
-      mediaProcessingPollIntervalMs: 0,
-      mediaProcessingTimeoutMs: 1_000,
-    });
-    api.setFacebookPrimary('17841444094675941');
-
+    const api = reelTestApi();
     await api.publishReel({
       videoUrl: 'https://cdn.example.test/reel.mp4',
       caption: 'caption',
