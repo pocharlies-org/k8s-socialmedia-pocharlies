@@ -142,9 +142,14 @@ spec:
         # v4-1c572645 was the EFFECTIVE pin via the `images:` block all along
         # (patches run before the block, so the v3 line that stood here was
         # dead code); spelled out here now that the block dropped the name.
-        # Same digest as the live pod — zero rollout.
+        # INFRA-125 (INFRA-746 B) 04-11: v1.3.133 -> v1.3.137 (run 41810030536,
+        # deploy/prod@dd75cfc, GREEN). El conector Telegram es quien recibe las
+        # rutas de moderacion (dm/ban/unban/add) que invoca el bot Sauvage. Se
+        # pinea AQUI y no en el bloque `images:` porque ese bloque reescribe por
+        # nombre de imagen y se llevaria por delante al pool inerte
+        # telegram-pairing, que sigue a proposito en v1.3.57. Digest en Harbor (crane).
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.133@sha256:d21bb7e8efba8c8eaa8865f5b5aa5cdfd18ffdde7fcc01f6c1f12402a633915d
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -159,7 +164,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.133@sha256:d21bb7e8efba8c8eaa8865f5b5aa5cdfd18ffdde7fcc01f6c1f12402a633915d
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
 ---
 # SC-1145 (SC-705 P2) — el conector Telegram por sub que queda (leila).
 # El generador lo deja en `:latest` (TG_CONNECTOR_IMAGE): sin pin aquí caería
@@ -183,7 +188,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.133@sha256:d21bb7e8efba8c8eaa8865f5b5aa5cdfd18ffdde7fcc01f6c1f12402a633915d
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
 ---
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
