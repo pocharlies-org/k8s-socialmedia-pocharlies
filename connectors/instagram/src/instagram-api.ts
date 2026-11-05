@@ -293,6 +293,8 @@ export class InstagramAPI {
   }
 
   async publishMedia(containerId: string) {
+    // Meta has not downloaded the media until the container is FINISHED; publishing earlier fails 9007.
+    await this.waitForMediaReady(containerId);
     return this.request<{ id: string }>(
       `/${this.primaryAccountId()}/media_publish`,
       { creation_id: containerId },
@@ -376,6 +378,7 @@ export class InstagramAPI {
         body
       );
       childIds.push(child.id);
+      await this.waitForMediaReady(child.id);
     }
     const carouselBody: Record<string, string> = {
       media_type: 'CAROUSEL',
@@ -415,7 +418,6 @@ export class InstagramAPI {
       'POST',
       body
     );
-    await this.waitForMediaReady(container.id);
     const published = await this.publishMedia(container.id);
     return { container_id: container.id, media_id: published.id };
   }

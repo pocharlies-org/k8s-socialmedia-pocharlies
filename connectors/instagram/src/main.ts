@@ -605,6 +605,7 @@ export async function createInstagramApp(opts: InstagramAppOptions): Promise<Exp
         caption,
         media_type || 'IMAGE'
       );
+      await entry.api.waitForMediaReady(container.id);
       const published = await entry.api.publishMedia(container.id);
       res.json({ container_id: container.id, media_id: published.id });
     } catch (error) {
