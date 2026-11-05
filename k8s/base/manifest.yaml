@@ -576,6 +576,8 @@ spec:
             # Las cuentas sin banco (profesional, leila, cloudblue) caen a texto y lo dicen en
             # `fallbackReason`. Vuelta atras: SEMANTIC_PROVIDER=brain (el brain sigue arriba hasta S8).
             - { name: SEMANTIC_PROVIDER, value: "hindsight" }
+            # recall (rerank incluido) sobre el banco `personal` pasa de los 10 s por defecto del cliente.
+            - { name: HINDSIGHT_TIMEOUT_MS, value: "40000" }
             - { name: BRAIN_SEARCH_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
             - name: HINDSIGHT_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: socialmedia-hindsight-reader, key: HINDSIGHT_CLIENT_SECRET } }
