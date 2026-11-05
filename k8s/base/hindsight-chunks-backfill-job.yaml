@@ -7,15 +7,17 @@
 #       manifiestos: el cursor (brain_windows_backfill_cursor, RUN_ID sc4304-hindsight) vive en la BD, no en el Job.
 #   -2  MAX_ITEMS=0, 2 conexiones: arrancó 18:45Z y paró solo a los 50 min con `done: false`. Ya no está en los
 #       manifiestos; el cursor (BD) conserva dónde quedó.
-#   -3  Mismas condiciones (MAX_ITEMS=0, 2 conexiones): retoma desde el cursor. Cada tramo que acabe con
-#       `done: false` se sigue con un Job de nombre nuevo (-4…), nunca con un cambio en sitio. No se fusiona
-#       mientras el Job anterior siga activo: dos Jobs a la vez serían 4 conexiones contra los 4 slots del escritor.
+#   -3  MAX_ITEMS=0, 2 conexiones: arrancó 19:44Z y paró solo a los 50 min con `done: false`. Ya no está en los
+#       manifiestos; el cursor (BD) conserva dónde quedó.
+#   -4  Mismas condiciones (MAX_ITEMS=0, 2 conexiones): retoma desde el cursor. Si acabara con `done: false`, el
+#       siguiente es un Job de nombre nuevo (-5…), nunca un cambio en sitio. No se fusiona mientras el Job anterior
+#       siga activo: dos Jobs a la vez serían 4 conexiones contra los 4 slots del escritor.
 # La imagen va fijada por tag@digest (nunca :latest; condición de security). Un 401/403 del escritor (el token no
 # casa con la identidad) para al instante y no se reintenta.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: hindsight-chunks-backfill-3
+  name: hindsight-chunks-backfill-4
   namespace: whatsapp-mcp
 spec:
   backoffLimit: 0
