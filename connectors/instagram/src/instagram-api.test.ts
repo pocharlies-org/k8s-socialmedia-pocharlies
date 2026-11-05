@@ -58,6 +58,7 @@ test('uses Facebook Graph and the durable system-user token for publishing', asy
   globalThis.fetch = async (input) => {
     const url = new URL(String(input));
     requests.push(url);
+    if (url.pathname.endsWith('/container-1')) return jsonResponse({ id: 'container-1', status_code: 'FINISHED' });
     return jsonResponse({ id: requests.length === 1 ? 'container-1' : 'media-1' });
   };
   try {
@@ -78,8 +79,8 @@ test('uses Facebook Graph and the durable system-user token for publishing', asy
     assert.equal(requests[0].pathname, '/v22.0/17841444094675941/media');
     assert.equal(requests[0].searchParams.get('access_token'), 'system-user-token');
     assert.equal(requests[0].searchParams.get('image_url'), 'https://cdn.example.test/post.jpg');
-    assert.equal(requests[1].pathname, '/v22.0/17841444094675941/media_publish');
-    assert.equal(requests[1].searchParams.get('creation_id'), 'container-1');
+    assert.equal(requests[2].pathname, '/v22.0/17841444094675941/media_publish');
+    assert.equal(requests[2].searchParams.get('creation_id'), 'container-1');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -120,6 +121,52 @@ test('waits for Meta to finish processing a reel before publishing it', async ()
         '/v22.0/17841444094675941/media',
         '/v22.0/container-reel-1',
         '/v22.0/container-reel-1',
+        '/v22.0/17841444094675941/media_publish',
+      ]
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('waits for every carousel container to finish before publishing', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  let childCount = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    if (url.pathname.endsWith('/media')) {
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+      if (body.media_type === 'CAROUSEL') return jsonResponse({ id: 'container-carousel-1' });
+      childCount += 1;
+      return jsonResponse({ id: `container-child-${childCount}` });
+    }
+    const child = url.pathname.match(/\/(container-child-\d)$/);
+    if (child) return jsonResponse({ id: child[1], status_code: 'FINISHED' });
+    if (url.pathname.endsWith('/container-carousel-1')) {
+      return jsonResponse({ id: 'container-carousel-1', status_code: 'FINISHED' });
+    }
+    if (url.pathname.endsWith('/media_publish')) return jsonResponse({ id: 'media-carousel-1' });
+    return jsonResponse({ error: 'unexpected request' }, 500);
+  };
+  try {
+    const api = reelTestApi();
+    const published = await api.publishCarousel([
+      'https://cdn.example.test/a.jpg',
+      'https://cdn.example.test/b.jpg',
+    ]);
+
+    assert.equal(published.media_id, 'media-carousel-1');
+    assert.deepEqual(
+      requests.map((request) => request.pathname),
+      [
+        '/v22.0/17841444094675941/media',
+        '/v22.0/container-child-1',
+        '/v22.0/17841444094675941/media',
+        '/v22.0/container-child-2',
+        '/v22.0/17841444094675941/media',
+        '/v22.0/container-carousel-1',
         '/v22.0/17841444094675941/media_publish',
       ]
     );
