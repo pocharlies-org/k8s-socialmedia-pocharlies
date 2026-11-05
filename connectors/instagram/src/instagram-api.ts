@@ -376,6 +376,7 @@ export class InstagramAPI {
         body
       );
       childIds.push(child.id);
+      await this.waitForMediaReady(child.id);
     }
     const carouselBody: Record<string, string> = {
       media_type: 'CAROUSEL',
@@ -388,6 +389,7 @@ export class InstagramAPI {
       'POST',
       carouselBody
     );
+    await this.waitForMediaReady(carousel.id);
     const published = await this.publishMedia(carousel.id);
     return { container_id: carousel.id, media_id: published.id, child_container_ids: childIds };
   }
@@ -431,6 +433,7 @@ export class InstagramAPI {
       'POST',
       body
     );
+    await this.waitForMediaReady(container.id);
     const published = await this.publishMedia(container.id);
     return { container_id: container.id, media_id: published.id };
   }

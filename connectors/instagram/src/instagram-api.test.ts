@@ -128,6 +128,52 @@ test('waits for Meta to finish processing a reel before publishing it', async ()
   }
 });
 
+test('waits for every carousel container to finish before publishing', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  let childCount = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    if (url.pathname.endsWith('/media')) {
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+      if (body.media_type === 'CAROUSEL') return jsonResponse({ id: 'container-carousel-1' });
+      childCount += 1;
+      return jsonResponse({ id: `container-child-${childCount}` });
+    }
+    const child = url.pathname.match(/\/(container-child-\d)$/);
+    if (child) return jsonResponse({ id: child[1], status_code: 'FINISHED' });
+    if (url.pathname.endsWith('/container-carousel-1')) {
+      return jsonResponse({ id: 'container-carousel-1', status_code: 'FINISHED' });
+    }
+    if (url.pathname.endsWith('/media_publish')) return jsonResponse({ id: 'media-carousel-1' });
+    return jsonResponse({ error: 'unexpected request' }, 500);
+  };
+  try {
+    const api = reelTestApi();
+    const published = await api.publishCarousel([
+      'https://cdn.example.test/a.jpg',
+      'https://cdn.example.test/b.jpg',
+    ]);
+
+    assert.equal(published.media_id, 'media-carousel-1');
+    assert.deepEqual(
+      requests.map((request) => request.pathname),
+      [
+        '/v22.0/17841444094675941/media',
+        '/v22.0/container-child-1',
+        '/v22.0/17841444094675941/media',
+        '/v22.0/container-child-2',
+        '/v22.0/17841444094675941/media',
+        '/v22.0/container-carousel-1',
+        '/v22.0/17841444094675941/media_publish',
+      ]
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('sends cover_url, thumb_offset and collaborators on the reel container', async () => {
   const originalFetch = globalThis.fetch;
   const bodies: Array<Record<string, unknown>> = [];
