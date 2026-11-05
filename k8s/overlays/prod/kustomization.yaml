@@ -63,9 +63,11 @@ images:
   # en claro a los transcripts. Desde 897435e el conector trae ademas #249 (SKIRM-112:
   # /api/v1 exige firma HMAC; los consumidores ya la firmaban) y #74. Digest de la
   # evidencia del release (sigstore-keyless).
+  # SC-4718 05-11: instagram-6cbf62c (release-instagram run 42117236233, deploy/prod@6cbf62c):
+  # #452 espera contenedor FINISHED antes de media_publish (fallaba 9007 al publicar).
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.138
-    digest: sha256:da8e7b40f05c014c6ac205636541ec59be8154f47389e96f3a25af3c25ab1812
+    newTag: instagram-6cbf62c4fe4ffa66210361627ead1d112d3f24fd
+    digest: sha256:af2930abbe49770a105d57398d832ae10ca574cd40529341c33f5a5163abfb6c
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
