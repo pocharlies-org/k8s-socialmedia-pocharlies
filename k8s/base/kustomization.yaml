@@ -2,6 +2,8 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - manifest.yaml
+  # SC-4304 S8: credencial del lector de Hindsight (inerte hasta el corte).
+  - hindsight-reader.yaml
   # Per-account connector workloads, rendered from social-accounts.json by
   # scripts/render-connectors.py (CI fails if stale: --check).
   - generated/connectors.yaml

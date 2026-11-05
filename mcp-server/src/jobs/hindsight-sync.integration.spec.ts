@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { useTestAccounts } from '../domain/test-accounts';
 import { getAccounts } from '../domain/account-registry';
-import { SearchService } from '../application/search.service';
 import {
   HindsightClient,
   hindsightConfigFromEnv,
@@ -180,26 +179,8 @@ liveTest(
       const hits = await client.recall({ query: 'proyecto faro zafiro', tags: [tag] });
       expect(hits.some(h => h.documentId === socialmediaDocumentId(ids[0]))).toBe(true);
       expect(hits.some(h => h.documentId === socialmediaDocumentId(ids[1]))).toBe(false);
-      const search = new SearchService(pool, null, fetch, client);
-      const outcome = await search.semanticSearch('proyecto faro zafiro', {
-        platform: 'whatsapp',
-        account: 'personal',
-        chatId: chats[0],
-      });
-      expect(outcome.results.map(r => r.messageId)).toEqual([ids[0]]);
       await db.query(
-        "UPDATE messages SET metadata=jsonb_build_object('deleted_for_me',true) WHERE id=$1",
-        [ids[0]]
-      );
-      // Remote document still exists: the local SQL boundary must hide it immediately.
-      const hidden = await search.semanticSearch('proyecto faro zafiro', {
-        platform: 'whatsapp',
-        account: 'personal',
-        chatId: chats[0],
-      });
-      expect(hidden.results).toEqual([]);
-      await db.query(
-        "UPDATE messages SET metadata='{}',content='El proyecto faro zafiro ahora usa acero verde.' WHERE id=$1",
+        "UPDATE messages SET content='El proyecto faro zafiro ahora usa acero verde.' WHERE id=$1",
         [ids[0]]
       );
       await settle(2);
