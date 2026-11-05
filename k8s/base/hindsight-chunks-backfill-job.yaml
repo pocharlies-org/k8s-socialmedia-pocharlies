@@ -5,15 +5,17 @@
 # nombre nuevo (-2, -3…) por PR, nunca un cambio en sitio. Sin TTL: ArgoCD no lo recrea al acabar.
 #   -1  MAX_ITEMS=200: primer lote, hecho (80 ventanas, 552 chunks, todo 200 en el sidecar). Ya borrado de los
 #       manifiestos: el cursor (brain_windows_backfill_cursor, RUN_ID sc4304-hindsight) vive en la BD, no en el Job.
-#   -2  MAX_ITEMS=0: el resto del historial de `personal`. Retoma donde quedó -1; relanzar solo repite el último
-#       lote, que es idempotente por document_id. Si agota MAX_RUNTIME_MS sale con `done: false` y la pasada
-#       siguiente es un Job con nombre nuevo (-3…), nunca un cambio en sitio.
+#   -2  MAX_ITEMS=0, 2 conexiones: arrancó 18:45Z y paró solo a los 50 min con `done: false`. Ya no está en los
+#       manifiestos; el cursor (BD) conserva dónde quedó.
+#   -3  Mismas condiciones (MAX_ITEMS=0, 2 conexiones): retoma desde el cursor. Cada tramo que acabe con
+#       `done: false` se sigue con un Job de nombre nuevo (-4…), nunca con un cambio en sitio. No se fusiona
+#       mientras el Job anterior siga activo: dos Jobs a la vez serían 4 conexiones contra los 4 slots del escritor.
 # La imagen va fijada por tag@digest (nunca :latest; condición de security). Un 401/403 del escritor (el token no
 # casa con la identidad) para al instante y no se reintenta.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: hindsight-chunks-backfill-2
+  name: hindsight-chunks-backfill-3
   namespace: whatsapp-mcp
 spec:
   backoffLimit: 0
