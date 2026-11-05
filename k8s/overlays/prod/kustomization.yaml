@@ -161,9 +161,12 @@ images:
   # social-api, los CronJobs de brain-windows y voz, y el Job PreSync whatsapp-mcp-migrate (que aplica la
   # 042 con su ledger _migrations antes del CronJob). Digest comprobado en Harbor (docker manifest
   # inspect + crane).
+  # SC-4304 S8: v1.3.138 -> v1.3.139 (run 42047355404, deploy/prod@d770720, GREEN): trae el lector de Hindsight
+  # (#442, inerte con SEMANTIC_PROVIDER=brain) y el script de backfill (#443). Mueve mcp-server, mcp-sse, los
+  # CronJobs brain-* (misma imagen) y el Job de backfill, como todo pin de esta imagen.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.138
-    digest: sha256:aa972aad3ed2b4263889ea18dcc1ad01d8c11f8fc95b3c0389b79caf5ecc130f
+    newTag: v1.3.139
+    digest: sha256:e36b7a76ca67776915e99b63684c942f74c197b3b2112de164b12477fcf69794
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e

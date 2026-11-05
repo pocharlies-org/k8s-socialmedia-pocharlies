@@ -1,7 +1,5 @@
 # SC-4304 S8: backfill del historial de mensajes en Hindsight (banco `personal`, estrategia vector) por el
-# escritor del boundary. Igual que brain-windows-backfill.yaml, NO va en la kustomization hasta que la imagen
-# pineada lleve el script (un Job con la imagen vieja falla por módulo inexistente y su nombre ya no vuelve a
-# servir): el PR de pin de imagen lo añade a `resources`.
+# escritor del boundary. Va en la kustomization desde que la imagen pineada lleva el script (v1.3.139).
 #
 # Un Job por pasada, de nombre versionado: el spec de un Job es inmutable, así que una pasada nueva es un
 # nombre nuevo (-2, -3…) por PR, nunca un cambio en sitio. Sin TTL: ArgoCD no lo recrea al acabar.
@@ -9,8 +7,8 @@
 #       (identity=socialmedia-mensajes) y que los documentos aparecen en el banco antes de seguir.
 #   -2  MAX_ITEMS=0: el resto. El cursor (brain_windows_backfill_cursor, RUN_ID sc4304-hindsight) retoma donde
 #       quedó el anterior; relanzar solo repite el último lote, que es idempotente por document_id.
-# La imagen va fijada por digest (nunca :latest): el PR de pin sustituye el `image:` de abajo por el digest de la
-# release. Un 401/403 del escritor (el token no casa con la identidad) para al instante y no se reintenta.
+# La imagen va fijada por tag@digest (nunca :latest; condición de security). Un 401/403 del escritor (el token no
+# casa con la identidad) para al instante y no se reintenta.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -26,7 +24,7 @@ spec:
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
       containers:
         - name: backfill
-          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:v1.3.139@sha256:e36b7a76ca67776915e99b63684c942f74c197b3b2112de164b12477fcf69794
           command: ["sh", "-c", "cd mcp-server && node --import tsx src/jobs/hindsight-chunks-backfill.ts"]
           env:
             # Solo DB_USER y DB_PASSWORD de whatsapp-mcp-secrets, nunca el Secret entero (40 claves): este Job

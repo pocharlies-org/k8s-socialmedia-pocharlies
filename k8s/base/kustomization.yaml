@@ -6,6 +6,8 @@ resources:
   - hindsight-reader.yaml
   # SC-4304 S8: CA pública y token de escritura del backfill (solo los monta el Job, aún sin cablear).
   - hindsight-writer.yaml
+  # SC-4304 S8: pasada -1 del backfill (MAX_ITEMS=200). Una pasada nueva es un Job con nombre nuevo.
+  - hindsight-chunks-backfill-job.yaml
   # Per-account connector workloads, rendered from social-accounts.json by
   # scripts/render-connectors.py (CI fails if stale: --check).
   - generated/connectors.yaml
