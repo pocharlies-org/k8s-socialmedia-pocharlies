@@ -578,6 +578,10 @@ spec:
             - { name: SEMANTIC_PROVIDER, value: "hindsight" }
             # recall (rerank incluido) sobre el banco `personal` pasa de los 10 s por defecto del cliente.
             - { name: HINDSIGHT_TIMEOUT_MS, value: "40000" }
+            # Corte de `scores.final` de Hindsight, medido el 05-11 con el principal lector: consultas sin sentido
+            # 0.0008-0.0019; consultas reales, su mejor acierto entre 0.13 y 0.77. 0.02 deja pasar el acierto mas flojo
+            # medido (0.13) y corta el ruido. Pocas consultas: se reajusta si aparecen aciertos reales por debajo.
+            - { name: HINDSIGHT_MIN_SCORE, value: "0.02" }
             - { name: BRAIN_SEARCH_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
             - name: HINDSIGHT_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: socialmedia-hindsight-reader, key: HINDSIGHT_CLIENT_SECRET } }
