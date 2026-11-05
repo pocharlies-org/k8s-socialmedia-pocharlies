@@ -9,7 +9,8 @@
 #       (identity=socialmedia-mensajes) y que los documentos aparecen en el banco antes de seguir.
 #   -2  MAX_ITEMS=0: el resto. El cursor (brain_windows_backfill_cursor, RUN_ID sc4304-hindsight) retoma donde
 #       quedó el anterior; relanzar solo repite el último lote, que es idempotente por document_id.
-# Un 401/403 del escritor (el token no casa con la identidad) para al instante y no se reintenta.
+# La imagen va fijada por digest (nunca :latest): el PR de pin sustituye el `image:` de abajo por el digest de la
+# release. Un 401/403 del escritor (el token no casa con la identidad) para al instante y no se reintenta.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -28,6 +29,12 @@ spec:
           image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
           command: ["sh", "-c", "cd mcp-server && node --import tsx src/jobs/hindsight-chunks-backfill.ts"]
           env:
+            # Solo DB_USER y DB_PASSWORD de whatsapp-mcp-secrets, nunca el Secret entero (40 claves): este Job
+            # no necesita ninguna otra y la de escritura de Hindsight es la suya (security, SC-4304).
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_PASSWORD } }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: HINDSIGHT_WRITER_URL, value: "https://hindsight-writer.hindsight.svc:8443" }
             - { name: NODE_EXTRA_CA_CERTS, value: "/hindsight-ca/ca.crt" }
@@ -36,7 +43,6 @@ spec:
             - { name: MAX_RUNTIME_MS, value: "3000000" }
             - name: HINDSIGHT_WRITER_TOKEN
               valueFrom: { secretKeyRef: { name: hindsight-writer-socialmedia-mensajes, key: HINDSIGHT_WRITER_TOKEN } }
-          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           volumeMounts:
             - { name: hindsight-ca, mountPath: /hindsight-ca, readOnly: true }
           resources:

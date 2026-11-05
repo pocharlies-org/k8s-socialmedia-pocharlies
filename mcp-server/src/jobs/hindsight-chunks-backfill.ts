@@ -152,7 +152,8 @@ export async function runBackfill(
     totals.windows += rows.length;
     totals.items += items.length;
     totals.requests += batches.length;
-    logger.info({ ...totals, cursor: after }, 'hindsight chunks backfill page confirmed');
+    // No cursor in the log: `after` is `win:platform:account:conversation_id:ts`, a chat id.
+    logger.info(totals, 'hindsight chunks backfill page confirmed');
   }
   return totals;
 }
