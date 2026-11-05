@@ -64,8 +64,8 @@ images:
   # /api/v1 exige firma HMAC; los consumidores ya la firmaban) y #74. Digest de la
   # evidencia del release (sigstore-keyless).
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: instagram-33e39d50ebed6148ccb629289cd1c91d8de3aea9
-    digest: sha256:e23c269fe4b2f3898eb70bb5bd7670d31996a9ee680d00cdbf22e02607fb74cf
+    newTag: v1.3.138
+    digest: sha256:da8e7b40f05c014c6ac205636541ec59be8154f47389e96f3a25af3c25ab1812
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
@@ -162,8 +162,8 @@ images:
   # 042 con su ledger _migrations antes del CronJob). Digest comprobado en Harbor (docker manifest
   # inspect + crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.135
-    digest: sha256:8165feb8061a01b541790719d5b312ae40c634c63d409aaf841fd7b653f2ad4c
+    newTag: v1.3.138
+    digest: sha256:aa972aad3ed2b4263889ea18dcc1ad01d8c11f8fc95b3c0389b79caf5ecc130f
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
