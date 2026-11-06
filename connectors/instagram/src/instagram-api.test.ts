@@ -280,7 +280,7 @@ test('updates a published media caption via POST /{ig-media-id}', async () => {
     assert.equal(seen!.init?.method, 'POST');
     assert.ok(seen!.url.pathname.endsWith('/17900000000000001'));
     assert.equal(seen!.url.searchParams.get('access_token'), 'system-user-token');
-    assert.deepEqual(JSON.parse(String(seen!.init!.body)), { caption: 'caption nuevo' });
+    assert.deepEqual(JSON.parse(String(seen!.init!.body)), { caption: 'caption nuevo', comment_enabled: 'true' });
   } finally {
     globalThis.fetch = originalFetch;
   }
