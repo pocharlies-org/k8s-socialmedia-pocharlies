@@ -2003,7 +2003,10 @@ contracts:
     puede llevar meta.partialErrors y source.completeness ''partial'' cuando una instancia del brain cae
     y otras contestan; la respuesta completa no cambia de forma. INFRA-345: aditivo — social_moderate_members
     (effect destructive, authScope social.write), catálogo 77→78; consume http.telegram-connector.moderation.v1
-    (P1, INFRA-344).'
+    (P1, INFRA-344). INFRA-1196: aditivo — social_update_content (effect externalWrite, authScope social.write,
+    caption de una publicación IG por media id vía POST /{ig-media-id}), catálogo 78→79, digest
+    sha256:ce8814b6b469a3779580668c8818eabc4c02cf3b6f2f522c4912c1c17c5cc8dc; re-venta en AgentGateway
+    (k8s-agentgateway-pocharlies PR #263).'
 - id: http.whatsapp-connector.auth-qr.v2
   kind: http-route
   value: /api/v2/auth/qr

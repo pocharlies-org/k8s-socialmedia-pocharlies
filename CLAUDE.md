@@ -209,7 +209,9 @@ Estado del conector (puerto 3003, ambas cuentas conectadas):
 | Comments read + reply | ✅ | |
 | Stories read | ✅ | |
 | Publish image / carousel / reel / story | ✅ | Implementado en `instagram-api.ts` |
+| Edit caption of published post | ✅ | `social_update_content` (INFRA-1196): Graph API `POST /{ig-media-id}` con `caption`; los reels cuentan como videos |
 | Media insights | ✅ | impressions / reach / engagement / saved |
+| **Edit profile (bio / website)** | ❌ | NO lo soporta la Graph API: `POST /{ig-user-id}` con `biography` → 400 `GraphMethodException` code 100 subcode 33 (probado 06-11 con skirmshopes `17841444094675941`). Solo a mano en la app de Instagram |
 | **DMs (read + send)** | ❌ | Graph API devuelve `data:[]` por permisos |
 
 **Causa del bloqueo de DMs:** los tokens actuales en `.env` (`INSTAGRAM_SKIRMSHOP_ACCESS_TOKEN`, `INSTAGRAM_BARBELPAPIS_ACCESS_TOKEN`) vienen de la app **Skirmshop conector MCP** (`1268684188569802`), que solo tiene `email`+`public_profile`. Sin `instagram_business_manage_messages` Meta no expone conversaciones.

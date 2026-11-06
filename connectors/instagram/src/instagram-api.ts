@@ -302,6 +302,11 @@ export class InstagramAPI {
     );
   }
 
+  /** Graph API "Update a Photo/Video": POST /{ig-media-id} with caption. Reels count as videos. */
+  async updateMediaCaption(mediaId: string, caption: string) {
+    return this.request<{ success: boolean }>(`/${mediaId}`, {}, 'POST', { caption });
+  }
+
   async getMediaContainerStatus(containerId: string) {
     return this.request<{ id: string; status_code?: string; status?: string }>(
       `/${containerId}`,

@@ -237,6 +237,11 @@ describe('Socialmedia canonical v2 acceptance gaps', () => {
         { channel: 'instagram', accountId: 'skirmshop', kind: 'story' },
       ],
       [
+        'caption update requires caption',
+        'social_update_content',
+        { channel: 'instagram', accountId: 'skirmshop', target: 'media-1' },
+      ],
+      [
         'comment creation requires a message',
         'social_manage_comment',
         {
