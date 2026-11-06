@@ -167,30 +167,6 @@ spec:
         - name: telegram-connector
           image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
 ---
-# SC-1145 (SC-705 P2) — el conector Telegram por sub que queda (leila).
-# El generador lo deja en `:latest` (TG_CONNECTOR_IMAGE): sin pin aquí caería
-# al tag móvil, que no es desplegable. Pin = el MISMO digest que corre en la
-# casa hoy (telegram-connector / telegram-connector-professional, INFRA-1008
-# 30-10: v1.3.133@sha256:d21bb7e8…, digest comprobado en Harbor): coherencia
-# total con la casa y cero imagen nueva en el clúster. El techo H1 (no subir de
-# v1.3.120) es de los conectores Baileys por el fail-closed SC-2092 con
-# CONNECTOR_SHARED_SECRET placeholder; no aplica a Telegram (la casa ya corre
-# el 133 sin incidencias), y el cableado por sub (resolveCredential +
-# payload-crypto) está en ≥v1.3.55. telegram-sync-leila NO se pinea
-# aquí: lo mueve el bloque `images:` del kustomization (v1.3.110) por nombre
-# de imagen, igual que a telegram-sync y telegram-sync-professional.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: telegram-connector-leila
-  namespace: whatsapp-mcp
-spec:
-  template:
-    spec:
-      containers:
-        - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
----
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
 # connectors/whatsapp-web/src/pairing/main.ts and
