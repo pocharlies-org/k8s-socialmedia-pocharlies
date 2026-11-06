@@ -209,7 +209,7 @@ Estado del conector (puerto 3003, ambas cuentas conectadas):
 | Comments read + reply | ✅ | |
 | Stories read | ✅ | |
 | Publish image / carousel / reel / story | ✅ | Implementado en `instagram-api.ts` |
-| Edit caption of published post | ✅ | `social_update_content` (INFRA-1196): Graph API `POST /{ig-media-id}` con `caption`; los reels cuentan como videos |
+| Edit caption of published post | ❌ (skirmshop) | `social_update_content` (INFRA-1196) implementada y desplegada, pero **no edita en skirmshop**: la credencial del credential store es IG Login → `graph.instagram.com` responde `{success:true}` como no-op (GET con el EAA confirma el caption intacto, 06-11), y `graph.facebook.com` (EAA válido, app "Skirmshop marketing manager") rechaza el POST de edición sobre media publicado vía IG Login (`Unknown method` code 3). `DELETE /{ig-media-id}` sí funciona por EAA. Sería editable solo si la cuenta se re-onboarda vía Instagram Business API (EAA) y publica por ella |
 | Media insights | ✅ | impressions / reach / engagement / saved |
 | **Edit profile (bio / website)** | ❌ | NO lo soporta la Graph API: `POST /{ig-user-id}` con `biography` → 400 `GraphMethodException` code 100 subcode 33 (probado 06-11 con skirmshopes `17841444094675941`). Solo a mano en la app de Instagram |
 | **DMs (read + send)** | ❌ | Graph API devuelve `data:[]` por permisos |
