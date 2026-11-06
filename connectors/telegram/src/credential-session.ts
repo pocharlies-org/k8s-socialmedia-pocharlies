@@ -148,3 +148,36 @@ export function createTelegramCredentialWriteBack(
     debounceMs,
   });
 }
+
+/**
+ * SC-4749: an unpaired per-sub slot is a WAITING state, not a crash. The
+ * whatsapp connectors stay up serving the QR page while pairing is pending;
+ * telegram now does the same: poll the store until the pairing pool writes
+ * the row, then resolve so main can restart clean and connect. Before this,
+ * main.ts exited 1 on the missing row and the Deployment crash-looped
+ * (telegram:leila, ~490 restarts) firing MCPBackendCrashLooping for days.
+ * A failing store read is logged and retried — DB trouble is not a reason
+ * to kill a pod that is only waiting anyway.
+ */
+export async function waitForPairedTelegramSession(
+  store: CredentialStore,
+  sessionKey: string,
+  opts: { intervalMs?: number; log?: (msg: string) => void } = {}
+): Promise<void> {
+  const intervalMs = opts.intervalMs ?? 30_000;
+  const log = opts.log ?? ((msg: string) => console.log(msg));
+  for (;;) {
+    try {
+      const row = await store.get(sessionKey, 'telegram');
+      if (row) {
+        log(
+          `credential-store: telegram session for ${sessionKey} appeared — restarting to connect`
+        );
+        return;
+      }
+    } catch (err) {
+      log(`credential-store: pairing poll failed: ${(err as Error).message}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}

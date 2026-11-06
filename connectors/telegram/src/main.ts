@@ -14,6 +14,7 @@ import {
   TelegramCredentialWriteBack,
   createTelegramCredentialWriteBack,
   resolveTelegramSession,
+  waitForPairedTelegramSession,
 } from './credential-session';
 
 const TELEGRAM_API_ID = parseInt(process.env.TELEGRAM_API_ID || '0', 10);
@@ -55,10 +56,34 @@ async function main() {
       `credential-store: telegram session for ${credentialSessionKey} resolved from ${resolved.source}`
     );
     if (!sessionString) {
-      console.error(
-        `No telegram session for ${credentialSessionKey}: no credential-store row and no TELEGRAM_SESSION_STRING — the MTProto pairing gesture for this user is still pending`
+      // SC-4749: pairing pending is a waiting state, not a crash. Serve
+      // /health (liveness passes, no CrashLoopBackOff) and poll the store;
+      // when the pairing pool writes the row, exit 0 so the restart picks it
+      // up and connects. Mirrors the whatsapp connectors staying up on the
+      // QR page. The legacy path below (house accounts) still exits 1.
+      console.warn(
+        `No telegram session for ${credentialSessionKey}: no credential-store row and no TELEGRAM_SESSION_STRING — the MTProto pairing gesture for this user is still pending; waiting with health on :${PORT}`
       );
-      process.exit(1);
+      const waiting = express();
+      waiting.get('/health', (_req, res) => {
+        res.json({
+          status: 'ok',
+          connected: false,
+          pairingPending: true,
+          platform: 'telegram',
+        });
+      });
+      const server = waiting.listen(PORT, () => {
+        console.log(`Telegram Connector waiting for pairing, health on port ${PORT}`);
+      });
+      const stop = (): void => {
+        server.close(() => process.exit(0));
+      };
+      process.on('SIGTERM', stop);
+      process.on('SIGINT', stop);
+      await waitForPairedTelegramSession(credentialStore, credentialSessionKey);
+      stop();
+      return;
     }
   }
 

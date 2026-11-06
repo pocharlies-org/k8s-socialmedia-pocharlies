@@ -23,6 +23,7 @@ import {
   createTelegramCredentialWriteBack,
   isSessionInvalidatedError,
   resolveTelegramSession,
+  waitForPairedTelegramSession,
 } from './credential-session';
 import {
   HookedMemoryStorageDriver,
@@ -339,4 +340,52 @@ test('PersistHookedStorage: every repository is built on the hooked driver and k
   assert.deepEqual(storage.authKeys.get(2), key);
   storage.kv.set('k', new Uint8Array([9]));
   assert.deepEqual(storage.kv.get('k'), new Uint8Array([9]));
+});
+
+// ---------------------------------------------------------------------------
+// SC-4749: waitForPairedTelegramSession — unpaired is a waiting state
+// ---------------------------------------------------------------------------
+
+test('waitForPairedTelegramSession: waits while the row is absent, resolves when the pairing pool writes it', async () => {
+  const store = new FakeStore();
+  const logs: string[] = [];
+  let settled = false;
+  const pending = waitForPairedTelegramSession(store, 'sub-a', {
+    intervalMs: 5,
+    log: msg => logs.push(msg),
+  }).then(() => {
+    settled = true;
+  });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(settled, false, 'must not resolve while no row exists');
+  store.rows.set('sub-a/telegram', {
+    sessionKey: 'sub-a',
+    channel: 'telegram',
+    payload: {},
+    updatedAt: new Date(),
+  });
+  await pending;
+  assert.equal(settled, true);
+  assert.ok(store.getCalls >= 2);
+  assert.match(logs.join('\n'), /appeared/);
+});
+
+test('waitForPairedTelegramSession: a failing store read is logged and polled again, never fatal', async () => {
+  let calls = 0;
+  const store: CredentialStore = {
+    get: async () => {
+      calls++;
+      if (calls < 3) throw new Error('db down');
+      return { sessionKey: 'sub-a', channel: 'telegram', payload: {}, updatedAt: new Date() };
+    },
+    put: async () => {},
+    delete: async () => {},
+  };
+  const logs: string[] = [];
+  await waitForPairedTelegramSession(store, 'sub-a', {
+    intervalMs: 5,
+    log: msg => logs.push(msg),
+  });
+  assert.equal(calls, 3);
+  assert.match(logs.join('\n'), /pairing poll failed: db down/);
 });
