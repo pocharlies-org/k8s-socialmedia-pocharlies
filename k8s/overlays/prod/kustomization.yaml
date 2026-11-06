@@ -169,9 +169,12 @@ images:
   # SC-4304 S8: v1.3.138 -> v1.3.139 (run 42047355404, deploy/prod@d770720, GREEN): trae el lector de Hindsight
   # (#442, inerte con SEMANTIC_PROVIDER=brain) y el script de backfill (#443). Mueve mcp-server, mcp-sse, los
   # CronJobs brain-* (misma imagen) y el Job de backfill, como todo pin de esta imagen.
+  # INFRA-1196 06-11: v1.3.139 -> v1.3.141 (run 42158985544, deploy/prod@7870a48): #456 añade la tool
+  # social_update_content (edita el caption de una publicacion IG por media id via Graph API). Mueve
+  # mcp-server, mcp-sse y los CronJobs brain-* (misma imagen). Digest de la evidencia del release.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.139
-    digest: sha256:e36b7a76ca67776915e99b63684c942f74c197b3b2112de164b12477fcf69794
+    newTag: v1.3.141
+    digest: sha256:bdcb5e6c8dc5fedb3eb7874defc74db7512aa3fac6e8e8c865c5d83b07f04b31
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
