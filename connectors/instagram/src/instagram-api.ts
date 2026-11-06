@@ -304,7 +304,10 @@ export class InstagramAPI {
 
   /** Graph API "Update a Photo/Video": POST /{ig-media-id} with caption. Reels count as videos. */
   async updateMediaCaption(mediaId: string, caption: string) {
-    return this.request<{ success: boolean }>(`/${mediaId}`, {}, 'POST', { caption });
+    // shortcut: la Graph exige comment_enabled en el update (400 code 100 si falta). Se manda
+    // siempre true (los comentarios van ON por defecto en cuentas de empresa); preservar el valor
+    // actual del post exigiría un GET previo — revisar solo si aparece un post con comentarios OFF.
+    return this.request<{ success: boolean }>(`/${mediaId}`, {}, 'POST', { caption, comment_enabled: 'true' });
   }
 
   async getMediaContainerStatus(containerId: string) {
