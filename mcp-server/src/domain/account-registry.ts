@@ -262,6 +262,10 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       connectorUrl: env.TELEGRAM_LEILA_URL || 'http://telegram-connector-leila:3002',
       bridgeUrl: env.TELEGRAM_BRIDGE_LEILA_URL || 'http://telegram-sync-leila:3080',
       brainInstance: 'leila',
+      // SC-4749: apagado por decisión de Dani en vivo (02-11) — la cuenta
+      // nunca llegó a emparejarse y el conector crash-loopaba. Debe batir
+      // con k8s/base/social-accounts.json (account-registry.spec.ts).
+      enabled: false,
     },
     {
       channel: 'instagram',
