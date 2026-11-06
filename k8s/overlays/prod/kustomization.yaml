@@ -71,9 +71,12 @@ images:
   # INFRA-1196 06-11 (fix): instagram-20e28922 -> instagram-bc36371 (release-instagram run 42167699842,
   # deploy/prod@bc36371): #459 — el POST /{ig-media-id} de la Graph exige comment_enabled (400 code 100 si
   # falta); updateMediaCaption ya lo manda. Digest de la evidencia del release (sigstore-keyless).
+  # INFRA-1196 06-11 (fix transporte): instagram-bc36371 -> instagram-e3735ef (release-instagram run 42175755043,
+  # deploy/prod@e3735ef): #461 — el edit de caption es de la Business API (graph.facebook.com + EAA); con
+  # primaryApi=instagram-login la IG Login API lo devolvía success:true como no-op. updateMediaCaption usa fbRequest.
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: instagram-bc36371dfa5cbcbfbc67444f38f58109f323432a
-    digest: sha256:a395feac571025dbfe862f464d41236790b7ee190c2e6d0b20843ff78a230903
+    newTag: instagram-e3735efd76b61ce67c13c34d24fc5757f86e46b9
+    digest: sha256:8a55e9d0059469666bfa601df6ed0d38bc4e954761513ec05e22f5882c3057f5
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
