@@ -302,12 +302,15 @@ export class InstagramAPI {
     );
   }
 
-  /** Graph API "Update a Photo/Video": POST /{ig-media-id} with caption. Reels count as videos. */
+  /**
+   * Edit the caption of a published media. Uses fbRequest (graph.facebook.com + EAA), NOT
+   * request(): the edit is an Instagram Business API endpoint that does not exist on
+   * graph.instagram.com — the IG Login API answers {success:true} as a silent no-op there
+   * (probado en real con skirmshopes, primaryApi=instagram-login). comment_enabled es obligatorio
+   * (400 code 100 si falta); se manda true (comentarios ON por defecto en cuentas de empresa).
+   */
   async updateMediaCaption(mediaId: string, caption: string) {
-    // shortcut: la Graph exige comment_enabled en el update (400 code 100 si falta). Se manda
-    // siempre true (los comentarios van ON por defecto en cuentas de empresa); preservar el valor
-    // actual del post exigiría un GET previo — revisar solo si aparece un post con comentarios OFF.
-    return this.request<{ success: boolean }>(`/${mediaId}`, {}, 'POST', { caption, comment_enabled: 'true' });
+    return this.fbRequest<{ success: boolean }>(`/${mediaId}`, {}, 'POST', { caption, comment_enabled: 'true' });
   }
 
   async getMediaContainerStatus(containerId: string) {
