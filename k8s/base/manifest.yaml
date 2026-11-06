@@ -283,26 +283,9 @@ spec:
                 - -c
                 - |
                   cd mcp-server
-                  # Guarda de embebido (misma que tenia brain-ingest): sin TEI
-                  # el push-ingest solo produce 502; saltarse la pasada no
-                  # pierde nada (cursor en brain_windows_cursor).
-                  node -e '
-                    const url = process.env.BRAIN_URL + "/health";
-                    fetch(url, { signal: AbortSignal.timeout(10000) })
-                      .then((r) => r.json())
-                      .then((d) => {
-                        const t = (d && d.tei) || {};
-                        if (t.primary_status !== "ok" && t.fallback_status !== "ok") {
-                          console.log("brain-windows: sin embeddings (primary=" + t.primary_status + " fallback=" + t.fallback_status + "); se salta esta pasada");
-                          process.exit(3);
-                        }
-                        console.log("brain-windows: embeddings via " + t.active_tei);
-                      })
-                      .catch((e) => {
-                        console.log("brain-windows: /health inalcanzable (" + e.message + "); se salta esta pasada");
-                        process.exit(3);
-                      });
-                  ' || exit 0
+                  # SC-4304: sin guarda de /health del Brain. Con BRAIN_WINDOWS_SINK=synapse
+                  # la pasada no llama al Brain (lee Postgres y publica brain_window.*);
+                  # saltarla con el Brain caido dejaba a Hindsight sin mensajes.
                   node --import tsx src/jobs/brain-windows.ts
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
