@@ -915,6 +915,8 @@ export class MCPServer {
         return this.canonicalManageChat(args);
       case 'publishContent':
         return this.canonicalPublishContent(args);
+      case 'updateContent':
+        return this.canonicalUpdateContent(args);
       case 'manageComment':
         return this.canonicalManageComment(args);
       case 'reactMessage':
@@ -3733,6 +3735,15 @@ export class MCPServer {
       default:
         throw this.canonicalError('invalid_request', `Unsupported content kind '${args.kind}'`);
     }
+  }
+
+  private async canonicalUpdateContent(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'instagram');
+    return this.handleInstagramUpdateCaption({
+      account: this.account(args),
+      mediaId: this.target(args),
+      caption: this.string(args, 'caption'),
+    });
   }
 
   private async canonicalManageComment(args: Record<string, any>): Promise<any> {
@@ -6605,6 +6616,19 @@ export class MCPServer {
       caption: args.caption,
       media_type: args.mediaType || 'IMAGE',
     });
+    return this.jsonResponse(data);
+  }
+
+  private async handleInstagramUpdateCaption(args: {
+    account: string;
+    mediaId: string;
+    caption: string;
+  }) {
+    const data = await this.instagramCall(
+      'POST',
+      `/api/v1/${args.account}/media/${args.mediaId}/caption`,
+      { caption: args.caption }
+    );
     return this.jsonResponse(data);
   }
 

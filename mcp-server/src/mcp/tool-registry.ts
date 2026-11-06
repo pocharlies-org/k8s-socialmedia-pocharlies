@@ -1334,6 +1334,26 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
     ),
   }),
   tool({
+    name: 'social_update_content',
+    title: 'Update Instagram caption',
+    description:
+      'Replace the caption of a published Instagram photo, video or reel by media id ' +
+      '(Graph API POST /{ig-media-id} with caption; reels count as videos). Comments, likes ' +
+      'and insights are kept. Instagram only.',
+    effect: 'externalWrite',
+    authScope: 'social.write',
+    capability: 'content.update',
+    handler: 'updateContent',
+    inputSchema: objectSchema(
+      {
+        ...writeProperties,
+        caption: { type: 'string', maxLength: 2200 },
+      },
+      ['channel', 'accountId', 'target', 'caption']
+    ),
+    idempotent: true,
+  }),
+  tool({
     name: 'social_manage_comment',
     title: 'Manage Instagram comment',
     description: 'Create, reply to, hide, unhide or delete an Instagram comment.',

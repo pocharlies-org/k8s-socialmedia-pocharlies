@@ -264,3 +264,24 @@ test('never returns Graph API paging URLs, which carry access_token in plaintext
     globalThis.fetch = originalFetch;
   }
 });
+
+test('updates a published media caption via POST /{ig-media-id}', async () => {
+  const originalFetch = globalThis.fetch;
+  let seen: { url: URL; init?: RequestInit } | undefined;
+  globalThis.fetch = async (input, init) => {
+    seen = { url: new URL(String(input)), init };
+    return jsonResponse({ success: true });
+  };
+  try {
+    const api = reelTestApi();
+    assert.deepEqual(await api.updateMediaCaption('17900000000000001', 'caption nuevo'), {
+      success: true,
+    });
+    assert.equal(seen!.init?.method, 'POST');
+    assert.ok(seen!.url.pathname.endsWith('/17900000000000001'));
+    assert.equal(seen!.url.searchParams.get('access_token'), 'system-user-token');
+    assert.deepEqual(JSON.parse(String(seen!.init!.body)), { caption: 'caption nuevo' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

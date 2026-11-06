@@ -595,6 +595,20 @@ export async function createInstagramApp(opts: InstagramAppOptions): Promise<Exp
     }
   });
 
+  app.post('/api/v1/:account/media/:mediaId/caption', async (req, res) => {
+    const entry = res.locals.igEntry as AccountEntry | undefined;
+    if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
+    const { caption } = req.body ?? {};
+    if (typeof caption !== 'string') {
+      return res.status(400).json({ error: 'caption must be a string' });
+    }
+    try {
+      res.json(await entry.api.updateMediaCaption(req.params.mediaId, caption));
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
   app.post('/api/v1/:account/publish', async (req, res) => {
     const entry = res.locals.igEntry as AccountEntry | undefined;
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
