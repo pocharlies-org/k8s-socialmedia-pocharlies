@@ -345,7 +345,10 @@ contracts:
     false. The same columns follow the phone (chats.update / chats.upsert / history). No NATS event. The
     path, the body fields, the action names, the 200 shape and the failureClass values are contract: changing
     any is breaking — a new `.v2` entry beside this one. Also consumed by the MCP tool social_set_chat_state
-    (mcp-server/src/mcp/server.ts canonicalSetChatState; added later, surface unchanged).'
+    (mcp-server/src/mcp/server.ts canonicalSetChatState; added later, surface unchanged). Internal behavior,
+    not contract: when Baileys parks an app-state collection on a missing sync key the connector now asks
+    the primary device for that key (connectors/whatsapp-web/src/app-state-key-request.ts), so phone-side
+    pin/unpin/archive/mute mutations resume instead of being lost forever.'
 - id: http.whatsapp-connector.groups-state.v1
   kind: http-route
   value: /groups/state

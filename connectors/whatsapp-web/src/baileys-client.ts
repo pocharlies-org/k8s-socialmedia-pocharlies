@@ -1,6 +1,11 @@
 import { readContactBlocked } from './contact-block';
 import { directReceiptStatus } from './receipt-status';
 import { chatPinState } from './chat-pin-state';
+import {
+  AppStateKeyRequestSocket,
+  extractMissingKeyIds,
+  requestMissingAppStateKeys,
+} from './app-state-key-request';
 import { qrPageUrl, whatsappSocketOptions } from './url-config';
 import { CommunityService, CommunityError } from './novedades-communities';
 import {
@@ -1811,6 +1816,23 @@ export class BaileysClient extends EventEmitter {
       }));
       this.logger.info(`Baileys WA version=${version.join('.')} latest=${isLatest}`);
       const baileysLogger = pino({ level: 'warn' }) as any;
+      // Baileys parks an app-state collection on a missing sync key and waits for the phone
+      // to push the key — it never asks for it. Ask once per socket (app-state-key-request.ts);
+      // a skipped ask (no meJid yet) is retried on the next park, ~10 min later.
+      const requestedAppStateKeys = new Set<string>();
+      const rawBaileysWarn = baileysLogger.warn.bind(baileysLogger);
+      baileysLogger.warn = (...args: unknown[]) => {
+        rawBaileysWarn(...args);
+        const keyIds = extractMissingKeyIds(args);
+        if (!keyIds.length || !this.sock || !this.meJid) return;
+        void requestMissingAppStateKeys(
+          this.sock as unknown as AppStateKeyRequestSocket,
+          this.meJid,
+          keyIds,
+          requestedAppStateKeys,
+          line => this.logger.warn(line)
+        );
+      };
 
       this.sock = makeWASocket({
         ...whatsappSocketOptions(),
