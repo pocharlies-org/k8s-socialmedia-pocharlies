@@ -1,7 +1,11 @@
 import { readContactBlocked } from './contact-block';
 import { directReceiptStatus } from './receipt-status';
 import { chatPinState } from './chat-pin-state';
-import { AppStateKeyRequestSocket, extractMissingKeyIds, requestMissingAppStateKeys } from './app-state-key-request';
+import {
+  AppStateKeyRequestSocket,
+  extractMissingKeyIds,
+  requestMissingAppStateKeys,
+} from './app-state-key-request';
 import { qrPageUrl, whatsappSocketOptions } from './url-config';
 import { CommunityService, CommunityError } from './novedades-communities';
 import {
