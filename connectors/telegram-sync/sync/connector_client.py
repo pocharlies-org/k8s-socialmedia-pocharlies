@@ -57,7 +57,9 @@ def retry_after(response: httpx.Response) -> float:
 
 
 def is_throttled(error: Exception) -> bool:
-    return isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (429, 503)
+    # 401/403 = the connector refused our HMAC (e.g. a rotated CONNECTOR_SHARED_SECRET not yet
+    # rolled out): not the message's fault, so like a throttle it waits without spending an attempt.
+    return isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (401, 403, 429, 503)
 
 # Default in-cluster connector service per account (overridable via CONNECTOR_BASE_URL).
 _DEFAULT_BASE = {
