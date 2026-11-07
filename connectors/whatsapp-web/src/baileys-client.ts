@@ -1,7 +1,7 @@
 import { readContactBlocked } from './contact-block';
 import { directReceiptStatus } from './receipt-status';
 import { chatPinState } from './chat-pin-state';
-import { extractMissingKeyIds, requestMissingAppStateKeys } from './app-state-key-request';
+import { AppStateKeyRequestSocket, extractMissingKeyIds, requestMissingAppStateKeys } from './app-state-key-request';
 import { qrPageUrl, whatsappSocketOptions } from './url-config';
 import { CommunityService, CommunityError } from './novedades-communities';
 import {
@@ -1822,7 +1822,7 @@ export class BaileysClient extends EventEmitter {
         const keyIds = extractMissingKeyIds(args);
         if (!keyIds.length || !this.sock || !this.meJid) return;
         void requestMissingAppStateKeys(
-          this.sock as unknown as { sendMessage(jid: string, content: Record<string, unknown>): Promise<unknown> },
+          this.sock as unknown as AppStateKeyRequestSocket,
           this.meJid,
           keyIds,
           requestedAppStateKeys,
