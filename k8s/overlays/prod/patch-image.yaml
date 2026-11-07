@@ -65,6 +65,15 @@
 # item de 1Password `whatsapp-mcp` sigue con el placeholder del repo: con el 134 toda la API del
 # conector responde 401 (también los envíos del mcp-server). Con el 120, que no tiene ese gate, el
 # HMAC con placeholder funciona como siempre. Avanzar de nuevo exige clave real en 1Password primero.
+#
+# DGX-1495 07-11: whatsapp-connector (personal) avanza v1.3.120 -> sha-8c5c786c74ef (deploy/prod@8c5c786,
+# PR #470): el conector pide al dispositivo primario las app-state keys que faltan (los desfijados/
+# archivados del móvil perdidos por colecciones bloqueadas). Pinneado por la etiqueta sha del release, no
+# por v1.3.x: los dos runs de release (42372854616, 42376747736) murieron al firmar instagram-connector
+# (Rekor 409, digest idéntico ya firmado) antes de promover la versión; la imagen del conector sí quedó
+# publicada e inmutable bajo sha-8c5c786c74ef. Digest comprobado en Harbor (docker manifest inspect).
+# El gate SC-2092 no bloquea: el Secret whatsapp-mcp-secrets lleva la clave real (64 chars, no el
+# placeholder). Los otros dos whatsapp-connector* intactos (uno por PR, costumbre de la casa).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -75,7 +84,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:sha-8c5c786c74ef@sha256:94157f998443203fe16c16e3ae3dac3dce8b9cf328aa9c4fde4e8df0ad8d45b4
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
