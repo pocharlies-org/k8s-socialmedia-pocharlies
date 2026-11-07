@@ -18,6 +18,15 @@ patches:
   - path: patch-social-pairing-on.yaml
   # DGX-1235: correo-bridge a 1 réplica, con entrada y salida (ENABLE_OUTBOUND "true").
   - path: patch-correo-bridge-on.yaml
+  # SC-4836: leen CONNECTOR_SHARED_SECRET por env; Reloader los reinicia cuando su Secret cambia
+  # (31-10 una rotación no llegó a los pods hasta un rollout restart manual).
+  - target:
+      kind: Deployment
+      name: ^(telegram-sync|telegram-sync-professional|whatsapp-pairing)$
+    patch: |-
+      - op: add
+        path: /metadata/annotations/reloader.stakater.com~1auto
+        value: "true"
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
   # SC-1197 encendido: mcp-server advances v1.3.55 -> v1.3.57 (run

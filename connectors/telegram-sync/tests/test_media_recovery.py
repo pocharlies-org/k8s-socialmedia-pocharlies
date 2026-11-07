@@ -138,7 +138,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.connector.download_media.side_effect = httpx.ReadTimeout('late')
         await media_recovery.recover_batch(self.pool, self.connector, 'personal')
         self.assertTrue(counted())
-        for code in (429, 503):  # flood wait, connector not connected: not the message's fault
+        for code in (401, 403, 429, 503):  # bad signature, flood wait, connector not connected: not the message's fault
             self.conn.cooldown = False
             response = httpx.Response(code, request=httpx.Request('GET', 'http://connector'))
             self.connector.download_media.side_effect = httpx.HTTPStatusError('wait', request=response.request, response=response)
