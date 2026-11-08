@@ -10,7 +10,7 @@
  * the missing key once per socket. Baileys resumes the parked collection on its own when
  * the key arrives (creds.update myAppStateKeyId → resync of blockedCollections).
  */
-import { proto } from '@whiskeysockets/baileys';
+import { generateMessageIDV2, generateWAMessageFromContent, proto } from '@whiskeysockets/baileys';
 
 /** Baileys' getKey error: `failed to find key "AAAAAAvU" to decode mutation` (base64 key id).
  * The quotes may arrive escaped — the park line reaches us as a JSON.stringified pino object. */
@@ -31,8 +31,16 @@ export function extractMissingKeyIds(args: unknown[]): string[] {
   return [...new Set([...text.matchAll(MISSING_KEY_RE)].map(m => m[1]))];
 }
 
+/** Raw content never reaches the wire through `sendMessage` in Baileys rc13 (no `message`
+ * branch in generateWAMessageContent — it falls to prepareWAMessageMedia and throws
+ * "Invalid media type"). Relay it the way the connector relays votes and responses. */
 export interface AppStateKeyRequestSocket {
-  sendMessage(jid: string, content: Record<string, unknown>): Promise<unknown>;
+  user?: { id?: string } | null;
+  relayMessage(
+    jid: string,
+    content: proto.IMessage,
+    options: { messageId: string }
+  ): Promise<unknown>;
 }
 
 /**
@@ -51,14 +59,18 @@ export async function requestMissingAppStateKeys(
     if (requested.has(id)) continue;
     requested.add(id);
     try {
-      await sock.sendMessage(primaryJid, {
-        message: {
+      const messageId = generateMessageIDV2(sock.user?.id);
+      const full = generateWAMessageFromContent(
+        primaryJid,
+        {
           protocolMessage: {
             type: proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST,
             appStateSyncKeyRequest: { keyIds: [Buffer.from(id, 'base64')] },
           },
-        },
-      });
+        } as proto.IMessage,
+        { messageId, userJid: sock.user?.id || primaryJid }
+      );
+      await sock.relayMessage(primaryJid, full.message as proto.IMessage, { messageId });
       log(`app-state key ${id} requested from the primary device`);
     } catch (e) {
       requested.delete(id);

@@ -33,12 +33,13 @@ test('dedupes repeated ids and ignores warns without a missing key', () => {
   assert.deepEqual(extractMissingKeyIds(['resyncAppState (api)']), []);
 });
 
-test('asks the primary device once per key, with the decoded key id', async () => {
+test('relays the request to the primary device once per key, with the decoded key id', async () => {
   const sent: Array<{ jid: string; keyIds: Buffer[] }> = [];
   const sock = {
-    sendMessage: async (jid: string, content: Record<string, any>) => {
-      sent.push({ jid, keyIds: content.message.protocolMessage.appStateSyncKeyRequest.keyIds });
-      return {};
+    user: { id: '34600000000:10@s.whatsapp.net' },
+    relayMessage: async (jid: string, content: any) => {
+      sent.push({ jid, keyIds: content.protocolMessage.appStateSyncKeyRequest.keyIds });
+      return 'MSGID';
     },
   };
   const requested = new Set<string>();
@@ -56,7 +57,7 @@ test('asks the primary device once per key, with the decoded key id', async () =
 
 test('a failed request is forgotten so the next park retries it', async () => {
   const sock = {
-    sendMessage: async () => {
+    relayMessage: async () => {
       throw new Error('not connected');
     },
   };
