@@ -66,14 +66,15 @@
 # conector responde 401 (también los envíos del mcp-server). Con el 120, que no tiene ese gate, el
 # HMAC con placeholder funciona como siempre. Avanzar de nuevo exige clave real en 1Password primero.
 #
-# DGX-1495 07-11 y 08-11: whatsapp-connector (personal) avanza v1.3.120 -> v1.3.144 (deploy/prod@32c2e8f,
-# PRs #470 y #472): el conector pide al dispositivo primario las app-state keys que faltan (los desfijados/
-# archivados del móvil perdidos por colecciones bloqueadas), reenviando la petición con relayMessage (en
-# rc13 sendMessage rechaza el contenido crudo). Intermedio sha-8c5c786c74ef (#471): los dos primeros runs
-# de release murieron firmando instagram-connector (Rekor 409); el run 42486992680 fue verde y promovió
-# v1.3.144. Digest comprobado en Harbor (API artifacts). El gate SC-2092 no bloquea: el Secret
-# whatsapp-mcp-secrets lleva la clave real (64 chars, no el placeholder). Los otros dos whatsapp-connector*
-# intactos (uno por PR, costumbre de la casa).
+# DGX-1495 07-11 a 08-11: whatsapp-connector (personal) avanza v1.3.120 -> v1.3.145 (deploy/prod@e1eca05,
+# PRs #470/#472/#474): el conector pide al dispositivo primario las app-state keys que faltan (los
+# desfijados/archivados del móvil perdidos por colecciones bloqueadas). El ask se reenvía con relayMessage
+# + category=peer (en rc13 sendMessage rechaza el contenido crudo, y el relay sin category cuelga
+# enumerando el PN propio; es el shape que Baileys usa para sus propios mensajes de protocolo a meJid).
+# Intermedios sha-8c5c786c74ef y v1.3.144: el envío seguía roto (y dos runs murieron firmando en Rekor 409).
+# Digest comprobado en Harbor (API artifacts). El gate SC-2092 no bloquea: el Secret whatsapp-mcp-secrets
+# lleva la clave real (64 chars, no el placeholder). Los otros dos whatsapp-connector* intactos (uno por
+# PR, costumbre de la casa).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -84,7 +85,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.144@sha256:39850d25c2405a27d438b261b7020fff38be638ab03b8644a928c40bb10f74a3
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.145@sha256:ed1de167f7b532b5dcdb298d5fd5a4656f239f323e90353a76742eec1ec2902d
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
