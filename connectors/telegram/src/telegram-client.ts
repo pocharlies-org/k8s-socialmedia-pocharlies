@@ -688,14 +688,31 @@ export class TelegramClientWrapper extends EventEmitter {
       type: TelegramMessage['chatType'];
       unreadCount: number;
     }> = [];
-    for await (const dialog of this.client.iterDialogs({})) {
-      const peer = dialog.peer;
-      result.push({
-        id: peer.id.toString(),
-        name: chatTitleOf(peer) || 'Unknown',
-        type: mapChatType(peer),
-        unreadCount: dialog.unreadCount,
-      });
+    // SC-1500: one unresolvable peer (PEER_ID_INVALID / missing from the input
+    // cache) must not abort the enumeration — telegram-sync's backfill cycle
+    // then imports ZERO chats (get_dialogs 500s) and the conversation autopilot
+    // starves. Skip + log the bad dialog; on a mid-enumeration API error return
+    // what was read so the cycle still processes the good chats (nothing read
+    // at all keeps failing, so the caller retries).
+    try {
+      for await (const dialog of this.client.iterDialogs({})) {
+        try {
+          const peer = dialog.peer;
+          result.push({
+            id: peer.id.toString(),
+            name: chatTitleOf(peer) || 'Unknown',
+            type: mapChatType(peer),
+            unreadCount: dialog.unreadCount,
+          });
+        } catch (e) {
+          this.logger.warn(`getDialogs: skipping unresolvable peer: ${String(e)}`);
+        }
+      }
+    } catch (e) {
+      if (result.length === 0) throw e;
+      this.logger.warn(
+        `getDialogs: enumeration stopped early (${String(e)}); returning ${result.length} dialogs`
+      );
     }
     return result;
   }
@@ -731,21 +748,32 @@ export class TelegramClientWrapper extends EventEmitter {
     }
 
     const out: TelegramMessage[] = [];
-    await withDownloadDeadline(
-      async signal => {
-        const client = telegramReadClient(
-          this.client.withParams({ abortSignal: signal }),
-          signal
-        );
-        for await (const m of client.iterHistory(toMtcutePeer(chatId), params)) {
-          if (forward && m.id <= (afterId ?? 0)) continue;
-          if (!forward && offsetId && m.id >= offsetId) continue;
-          const p = await this.parseMessage(m);
-          if (p) out.push(p);
-        }
-      },
-      mediaDeadlineMs()
-    );
+    const readHistory = async (signal: AbortSignal): Promise<void> => {
+      const client = telegramReadClient(
+        this.client.withParams({ abortSignal: signal }),
+        signal
+      );
+      for await (const m of client.iterHistory(toMtcutePeer(chatId), params)) {
+        if (forward && m.id <= (afterId ?? 0)) continue;
+        if (!forward && offsetId && m.id >= offsetId) continue;
+        const p = await this.parseMessage(m);
+        if (p) out.push(p);
+      }
+    };
+    try {
+      await withDownloadDeadline(readHistory, mediaDeadlineMs());
+    } catch (e) {
+      // SC-1500: peer missing from mtcute's input cache (MtPeerNotFoundError,
+      // "Peer <id> is not found in local cache") — resolve it through the API
+      // (getPeer reindexes the cache) and retry once. A peer Telegram itself
+      // rejects (PEER_ID_INVALID) still propagates: the caller skips that chat
+      // and logs it, which is correct.
+      if (!String(e).includes('is not found in local cache')) throw e;
+      this.logger.warn(`getMessages: reindexing input cache for peer ${chatId} via API`);
+      await this.client.getPeer(toMtcutePeer(chatId));
+      out.length = 0;
+      await withDownloadDeadline(readHistory, mediaDeadlineMs());
+    }
     return out;
   }
 
