@@ -34,11 +34,15 @@ test('dedupes repeated ids and ignores warns without a missing key', () => {
 });
 
 test('relays the request to the primary device once per key, with the decoded key id', async () => {
-  const sent: Array<{ jid: string; keyIds: Buffer[] }> = [];
+  const sent: Array<{ jid: string; keyIds: Buffer[]; category?: string }> = [];
   const sock = {
     user: { id: '34600000000:10@s.whatsapp.net' },
-    relayMessage: async (jid: string, content: any) => {
-      sent.push({ jid, keyIds: content.protocolMessage.appStateSyncKeyRequest.keyIds });
+    relayMessage: async (jid: string, content: any, options: any) => {
+      sent.push({
+        jid,
+        keyIds: content.protocolMessage.appStateSyncKeyRequest.keyIds,
+        category: options.additionalAttributes?.category,
+      });
       return 'MSGID';
     },
   };
@@ -53,6 +57,7 @@ test('relays the request to the primary device once per key, with the decoded ke
   assert.equal(sent.length, 1);
   assert.equal(sent[0].jid, '34600000000@c.us');
   assert.equal(sent[0].keyIds[0].toString('base64'), 'AAAAAAvU');
+  assert.equal(sent[0].category, 'peer');
 });
 
 test('a failed request is forgotten so the next park retries it', async () => {

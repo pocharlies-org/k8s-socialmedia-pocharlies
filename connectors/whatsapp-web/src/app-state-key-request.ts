@@ -39,7 +39,7 @@ export interface AppStateKeyRequestSocket {
   relayMessage(
     jid: string,
     content: proto.IMessage,
-    options: { messageId: string }
+    options: { messageId: string; additionalAttributes?: Record<string, string> }
   ): Promise<unknown>;
 }
 
@@ -70,7 +70,19 @@ export async function requestMissingAppStateKeys(
         } as proto.IMessage,
         { messageId, userJid: sock.user?.id || primaryJid }
       );
-      await sock.relayMessage(primaryJid, full.message as proto.IMessage, { messageId });
+      log(`app-state key ${id}: relaying request to the primary device`);
+      // category=peer skips relayMessage's device enumeration (fetchDevices on our own PN
+      // never answers here) — the same shape Baileys uses to relay PDO messages to meJid.
+      // The timeout is a guard: a stalled ask must never outlive the park cycle.
+      await Promise.race([
+        sock.relayMessage(primaryJid, full.message as proto.IMessage, {
+          messageId,
+          additionalAttributes: { category: 'peer' },
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('relay timeout after 30s')), 30_000).unref()
+        ),
+      ]);
       log(`app-state key ${id} requested from the primary device`);
     } catch (e) {
       requested.delete(id);
