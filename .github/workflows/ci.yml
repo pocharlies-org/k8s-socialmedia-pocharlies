@@ -19,10 +19,9 @@ permissions:
 
 jobs:
   # ADR 0001 decision 5: per-account connectors are rendered from the registry.
-  # Los verificadores de PR usan runners publicos para no depender de ARC.
   connectors-generated:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    runs-on: ubuntu-latest
+    runs-on: arc-k8s
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,7 +35,7 @@ jobs:
   # throwaway Postgres (tests/test_edits.py; without the DSN those are skipped).
   telegram-sync-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    runs-on: ubuntu-latest
+    runs-on: arc-k8s
     services:
       postgres:
         image: postgres:16-alpine
@@ -67,7 +66,7 @@ jobs:
       - run: python -m pytest -p no:cacheprovider -rs tests
 
   whatsapp-app:
-    runs-on: ubuntu-latest
+    runs-on: arc-k8s
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -128,7 +127,7 @@ jobs:
 
   s3-tests:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
-    runs-on: ubuntu-latest
+    runs-on: arc-k8s
     env:
       RUN_S3_INTEGRATION: "1"
       S3_ENDPOINT: http://127.0.0.1:9000
@@ -182,7 +181,6 @@ jobs:
     if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-ci.yml@main
     with:
-      runner: ${{ github.repository_owner == 'pocharlies-org' && 'arc-k8s' || 'ubuntu-latest' }}
       node_version: "22"
       pnpm_version: "11.18.0"
       # En pull_request, github.repository_owner es el dueño de la base, así que también
@@ -216,11 +214,13 @@ jobs:
 
   # The reusable's contract checkout requires a secret that fork PRs cannot receive.
   # Run the same gates locally with read-only checkout and no repository secrets.
+  # (El job de un PR de fork se ejecuta en el contexto del repo base, así que el
+  # pool org-level arc-k8s le sirve igual que a los internos.)
   standard-fork-app:
     name: standard / Lint, test, build
     needs: [s3-tests]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: arc-k8s
     timeout-minutes: 30
     env:
       DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
@@ -242,7 +242,7 @@ jobs:
     name: standard / Lint and validate manifests
     needs: [s3-tests]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: arc-k8s
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -306,7 +306,7 @@ jobs:
     name: standard / Contract surface
     needs: [s3-tests]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: arc-k8s
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
