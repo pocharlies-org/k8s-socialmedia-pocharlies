@@ -16,7 +16,7 @@ const BASE: Record<string, string> = {
   CORREO_CONECTOR_TG_ID: 'tg-professional',
   CORREO_CONECTOR_TG_SECRET: 't'.repeat(32),
 };
-const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'TRACKING_OPT_IN_BASE_URL', 'ENABLE_OUTBOUND'];
+const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'TRACKING_OPT_IN_BASE_URL', 'ENABLE_OUTBOUND', 'HERMES_WAKE_ENABLED', 'HERMES_WAKE_URL', 'HERMES_WAKE_SECRET', 'WAKE_STALE_MAX_MIN'];
 
 function con(env: Record<string, string | undefined>, fn: () => void): void {
   const keys = [...Object.keys(BASE), ...OPCIONALES];
@@ -41,6 +41,9 @@ test('defaults: own queue group, port 8080', () => {
     const c = loadConfig();
     assert.equal(c.natsQueueGroup, 'correo-bridge');
     assert.equal(c.port, 8080);
+    assert.equal(c.hermesWakeUrl, null);
+    assert.equal(c.hermesWakeSecreto, null);
+    assert.equal(c.wakeStaleMaxMs, 30 * 60_000);
     assert.deepEqual([...c.secretosConector.keys()].sort(), ['tg-professional', 'wa-professional']);
     assert.equal(c.conectorPorCanal.whatsapp, 'wa-professional');
     assert.equal(c.conectorPorCanal.telegram, 'tg-professional');
@@ -83,4 +86,22 @@ test('B2: ENABLE_OUTBOUND is off unless it says exactly true; anything else refu
   for (const v of ['TRUE', '1', 'yes', 'on']) {
     con({ ...BASE, ENABLE_OUTBOUND: v }, () => assert.throws(loadConfig, /ENABLE_OUTBOUND/));
   }
+});
+
+test('DGX-1533: the wake is off by default; when on, URL and secret are required', () => {
+  const WAKE = { HERMES_WAKE_URL: 'http://hermes-webhook.hermes.svc:8644/p/secretaria-skirmshop/webhooks/whatsapp-skirmshop', HERMES_WAKE_SECRET: 's'.repeat(40) };
+  con({ ...BASE, ...WAKE }, () => {
+    const c = loadConfig();
+    assert.equal(c.hermesWakeUrl, null);
+  });
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true' }, () => assert.throws(loadConfig, /HERMES_WAKE_URL/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', HERMES_WAKE_SECRET: WAKE.HERMES_WAKE_SECRET }, () => assert.throws(loadConfig, /HERMES_WAKE_URL/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', HERMES_WAKE_URL: WAKE.HERMES_WAKE_URL }, () => assert.throws(loadConfig, /HERMES_WAKE_SECRET/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', ...WAKE }, () => {
+    const c = loadConfig();
+    assert.equal(c.hermesWakeUrl, WAKE.HERMES_WAKE_URL);
+    assert.equal(c.hermesWakeSecreto, WAKE.HERMES_WAKE_SECRET);
+  });
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', HERMES_WAKE_URL: 'http://hermes-webhook.hermes.svc:8644', HERMES_WAKE_SECRET: WAKE.HERMES_WAKE_SECRET }, () => assert.throws(loadConfig, /HERMES_WAKE_URL/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'si', HERMES_WAKE_URL: WAKE.HERMES_WAKE_URL, HERMES_WAKE_SECRET: WAKE.HERMES_WAKE_SECRET }, () => assert.throws(loadConfig, /HERMES_WAKE_ENABLED/));
 });

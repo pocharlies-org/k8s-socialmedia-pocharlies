@@ -17,3 +17,6 @@ spec:
         - name: correo-bridge
           env:
             - { name: ENABLE_OUTBOUND, value: "true" }
+            # DGX-1533: despierto de la secretaria (entrada; la salida al cliente sigue
+            # siendo de la sesión de caso tras el OK de Dani). Rollback: quitar esta línea.
+            - { name: HERMES_WAKE_ENABLED, value: "true" }

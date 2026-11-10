@@ -32,8 +32,10 @@ test('C3: the connector routes in the code are exactly the closed lists: GET rea
   }
 });
 
-test('C3: the only non-GET requests are the ingest POST to the core and the send POST to a connector', () => {
-  const permitidos: Record<string, string> = { 'entrega.ts': 'POST', 'conectores.ts': 'POST' };
+test('C3: the only non-GET requests are the ingest POST to the core, the send POST to a connector and the secretary wake', () => {
+  // DGX-1533: hermes.ts POSTs the wake card to Hermes (inbound-only: it never
+  // reaches a customer — the answer is the case session's, after Dani's OK).
+  const permitidos: Record<string, string> = { 'entrega.ts': 'POST', 'conectores.ts': 'POST', 'hermes.ts': 'POST' };
   for (const { f, texto } of fuentes) {
     for (const m of texto.matchAll(/method:\s*['"`](\w+)['"`]/g)) {
       if (m[1] === 'GET') continue;
