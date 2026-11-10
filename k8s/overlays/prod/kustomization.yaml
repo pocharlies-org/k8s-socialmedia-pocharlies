@@ -199,11 +199,13 @@ images:
   # SC-2760: app de WhatsApp del fork de Jordi. El base la deja en :latest (no
   # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija. v1.3.126
   # (run 39508533271) lleva el enrutado de media por bucket (skirmshop-drive vs legacy).
-  # DGX-1235: correo-bridge por tag@digest antes de escalarlo (condición de security). v1.3.129 =
-  # Release Production run 39912746266 de deploy/prod@a19d042 (B2). ENABLE_OUTBOUND sigue "false".
+  # DGX-1235: correo-bridge por tag@digest antes de escalarlo (condición de security). ENABLE_OUTBOUND
+  # sigue "false". DGX-1533: v1.3.129 -> v1.3.146 (Release Production run 42753526304, deploy/prod@32d469d):
+  # despierta a la secretaria de Hermes (whatsapp-skirmshop) por cada WhatsApp 1:1 entrante; el egreso
+  # netpol a hermes:8644 va en el mismo manifiesto.
   - name: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge
-    newTag: v1.3.129
-    digest: sha256:0983a4be18cee811a67b314897df6d79214cfd27ab986898011356e162f5aa3f
+    newTag: v1.3.146
+    digest: sha256:61e25d1a83440bf1af1dfe7a7b1e3b0edb3ad92068070fe302f84fe358b124d2
   # SC-2760 24-10: v1.3.126 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): el join del listado (#384),
   # los ETag/304 (#371), los ticks (#354), el rail (#375), el <select> del audio (#376), el service worker
   # cache-first (#385) y la lista de chats virtualizada (#387).
