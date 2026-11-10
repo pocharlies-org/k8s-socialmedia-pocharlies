@@ -35,8 +35,8 @@ function limpio(valor: string, limite: number): string {
   return plano.slice(0, limite);
 }
 
-export const MAX_CAMPO = 100;
-export const MAX_TEXTO = 500;
+const MAX_CAMPO = 100;
+const MAX_TEXTO = 500;
 
 /** The fixed-template card the profile prompt `{mensaje}` receives. `chat` is the
  * canonical jid to answer to (never invented); `caso` the key the session opens

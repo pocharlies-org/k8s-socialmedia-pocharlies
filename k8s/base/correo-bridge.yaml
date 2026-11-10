@@ -30,7 +30,7 @@ spec:
     spec:
       enableServiceLinks: false
       automountServiceAccountToken: false
-      # atlantic (INFRA-1103): fuera del x86; solo habla con NATS, los conectores y el core, todos del clúster
+      # atlantic (INFRA-1103): fuera del x86; solo habla con NATS, los conectores, el core y Hermes, todos del clúster
       nodeSelector: { node-pool: ovh-heavy, kubernetes.io/arch: amd64 }
       securityContext:
         runAsNonRoot: true
@@ -176,8 +176,8 @@ spec:
   policyTypes:
     - Ingress
 ---
-# Egress: DNS, NATS, the two professional connectors and the core. Nothing
-# else: no Postgres, no internet.
+# Egress: DNS, NATS, the two professional connectors, the core and the Hermes
+# webhook (DGX-1533 secretary wake). Nothing else: no Postgres, no internet.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -209,6 +209,11 @@ spec:
           podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: core } }
       ports:
         - { protocol: TCP, port: 8081 }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: hermes } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: hermes, app.kubernetes.io/instance: hermes } }
+      ports:
+        - { protocol: TCP, port: 8644 }
   policyTypes:
     - Egress
 ---

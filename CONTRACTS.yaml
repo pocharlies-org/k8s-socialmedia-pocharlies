@@ -2721,7 +2721,9 @@ contracts:
     secret = 1Password item hermes-webhook-gmail (same as the gmail-* routes), 202 delivered / 200 duplicate /
     429 Retry-After. Inbound-only: it never sends to a customer — the answer is the case session''s, after
     Dani''s OK. Body {"mensaje": "<tarjeta>"} with the fixed WHATSAPP markers and caso=wa:<E.164 digits>.
-    Receiver: helm/hermes/values.yaml webhook.routes.whatsapp-skirmshop (k8s-openclaw-qwen36-pocharlies).'
+    Receiver: helm/hermes/values.yaml webhook.routes.whatsapp-skirmshop (k8s-openclaw-qwen36-pocharlies).
+    Transport: netpol correo-bridge-egress allows TCP 8644 to the hermes namespace, and hermes'' webhook.allowPods
+    admits this pod — both must stay for the wake to arrive.'
 - id: nats.correo-bridge.telegram-message-received.v1
   kind: routing-key
   value: telegram.MessageReceived

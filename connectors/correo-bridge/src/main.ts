@@ -138,6 +138,7 @@ async function main(): Promise<void> {
   logger.info({ enableOutbound: config.enableOutbound }, 'send route');
   // DGX-1533: the wake of the Skirmshop secretary (inbound-only; the answer is the
   // case session's, after Dani's OK). GitOps switch: HERMES_WAKE_ENABLED=true.
+  // CONTRACT: http.webhook.hermes_whatsapp_notify.v1 — POST /p/secretaria-skirmshop/webhooks/whatsapp-skirmshop
   const aviso =
     config.hermesWakeUrl && config.hermesWakeSecreto
       ? new AvisoHermes({ url: config.hermesWakeUrl, secreto: config.hermesWakeSecreto, logger })

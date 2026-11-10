@@ -20,8 +20,8 @@ import type pino from 'pino';
  * must not block the sequential NATS loop for longer than that.
  */
 
-export const INTENTOS = 3;
-export const TOPE_MS = 30_000;
+const INTENTOS = 3;
+const TOPE_MS = 30_000;
 const TIEMPO_INTENTO_MS = 8_000;
 const ESPERAS_MS = [1_000, 2_000];
 const RETRY_AFTER_MAX_S = 25;
