@@ -65,6 +65,8 @@ class FakeMtcute {
 const open: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of open.splice(0)) await close();
+  delete process.env.ENABLE_SENDING;
+  delete process.env.EMERGENCY_DISABLE_SENDING;
 });
 
 async function serve(fake = new FakeMtcute()) {
@@ -340,4 +342,123 @@ test('get_admin_rights: la cuenta no está en el chat → user_not_participant',
   const r = await rights(base);
   assert.equal(r.status, 404);
   assert.equal(r.body.failureClass, 'user_not_participant');
+});
+
+// INFRA-218 regression (qa PASA on INFRA-348): the gate, the signature and the
+// error envelope of the five moderation routes, none of it touching Telegram.
+const ACTIONS = ['ban', 'unban', 'kick', 'restrict', 'unrestrict'] as const;
+const VALID_BODY = { user_id: String(USER), restriction: 'mute' };
+
+for (const [env, value] of [
+  ['ENABLE_SENDING', 'false'],
+  ['ENABLE_SENDING', '0'],
+  ['EMERGENCY_DISABLE_SENDING', 'true'],
+] as const) {
+  test(`${env}=${value} → las cinco mutaciones dan 403 disabled_sending sin tocar Telegram; admin-rights sigue abierta`, async () => {
+    const { base, fake } = await serve();
+    process.env[env] = value;
+    for (const action of ACTIONS) {
+      const r = await act(base, action, VALID_BODY);
+      assert.equal(r.status, 403, action);
+      assert.equal(r.body.failureClass, 'disabled_sending', action);
+    }
+    assert.deepEqual(fake.calls, [], 'cerrada la puerta, ninguna mutación llega a Telegram');
+    const read = await rights(base);
+    assert.equal(read.status, 200, 'get_admin_rights es lectura: no pasa por la puerta');
+    assert.deepEqual(fake.methods, ['getChatMember']);
+  });
+}
+
+test('ENABLE_SENDING sin definir → las cinco mutaciones pasan (la puerta cerrada no es el estado normal)', async () => {
+  const { base, fake } = await serve();
+  for (const action of ACTIONS) {
+    assert.equal((await act(base, action, VALID_BODY)).status, 200, action);
+  }
+  assert.ok(fake.calls.length >= ACTIONS.length);
+});
+
+test('sin firma, con secreto ajeno o con cuerpo alterado → 401 y Telegram intacto (mutaciones y lectura)', async () => {
+  const { base, fake } = await serve();
+  const url = (action: string) => `${base}/chats/${CHAT}/moderation/${action}`;
+  const body = JSON.stringify(VALID_BODY);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const forged = {
+    'content-type': 'application/json',
+    'x-connector-timestamp': ts,
+    'x-connector-signature': generateHMACSignature(VALID_BODY, Number(ts), 'otro-secreto'),
+  };
+  const tampered = {
+    'content-type': 'application/json',
+    'x-connector-timestamp': ts,
+    'x-connector-signature': generateHMACSignature({ user_id: '1' }, Number(ts), SECRET),
+  };
+  for (const action of ACTIONS) {
+    for (const extra of [{}, forged, tampered]) {
+      const res = await fetch(url(action), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...extra },
+        body,
+      });
+      assert.equal(res.status, 401, `${action} ${Object.keys(extra).length}`);
+    }
+  }
+  const read = await fetch(`${base}/chats/${CHAT}/moderation/admin-rights`);
+  assert.equal(read.status, 401);
+  assert.deepEqual(fake.calls, []);
+});
+
+test('until que no es ISO-8601 → 400 invalid_request en ban y restrict, sin tocar Telegram', async () => {
+  const { base, fake } = await serve();
+  for (const until of ['mañana', '2026-13-45T99:00:00Z', 'not-a-date', 12345]) {
+    for (const action of ['ban', 'restrict'] as const) {
+      const r = await act(base, action, { ...VALID_BODY, until });
+      assert.equal(r.status, 400, `${action} ${String(until)}`);
+      assert.equal(r.body.failureClass, 'invalid_request', `${action} ${String(until)}`);
+    }
+  }
+  assert.deepEqual(fake.calls, []);
+});
+
+test('rate_limited lleva la cabecera Retry-After además de retry_after_s', async () => {
+  const fake = new FakeMtcute();
+  fake.failWith = rpc(420, 'FLOOD_WAIT_30');
+  const { base } = await serve(fake);
+  const body = { user_id: String(USER) };
+  const res = await fetch(`${base}/chats/${CHAT}/moderation/ban`, {
+    method: 'POST',
+    headers: headers(body),
+    body: JSON.stringify(body),
+  });
+  assert.equal(res.status, 429);
+  assert.equal(res.headers.get('retry-after'), '30');
+  assert.equal(((await res.json()) as Record<string, unknown>).retry_after_s, 30);
+});
+
+test('los errores propios de mtcute (peer desconocido, tipo de peer) tampoco son un 500', async () => {
+  class MtPeerNotFoundError extends Error {}
+  class MtInvalidPeerTypeError extends Error {}
+  const cases: Array<[Error, number, string]> = [
+    [new MtPeerNotFoundError('peer'), 400, 'invalid_target'],
+    [new MtInvalidPeerTypeError('peer'), 422, 'unsupported_chat_type'],
+  ];
+  for (const [error, status, failureClass] of cases) {
+    const fake = new FakeMtcute();
+    fake.failWith = error;
+    const { base } = await serve(fake);
+    const r = await act(base, 'ban', { user_id: String(USER) });
+    assert.equal(r.status, status, failureClass);
+    assert.equal(r.body.failureClass, failureClass);
+    assert.notEqual(r.body.failureClass, 'outcome_unknown');
+  }
+});
+
+test('not_admin con USER_ADMIN_INVALID dice que el objetivo es administrador (mensaje accionable)', async () => {
+  const fake = new FakeMtcute();
+  fake.failWith = rpc(400, 'USER_ADMIN_INVALID');
+  const { base } = await serve(fake);
+  const r = await act(base, 'ban', { user_id: String(USER) });
+  assert.equal(r.status, 403);
+  assert.equal(r.body.failureClass, 'not_admin');
+  assert.match(r.body.error, /administrador/);
+  assert.equal(r.body.missing_right, 'banUsers');
 });
