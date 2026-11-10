@@ -17,7 +17,8 @@ export const SUBJECT_WHATSAPP = 'whatsapp.MessageReceived';
 export const SUBJECT_TELEGRAM = 'telegram.MessageReceived';
 
 export type Resultado =
-  | { forward: true; reason: string; canal: Canal; cuerpo: MensajeCanal }
+  /** `evento` is the decoded NATS event: DGX-1533 needs it to build the secretary wake card. */
+  | { forward: true; reason: string; canal: Canal; cuerpo: MensajeCanal; evento: MessageReceivedEvent | TelegramMessageReceivedEvent }
   /** `reason` is machine-readable and safe to log (never PII). */
   | { forward: false; reason: string };
 
@@ -33,8 +34,8 @@ function hasSuffix(jid: string, suffixes: readonly string[]): boolean {
 
 const drop = (reason: string): Resultado => ({ forward: false, reason });
 
-function desdeCuerpo(canal: Canal, r: { cuerpo: MensajeCanal } | { motivo: string }): Resultado {
-  return 'cuerpo' in r ? { forward: true, reason: `forward-${r.cuerpo.direccion}`, canal, cuerpo: r.cuerpo } : drop(r.motivo);
+function desdeCuerpo(canal: Canal, r: { cuerpo: MensajeCanal } | { motivo: string }, evento: MessageReceivedEvent | TelegramMessageReceivedEvent): Resultado {
+  return 'cuerpo' in r ? { forward: true, reason: `forward-${r.cuerpo.direccion}`, canal, cuerpo: r.cuerpo, evento } : drop(r.motivo);
 }
 
 function whatsapp(event: MessageReceivedEvent, ownJid: string, dedup: { has(key: string): boolean }): Resultado {
@@ -53,7 +54,7 @@ function whatsapp(event: MessageReceivedEvent, ownJid: string, dedup: { has(key:
   const fromMe = event.fromMe === true || sender === normalizeJid(ownJid);
   if (dedup.has(waMessageId)) return drop('duplicate');
   if (!fromMe && isTrackingOptInControlMessage(event.content)) return drop('tracking-opt-in-control-message');
-  return desdeCuerpo('whatsapp', cuerpoWhatsapp(event, fromMe ? 'saliente' : 'entrante'));
+  return desdeCuerpo('whatsapp', cuerpoWhatsapp(event, fromMe ? 'saliente' : 'entrante'), event);
 }
 
 function telegram(event: TelegramMessageReceivedEvent, dedup: { has(key: string): boolean }): Resultado {
@@ -64,7 +65,7 @@ function telegram(event: TelegramMessageReceivedEvent, dedup: { has(key: string)
   if (!id) return drop('missing-telegram-message-id');
   if (!(event.senderTelegramId || '').trim()) return drop('missing-sender');
   if (dedup.has(`tg:${id}`)) return drop('duplicate');
-  return desdeCuerpo('telegram', cuerpoTelegram(event, event.isOutbound === true ? 'saliente' : 'entrante'));
+  return desdeCuerpo('telegram', cuerpoTelegram(event, event.isOutbound === true ? 'saliente' : 'entrante'), event);
 }
 
 /** One NATS message, start to end: decode, filter, canonical body. Pure but for the dedup. */

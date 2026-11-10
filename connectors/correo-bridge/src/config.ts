@@ -36,6 +36,11 @@ export interface BridgeConfig {
   refsMax: number;
   refsTtlMs: number;
   port: number;
+  /** DGX-1533: wake of the Skirmshop secretary (Hermes webhook). Both null when disabled. */
+  hermesWakeUrl: string | null;
+  hermesWakeSecreto: string | null;
+  /** An entrante older than this never wakes (backlog after an outage). */
+  wakeStaleMaxMs: number;
 }
 
 function patron(name: string, re: RegExp): string {
@@ -81,6 +86,22 @@ export function loadConfig(): BridgeConfig {
     throw new ConfigError('each producer key, each connector key and CONNECTOR_SHARED_SECRET must be distinct');
   }
 
+  // DGX-1533: off unless HERMES_WAKE_ENABLED is exactly `true` (the GitOps switch
+  // back); when on, URL and secret are required or the bridge refuses to start.
+  const wakeEnabled = optionalEnv('HERMES_WAKE_ENABLED', 'false');
+  if (wakeEnabled !== 'true' && wakeEnabled !== 'false') {
+    throw new ConfigError('HERMES_WAKE_ENABLED must be true or false');
+  }
+  let hermesWakeUrl: string | null = null;
+  let hermesWakeSecreto: string | null = null;
+  if (wakeEnabled === 'true') {
+    hermesWakeUrl = httpUrl('HERMES_WAKE_URL', requireEnv('HERMES_WAKE_URL'));
+    if (new URL(hermesWakeUrl).pathname === '/') throw new ConfigError('HERMES_WAKE_URL must carry the route path');
+    const secreto = requireEnv('HERMES_WAKE_SECRET');
+    if (secreto.length < 16) throw new ConfigError('HERMES_WAKE_SECRET must be at least 16 characters');
+    hermesWakeSecreto = secreto;
+  }
+
   return {
     natsUrl: optionalEnv('NATS_URL', 'nats://localhost:4222'),
     natsCaCert: natsCaCert && natsCaCert !== 'none' ? natsCaCert : undefined,
@@ -99,6 +120,9 @@ export function loadConfig(): BridgeConfig {
     refsMax: intEnv('REFS_MAX', 50_000),
     refsTtlMs: intEnv('REFS_TTL_MS', 30 * 86_400_000),
     port: intEnv('PORT', 8080),
+    hermesWakeUrl,
+    hermesWakeSecreto,
+    wakeStaleMaxMs: intEnv('WAKE_STALE_MAX_MIN', 30) * 60_000,
   };
 }
 

@@ -30,7 +30,7 @@ spec:
     spec:
       enableServiceLinks: false
       automountServiceAccountToken: false
-      # atlantic (INFRA-1103): fuera del x86; solo habla con NATS, los conectores y el core, todos del clúster
+      # atlantic (INFRA-1103): fuera del x86; solo habla con NATS, los conectores, el core y Hermes, todos del clúster
       nodeSelector: { node-pool: ovh-heavy, kubernetes.io/arch: amd64 }
       securityContext:
         runAsNonRoot: true
@@ -57,6 +57,10 @@ spec:
             - { name: CORREO_PRODUCTOR_TG_ID, value: "correo-bridge-tg" }
             # Whoever can call POST /envios sends as Skirmshop: only in the prod overlay.
             - { name: ENABLE_OUTBOUND, value: "false" }
+            # DGX-1533: wake of the Skirmshop secretary (inbound-only, never a customer
+            # message). Off in base; the prod overlay turns it on (same pattern as ENABLE_OUTBOUND).
+            - { name: HERMES_WAKE_ENABLED, value: "false" }
+            - { name: HERMES_WAKE_URL, value: "http://hermes-webhook.hermes.svc.cluster.local:8644/p/secretaria-skirmshop/webhooks/whatsapp-skirmshop" }
             # Only the one key of whatsapp-mcp-secrets it needs (no envFrom).
             - name: CONNECTOR_SHARED_SECRET
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
@@ -68,6 +72,8 @@ spec:
               valueFrom: { secretKeyRef: { name: correo-bridge-tg-professional, key: conector } }
             - name: CORREO_PRODUCTOR_TG_SECRET
               valueFrom: { secretKeyRef: { name: correo-bridge-tg-professional, key: productor } }
+            - name: HERMES_WAKE_SECRET
+              valueFrom: { secretKeyRef: { name: correo-bridge-hermes-wake, key: webhook_secret } }
           resources:
             requests: { cpu: 20m, memory: 64Mi }
             limits: { memory: 256Mi }
@@ -131,6 +137,24 @@ spec:
     - secretKey: productor
       remoteRef: { key: correo-productor-correo-bridge-tg/clave }
 ---
+# DGX-1533: the HMAC secret of the Hermes webhook routes (the same 1Password item
+# Hermes and the gmail adapter read — one source of truth, never a copy).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: correo-bridge-hermes-wake
+  namespace: whatsapp-mcp
+spec:
+  refreshInterval: 24h
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: correo-bridge-hermes-wake
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: webhook_secret
+      remoteRef: { key: hermes-webhook-gmail/webhook_secret }
+---
 # Ingress: only the core pod (ns correo, component=core) and the vmagent. The pod is
 # excluded from whatsapp-mcp-allow-same-namespace (networkpolicy.yaml), so no
 # other pod of this namespace reaches it.
@@ -152,8 +176,8 @@ spec:
   policyTypes:
     - Ingress
 ---
-# Egress: DNS, NATS, the two professional connectors and the core. Nothing
-# else: no Postgres, no internet.
+# Egress: DNS, NATS, the two professional connectors, the core and the Hermes
+# webhook (DGX-1533 secretary wake). Nothing else: no Postgres, no internet.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -185,6 +209,11 @@ spec:
           podSelector: { matchLabels: { app.kubernetes.io/name: correo, app.kubernetes.io/component: core } }
       ports:
         - { protocol: TCP, port: 8081 }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: hermes } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: hermes, app.kubernetes.io/instance: hermes } }
+      ports:
+        - { protocol: TCP, port: 8644 }
   policyTypes:
     - Egress
 ---

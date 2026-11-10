@@ -2704,8 +2704,24 @@ contracts:
   status: active
   note: 'DGX-1235 B1. correo-bridge consumes the core-NATS subject the WhatsApp connectors publish (MessageReceivedEvent
     of shared/src/types/events.ts), queue group correo-bridge, and reads only account, conversationId, waMessageId,
-    waTimestamp, senderWaId, fromMe and, for the tracking opt-in control message, content (never forwarded).
-    Renaming the subject or those fields breaks it.'
+    waTimestamp, senderWaId, fromMe and, for the tracking opt-in control message and the DGX-1533 secretary wake
+    card, content (sanitized and truncated, never to a customer). Renaming the subject or those fields breaks it.'
+- id: http.webhook.hermes_whatsapp_notify.v1
+  kind: http-route
+  value: /p/secretaria-skirmshop/webhooks/whatsapp-skirmshop
+  role: consumer
+  files:
+  - connectors/correo-bridge/src/main.ts
+  status: active
+  note: 'DGX-1533. correo-bridge POSTs the wake card of an entrant WhatsApp 1:1 message to the Hermes profile
+    webhook (the Gmail webhook_by_account analogue): HMAC V2 (X-Webhook-Timestamp +
+    X-Webhook-Signature-V2 = hex(HMAC(secret, "<ts>." + body)), X-Request-ID dedup),
+    secret = 1Password item hermes-webhook-gmail (same as the gmail-* routes), 202 delivered / 200 duplicate /
+    429 Retry-After. Inbound-only: it never sends to a customer — the answer is the case session''s, after
+    Dani''s OK. Body {"mensaje": "<tarjeta>"} with the fixed WHATSAPP markers and caso=wa:<E.164 digits>.
+    Receiver: helm/hermes/values.yaml webhook.routes.whatsapp-skirmshop (k8s-openclaw-qwen36-pocharlies).
+    Transport: netpol correo-bridge-egress allows TCP 8644 to the hermes namespace, and hermes'' webhook.allowPods
+    admits this pod — both must stay for the wake to arrive.'
 - id: nats.correo-bridge.telegram-message-received.v1
   kind: routing-key
   value: telegram.MessageReceived
