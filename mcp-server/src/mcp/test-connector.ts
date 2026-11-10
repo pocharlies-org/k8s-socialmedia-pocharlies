@@ -16,9 +16,14 @@ export interface Seen {
   url: string;
   headers: http.IncomingHttpHeaders;
   signatureOk: boolean;
+  body: unknown;
 }
 
-export async function connector(mode: 'gated' | 'open', reply = '{"chats":[],"messageId":"m1"}') {
+export async function connector(
+  mode: 'gated' | 'open',
+  reply = '{"chats":[],"messageId":"m1"}',
+  status = 200
+) {
   const seen: Seen[] = [];
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -37,6 +42,7 @@ export async function connector(mode: 'gated' | 'open', reply = '{"chats":[],"me
         url: req.url ?? '',
         headers: req.headers,
         signatureOk,
+        body,
       });
       if (mode === 'gated' && !signatureOk) {
         res
@@ -44,7 +50,7 @@ export async function connector(mode: 'gated' | 'open', reply = '{"chats":[],"me
           .end('{"error":"Invalid signature"}');
         return;
       }
-      res.writeHead(200, { 'content-type': 'application/json' }).end(reply);
+      res.writeHead(status, { 'content-type': 'application/json' }).end(reply);
     });
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
