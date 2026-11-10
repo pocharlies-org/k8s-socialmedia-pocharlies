@@ -55,7 +55,12 @@ spec:
       labels:
         app: sauvage-verificacion
     spec:
-      backoffLimit: 0
+      # SC-5165 (SC-5013): 0 -> 2. Con 0, un pull transitorio (ImagePullBackOff
+      # del 11-08) o un fallo de red/LLM (11-07) era fallo definitivo y Keep
+      # paginaba. Con 2 el Job reintenta el pod (restartPolicy Never = pods
+      # nuevos) antes de dar la pasada por fallida. concurrencyPolicy Forbid
+      # sigue: los reintentos nunca solapan con la pasada siguiente.
+      backoffLimit: 2
       # ~350 miembros x (foto + vision con reintentos): 2 h de techo. Si se
       # agota, la pasada queda interrumpida y la siguiente reanuda desde el
       # estado (C6).
@@ -78,9 +83,17 @@ spec:
                 - -c
                 - |
                   cd /app/sauvage-verificacion
+                  # SC-5165 (SC-5013): sin esto el job no emitia nada a stdout y
+                  # no quedaba evidencia en Loki de ningun run (ni exito ni
+                  # fallo). Marcadores de inicio/fin + stderr volcado a stdout;
+                  # el exit code de opencode es el del contenedor.
+                  echo "sauvage-verificacion: inicio $(date -u -Is)"
                   opencode run --pure --auto --print-logs \
                     -m litellm/qwen38-flash-next-uncensored \
-                    "$(cat /sauvage-prompt/prompt-pasada.md)"
+                    "$(cat /sauvage-prompt/prompt-pasada.md)" 2>&1
+                  rc=$?
+                  echo "sauvage-verificacion: fin rc=$rc $(date -u -Is)"
+                  exit $rc
               env:
                 # Mismo patron que el Job PreSync y los CronJobs de voz: el
                 # kubelet expande $(DB_USER)/$(DB_PASSWORD) del envFrom.
