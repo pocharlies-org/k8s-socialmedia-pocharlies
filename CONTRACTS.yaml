@@ -2711,8 +2711,6 @@ contracts:
   value: /p/secretaria-skirmshop/webhooks/whatsapp-skirmshop
   role: consumer
   files:
-  - connectors/correo-bridge/src/hermes.ts
-  - connectors/correo-bridge/src/caso.ts
   - connectors/correo-bridge/src/main.ts
   status: active
   note: 'DGX-1533. correo-bridge POSTs the wake card of an entrant WhatsApp 1:1 message to the Hermes profile
