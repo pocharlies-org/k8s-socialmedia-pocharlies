@@ -1,0 +1,10 @@
+# SC-1244 spike: nada de esto va al git (descargas, venv, imagenes, artefactos de un solo uso)
+work/
+*.apk
+*.xapk
+*.png
+*.log
+*.zip
+Dockerfile
+mindthegapps/
+venv/
