@@ -60,3 +60,25 @@ test('tarjeta: the text is truncated', () => {
   const linea = tarjeta.split('\n').find(l => l.startsWith('texto: ')) as string;
   assert.ok(linea.length <= 'texto: '.length + 500);
 });
+
+// DGX-1550: one wake per burst — the coalesced card keeps the last message's id/ts.
+test('tarjeta de rafaga: contador, textos unidos oldest->newest, id del ultimo', () => {
+  const e1 = evento({ waMessageId: 'A1', content: 'una', waTimestamp: '2026-11-11T11:47:52.000Z' });
+  const e2 = evento({ waMessageId: 'A2', content: 'dos', waTimestamp: '2026-11-11T11:48:06.000Z' });
+  const tarjeta = tarjetaWhatsapp(e2, 'wa:34600112233', '123@lid', [e1, e2]);
+  assert.ok(tarjeta.includes('\nmensajes: 2\n'));
+  assert.ok(tarjeta.includes('\ntexto: una / dos\n'));
+  assert.ok(tarjeta.includes('\nid: A2\n'));
+  assert.ok(tarjeta.includes('\nts: 2026-11-11T11:48:06.000Z\n'));
+  // one lone message never carries the counter
+  assert.ok(!tarjetaWhatsapp(e2, 'wa:34600112233', '123@lid', [e2]).includes('mensajes:'));
+});
+
+test('tarjeta de rafaga: un burst largo muestra la cola', () => {
+  const eventos = Array.from({ length: 10 }, (_, i) => evento({ waMessageId: `A${i}`, content: `m${i + 1}` }));
+  const tarjeta = tarjetaWhatsapp(eventos[9], 'wa:34600112233', '123@lid', eventos);
+  const linea = tarjeta.split('\n').find(l => l.startsWith('texto: ')) as string;
+  assert.ok(linea.startsWith('texto: m3'), linea);
+  assert.ok(linea.includes('m10'), linea);
+  assert.ok(tarjeta.includes('\nmensajes: 10\n'));
+});

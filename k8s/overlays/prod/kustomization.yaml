@@ -202,10 +202,11 @@ images:
   # DGX-1235: correo-bridge por tag@digest antes de escalarlo (condición de security). ENABLE_OUTBOUND
   # sigue "false". DGX-1533: v1.3.129 -> v1.3.146 (Release Production run 42753526304, deploy/prod@32d469d):
   # despierta a la secretaria de Hermes (whatsapp-skirmshop) por cada WhatsApp 1:1 entrante; el egreso
-  # netpol a hermes:8644 va en el mismo manifiesto.
+  # netpol a hermes:8644 va en el mismo manifiesto. DGX-1550: v1.3.146 -> v1.3.147 (Release Production run
+  # 43034225088, deploy/prod@065f5dd): un wake por rafaga de cliente (ventana WAKE_DEBOUNCE_MIN, 5 min).
   - name: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge
-    newTag: v1.3.146
-    digest: sha256:61e25d1a83440bf1af1dfe7a7b1e3b0edb3ad92068070fe302f84fe358b124d2
+    newTag: v1.3.147
+    digest: sha256:def8a90b166f9f746253895082904e346e3c36f16d14ae8e7846d2bf7665b25f
   # SC-2760 24-10: v1.3.126 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): el join del listado (#384),
   # los ETag/304 (#371), los ticks (#354), el rail (#375), el <select> del audio (#376), el service worker
   # cache-first (#385) y la lista de chats virtualizada (#387).

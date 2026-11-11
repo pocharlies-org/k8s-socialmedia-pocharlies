@@ -2735,7 +2735,13 @@ contracts:
     Dani''s OK. Body {"mensaje": "<tarjeta>"} with the fixed WHATSAPP markers and caso=wa:<E.164 digits>.
     Receiver: helm/hermes/values.yaml webhook.routes.whatsapp-skirmshop (k8s-openclaw-qwen36-pocharlies).
     Transport: netpol correo-bridge-egress allows TCP 8644 to the hermes namespace, and hermes'' webhook.allowPods
-    admits this pod — both must stay for the wake to arrive.'
+    admits this pod — both must stay for the wake to arrive.
+    DGX-1550 (additive, same shape — no v2): wakes coalesce per burst. The first entrante of a caso opens a
+    WAKE_DEBOUNCE_MIN window (default 5, GitOps); messages arriving inside it ride in ONE card flushed when the
+    window closes — id/ts = the last message, a `mensajes: N` line is added when N>1 and texto: joins the tail
+    (last 8, oldest->newest, per-text truncated as before); X-Request-ID = whatsapp-skirmshop:<chat>:<ref of the
+    last>. The buffer is in-memory: a bridge restart inside a window loses that burst''s wake. Hermes consumes
+    mensaje as free text, so consumers of the card need no change.'
 - id: nats.correo-bridge.telegram-message-received.v1
   kind: routing-key
   value: telegram.MessageReceived

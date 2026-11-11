@@ -6,7 +6,8 @@ import { loadConfig, BridgeConfig, ConfigError } from './config';
 import { procesar, SUBJECT_TELEGRAM, SUBJECT_WHATSAPP } from './filter';
 import { Entrega } from './entrega';
 import { AvisoHermes } from './hermes';
-import { casoWhatsapp, esViejo, tarjetaWhatsapp } from './caso';
+import { casoWhatsapp, esViejo } from './caso';
+import { DespertarRafaga } from './rafaga';
 import { IndiceRefs } from './refs';
 import { ClienteConectores } from './conectores';
 import { crearLectura } from './lectura';
@@ -144,6 +145,9 @@ async function main(): Promise<void> {
       ? new AvisoHermes({ url: config.hermesWakeUrl, secreto: config.hermesWakeSecreto, logger })
       : null;
   logger.info({ wakeEnabled: aviso !== null }, 'secretary wake route');
+  // DGX-1550: one wake per burst — WAKE_DEBOUNCE_MIN minutes from the first entrante
+  // of a caso; a live chat no longer means one Hermes turn per message.
+  const rafaga = aviso ? new DespertarRafaga(config.wakeDebounceMs, (t, id) => aviso.avisar(t, id), logger) : null;
   // One NATS message, start to end. One sequential loop per subject: a dead
   // core costs each loop at most TOPE_MS per event (entrega.ts).
   const handle = async (subject: string, data: Uint8Array): Promise<void> => {
@@ -158,15 +162,12 @@ async function main(): Promise<void> {
     metrics.forwarded++;
     refs.guardar(r.cuerpo.ref, r.cuerpo.hilo_ref);
     // The secretary first: she is who acts on the case; the core is the record.
-    if (aviso && r.canal === 'whatsapp' && r.cuerpo.direccion === 'entrante') {
+    if (rafaga && r.canal === 'whatsapp' && r.cuerpo.direccion === 'entrante') {
       const evento = r.evento as MessageReceivedEvent;
       const caso = casoWhatsapp(evento);
       if (esViejo(r.cuerpo.ts, Date.now(), config.wakeStaleMaxMs)) countWakeDrop('stale');
       else if (!caso) countWakeDrop('sin-caso');
-      else {
-        const resultado = await aviso.avisar(tarjetaWhatsapp(evento, caso, r.cuerpo.hilo_ref), `whatsapp-skirmshop:${r.cuerpo.hilo_ref}:${r.cuerpo.ref}`);
-        logger.info({ resultado }, 'secretary wake');
-      }
+      else rafaga.despertar(caso, evento, r.cuerpo.hilo_ref, r.cuerpo.ref);
     }
     await entrega.entregar(config.conectorPorCanal[r.canal], r.cuerpo);
   };
