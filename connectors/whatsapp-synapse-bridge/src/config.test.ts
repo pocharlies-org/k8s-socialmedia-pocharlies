@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadConfig, trackingOptInBaseUrl } from './config';
+import { loadConfig } from './config';
 
-test('bridge requires explicit validated endpoints and tracking filter is opt-in', () => {
-  const keys = ['GATEWAY_WEBHOOK_URL', 'CONNECTOR_URL', 'WHATSAPP_WEBHOOK_SECRET', 'CONNECTOR_SHARED_SECRET', 'TRACKING_OPT_IN_BASE_URL'];
+test('bridge requires explicit validated endpoints', () => {
+  const keys = ['GATEWAY_WEBHOOK_URL', 'CONNECTOR_URL', 'WHATSAPP_WEBHOOK_SECRET', 'CONNECTOR_SHARED_SECRET'];
   const previous = keys.map(key => process.env[key]);
   try {
     for (const key of keys) delete process.env[key];
@@ -16,12 +16,6 @@ test('bridge requires explicit validated endpoints and tracking filter is opt-in
     const config = loadConfig();
     assert.equal(config.gatewayWebhookUrl, 'https://gateway.example/hooks/whatsapp');
     assert.equal(config.connectorUrl, 'http://connector:3001');
-    assert.equal(trackingOptInBaseUrl(), undefined);
-    process.env.TRACKING_OPT_IN_BASE_URL = 'https://tracking.example/orders/';
-    assert.equal(trackingOptInBaseUrl(), 'https://tracking.example/orders/');
-    process.env.TRACKING_OPT_IN_BASE_URL = 'file:///orders';
-    assert.throws(loadConfig, /TRACKING_OPT_IN_BASE_URL/);
-    delete process.env.TRACKING_OPT_IN_BASE_URL;
     for (const value of ['http://gateway.example', 'https://user:password@gateway.example', 'https://gateway.example/?secret=1']) {
       process.env.GATEWAY_WEBHOOK_URL = value;
       assert.throws(loadConfig, /GATEWAY_WEBHOOK_URL/);

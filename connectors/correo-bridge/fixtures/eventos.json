@@ -1,5 +1,5 @@
 {
- "descripcion": "DGX-1235 B1 C1: lo que entra por NATS y lo que hace el puente, en orden (el dedup es compartido entre entradas). jid propio de WhatsApp: 34999000111@c.us. TRACKING_OPT_IN_BASE_URL del test: https://seguimiento.example.org. Valores inventados.",
+ "descripcion": "DGX-1235 B1 C1: lo que entra por NATS y lo que hace el puente, en orden (el dedup es compartido entre entradas). jid propio de WhatsApp: 34999000111@c.us. Valores inventados.",
  "jidPropio": "34999000111@c.us",
  "eventos": [
   {

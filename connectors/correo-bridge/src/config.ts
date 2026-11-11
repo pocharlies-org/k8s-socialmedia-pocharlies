@@ -9,7 +9,7 @@
  * - CONNECTOR_SHARED_SECRET: the house HMAC towards the socialmedia connectors.
  */
 
-import { ConfigError, requireEnv, optionalEnv, httpUrl, intEnv, trackingOptInBaseUrl } from '@mcp-socialmedia/shared';
+import { ConfigError, requireEnv, optionalEnv, httpUrl, intEnv } from '@mcp-socialmedia/shared';
 
 export type Canal = 'whatsapp' | 'telegram';
 
@@ -77,7 +77,6 @@ export function loadConfig(): BridgeConfig {
   const waSecreto = clave('CORREO_CONECTOR_WA_SECRET');
   const tgId = patron('CORREO_CONECTOR_TG_ID', /^tg-[a-z0-9-]{1,40}$/);
   const tgSecreto = clave('CORREO_CONECTOR_TG_SECRET');
-  trackingOptInBaseUrl();
   const enableOutbound = optionalEnv('ENABLE_OUTBOUND', 'false');
   if (enableOutbound !== 'true' && enableOutbound !== 'false') {
     throw new ConfigError('ENABLE_OUTBOUND must be true or false');

@@ -16,7 +16,7 @@ const BASE: Record<string, string> = {
   CORREO_CONECTOR_TG_ID: 'tg-professional',
   CORREO_CONECTOR_TG_SECRET: 't'.repeat(32),
 };
-const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'TRACKING_OPT_IN_BASE_URL', 'ENABLE_OUTBOUND', 'HERMES_WAKE_ENABLED', 'HERMES_WAKE_URL', 'HERMES_WAKE_SECRET', 'WAKE_STALE_MAX_MIN', 'WAKE_DEBOUNCE_MIN'];
+const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'ENABLE_OUTBOUND', 'HERMES_WAKE_ENABLED', 'HERMES_WAKE_URL', 'HERMES_WAKE_SECRET', 'WAKE_STALE_MAX_MIN', 'WAKE_DEBOUNCE_MIN'];
 
 function con(env: Record<string, string | undefined>, fn: () => void): void {
   const keys = [...Object.keys(BASE), ...OPCIONALES];

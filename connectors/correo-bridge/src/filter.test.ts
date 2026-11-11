@@ -21,28 +21,21 @@ const fixture = JSON.parse(readFileSync(join(__dirname, '..', 'fixtures', 'event
 };
 
 test('C1: the 6 forwarded events and every dropped one with its reason', () => {
-  const previous = process.env.TRACKING_OPT_IN_BASE_URL;
-  process.env.TRACKING_OPT_IN_BASE_URL = 'https://seguimiento.example.org';
-  try {
-    const dedup = new DedupCache(86_400_000, 50_000);
-    let forwarded = 0;
-    for (const e of fixture.eventos) {
-      const data = new TextEncoder().encode(e.crudo ?? JSON.stringify(e.evento));
-      const r = procesar(e.subject, data, e.sinJidPropio ? '' : fixture.jidPropio, dedup);
-      if (e.esperado === 'forward') {
-        assert.equal(r.forward, true, `${e.nombre}: ${r.reason}`);
-        if (r.forward) assert.deepEqual(r.cuerpo, e.cuerpo, e.nombre);
-        forwarded++;
-      } else {
-        assert.equal(r.forward, false, e.nombre);
-        assert.equal(r.reason, e.esperado, e.nombre);
-      }
+  const dedup = new DedupCache(86_400_000, 50_000);
+  let forwarded = 0;
+  for (const e of fixture.eventos) {
+    const data = new TextEncoder().encode(e.crudo ?? JSON.stringify(e.evento));
+    const r = procesar(e.subject, data, e.sinJidPropio ? '' : fixture.jidPropio, dedup);
+    if (e.esperado === 'forward') {
+      assert.equal(r.forward, true, `${e.nombre}: ${r.reason}`);
+      if (r.forward) assert.deepEqual(r.cuerpo, e.cuerpo, e.nombre);
+      forwarded++;
+    } else {
+      assert.equal(r.forward, false, e.nombre);
+      assert.equal(r.reason, e.esperado, e.nombre);
     }
-    assert.equal(forwarded, 6);
-  } finally {
-    if (previous === undefined) delete process.env.TRACKING_OPT_IN_BASE_URL;
-    else process.env.TRACKING_OPT_IN_BASE_URL = previous;
   }
+  assert.equal(forwarded, 6);
 });
 
 test('C1: the canal of a forwarded event follows its subject', () => {
