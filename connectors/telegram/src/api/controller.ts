@@ -279,15 +279,23 @@ export function createRouter(
   });
 
   /**
-   * GET /chats/:id/participants - Get chat participants
+   * GET /chats/:id/participants - Get ONE page of chat participants.
+   *
+   * v2 (INFRA-745): optional `offset` pages past MTProto's 200-per-call cap
+   * (the bot sauvage-verificacion sweeps a ~350-member group with it), and
+   * the 200 gains `total` — the real member count Telegram reports, not the
+   * page length. v1 stays intact for callers that pass no `offset`: they get
+   * the same `participants` array as always.
    */
   // CONTRACT: http.telegram-connector.chats-participants.v1
+  // CONTRACT: http.telegram-connector.chats-participants.v2
   router.get('/chats/:id/participants', (req: Request, res: Response): void => {
     void (async () => {
       try {
         const limit = parseInt(req.query.limit as string) || 100;
-        const participants = await client.getParticipants(req.params.id, limit);
-        res.json({ participants });
+        const offset = parseInt(req.query.offset as string) || 0;
+        const { participants, total } = await client.getParticipants(req.params.id, limit, offset);
+        res.json({ participants, total });
       } catch (e) {
         res.status(500).json({ error: String(e) });
       }

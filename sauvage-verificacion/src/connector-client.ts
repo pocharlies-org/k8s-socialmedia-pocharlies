@@ -6,7 +6,8 @@ import { generateHMACSignature } from '@mcp-socialmedia/shared';
  * El bot NO abre clientes MTProto: la sesion es propiedad del proceso del
  * conector (veredicto del architect, INFRA-125). Todo lo que hace con Telegram
  * pasa por las rutas firmadas de `connectors/telegram/src/api/controller.ts`:
- *   GET  /chats/:id/participants  (barrido, http.telegram-connector.chats-participants.v1)
+ *   GET  /chats/:id/participants  (barrido paginado por offset,
+ *        http.telegram-connector.chats-participants.v2 — v1 intacta para quien no pasa offset)
  *   GET  /peers/:id/photo         (foto,     http.telegram-connector.peers-photo.v1)
  *   GET  /me                      (chat de Dani = self-chat de la cuenta personal)
  *   POST /messages/:chatId        (informe,  http.telegram-connector.messages-send.v1)
@@ -111,23 +112,46 @@ export interface Participante {
 }
 
 /**
- * Barrido completo: `?limit=1000` cubre los ~350 miembros del grupo verificado
- * (getParticipants pagina internamente con getChatMembers, telegram-client.ts).
+ * Barrido completo: recorre TODAS las paginas de participantes.
+ *
+ * MTProto devuelve como maximo 200 participantes por llamada
+ * (`channels.getParticipants`) y el conector hace UNA llamada por peticion:
+ * pedir `?limit=1000` en una sola peticion topaba el barrido a 200 (qa,
+ * 70-qa.md de INFRA-125 — C2). Se pide de 200 en 200 con `offset` (adicion
+ * compatible del contrato http.telegram-connector.chats-participants) hasta
+ * una pagina corta. Dedup por id: con altas/bajas durante el barrido las
+ * ventanas de offset pueden solapar; una pagina sin ids nuevos (un conector
+ * viejo que ignora `offset`) termina el bucle en vez de loop infinito.
  */
 export async function listarParticipantes(
   client: ConnectorClient,
   groupId: string,
-  limit = 1000
+  pageSize = 200
 ): Promise<Participante[]> {
-  const res = await client.get(`/chats/${encodeURIComponent(groupId)}/participants?limit=${limit}`);
-  if (res.status !== 200) {
-    throw new Error(`barrido fallo status=${res.status} ${JSON.stringify(res.json ?? '')}`);
+  const chat = encodeURIComponent(groupId);
+  const vistos = new Set<string>();
+  const out: Participante[] = [];
+  let offset = 0;
+  for (;;) {
+    const res = await client.get(`/chats/${chat}/participants?limit=${pageSize}&offset=${offset}`);
+    if (res.status !== 200) {
+      throw new Error(`barrido fallo status=${res.status} ${JSON.stringify(res.json ?? '')}`);
+    }
+    const participants = (res.json as { participants?: unknown })?.participants;
+    if (!Array.isArray(participants)) {
+      throw new Error('barrido: respuesta sin array participants');
+    }
+    let nuevos = 0;
+    for (const p of participants as Participante[]) {
+      if (vistos.has(p.id)) continue;
+      vistos.add(p.id);
+      out.push(p);
+      nuevos++;
+    }
+    if (participants.length < pageSize || nuevos === 0) break;
+    offset += participants.length;
   }
-  const participants = (res.json as { participants?: unknown })?.participants;
-  if (!Array.isArray(participants)) {
-    throw new Error('barrido: respuesta sin array participants');
-  }
-  return participants as Participante[];
+  return out;
 }
 
 export type ResultadoFoto =
