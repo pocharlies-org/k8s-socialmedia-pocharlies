@@ -6,7 +6,7 @@
  * traffic. Optional knobs fall back to safe defaults.
  */
 
-import { ConfigError, requireEnv, optionalEnv, httpUrl, trackingOptInBaseUrl, intEnv } from '@mcp-socialmedia/shared';
+import { ConfigError, requireEnv, optionalEnv, httpUrl, intEnv } from '@mcp-socialmedia/shared';
 
 export interface BridgeConfig {
   /** NATS server URL (e.g. nats://whatsapp-mcp-nats...:4222). */
@@ -44,7 +44,6 @@ export function loadConfig(): BridgeConfig {
   const natsCaCert = optionalEnv('NATS_CA_CERT', '');
   const gatewayWebhookUrl = httpUrl('GATEWAY_WEBHOOK_URL', requireEnv('GATEWAY_WEBHOOK_URL'), true);
   const connectorUrl = httpUrl('CONNECTOR_URL', requireEnv('CONNECTOR_URL'));
-  trackingOptInBaseUrl();
 
   return {
     natsUrl: optionalEnv('NATS_URL', 'nats://localhost:4222'),
@@ -62,4 +61,4 @@ export function loadConfig(): BridgeConfig {
   };
 }
 
-export { ConfigError, trackingOptInBaseUrl };
+export { ConfigError };

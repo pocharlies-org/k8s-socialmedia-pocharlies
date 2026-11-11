@@ -41,11 +41,6 @@ function httpUrl(name: string, value: string, httpsOnly = false): string {
   return url.toString().replace(/\/$/, '');
 }
 
-function trackingOptInBaseUrl(): string | undefined {
-  const value = optionalEnv('TRACKING_OPT_IN_BASE_URL', '');
-  return value ? `${httpUrl('TRACKING_OPT_IN_BASE_URL', value)}/` : undefined;
-}
-
 function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
@@ -56,4 +51,4 @@ function intEnv(name: string, fallback: number): number {
   return parsed;
 }
 
-export { ConfigError, requireEnv, optionalEnv, httpUrl, trackingOptInBaseUrl, intEnv };
+export { ConfigError, requireEnv, optionalEnv, httpUrl, intEnv };

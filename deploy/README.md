@@ -111,8 +111,7 @@ when every self-hosted service uses your own domain.
 
 Optional upstream components are not installed by this Compose. Telegram uses
 the same opt-in `DASHBOARD_URL`. The Synapse bridge requires explicit
-`GATEWAY_WEBHOOK_URL` and `CONNECTOR_URL`; `TRACKING_OPT_IN_BASE_URL` optionally
-enables its tracking-link filter. WhatsApp Cloud accepts
+`GATEWAY_WEBHOOK_URL` and `CONNECTOR_URL`. WhatsApp Cloud accepts
 `WHATSAPP_GRAPH_BASE_URL` (without version) and `WHATSAPP_GRAPH_API_VERSION`.
 Their own deployments must pass those variables if enabled later.
 
