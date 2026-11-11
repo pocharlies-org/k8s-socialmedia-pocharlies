@@ -10,17 +10,11 @@ SPIKE_DIR=$(cd "$(dirname "$0")" && pwd)
 SCRATCH=${SCRATCH:-$SPIKE_DIR/work}
 PIN=a4951b782fc8e06c845d9553bf07bb643fd8c158
 MEM=${MEM:-6g}
-mkdir -p "$SCRATCH"
+# shellcheck source=lib.sh
+. "$SPIKE_DIR/lib.sh"
 
-if [ ! -d "$SCRATCH/redroid-script" ]; then
-  git clone https://github.com/ayasa520/redroid-script.git "$SCRATCH/redroid-script"
-fi
-git -C "$SCRATCH/redroid-script" fetch -q origin
-git -C "$SCRATCH/redroid-script" checkout -q "$PIN"
-
-cd "$SCRATCH/redroid-script"
-python3 -m venv venv
-venv/bin/pip install -q -r requirements.txt
+# Deja el cwd en $SCRATCH/redroid-script con su venv instalado (helper compartido con 06).
+prepare_redroid_script "$PIN"
 
 # Descarga MindTheGapps (md5 verificado), escribe Dockerfile (FROM redroid/redroid:13.0.0-latest +
 # COPY mindthegapps / + ENTRYPOINT con setupwizard deshabilitado) y hace docker build.
