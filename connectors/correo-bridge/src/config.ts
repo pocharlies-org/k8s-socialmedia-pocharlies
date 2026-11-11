@@ -41,6 +41,8 @@ export interface BridgeConfig {
   hermesWakeSecreto: string | null;
   /** An entrante older than this never wakes (backlog after an outage). */
   wakeStaleMaxMs: number;
+  /** DGX-1550: burst window — messages of one caso inside it share ONE wake card. */
+  wakeDebounceMs: number;
 }
 
 function patron(name: string, re: RegExp): string {
@@ -123,6 +125,7 @@ export function loadConfig(): BridgeConfig {
     hermesWakeUrl,
     hermesWakeSecreto,
     wakeStaleMaxMs: intEnv('WAKE_STALE_MAX_MIN', 30) * 60_000,
+    wakeDebounceMs: intEnv('WAKE_DEBOUNCE_MIN', 5) * 60_000,
   };
 }
 

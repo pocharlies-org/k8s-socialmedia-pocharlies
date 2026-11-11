@@ -61,6 +61,8 @@ spec:
             # message). Off in base; the prod overlay turns it on (same pattern as ENABLE_OUTBOUND).
             - { name: HERMES_WAKE_ENABLED, value: "false" }
             - { name: HERMES_WAKE_URL, value: "http://hermes-webhook.hermes.svc.cluster.local:8644/p/secretaria-skirmshop/webhooks/whatsapp-skirmshop" }
+            # DGX-1550: one wake per burst — messages of one caso inside this window share one card.
+            - { name: WAKE_DEBOUNCE_MIN, value: "5" }
             # Only the one key of whatsapp-mcp-secrets it needs (no envFrom).
             - name: CONNECTOR_SHARED_SECRET
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
