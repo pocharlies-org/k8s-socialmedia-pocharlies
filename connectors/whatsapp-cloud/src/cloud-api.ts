@@ -8,6 +8,16 @@ export interface WhatsAppCloudConfig {
   graphApiVersion: string;
 }
 
+export function whatsappGraphBaseUrl(): string {
+  const value = process.env.WHATSAPP_GRAPH_BASE_URL?.trim() || 'https://graph.facebook.com';
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error('WHATSAPP_GRAPH_BASE_URL must be an absolute HTTP(S) URL'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('WHATSAPP_GRAPH_BASE_URL must use HTTP(S) without credentials, query or fragment');
+  }
+  return url.toString().replace(/\/$/, '');
+}
+
 export interface SendTextInput {
   conversationId?: string;
   to?: string;
@@ -26,7 +36,12 @@ export interface SendTemplateInput {
 export class WhatsAppCloudAPI {
   private logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
 
-  constructor(private config: WhatsAppCloudConfig) {}
+  constructor(private config: WhatsAppCloudConfig) {
+    whatsappGraphBaseUrl();
+    if (!/^v\d+\.\d+$/.test(config.graphApiVersion)) {
+      throw new Error('WHATSAPP_GRAPH_API_VERSION must be a version such as v25.0');
+    }
+  }
 
   isConfigured(): boolean {
     return Boolean(this.config.accessToken && this.config.phoneNumberId);
@@ -93,7 +108,7 @@ export class WhatsAppCloudAPI {
   }
 
   private async postMessage(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const url = `https://graph.facebook.com/${this.config.graphApiVersion}/${this.config.phoneNumberId}/messages`;
+    const url = `${whatsappGraphBaseUrl()}/${this.config.graphApiVersion}/${encodeURIComponent(this.config.phoneNumberId)}/messages`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {

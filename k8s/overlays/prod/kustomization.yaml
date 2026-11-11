@@ -7,33 +7,230 @@ patches:
   - path: patch-env.yaml
   - path: patch-image.yaml
   - path: patch-nodepool.yaml
-  # SC-705 phase 1.5: CREDENTIAL_STORE_ENABLED=false in this PR (the patch
-  # keeps it OFF until PR2 re-pins the image; ON is prod-only, stg stays OFF).
+  # SC-705 / SC-1214: per-user credential store. WhatsApp keeps the flag OFF
+  # (house connectors set no CREDENTIAL_SESSION_KEY); the ON flip is
+  # Instagram-only and lives in the second document of
+  # patch-credential-store.yaml; rollback = revert of that document.
+  # ON is prod-only, stg stays OFF.
   - path: patch-credential-store.yaml
+  # SC-1197 encendido: SOCIAL_PAIRING_API=on + replicas 1 + CREDENTIAL_STORE_ENABLED
+  # en social-api y los dos pools. Rollback = revert de este fichero y su linea.
+  - path: patch-social-pairing-on.yaml
+  # DGX-1235: correo-bridge a 1 réplica, con entrada y salida (ENABLE_OUTBOUND "true").
+  - path: patch-correo-bridge-on.yaml
+  # SC-4836: leen CONNECTOR_SHARED_SECRET por env; Reloader los reinicia cuando su Secret cambia
+  # (31-10 una rotación no llegó a los pods hasta un rollout restart manual).
+  - target:
+      kind: Deployment
+      name: ^(telegram-sync|telegram-sync-professional|whatsapp-pairing)$
+    patch: |-
+      - op: add
+        path: /metadata/annotations/reloader.stakater.com~1auto
+        value: "true"
 images:
   # The original Socialmedia v2 cutover remains pinned for unchanged services.
-  # mcp-server moves to v1.3.51 (run 35616735956, deploy/prod@6f0239c): the
-  # identity-binding gate for /social (SC-1144 fase 2, PRs 53+54) plus the
-  # encrypted credential store code from PR 52 — both behind flags that stay
-  # OFF in this overlay (CREDENTIAL_STORE_ENABLED=false, SOCIAL_IDENTITY_BINDING=off).
-  # telegram-connector alone stays on socialmedia-v4-1c572645: real reaction totals.
-  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector
-    newTag: socialmedia-v2-c88dce16
-    digest: sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
-  - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector
-    newTag: socialmedia-v4-1c572645
-    digest: sha256:a54d0cd4109b96fe0d1c2c434613be943c6dba50c88ed5db12608c82b77fd2f9
+  # SC-1197 encendido: mcp-server advances v1.3.55 -> v1.3.57 (run
+  # 36135670213, deploy/prod@115c066 — the tip that carries #70..#85: the P1a
+  # baileys pairing pool, the P1b/P2/P4b social-api routes and the SC-1243
+  # status fix). This block rewrites EVERY consumer of the image name, so the
+  # advance also moves the house mcp-server, mcp-sse, the brain CronJobs
+  # (brain-windows since INFRA-364) and the PreSync migrate Job — the repo's
+  # established pin pattern (PRs
+  # 73/76/78 did exactly this). All of them set DATABASE_URL, which the code
+  # requires since SC-1239 C2 (#84), and migrate.ts's `_migrations` ledger
+  # skips what 007/008 already applied.
+  #
+  # whatsapp-connector and telegram-connector are NO LONGER pinned here (were
+  # socialmedia-v2-c88dce16 / socialmedia-v4-1c572645): the encendido needs
+  # the two pairing pools on v1.3.57 while the HOUSE connectors keep their
+  # current digests, and this block cannot tell them apart — it rewrites by
+  # image name, house pods included. The per-deployment pins (house:
+  # byte-identical digests to today, pools: v1.3.57) live in
+  # patch-image.yaml, now the authority for those two names.
   # telegram-sync is SESSION-LESS (ingests via the connector NATS+HTTP API,
   # holds no Telethon session) and has no legacy DGX webhook path.
+  # SKIRM-101 08-10: v1.3.82 -> v1.3.105 (run 37739696589, deploy/prod@129b8ea: #229 —
+  # recuperacion de medios de Telegram con tope de 8 intentos por mensaje; sin migraciones
+  # SQL). Digest checked against Harbor (crane). Moves telegram-sync and
+  # telegram-sync-professional (same image name); the connector side is in patch-image.yaml.
+  # SKIRM-111 10-10: v1.3.105 -> v1.3.110 (run 38021085868, deploy/prod@8c9ee62): #251,
+  # telegram-sync firma POST /api/public/send (y la lectura) con la firma HMAC del conector. El
+  # conector de Telegram (v1.3.105) aun no exige la firma: un consumidor que firma no rompe nada.
+  # Digest comprobado en Harbor (crane).
+  # SC-4836 07-11: v1.3.110 -> v1.3.142 (run 42328277914, deploy/prod@c8ad657): #468, un 401/403
+  # del conector (firma rechazada) ya no gasta intentos de medios. Arrastra los cambios de
+  # telegram-sync de #74 (21-10) que no estaban desplegados (decisión de Dani). Digest de Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: socialmedia-v2-c88dce16
-    digest: sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
+    newTag: v1.3.142
+    digest: sha256:ef67824334fcee2256a49a8184e851ff9cab7b2f1a602f202887e3e775f8f9c1
+  # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
+  # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
+  # resolution (resolveCredential) + the oauth callback route, still dark:
+  # CREDENTIAL_STORE_ENABLED stays false until the pre-check (C6) PR.
+  # SC-1256: v1.3.55 -> v1.3.74 (run 36725155383, deploy/prod@7f0dd82 — merge #123):
+  # /health por sub del conector IG (puerta por actor de social_list_accounts) y,
+  # de paso, SC-1258 #96 (tolerar 0 cuentas de env con CREDENTIAL_STORE_ENABLED).
+  # SC-4613 04-11: v1.3.106 -> instagram-33e39d5 (release-instagram run 41927395010,
+  # deploy/prod@33e39d5): #436 quita el paging de la Graph API, que llevaba access_token
+  # en claro a los transcripts. Desde 897435e el conector trae ademas #249 (SKIRM-112:
+  # /api/v1 exige firma HMAC; los consumidores ya la firmaban) y #74. Digest de la
+  # evidencia del release (sigstore-keyless).
+  # SC-4718 05-11: instagram-6cbf62c (release-instagram run 42117236233, deploy/prod@6cbf62c):
+  # #452 espera contenedor FINISHED antes de media_publish (fallaba 9007 al publicar).
+  # INFRA-1196 06-11: instagram-6cbf62c -> instagram-20e28922 (release-instagram run 42150403796,
+  # deploy/prod@20e28922): #456 añade POST /api/v1/:account/media/:mediaId/caption (edita el
+  # caption de una publicacion IG por la Graph API). Digest de la evidencia del release (sigstore-keyless).
+  # INFRA-1196 06-11 (fix): instagram-20e28922 -> instagram-bc36371 (release-instagram run 42167699842,
+  # deploy/prod@bc36371): #459 — el POST /{ig-media-id} de la Graph exige comment_enabled (400 code 100 si
+  # falta); updateMediaCaption ya lo manda. Digest de la evidencia del release (sigstore-keyless).
+  # INFRA-1196 06-11 (fix transporte): instagram-bc36371 -> instagram-e3735ef (release-instagram run 42175755043,
+  # deploy/prod@e3735ef): #461 — el edit de caption es de la Business API (graph.facebook.com + EAA); con
+  # primaryApi=instagram-login la IG Login API lo devolvía success:true como no-op. updateMediaCaption usa fbRequest.
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: sha-985a199ea567
-    digest: sha256:38c141768e5fe10c731616c46fc82276fef9a3ddafabcae6c4ee98a68eb2e11a
+    newTag: instagram-e3735efd76b61ce67c13c34d24fc5757f86e46b9
+    digest: sha256:8a55e9d0059469666bfa601df6ed0d38bc4e954761513ec05e22f5882c3057f5
+  # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
+  # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
+  # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
+  # tool social_edit_message (#112); v1.3.67 (run 36623083265, deploy/prod@e015709) añade
+  # la migración 011 (reacciones, #115) y editar en Telegram en el MCP (#114);
+  # v1.3.68 (run 36642557180, deploy/prod@625b95d) añade la migración 012 (fijar/silenciar, #118).
+  # v1.3.70 (run 36682303779, deploy/prod@57c825c) añade la migración 013 (votos de
+  # encuestas y respuestas a eventos, #125) e imágenes sin pnpm (INFRA-285, #122).
+  # v1.3.73 (run 36705379093, deploy/prod@fadad16) añade la migración 014 (temporizador de
+  # mensajes temporales, #128). v1.3.71/v1.3.72 quemados por runs fallidos.
+  # v1.3.74 (run 36725155383, deploy/prod@7f0dd82) añade SC-1256 (#123): social_list_accounts
+  # por actor, omite Instagram sin credencial (no_credential). Sin migraciones nuevas.
+  # v1.3.76 (run 36751988471, deploy/prod@2df6408) añade las 15 tools MCP de la fase 3 (#138)
+  # y el Baileys parcheado (#139). Sin migraciones nuevas.
+  # v1.3.78 (run 36792706654, deploy/prod@74ab0cb): migraciones 015 (backfills de reacciones
+  # e is_deleted) y 017 (aviso de ediciones/borrados), tools social_block_contact /
+  # social_list_blocked (#153) y los jobs de voz (INFRA-364, #154).
+  # v1.3.79 (run 36796583315, deploy/prod@06ea1ea): migracion 016 (brain_windows y
+  # messages.updated_at), jobs brain-windows (#157, CronJob suspendido) y el eco ASR de
+  # Telegram desenvuelto (#159). Mismo bump para telegram-sync (#159).
+  # v1.3.80 (run 36846209634, deploy/prod@19d2716): arregla el INSERT del ledger
+  # brain_windows y el corte de sesiones enormes del backfill de ventanas (#164).
+  # v1.3.82 (deploy/prod@ea5b8c4): textos bien formados (sin sustitutos UTF-16 sueltos)
+  # antes del brain y del LLM (#168); incluye lo de v1.3.81 (#166).
+  # v1.3.83 (run 36906114195, deploy/prod@84c9b76) añade la tool social_invite_to_group (#171);
+  # mismo código que v1.3.82 en lo demás.
+  # v1.3.85 (run 36920007935, deploy/prod@69d1fe8): #173 (privacidad, temporizador, escribiendo,
+  # stickers/GIFs, borrar para mí) y #175 (destacados/fijados, migración 018). 62 tools.
+  # v1.3.87 (run 36940363123, deploy/prod@b1fdd25): #178 (búsqueda en Instagram + mediaType), #177
+  # (comunidades y canales), #182 (estados y publicaciones de canales, migración 019; publicar
+  # estado tras WA_STATUS_PUBLISH_ENABLED) y #180 (perfil propio, una sola vez/HD). 73 tools.
+  # v1.3.88 (run 36948590108, deploy/prod@7c8d9a6): sobre v1.3.87 solo cambia #184 (INFRA-364):
+  # la fase LLM de brain-windows corre de verdad en paralelo (BRAIN_WINDOWS_LLM_CONCURRENCY) y
+  # normaliza las respuestas casi válidas del LLM. 73 tools, como v1.3.87.
+  # v1.3.90 (run 36950205073, deploy/prod@4662be0): sobre v1.3.88 anade #187 (resumenes,
+  # borradores y digest con enable_thinking:false: social_summarize devolvia "Failed to generate
+  # summary"). Incluye #184 de v1.3.88. Solo mcp-server.
+  # v1.3.91 (run 36959150256, deploy/prod@f43b1c6): #190 corrige #187: el razonamiento se apaga
+  # con reasoning_effort "none" (el enable_thinking suelto no lo honra LiteLLM). Solo mcp-server.
+  # v1.3.92 (run 36962281564, deploy/prod@4a2065e): sobre v1.3.91 solo cambia #191 — el
+  # incremental de brain-windows solo borra ventanas del rango que reconstruye y nunca más de
+  # 50 por chat y pasada (incidente INFRA-364 del 02-10: ~26k ventanas borradas).
+  # v1.3.94 (run 37039896599, deploy/prod@4fc6081): #195, arreglos de la auditoria QA 02-10 —
+  # migracion 020 (quita los enlaces de la propia cuenta en chats 1:1, con lapida en
+  # conversation_participants_removed; el chat 0@ se llama "WhatsApp"), indice GIN
+  # idx_messages_content_fts creado CONCURRENTLY por mcp-sse al arrancar,
+  # social_get_conversation con respaldo del indice y el name del adjunto como fileName.
+  # Incluye #196 (brain-windows). 73 tools, contrato sin cambios.
+  # v1.3.95 (run 37052617556, deploy/prod@6696025): sobre v1.3.94 solo cambia #198 — el cron
+  # brain-windows importa en vmsingle brain_windows_refused_deletes{account} y el fin de pasada
+  # (alertas BrainWindowsMassDeleteRefused y BrainWindowsPassStale, k8s-observability#69).
+  # v1.3.102 (run 37632009415, deploy/prod@f9d181f): sobre v1.3.98 trae #206 (INFRA-635, busqueda
+  # semantica desde el brain con aislamiento por cuenta; una instancia caida sale en
+  # meta.partialErrors y no tumba las demas; sin BRAIN_MESSAGING_SEARCH_KEY, INFRA-637, cae a
+  # texto con fallbackReason), #219 (SDK MCP 1.31.0 y sharp 0.35.5) y #209 (descripcion de la
+  # tool de audio). 73 tools, contrato sin cambios.
+  # v1.3.104 (run 37711962973, deploy/prod@5ed41bc): sobre v1.3.102 trae #230 (SKIRM-107):
+  # accountKey lanza "Cross-account identifier" si el id ya viene namespaced a otra cuenta
+  # (tambien bajo personal), e inEveryNamespace/brainScopes buscan un id namespaced solo en la
+  # cuenta que lleva. INFRA-637 (#226) no toca la imagen. Sin migraciones nuevas. 73 tools,
+  # contrato sin cambios.
+  # SKIRM-118 08-10: v1.3.104 -> v1.3.107 (run 37775775514, deploy/prod@8cf1f6c): #239,
+  # social_send_message manda los audio/ogg de Telegram como nota de voz (voiceNote). Trae
+  # tambien #234 (SKIRM-103: requireConnectorSecret en el arranque, providerGet firmado; sin
+  # CONNECTOR_SECRET_STRICT no cambia el comportamiento con la clave actual). Sin migraciones
+  # nuevas. Mueve mcp-server, mcp-sse, social-api, brain-windows y el Job de migracion.
+  # SKIRM-106 10-10: v1.3.107 -> v1.3.109 (run 38008072969, deploy/prod@3cdf251): migracion 021
+  # (canales de WhatsApp que sigue la cuenta; aditiva e idempotente, la aplica el Job PreSync) y
+  # SKIRM-130 (#248, handlebars actualizado por los CVE de la puerta Trivy). v1.3.108 quemado
+  # por esa puerta. Digest comprobado en Harbor (crane). Los conectores de WhatsApp no se
+  # pinan aqui: siguen con los digests de patch-image.yaml.
+  # SKIRM-112 10-10: v1.3.109 -> v1.3.110 (run 38021085868, deploy/prod@8c9ee62): #249, mcp-server
+  # (instagramCall) y el job de backfill de Instagram firman las llamadas a /api/v1 del conector.
+  # El conector de Instagram (v1.3.106) aun no exige la firma: un consumidor que firma no rompe
+  # nada. Digest comprobado en Harbor (crane). Mueve mcp-server, mcp-sse, social-api, los
+  # CronJobs de brain-windows y voz, y el Job de migracion.
+  # INFRA-926 17-10: v1.3.110 -> v1.3.111 (run 39055381833, deploy/prod@c4a0e32): tool MCP de lectura
+  # social_get_reactions (recuento de reacciones de Telegram). Digest comprobado en Harbor (crane).
+  # SKIRM-257 / DGX-1235 23-10: v1.3.115 -> v1.3.130 (run 39927963792, deploy/prod@SKIRM-257). Trae el runner de
+  # migraciones de #74 y las 022-040: la 037 nueva (SKIRM-257) añade messages.deleted_at, que la 038 necesita contra el
+  # esquema de prod, y la 040 es telegram_send_attempts (idempotencia de envio de B2). Sandbox sobre el esquema y el ledger
+  # reales: 021-040 sin errores. Digest comprobado en Harbor (crane). Mueve mcp-server, mcp-sse, social-api, CronJobs y el Job.
+  # SKIRM-261 23-10: v1.3.130 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): la 041 realinea el participante mal
+  # archivado antes de la 039 (duplicate key en prod). Sandbox con DATOS reales: 021-040 sin errores. Digest con crane.
+  # SC-3681 30-10: v1.3.131 -> v1.3.133 (run 40988750820, deploy/prod@a1b2544): social_manage_group
+  # action=setPhoto (#406) y override decode-uri-component 0.5.1 (CVE-2026-118664, #407). Digest con la API de Harbor.
+  # INFRA-745: avance EXIGIBLE en el PR de release de P1 al build que lleve la migracion 042
+  # (savage_verdicts/savage_actions). Es este bloque —no patch-image.yaml— el que mueve el Job PreSync
+  # whatsapp-mcp-migrate; sin el avance el CronJob sauvage-verificacion-diaria muere con «relation
+  # savage_verdicts does not exist» y C6 no puede pasar (nota del architect, punto 1 de no bloqueantes).
+  # INFRA-125 04-11: v1.3.133 -> v1.3.135 (release.yml run 41458469268, deploy/prod@8f276da, GREEN):
+  # trae la migracion 042 (savage_verdicts/savage_actions), la exigida arriba. Mueve mcp-server, mcp-sse,
+  # social-api, los CronJobs de brain-windows y voz, y el Job PreSync whatsapp-mcp-migrate (que aplica la
+  # 042 con su ledger _migrations antes del CronJob). Digest comprobado en Harbor (docker manifest
+  # inspect + crane).
+  # SC-4304 S8: v1.3.138 -> v1.3.139 (run 42047355404, deploy/prod@d770720, GREEN): trae el lector de Hindsight
+  # (#442, inerte con SEMANTIC_PROVIDER=brain) y el script de backfill (#443). Mueve mcp-server, mcp-sse, los
+  # CronJobs brain-* (misma imagen) y el Job de backfill, como todo pin de esta imagen.
+  # INFRA-1196 06-11: v1.3.139 -> v1.3.141 (run 42158985544, deploy/prod@7870a48): #456 añade la tool
+  # social_update_content (edita el caption de una publicacion IG por media id via Graph API). Mueve
+  # mcp-server, mcp-sse y los CronJobs brain-* (misma imagen). Digest de la evidencia del release.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.55
-    digest: sha256:a544d2639e06800252955dcfe96dc9eccf0f257a1cf8f3703997253077c6c23b
+    newTag: v1.3.141
+    digest: sha256:bdcb5e6c8dc5fedb3eb7874defc74db7512aa3fac6e8e8c865c5d83b07f04b31
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
+  # SC-2760: app de WhatsApp del fork de Jordi. El base la deja en :latest (no
+  # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija. v1.3.126
+  # (run 39508533271) lleva el enrutado de media por bucket (skirmshop-drive vs legacy).
+  # DGX-1235: correo-bridge por tag@digest antes de escalarlo (condición de security). ENABLE_OUTBOUND
+  # sigue "false". DGX-1533: v1.3.129 -> v1.3.146 (Release Production run 42753526304, deploy/prod@32d469d):
+  # despierta a la secretaria de Hermes (whatsapp-skirmshop) por cada WhatsApp 1:1 entrante; el egreso
+  # netpol a hermes:8644 va en el mismo manifiesto.
+  - name: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge
+    newTag: v1.3.146
+    digest: sha256:61e25d1a83440bf1af1dfe7a7b1e3b0edb3ad92068070fe302f84fe358b124d2
+  # SC-2760 24-10: v1.3.126 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): el join del listado (#384),
+  # los ETag/304 (#371), los ticks (#354), el rail (#375), el <select> del audio (#376), el service worker
+  # cache-first (#385) y la lista de chats virtualizada (#387).
+  # SC-2760 27-10: v1.3.131 -> v1.3.132 (run 40439506470, deploy/prod@ec9e645): todo lo fusionado despues de
+  # 4a97da6 — gzip (#386), archivo instantaneo (#389), export por servidor (#391), seleccion rapida (#392),
+  # busqueda de chats (#394), exportacion con aviso de tope (#377), el contador «↓» con fecha sticky (#379),
+  # el refresco dirigido por SSE (#398) y que «↓» no cuente el mensaje propio (#399). La release pudo salir
+  # porque #400 y #401 pasaron la puerta Trivy (body-parser 1.20.9/2.4.0, multer 2.5.0, zod 4.6.7), que la
+  # tenia bloqueada desde el 26-10 (#133). Solo se avanza esta imagen: mcp-server y los conectores siguen
+  # con sus digests de v1.3.131, que no cambian de bytes.
+  # Digest comprobado en Harbor (docker manifest inspect) y contra la evidencia firmada del run.
+  - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
+    newTag: v1.3.132
+    digest: sha256:4278e4cefe65f37e1e709a2f2bd993fc8c04b9d2ccaaf13649f54c0346cd19bc
+  # INFRA-745 (INFRA-125 A): bot diario de verificacion facial del grupo Sauvage (CronJob
+  # sauvage-verificacion-diaria). El base lo deja en :latest (no existe en Harbor); este bloque es
+  # el sitio de su pin — patch-image.yaml solo parchea kind: Deployment y no haria match con el
+  # CronJob (nota del architect, punto 2). Nacio con tag y SIN digest (la imagen no existia hasta el
+  # despacho); release.yml run 41458469268 (deploy/prod@8f276da, GREEN) publico v1.3.135 y este PR de
+  # pines le fija el digest junto al avance de whatsappmcp-mcp-server (norma de la casa: tag@digest,
+  # nunca tag suelto). Digest comprobado en Harbor (docker manifest inspect + crane). Runbook:
+  # docs/sauvage-verificacion.md.
+  # INFRA-125 (INFRA-746 B): v1.3.135 -> v1.3.137 (run 41810030536, deploy/prod@dd75cfc, GREEN).
+  # El bot Sauvage ejecuta la cadena dm->ban->readmision de la parte B; sale con
+  # SAUVAGE_MODERATION=off (la activacion es del operador). Digest comprobado en Harbor (crane).
+  - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
+    newTag: v1.3.137
+    digest: sha256:431e15f132cbddb1128923c8c13c482bfc204ffea6a9e153461422c6e051feb6

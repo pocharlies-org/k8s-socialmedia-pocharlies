@@ -9,6 +9,7 @@
  */
 import { Pool } from 'pg';
 import pino from 'pino';
+import { generateHMACSignature, requireConnectorSecret } from '@mcp-socialmedia/shared';
 import {
   InstagramEvent,
   InstagramIngestionService,
@@ -17,6 +18,10 @@ import {
 const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
+
+// SKIRM-112: /api/v1 of the connector needs its signature. Resolved at load: a missing key stops the
+// run here instead of becoming a failed probe or an empty backfill (the fetches below swallow errors).
+const CONNECTOR_SECRET = requireConnectorSecret();
 
 type BackfillConfig = {
   connectorUrl: string;
@@ -77,14 +82,22 @@ function intEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+/** SC-1239 C2: no hardcoded fallback — name the missing variable, don't dial a default. */
+function requireDatabaseUrl(): string {
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL is unset: refusing to run the instagram backfill without an explicit database connection'
+    );
+  }
+  return process.env.DATABASE_URL;
+}
+
 function configFromEnv(): BackfillConfig {
   return {
     connectorUrl: (
       process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003'
     ).replace(/\/+$/, ''),
-    databaseUrl:
-      process.env.DATABASE_URL ||
-      'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp',
+    databaseUrl: requireDatabaseUrl(),
     account: process.env.INSTAGRAM_BACKFILL_ACCOUNT || 'barbelpapis',
     dryRun: boolEnv('INSTAGRAM_BACKFILL_DRY_RUN', true),
     validateOnly: boolEnv('INSTAGRAM_BACKFILL_VALIDATE_ONLY', false),
@@ -101,7 +114,14 @@ function configFromEnv(): BackfillConfig {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  // A GET has no body, so it signs "{}".
+  const timestamp = Math.floor(Date.now() / 1000);
+  const response = await fetch(url, {
+    headers: {
+      'X-Connector-Signature': generateHMACSignature({}, timestamp, CONNECTOR_SECRET),
+      'X-Connector-Timestamp': String(timestamp),
+    },
+  });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${url}: ${text.slice(0, 400)}`);

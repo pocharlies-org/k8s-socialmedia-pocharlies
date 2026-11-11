@@ -5,10 +5,12 @@
  *
  * social-api is the single public face of the pairing epic (design Topología):
  * the only process that verifies the Keycloak JWT and the only caller of the
- * per-sub pools. It opens no DB connection and writes no credential row
- * itself — the whatsapp-pairing pool does, keyed by the sessionKey = sub
- * derived from the verified token. Env names are the contract with the P3
- * manifests; see env.ts for the full list and the defaults.
+ * per-sub pools. It writes no credential row itself — the whatsapp-pairing
+ * pool does, keyed by the sessionKey = sub derived from the verified token.
+ * Since SC-1228 it holds ONE read-only DB connection, used solely by
+ * /social/status for the caller's own Instagram row (design D3); a DB failure
+ * there is an `unavailable` state, never a crash. Env names are the contract
+ * with the P3 manifests; see env.ts for the full list and the defaults.
  */
 import { createSocialApiApp } from './app';
 import { contextFromEnv } from './env';

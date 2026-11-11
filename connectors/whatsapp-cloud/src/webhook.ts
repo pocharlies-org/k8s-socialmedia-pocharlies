@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { createHmac, timingSafeEqual } from 'crypto';
 import pino from 'pino';
-import { EventType, MessageReceivedEvent } from '@mcp-socialmedia/shared';
+import { EventType, MessageReceivedEvent, verifyMetaSignature } from '@mcp-socialmedia/shared';
 import { normalizeWhatsAppPhone } from './phone';
 
 const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
@@ -35,7 +34,12 @@ export function createWebhookRouter(
   });
 
   router.post('/webhook', (req: RawBodyRequest, res: Response) => {
-    if (appSecret && !verifyMetaSignature(req, appSecret)) {
+    if (
+      appSecret &&
+      !(
+        req.rawBody && verifyMetaSignature(req.rawBody, req.get('x-hub-signature-256'), [appSecret])
+      )
+    ) {
       logger.warn('WhatsApp Cloud webhook signature verification failed');
       res.sendStatus(403);
       return;
@@ -84,17 +88,6 @@ export function createWebhookRouter(
   });
 
   return router;
-}
-
-function verifyMetaSignature(req: RawBodyRequest, appSecret: string): boolean {
-  const signature = req.headers['x-hub-signature-256'];
-  if (typeof signature !== 'string' || !req.rawBody) return false;
-
-  const expected = createHmac('sha256', appSecret).update(req.rawBody).digest('hex');
-  const provided = signature.replace(/^sha256=/, '');
-  if (provided.length !== expected.length) return false;
-
-  return timingSafeEqual(Buffer.from(provided, 'utf8'), Buffer.from(expected, 'utf8'));
 }
 
 function toMessageReceivedEvent(message: any): MessageReceivedEvent | null {

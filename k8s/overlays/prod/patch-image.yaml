@@ -1,3 +1,80 @@
+# SC-1197 encendido: since the `images:` block no longer carries
+# whatsapp-connector / telegram-connector (it rewrites by image name and would
+# have moved the HOUSE connectors together with the pairing pools), this file
+# is the authority for those two names. The house digests below are
+# byte-identical to what runs today (measured 25-09 in the live objects): the
+# flip changes zero bytes for the house connectors. Every Deployment that uses
+# either image name must appear here — an unpatched one would fall back to the
+# base tag (`:latest` / the generator's pin).
+#
+# INFRA-293 (P6 INFRA-112) 29-09: the three house whatsapp-connector* and the
+# two house telegram-connector* advance socialmedia-v2-c88dce16 /
+# socialmedia-v4-1c572645 -> v1.3.61 (run 36518430515, deploy/prod@a6a1547 —
+# tip #101: backfill acotado al reconectar + reten/reenganche NATS). Both
+# previous SHAs are ancestors of a6a1547 (git merge-base --is-ancestor), so the
+# flip only adds code. Envs WA_RECONNECT_BACKFILL_* ride in via
+# social-accounts.json (registry, PR #101).
+#
+# SC-1394 02-10: the three house whatsapp-connector* advance v1.3.87 -> v1.3.91
+# (Release Production run 36959150256, deploy/prod@f43b1c6, which carries the
+# merge 95ae878: whatsapp-pairing no revive un cliente cerrado por el pool —
+# the reconnect loop after ~40 sockets/h without start). Digest resolved from
+# Harbor (skopeo). whatsapp-pairing moves too — see its section below.
+#
+# QA 02-10: the three house whatsapp-connector* advance v1.3.91 -> v1.3.94
+# (Release Production run 37039896599, deploy/prod@4fc6081, merge of #195):
+# media we send is stored (upsert `append`), document fileName, reply quotes in
+# metadata, no self-link in 1:1 chats, privacy-hidden avatar = 404. Digest
+# resolved from Harbor (skopeo). whatsapp-pairing stays on v1.3.91.
+#
+# SKIRM-92 07-10: the three house whatsapp-connector* advance v1.3.99 -> v1.3.103
+# (run 37680671534, deploy/prod@db096e9: #224 — el guard 1:1 cuenta el historial
+# OUTBOUND). Digest checked against Harbor (crane). whatsapp-pairing stays on v1.3.91.
+#
+# SKIRM-101 08-10: the two house telegram-connector* advance v1.3.78 -> v1.3.105
+# (run 37739696589, deploy/prod@129b8ea: #229 — recuperacion de medios de Telegram con
+# tope de 8 intentos; el conector sirve GET /messages/single y un plazo de descarga).
+# Digest checked against Harbor (crane). telegram-pairing stays on v1.3.57;
+# whatsapp-connector* stay on v1.3.103.
+#
+# SKIRM-103 10-10: the three house whatsapp-connector* advance v1.3.103 -> v1.3.109 (run
+# 38008072969, deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/*
+# doors), one PR each: leila (#252), professional (#253) and this one, whatsapp-connector
+# (personal), the last. No CONNECTOR_SECRET_STRICT here: the strict switch is a separate PR.
+# SC-2760 20-10: los tres house whatsapp-connector* avanzan v1.3.109 -> v1.3.120 (run 39432368481):
+# alias de rutas parametrizadas de la app whatsapp.e-dani.com (PR #282): fin del 501 en
+# silenciar/archivar/fijar/leído, borrar para mí, desaparecientes y asunto de grupo.
+# Digest checked against Harbor (docker manifest). whatsapp-pairing intacto.
+#
+# SC-3681 30-10: los tres house whatsapp-connector* avanzan v1.3.120 -> v1.3.133 (run 40988750820,
+# deploy/prod@a1b2544): POST /groups/photo (foto de grupo, #406) y override decode-uri-component 0.5.1
+# (CVE-2026-118664, #407). Digest comprobado en Harbor (API artifacts).
+#
+# INFRA-1008 30-10: los dos house telegram-connector* avanzan v1.3.130 -> v1.3.133 (mismo run
+# 40988750820, deploy/prod@a1b2544, que ya trae la fusión 3afe07d del PR #405): getMessages pagina
+# con iterHistory (before/after sobre /api/public/messages/:chatId, sin tope de 100 por llamada).
+# Digest comprobado en Harbor (crane). telegram-pairing sigue en v1.3.57.
+#
+# SC-3681 30-10: los tres whatsapp-connector* avanzan v1.3.133 -> v1.3.134 (run 40997803810,
+# deploy/prod@7f3fc60): el arranque del 133 murió con 42703 (el índice de chat fijaba
+# message_timestamp_ms y la tabla de prod, forma fresca de la 015, solo tiene wa_timestamp) —
+# CrashLoop de los tres hasta aquí. Fix #409. Digest comprobado en Harbor (API artifacts).
+#
+# SC-3681 30-10: RETROCESO de los tres a v1.3.120 (deploy/prod@917626b). El tronco del 133/134 trae el
+# fail-closed de SC-2092 (createConnectorAccess rechaza CONNECTOR_SHARED_SECRET == placeholder), y el
+# item de 1Password `whatsapp-mcp` sigue con el placeholder del repo: con el 134 toda la API del
+# conector responde 401 (también los envíos del mcp-server). Con el 120, que no tiene ese gate, el
+# HMAC con placeholder funciona como siempre. Avanzar de nuevo exige clave real en 1Password primero.
+#
+# DGX-1495 07-11 a 08-11: whatsapp-connector (personal) avanza v1.3.120 -> v1.3.145 (deploy/prod@e1eca05,
+# PRs #470/#472/#474): el conector pide al dispositivo primario las app-state keys que faltan (los
+# desfijados/archivados del móvil perdidos por colecciones bloqueadas). El ask se reenvía con relayMessage
+# + category=peer (en rc13 sendMessage rechaza el contenido crudo, y el relay sin category cuelga
+# enumerando el PN propio; es el shape que Baileys usa para sus propios mensajes de protocolo a meJid).
+# Intermedios sha-8c5c786c74ef y v1.3.144: el envío seguía roto (y dos runs murieron firmando en Rekor 409).
+# Digest comprobado en Harbor (API artifacts). El gate SC-2092 no bloquea: el Secret whatsapp-mcp-secrets
+# lleva la clave real (64 chars, no el placeholder). Los otros dos whatsapp-connector* intactos (uno por
+# PR, costumbre de la casa).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,8 +85,13 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:socialmedia-v2-c88dce16@sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.145@sha256:ed1de167f7b532b5dcdb298d5fd5a4656f239f323e90353a76742eec1ec2902d
 ---
+# SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
+# deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
+# Moves only this Deployment, one connector per PR (leila, professional, personal), and
+# carries no CONNECTOR_SECRET_STRICT: the strict switch is a separate PR. Digest checked
+# against Harbor (crane). whatsapp-pairing stays on v1.3.91.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,9 +102,14 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:socialmedia-v2-c88dce16@sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:skirm-376-d515faa@sha256:1a9634a83bc98e87e23cbe3eb7f7091125617e05766d2fa1e431415a1f58c810
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
+# SKIRM-103 10-10: whatsapp-connector-leila advances v1.3.103 -> v1.3.109 (run 38008072969,
+# deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
+# Moves only this Deployment, one connector per PR (leila, professional, personal), and
+# carries no CONNECTOR_SECRET_STRICT: the strict switch is a separate PR. Digest checked
+# against Harbor (crane). whatsapp-pairing stays on v1.3.91.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,8 +120,15 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-leila
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:socialmedia-v2-c88dce16@sha256:ad54cc1eb7e0e11b768c89d1e4d04050cb29f816dfd689e32578281f2ee95c6a
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
 ---
+# SC-4613 04-11: instagram-connector advances v1.3.106 -> instagram-33e39d5
+# (release-instagram run 41927395010, deploy/prod@33e39d5: #436 strips the Graph
+# API paging, which carried access_token in plaintext into transcripts). Since
+# 897435e the connector also carries #249 (SKIRM-112 HMAC on /api/v1; consumers
+# already sign) and #74. Digest from the release evidence (sigstore-keyless).
+# Same value as the `images:` block in kustomization.yaml, which is the
+# effective one (it runs after the patches).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,7 +139,7 @@ spec:
     spec:
       containers:
         - name: instagram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:sha-985a199ea567@sha256:38c141768e5fe10c731616c46fc82276fef9a3ddafabcae6c4ee98a68eb2e11a
+          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:instagram-6cbf62c4fe4ffa66210361627ead1d112d3f24fd@sha256:af2930abbe49770a105d57398d832ae10ca574cd40529341c33f5a5163abfb6c
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -56,8 +150,66 @@ spec:
   template:
     spec:
       containers:
+        # v4-1c572645 was the EFFECTIVE pin via the `images:` block all along
+        # (patches run before the block, so the v3 line that stood here was
+        # dead code); spelled out here now that the block dropped the name.
+        # INFRA-125 (INFRA-746 B) 04-11: v1.3.133 -> v1.3.137 (run 41810030536,
+        # deploy/prod@dd75cfc, GREEN). El conector Telegram es quien recibe las
+        # rutas de moderacion (dm/ban/unban/add) que invoca el bot Sauvage. Se
+        # pinea AQUI y no en el bloque `images:` porque ese bloque reescribe por
+        # nombre de imagen y se llevaria por delante al pool inerte
+        # telegram-pairing, que sigue a proposito en v1.3.57. Digest en Harbor (crane).
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:socialmedia-v3-f0f219bd@sha256:60470b59445d1d93be8c8017fd72112085888ec2459218c950e7a2fc80af4c06
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
+---
+# telegram-connector-professional was pinned ONLY by the `images:` block
+# (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
+# as today.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-connector-professional
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: telegram-connector
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
+---
+# SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
+# deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
+# connectors/whatsapp-web/src/pairing/main.ts and
+# connectors/telegram/src/pairing/main.ts, plus the social-api routes).
+# SC-1394 02-10: whatsapp-pairing deliberately leaves that v1.3.57 hold — the
+# bug (infinite reconnect loop after ~40 sockets/h without start) lives in the
+# pairing pool: pairing/main.ts imports BaileysClient from ../baileys-client,
+# so the fix (merge 95ae878) ships in this same image and only reaches the
+# pod once the pin moves. Release Production run 36959150256 built v1.3.91
+# from deploy/prod@f43b1c6 (carries 95ae878). telegram-pairing stays on v1.3.57.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-pairing
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: whatsapp-pairing
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.91@sha256:b6fe5bd409028b409d479d1dd25cf964d2c4a850ce16398980b64e9904175e29
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-pairing
+  namespace: whatsapp-mcp
+spec:
+  template:
+    spec:
+      containers:
+        - name: telegram-pairing
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.57@sha256:8594502b214dd8c2e44ab602c88c15e952402831a96e01b3eacc2292ccef6ae8
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -81,7 +233,7 @@ spec:
     spec:
       containers:
         - name: telegram-sync
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:socialmedia-v2-c88dce16@sha256:ff202003ff611ab57339d7233f1a41069a7c4ef805cdf1fda895240e11e0fa74
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.78@sha256:01235fc3d4f58535f7f1fb8f8e51893351dbe9c1e49d71c348018302f238dffa
 ---
 apiVersion: apps/v1
 kind: Deployment

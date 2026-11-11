@@ -1,0 +1,589 @@
+{
+ "descripcion": "DGX-1235 B1 C1: lo que entra por NATS y lo que hace el puente, en orden (el dedup es compartido entre entradas). jid propio de WhatsApp: 34999000111@c.us. TRACKING_OPT_IN_BASE_URL del test: https://seguimiento.example.org. Valores inventados.",
+ "jidPropio": "34999000111@c.us",
+ "eventos": [
+  {
+   "nombre": "wa @c.us entrante",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60001",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "forward",
+   "cuerpo": {
+    "ref": "3EB0A1B2C3D4E5F60001",
+    "hilo_ref": "34600111222@c.us",
+    "direccion": "entrante",
+    "ts": "2026-10-23T09:00:00Z",
+    "identidad": {
+     "canal": "whatsapp",
+     "valor": "34600111222@c.us"
+    }
+   }
+  },
+  {
+   "nombre": "wa @s.whatsapp.net entrante",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111333@s.whatsapp.net",
+    "waMessageId": "3EB0A1B2C3D4E5F60002",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111333:4@s.whatsapp.net",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "forward",
+   "cuerpo": {
+    "ref": "3EB0A1B2C3D4E5F60002",
+    "hilo_ref": "34600111333@c.us",
+    "direccion": "entrante",
+    "ts": "2026-10-23T09:00:00Z",
+    "identidad": {
+     "canal": "whatsapp",
+     "valor": "34600111333@c.us"
+    }
+   }
+  },
+  {
+   "nombre": "wa @lid entrante",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "123456789012345@lid",
+    "waMessageId": "3EB0A1B2C3D4E5F60003",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "123456789012345@lid",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "forward",
+   "cuerpo": {
+    "ref": "3EB0A1B2C3D4E5F60003",
+    "hilo_ref": "123456789012345@lid",
+    "direccion": "entrante",
+    "ts": "2026-10-23T09:00:00Z",
+    "identidad": {
+     "canal": "whatsapp",
+     "valor": "123456789012345@lid"
+    }
+   }
+  },
+  {
+   "nombre": "wa fromMe saliente",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60004",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34999000111:2@s.whatsapp.net",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222",
+    "fromMe": true
+   },
+   "esperado": "forward",
+   "cuerpo": {
+    "ref": "3EB0A1B2C3D4E5F60004",
+    "hilo_ref": "34600111222@c.us",
+    "direccion": "saliente",
+    "ts": "2026-10-23T09:00:00Z",
+    "identidad": null
+   }
+  },
+  {
+   "nombre": "tg privado entrante",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "777000111",
+    "telegramMessageId": "4242",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "private"
+   },
+   "esperado": "forward",
+   "cuerpo": {
+    "ref": "tg:4242",
+    "hilo_ref": "tg:777000111",
+    "direccion": "entrante",
+    "ts": "2026-10-23T09:00:01Z",
+    "identidad": {
+     "canal": "telegram",
+     "valor": "777000111"
+    }
+   }
+  },
+  {
+   "nombre": "tg isOutbound saliente",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "777000111",
+    "telegramMessageId": "4243",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "555000999",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": true,
+    "chatType": "private"
+   },
+   "esperado": "forward",
+   "cuerpo": {
+    "ref": "tg:4243",
+    "hilo_ref": "tg:777000111",
+    "direccion": "saliente",
+    "ts": "2026-10-23T09:00:01Z",
+    "identidad": null
+   }
+  },
+  {
+   "nombre": "wa cuenta personal",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "personal",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60010",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "account-not-professional"
+  },
+  {
+   "nombre": "wa cuenta leila",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "leila",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60011",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "account-not-professional"
+  },
+  {
+   "nombre": "wa sin cuenta",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60012",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "account-not-professional"
+  },
+  {
+   "nombre": "wa grupo",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "120363000000000001@g.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60013",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "group-or-broadcast-or-newsletter"
+  },
+  {
+   "nombre": "wa lista de difusión",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "1700000000@broadcast",
+    "waMessageId": "3EB0A1B2C3D4E5F60014",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "group-or-broadcast-or-newsletter"
+  },
+  {
+   "nombre": "wa canal (newsletter)",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "120363000000000002@newsletter",
+    "waMessageId": "3EB0A1B2C3D4E5F60015",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "group-or-broadcast-or-newsletter"
+  },
+  {
+   "nombre": "wa estados",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "status@broadcast",
+    "waMessageId": "3EB0A1B2C3D4E5F60016",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "status-broadcast"
+  },
+  {
+   "nombre": "wa sufijo desconocido",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us.evil",
+    "waMessageId": "3EB0A1B2C3D4E5F60017",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us.evil",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "not-1to1-allowlisted"
+  },
+  {
+   "nombre": "wa sin waMessageId",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "missing-wa-message-id"
+  },
+  {
+   "nombre": "wa duplicado",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60001",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "duplicate"
+  },
+  {
+   "nombre": "wa jid propio desconocido",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60018",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "sinJidPropio": true,
+   "esperado": "own-jid-unknown"
+  },
+  {
+   "nombre": "wa control de opt-in de seguimiento",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60019",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola Skirmshop, quiero recibir seguimiento por WhatsApp del pedido ORD12345 https://seguimiento.example.org/p/ORD12345",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "tracking-opt-in-control-message"
+  },
+  {
+   "nombre": "wa identidad no canónica (+)",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "+34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60020",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "+34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "identidad-no-canonica"
+  },
+  {
+   "nombre": "wa ref fuera de patrón",
+   "subject": "whatsapp.MessageReceived",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3E",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "ref-no-valido"
+  },
+  {
+   "nombre": "tg cuenta personal",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "personal",
+    "conversationId": "777000111",
+    "telegramMessageId": "4250",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "private"
+   },
+   "esperado": "account-not-professional"
+  },
+  {
+   "nombre": "tg grupo",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "-4000000001",
+    "telegramMessageId": "4251",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "group"
+   },
+   "esperado": "chat-not-private"
+  },
+  {
+   "nombre": "tg supergrupo",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "-1001000000001",
+    "telegramMessageId": "4252",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "supergroup"
+   },
+   "esperado": "chat-not-private"
+  },
+  {
+   "nombre": "tg canal",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "-1001000000002",
+    "telegramMessageId": "4253",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "channel"
+   },
+   "esperado": "chat-not-private"
+  },
+  {
+   "nombre": "tg sin telegramMessageId",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "777000111",
+    "telegramMessageId": "",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "private"
+   },
+   "esperado": "missing-telegram-message-id"
+  },
+  {
+   "nombre": "tg duplicado",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "777000111",
+    "telegramMessageId": "4242",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "private"
+   },
+   "esperado": "duplicate"
+  },
+  {
+   "nombre": "tg identidad no canónica",
+   "subject": "telegram.MessageReceived",
+   "evento": {
+    "eventType": "TelegramMessageReceived",
+    "account": "professional",
+    "conversationId": "777000111",
+    "telegramMessageId": "4254",
+    "telegramTimestamp": "2026-10-23T09:00:01.000Z",
+    "senderTelegramId": "0777000111",
+    "senderUsername": "cliente_inventado",
+    "senderFirstName": "Cliente",
+    "content": "Hola por Telegram",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "isOutbound": false,
+    "chatType": "private"
+   },
+   "esperado": "identidad-no-canonica"
+  },
+  {
+   "nombre": "payload que no se decodifica",
+   "subject": "whatsapp.MessageReceived",
+   "crudo": "{no es json",
+   "esperado": "decode-error"
+  },
+  {
+   "nombre": "subject desconocido",
+   "subject": "whatsapp.MessageDeleted",
+   "evento": {
+    "eventType": "MessageReceived",
+    "account": "professional",
+    "conversationId": "34600111222@c.us",
+    "waMessageId": "3EB0A1B2C3D4E5F60021",
+    "waTimestamp": "2026-10-23T09:00:00.000Z",
+    "senderWaId": "34600111222@c.us",
+    "content": "Hola, ¿dónde está mi pedido?",
+    "messageType": "TEXT",
+    "isForwarded": false,
+    "pushName": "Cliente Inventado",
+    "senderPnE164": "+34600111222"
+   },
+   "esperado": "subject-desconocido"
+  }
+ ]
+}

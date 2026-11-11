@@ -1,8 +1,14 @@
 import express from 'express';
-import { PostgresCredentialStore, credentialSessionKeyFromEnv } from '@mcp-socialmedia/shared';
-import { TelegramClientWrapper, TelegramMessage } from './telegram-client';
-import { TelegramEventPublisher, TelegramMessageReceivedEvent } from './events/publisher';
+import { dashboardUrl } from './dashboard-notifier';
+import { PostgresCredentialStore, credentialSessionKeyFromEnv, requireConnectorSecret } from '@mcp-socialmedia/shared';
+import { TelegramClientWrapper, TelegramMessage, TelegramMessageEdit } from './telegram-client';
+import {
+  TelegramEventPublisher,
+  TelegramMessageReceivedEvent,
+  toMessageEditedEvent,
+} from './events/publisher';
 import { createRouter } from './api/controller';
+import { createPublicRouter } from './api/public-routes';
 import { getPool } from './db-pool';
 import {
   TelegramCredentialWriteBack,
@@ -17,10 +23,10 @@ const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const PORT = parseInt(process.env.PORT || '3002', 10);
 const CONNECTOR_ACCOUNT = process.env.CONNECTOR_ACCOUNT || 'personal';
-const CONNECTOR_SHARED_SECRET =
-  process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
 
 async function main() {
+  dashboardUrl();
+  const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
   // Validate required configuration
   if (!TELEGRAM_API_ID || !TELEGRAM_API_HASH) {
     console.error('TELEGRAM_API_ID and TELEGRAM_API_HASH are required');
@@ -100,13 +106,22 @@ async function main() {
     if (typeof sub === 'string' && sub) console.log(`API request carries x-user-sub=${sub}`);
     next();
   });
-  app.use('/api/v1', createRouter(client, CONNECTOR_SHARED_SECRET));
+  app.use(
+    '/api/v1',
+    createRouter(client, CONNECTOR_SHARED_SECRET, {
+      publishMessageEdited: edit =>
+        eventPublisher.publishMessageEdited(toMessageEditedEvent(CONNECTOR_ACCOUNT, edit)),
+    })
+  );
 
-  // Health check endpoint
-  app.get('/health', (req, res) => {
+  // Health check endpoint. INFRA-291 (P4): readiness reports the REAL NATS
+  // state (eventPublisher.isConnected()) — the publisher no longer kills the
+  // process when NATS is down, so /health must not pretend events flow.
+  app.get('/health', (_req, res) => {
     res.json({
       status: 'ok',
       connected: client.isClientConnected(),
+      natsConnected: eventPublisher.isConnected(),
       platform: 'telegram',
     });
   });
@@ -115,7 +130,9 @@ async function main() {
     console.log(`Telegram Connector API listening on port ${PORT}`);
   });
 
-  // Connect to NATS
+  // Connect to NATS. INFRA-291 (P4): connect() never throws — a NATS that is
+  // down at boot used to kill main.ts here (CrashLoop); now the publisher
+  // retries with backoff and /health's natsConnected reflects the real state.
   await eventPublisher.connect();
 
   // Handle connection
@@ -148,58 +165,14 @@ async function main() {
     await eventPublisher.publishMessageReceived(event);
   });
 
+  // Edits Telegram tells us about (a contact's, our phone's) → telegram-sync.
+  client.on('messageEdited', (edit: TelegramMessageEdit) => {
+    eventPublisher.publishMessageEdited(toMessageEditedEvent(CONNECTOR_ACCOUNT, edit));
+  });
+
   // Connect to Telegram
 
-  // --- Public API endpoints (no auth, for brain/dashboard) ---
-  app.get('/api/public/dialogs', async (_req, res) => {
-    try {
-      if (!client.isClientConnected()) {
-        res.status(503).json({ error: 'Not connected' });
-        return;
-      }
-      const dialogs = await client.getDialogs();
-      res.json({ dialogs });
-    } catch (e) {
-      res.status(500).json({ error: String(e) });
-    }
-  });
-
-  app.get('/api/public/messages/:chatId', async (req, res) => {
-    try {
-      if (!client.isClientConnected()) {
-        res.status(503).json({ error: 'Not connected' });
-        return;
-      }
-      const limit = parseInt(req.query.limit as string) || 50;
-      const messages = await client.getMessages(req.params.chatId, limit);
-      res.json({ messages });
-    } catch (e) {
-      res.status(500).json({ error: String(e) });
-    }
-  });
-
-  app.post('/api/public/send/:chatId', async (req, res) => {
-    try {
-      if (!client.isClientConnected()) {
-        res.status(503).json({ error: 'Not connected' });
-        return;
-      }
-      const { text, topicId } = req.body;
-      if (!text) {
-        res.status(400).json({ error: 'Missing text' });
-        return;
-      }
-      const tid = topicId !== undefined && topicId !== null ? Number(topicId) : undefined;
-      if (tid !== undefined && (!Number.isInteger(tid) || tid <= 0)) {
-        res.status(400).json({ error: 'topicId must be a positive integer' });
-        return;
-      }
-      await client.sendMessage(req.params.chatId, text, tid);
-      res.json({ success: true });
-    } catch (e) {
-      res.status(500).json({ error: String(e) });
-    }
-  });
+  app.use('/api/public', createPublicRouter(client, CONNECTOR_SHARED_SECRET));
 
   await client.connect();
 

@@ -1,0 +1,4 @@
+Antes: un borrado (revoke) de un post de canal o de un estado que llegaba antes que su post no encontraba fila, no dejaba rastro y el post, al llegar, se guardaba visible; el payload duradero de un post guardado con id compuesto pisaba el del primer canal.
+Ahora: el conector recuerda en memoria el revoke que no encontró fila (clave `<chat>|<id de WhatsApp>` tal como llega, como mucho 2000, 24 h) y, al guardar el post, lo marca borrado como cualquier revoke (el contenido se queda, sale `message-update DELETED`); el payload de un post guardado con id compuesto ya no se escribe. No sobrevive a un reinicio.
+Quién se mueve: nadie. Sin cambio de ruta, tool, evento ni esquema; `CONTRACTS.yaml` no cambia en esta parte (el evento `DELETED` es el de siempre).
+Decisión: SKIRM-106, `00-spec.md` (criterio C5) y la parte B de `nota-architect-pr245.md` (criterios B5 a B10); una tumba durable sería una migración 022 aparte, con su Jira.

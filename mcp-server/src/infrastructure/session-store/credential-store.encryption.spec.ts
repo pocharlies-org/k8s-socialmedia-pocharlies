@@ -87,7 +87,9 @@ describe('SC-705 PostgresCredentialStore encryption', () => {
   test('get() of an envelope without a master key throws', async () => {
     const envelope = encryptCredentialPayload(SECRET_SESSION, masterKey);
     const { pool } = fakePool(() => ({
-      rows: [{ session_key: 'sub-1', channel: 'whatsapp', payload: envelope, updated_at: new Date() }],
+      rows: [
+        { session_key: 'sub-1', channel: 'whatsapp', payload: envelope, updated_at: new Date() },
+      ],
     }));
     const store = new PostgresCredentialStore(pool, { masterKey: null });
 

@@ -2,9 +2,14 @@ import express from 'express';
 import pg from 'pg';
 import { chromium, BrowserContext, Page } from 'playwright';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  'postgresql://whatsappmcp:whatsappmcp_dgx_2026@postgres:5432/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback — the worker polls the DB from boot, so a
+// missing DATABASE_URL is a fatal config error, not something to paper over.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to start the whatsapp-open worker without an explicit database connection'
+  );
+}
 const ACCOUNT = process.env.CONNECTOR_ACCOUNT || 'professional';
 const PROFILE_DIR = process.env.WA_OPEN_WORKER_PROFILE_DIR || '/app/browser-profile';
 const PORT = parseInt(process.env.PORT || '3005', 10);

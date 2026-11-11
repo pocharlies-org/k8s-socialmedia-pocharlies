@@ -1,4 +1,11 @@
-import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync, createHmac } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  pbkdf2Sync,
+  createHmac,
+  timingSafeEqual,
+} from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
@@ -85,4 +92,33 @@ export function generateHMACSignature(
   const message = `${timestamp}:${JSON.stringify(body)}`;
   const signature = createHmac('sha256', sharedSecret).update(message).digest('hex');
   return `sha256=${signature}`;
+}
+
+/** Seconds of clock skew a connector HMAC timestamp may carry (5-minute window). */
+const HMAC_MAX_SKEW_SECONDS = 300;
+
+/**
+ * Verifies a signature produced by generateHMACSignature — the counterpart
+ * every connector middleware needs (SC-1229 round 2, architect finding 1:
+ * this is the scheme the house middleware enforces, whatsapp
+ * createHMACAuth / telegram authMiddleware, in one place instead of a third
+ * copy): same message "<ts>:<JSON body>", same 300 s window, and a
+ * constant-time comparison so a wrong signature is never learned byte by
+ * byte. `body` is the PARSED body the verifier received; `timestamp` the
+ * numeric value of the x-connector-timestamp header.
+ */
+export function verifyHMACSignature(
+  body: unknown,
+  timestamp: number,
+  signature: string,
+  sharedSecret: string
+): boolean {
+  if (!Number.isFinite(timestamp)) return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - timestamp) > HMAC_MAX_SKEW_SECONDS) return false;
+  const expected = generateHMACSignature(body, timestamp, sharedSecret);
+  const provided = Buffer.from(signature, 'utf-8');
+  const expectedBuffer = Buffer.from(expected, 'utf-8');
+  if (provided.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(provided, expectedBuffer);
 }

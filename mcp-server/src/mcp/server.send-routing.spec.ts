@@ -1,3 +1,4 @@
+import { expectProfessionalForward } from './send-routing-test-helper';
 import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
 
@@ -60,16 +61,7 @@ describe('WhatsApp send routing without a cold-send gate', () => {
       account: 'professional',
     });
     expect(query).not.toHaveBeenCalled();
-    expect(connectorCall).toHaveBeenCalledWith(
-      'http://wa-professional',
-      'POST',
-      '/api/v1/messages/forward',
-      {
-        chatId: 'professional:source@s.whatsapp.net',
-        messageId: 'm1',
-        toChatId: '34660242739@s.whatsapp.net',
-      }
-    );
+    expectProfessionalForward(connectorCall, '34660242739@s.whatsapp.net');
   });
 
   it('still refuses when sending is disabled', async () => {

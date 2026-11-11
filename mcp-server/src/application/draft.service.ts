@@ -1,6 +1,8 @@
 import OpenAI from 'openai';
 import { Pool } from 'pg';
-import pino from 'pino';
+import type pino from 'pino';
+import { createServiceLogger } from './service-logger';
+import { NO_THINKING } from './llm-request';
 
 export interface DraftConstraints {
   maxLength?: number;
@@ -46,12 +48,7 @@ export class DraftService {
     });
     this.llmModel = llmModel || 'gpt-4o-mini';
     this.dbClient = dbClient;
-    this.logger = pino({
-      transport: {
-        target: 'pino-pretty',
-        options: { colorize: true },
-      },
-    });
+    this.logger = createServiceLogger();
   }
 
   /**
@@ -184,6 +181,7 @@ Generate a draft reply. Keep it concise and appropriate for WhatsApp messaging.`
           ],
           temperature: 0.7,
           max_tokens: constraints?.maxLength ? Math.min(constraints.maxLength / 4, 500) : 200,
+          ...NO_THINKING,
         },
         { timeout: 180_000 }
       );

@@ -1,0 +1,44 @@
+{
+  "fuente": "correo-core main 2b0262e correo_core/puertos/mensajeria.py CanalHttp.enviar (DGX-1235 B2): la petición exacta que manda el núcleo, capturada con httpx.MockTransport; secretos inventados",
+  "vectores": [
+    {
+      "clave_id": "wa-professional",
+      "secreto": "secreto-de-prueba-wa",
+      "ts": "1792745100",
+      "metodo": "POST",
+      "objetivo": "/envios",
+      "cuerpo": "{\"destino_ref\": \"34600111222@c.us\", \"texto\": \"Gracias, ya est\\u00e1 en camino. \\ud83d\\udce6 \\u00ab\\u00f1\\u00bb\", \"sha256\": \"65d0b2e0ce3741c22e47e7da0e4bc233b496cc8658b6bba59a7f678060336cb9\", \"idempotencia\": \"resp-41\"}",
+      "firma": "edd5c4787d029e01fc5a1ce2d5362cc92437dc61154a2b4f9ddeb6430db29c97",
+      "texto": "Gracias, ya está en camino. 📦 «ñ»",
+      "destino_ref": "34600111222@c.us",
+      "idempotencia": "resp-41",
+      "sha256": "65d0b2e0ce3741c22e47e7da0e4bc233b496cc8658b6bba59a7f678060336cb9"
+    },
+    {
+      "clave_id": "wa-professional",
+      "secreto": "secreto-de-prueba-wa",
+      "ts": "1792745101",
+      "metodo": "POST",
+      "objetivo": "/envios",
+      "cuerpo": "{\"destino_ref\": \"123456789012345@lid\", \"texto\": \"Hola\", \"sha256\": \"e633f4fc79badea1dc5db970cf397c8248bac47cc3acf9915ba60b5d76b0e88f\", \"idempotencia\": \"resp-42.r2\"}",
+      "firma": "2e9e915373084b857da9bb84155f594e3bd74c8761154a47bd463e46867f5aaa",
+      "texto": "Hola",
+      "destino_ref": "123456789012345@lid",
+      "idempotencia": "resp-42.r2",
+      "sha256": "e633f4fc79badea1dc5db970cf397c8248bac47cc3acf9915ba60b5d76b0e88f"
+    },
+    {
+      "clave_id": "tg-professional",
+      "secreto": "secreto-de-prueba-tg",
+      "ts": "1792745102",
+      "metodo": "POST",
+      "objetivo": "/envios",
+      "cuerpo": "{\"destino_ref\": \"777000111\", \"texto\": \"Te lo enviamos ma\\u00f1ana.\\nUn saludo\", \"sha256\": \"5e7006d6b55b5f9e9c759e57e606cd8cbfb962031cb0e2e88c88825d74dbff2a\", \"idempotencia\": \"resp:43\"}",
+      "firma": "a7aa48a5cada2eb75cc3d2d98f55991a5d44f2c30ed0762d1b6ae72749b7ea5a",
+      "texto": "Te lo enviamos mañana.\nUn saludo",
+      "destino_ref": "777000111",
+      "idempotencia": "resp:43",
+      "sha256": "5e7006d6b55b5f9e9c759e57e606cd8cbfb962031cb0e2e88c88825d74dbff2a"
+    }
+  ]
+}

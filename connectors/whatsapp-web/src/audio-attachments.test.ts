@@ -45,7 +45,7 @@ function silentLogger(): { info(m: string): void; warn(m: string): void; warns: 
 function baseOpts(over: Partial<BuildAudioAttachmentsOptions> = {}): BuildAudioAttachmentsOptions {
   return {
     store: async () => STORED,
-    presign: async () => 'https://skirmshop-s3.lan.e-dani.com/skirmshop-drive/x?X-Amz-Signature=s',
+    presign: async () => 'https://skirmshop-s3.e-dani.com/skirmshop-drive/x?X-Amz-Signature=s',
     timeoutMs: 200,
     seconds: 7,
     presignExpirySeconds: 3600,
@@ -60,7 +60,7 @@ test('success: returns the audio.py-compatible attachment shape', async () => {
   assert.ok(atts && atts.length === 1);
   const att = atts[0];
   assert.equal(att.type, 'audio');
-  assert.match(att.url, /^https:\/\/skirmshop-s3\.lan\.e-dani\.com\//);
+  assert.match(att.url, /^https:\/\/skirmshop-s3\.e-dani\.com\//);
   assert.equal(att.metadata.mimeType, 'audio/ogg; codecs=opus');
   assert.equal(att.metadata.fileSize, 12345);
   assert.equal(att.metadata.seconds, 7);

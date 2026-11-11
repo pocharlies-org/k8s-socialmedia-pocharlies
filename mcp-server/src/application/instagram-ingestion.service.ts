@@ -114,7 +114,10 @@ export class InstagramIngestionService {
 
       await this.dbClient.query(
         `INSERT INTO conversations (id, name, is_group, type, wa_chat_id, last_message_at, account)
-         VALUES ($1, $2, $3, $4, $1, $5, $6)
+         -- ::text casts: the NAS fork rekeyed these identity columns to text
+         -- (migration 008_provider_identity_schema); a text literal must not be
+         -- offered as an untyped parameter on a column that could still be uuid.
+         VALUES ($1::text, $2, $3, $4, $1::text, $5, $6)
          ON CONFLICT (id) DO UPDATE SET
            name = COALESCE(EXCLUDED.name, conversations.name),
            account = EXCLUDED.account,
@@ -125,7 +128,7 @@ export class InstagramIngestionService {
 
       await this.dbClient.query(
         `INSERT INTO participants (id, name, push_name, last_seen, account)
-         VALUES ($1, $2, $2, now(), $3)
+         VALUES ($1, $2::text, $2::text, now(), $3)
          ON CONFLICT (id) DO UPDATE SET
            name = COALESCE(EXCLUDED.name, participants.name),
            account = EXCLUDED.account,
@@ -162,6 +165,9 @@ export class InstagramIngestionService {
       }
     } catch (error) {
       this.logger.error(`Failed to ingest IG event: ${error}`);
+      // Fail the caller: the NAS event pipeline retries on rejection, and a
+      // swallowed error here used to drop the message without a trace.
+      throw error;
     }
   }
 }

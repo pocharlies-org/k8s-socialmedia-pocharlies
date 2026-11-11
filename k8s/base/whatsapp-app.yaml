@@ -1,0 +1,189 @@
+# SC-2760: la app de WhatsApp del fork de Jordi (jibanez-staticduo/
+# k8s-socialmedia-pocharlies @ ef500ec, `apps/whatsapp` verbatim) desplegada
+# tal cual para probarla en https://whatsapp.e-dani.com. Lee la Postgres
+# `whatsappmcp` compartida, sirve media desde el MinIO de la casa y envía por
+# los conectores firmando con CONNECTOR_SHARED_SECRET (la misma clave que ya
+# usan; el gate de envío del conector sigue mandando). Login: OIDC propio
+# contra el realm `edani` (cliente `whatsapp-app`, sub permitido = Dani).
+# La migración opcional del app (apps/whatsapp/migrations/001_feature_api.sql,
+# índices aditivos) NO se aplica aquí: es rendimiento, no funcionalidad.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: whatsapp-app-accounts
+  namespace: whatsapp-mcp
+data:
+  accounts.json: |
+    [
+      {"channel": "whatsapp", "accountId": "personal", "label": "WhatsApp personal", "enabled": true,
+       "connectorUrl": "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001",
+       "secretEnv": "CONNECTOR_SHARED_SECRET"},
+      {"channel": "whatsapp", "accountId": "professional", "label": "WhatsApp professional", "enabled": true,
+       "connectorUrl": "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001",
+       "secretEnv": "CONNECTOR_SHARED_SECRET"},
+      {"channel": "whatsapp", "accountId": "leila", "label": "WhatsApp Leila", "enabled": true,
+       "connectorUrl": "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001",
+       "secretEnv": "CONNECTOR_SHARED_SECRET"}
+    ]
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: whatsapp-app-secrets
+  namespace: whatsapp-mcp
+spec:
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: whatsapp-app-secrets
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef: { key: whatsapp-app, property: OIDC_CLIENT_SECRET }
+---
+# QA #26/22-10: /data guardaba app-state.json (listas, favoritos, destacados)
+# y las sesiones OIDC en un emptyDir: cada deploy o reschedule los borraba.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whatsapp-app-data
+  namespace: whatsapp-mcp
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  storageClassName: longhorn
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-app
+  namespace: whatsapp-mcp
+  labels: { app: whatsapp-app }
+spec:
+  replicas: 1
+  # Longhorn es RWO: con RollingUpdate el pod nuevo (surge) no puede montar el
+  # PVC mientras vive el viejo. Recreate: unos segundos de parada por deploy.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: whatsapp-app }
+  template:
+    metadata:
+      labels: { app: whatsapp-app }
+    spec:
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      # Security (PR 268): solo las tres claves que la app lee del secret de la
+      # casa — nada de envFrom ancho en un pod de internet con codigo ajeno.
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: app
+          # El pin tag@digest del overlay prod (patrón de la casa) lo escribe el
+          # Release Production en su job manifests tras el primer build.
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app:latest
+          ports:
+            - { name: http, containerPort: 3080 }
+          env:
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: DB_PASSWORD } }
+            - name: CONNECTOR_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: CONNECTOR_SHARED_SECRET } }
+            - { name: APP_AUTH_MODE, value: "oidc" }
+            - { name: APP_PUBLIC_URL, value: "https://whatsapp.e-dani.com" }
+            - { name: OIDC_ISSUER_URL, value: "https://auth-next.e-dani.com/realms/edani" }
+            - { name: OIDC_CLIENT_ID, value: "whatsapp-app" }
+            - { name: OIDC_ALLOWED_SUBJECTS, value: "e51253a7-c137-4c6c-9fb9-af9cecd3b147,19477a95-5db3-416a-858c-2eeb3cf136f0" }
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: whatsapp-app-secrets, key: OIDC_CLIENT_SECRET } }
+            # jit=off: las consultas listas del chat son de ~2 s y JIT gastaba ~3 s
+            # compilando 115 funciones por query (EXPLAIN ANALYZE, 20-10).
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp?options=-c%20jit%3Doff" }
+            - { name: SOCIAL_ACCOUNTS_FILE, value: "/etc/whatsapp-app/accounts.json" }
+            - { name: DATA_DIR, value: "/data" }
+            - { name: APP_ENABLE_SENDING, value: "true" }
+            - { name: LITELLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+            # único modelo que lista la clave del app (GET /models desde el pod, QA #44)
+            - { name: HERMES_DEFAULT_MODEL, value: "tooling" }
+            - name: LITELLM_API_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: OPENAI_API_KEY } }
+            - { name: MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+            - { name: MINIO_USE_SSL, value: "false" }
+            - { name: MINIO_BUCKET, value: "socialmedia-media" }
+            # file_url absolutos → skirmshop-drive (54583 adjuntos); claves sueltas → MinIO legacy (15308)
+            - { name: MEDIA_ALLOWED_BUCKETS, value: "skirmshop-drive,socialmedia-media" }
+            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } }
+            - name: MINIO_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: MINIO_ROOT_USER } }
+            - name: MINIO_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-secrets, key: MINIO_ROOT_PASSWORD } }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: accounts, mountPath: /etc/whatsapp-app, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /health, port: 3080 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3080 }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: whatsapp-app-data }
+        - name: accounts
+          configMap: { name: whatsapp-app-accounts }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whatsapp-app
+  namespace: whatsapp-mcp
+spec:
+  selector: { app: whatsapp-app }
+  ports:
+    - { name: http, port: 3080, targetPort: 3080 }
+---
+# El default-deny del ns cortaria a traefik-edge (whatsapp.e-dani.com es
+# publico) y a traefik-lan. Mismo patron que whatsapp-mcp-allow-traefik-
+# instagram: hostNetwork del edge (sauvage + los tres cps por tailnet) y el
+# /16 del overlay flannel para el trayecto entre nodos.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsapp-mcp-allow-traefik-app
+  namespace: whatsapp-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: whatsapp-app
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-lan
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-edge
+        - ipBlock:
+            cidr: 100.109.183.9/32  # sauvage — public callback arrives with this source IP
+        - ipBlock:
+            cidr: 100.107.21.89/32  # ks5-cp-1
+        - ipBlock:
+            cidr: 100.71.117.127/32 # ks5-cp-2
+        - ipBlock:
+            cidr: 100.75.189.75/32  # ks5-cp-3
+        - ipBlock:
+            cidr: 10.42.0.0/16  # flannel.1 node IPs — source NAT of the pod overlay
+      ports:
+        - protocol: TCP
+          port: 3080
+  policyTypes:
+    - Ingress

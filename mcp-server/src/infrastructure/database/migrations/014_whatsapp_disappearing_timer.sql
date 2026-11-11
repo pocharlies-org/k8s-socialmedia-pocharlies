@@ -1,0 +1,33 @@
+-- 014 — WhatsApp disappearing-messages timer on conversations (fase 3 / PR-8).
+--
+-- Written by the whatsapp-web connector, on the CANONICAL conversation row
+-- (account_id + external_id, merged_into IS NULL): our own change through
+-- POST /api/v1/chats/disappearing once WhatsApp accepted it, and what the
+-- socket tells us — a timer change of either side (EPHEMERAL_SETTING protocol
+-- message → Baileys chats.update) and the history / chats.upsert snapshot of
+-- the chat. WhatsApp has no query for the timer of a direct chat, so this is
+-- the only place it is known after a restart; a group's timer is read from
+-- its fresh metadata and is recorded here too when it changes.
+--
+--   ephemeral_expiration — seconds (0 = off; WhatsApp offers 86400, 604800,
+--                          7776000). NULL = never learnt (unknown), which is
+--                          NOT "off": readers show nothing rather than a guess.
+--   ephemeral_setting_at — when the timer was set, when WhatsApp said. The
+--                          connector never replaces a newer timer with an
+--                          older one (history sync replays old changes).
+--
+-- No presence column: presence is ephemeral and lives in the connector's
+-- memory only (60 s). No privacy column: WhatsApp keeps the account's
+-- privacy settings; readers ask the connector (GET /api/v1/privacy).
+--
+-- EXPAND only, idempotent (ADD COLUMN IF NOT EXISTS). Nullable columns
+-- without a default: catalog-only, no table rewrite. social_merge_conversation
+-- is NOT re-declared: a timer lives on the canonical row, where the connector
+-- writes it (tombstones are never written), so a merge has nothing to carry.
+-- The connector does NOT add these columns: while they are missing (42703)
+-- timers still go to WhatsApp, nothing is recorded (persisted: false), a log,
+-- re-probed every few minutes. No new table in this file, so migrate.ts never
+-- baselines this file: it runs once and is recorded.
+
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ephemeral_expiration INTEGER;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ephemeral_setting_at TIMESTAMPTZ;

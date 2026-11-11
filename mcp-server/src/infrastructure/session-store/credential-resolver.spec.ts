@@ -1,8 +1,4 @@
-import {
-  CredentialChannel,
-  CredentialStore,
-  StoredCredential,
-} from '@mcp-socialmedia/shared';
+import { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import { resolveCredential } from '@mcp-socialmedia/shared';
 
 class FakeStore implements CredentialStore {
@@ -47,7 +43,11 @@ describe('SC-552 credential resolution (no-regression precedence)', () => {
       enabled: false,
     });
 
-    expect(result).toEqual({ payload: { sessionString: 'legacy' }, source: 'legacy', adopted: false });
+    expect(result).toEqual({
+      payload: { sessionString: 'legacy' },
+      source: 'legacy',
+      adopted: false,
+    });
     expect(loadLegacy).toHaveBeenCalledTimes(1);
     expect(store.getCalls).toBe(0);
     expect(store.putCalls).toBe(0);
@@ -81,7 +81,11 @@ describe('SC-552 credential resolution (no-regression precedence)', () => {
       enabled: true,
     });
 
-    expect(result).toEqual({ payload: { files: { 'creds.json': 'e30=' } }, source: 'legacy', adopted: false });
+    expect(result).toEqual({
+      payload: { files: { 'creds.json': 'e30=' } },
+      source: 'legacy',
+      adopted: false,
+    });
     expect(store.getCalls).toBe(0);
     expect(store.putCalls).toBe(0);
     expect(store.rows.size).toBe(0);
@@ -123,7 +127,11 @@ describe('SC-552 credential resolution (no-regression precedence)', () => {
       enabled: true,
     });
 
-    expect(result).toEqual({ payload: { files: { 'creds.json': 'cm93' } }, source: 'store', adopted: false });
+    expect(result).toEqual({
+      payload: { files: { 'creds.json': 'cm93' } },
+      source: 'store',
+      adopted: false,
+    });
     expect(loadLegacy).not.toHaveBeenCalled();
     expect(store.putCalls).toBe(0);
   });

@@ -9,8 +9,13 @@ const logger = pino({
   },
 });
 
-const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to start the embeddings backfill job without an explicit database connection'
+  );
+}
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'not-used';
 const BATCH_SIZE = parseInt(process.env.BACKFILL_EMBEDDINGS_BATCH_SIZE || '100', 10);
@@ -27,11 +32,18 @@ async function main(): Promise<void> {
       if (MAX_MESSAGES > 0 && remainingLimit === 0) break;
       const limit = Math.min(BATCH_SIZE, remainingLimit);
 
+      // Barriendo por fila acierta todas las cuentas (no depende del id del
+      // evento), pero el filtro estaba fijado a 'whatsapp': el historial de
+      // Telegram no se embebía ni corriendo el backfill a mano.
       const result = await pool.query(
         `SELECT m.id
          FROM messages m
          LEFT JOIN message_embeddings me ON me.message_id = m.id
-         WHERE m.platform = 'whatsapp'
+         WHERE m.platform IN ('whatsapp', 'telegram')
+           AND (m.platform <> 'whatsapp' OR (m.conversation_id NOT LIKE '%@newsletter'
+             AND m.conversation_id <> 'status@broadcast'
+             AND m.conversation_id NOT LIKE '%:status@broadcast'))
+           AND (m.is_deleted IS NULL OR m.is_deleted = false)
            AND m.content IS NOT NULL
            AND btrim(m.content) <> ''
            AND me.message_id IS NULL
@@ -47,7 +59,7 @@ async function main(): Promise<void> {
         processed++;
       }
 
-      logger.info(`Backfilled embeddings for ${processed} WhatsApp messages so far`);
+      logger.info(`Backfilled embeddings for ${processed} messages so far`);
     }
 
     logger.info(`Embedding backfill complete. processed=${processed}`);

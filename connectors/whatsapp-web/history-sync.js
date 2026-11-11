@@ -5,7 +5,14 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const { Pool } = require('pg');
 
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dgx_2026@postgres:5432/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback — the script runs inside the connector
+// container, which is given DATABASE_URL; without it, fail naming the variable.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to run history-sync without an explicit database connection'
+  );
+}
 const SESSION_PATH = process.env.SESSION_PATH || '/app/session-data';
 const MESSAGES_PER_CHAT = parseInt(process.env.MESSAGES_PER_CHAT || '500', 10);
 

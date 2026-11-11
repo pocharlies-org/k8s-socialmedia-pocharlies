@@ -254,3 +254,41 @@ export async function resolveInstagramEntry(
 
   return { entry: { name: `${actor.sub}`, api: instagramApiFromPayload(payload) } };
 }
+
+/**
+ * SC-1256 (epic criterion 4): the per-actor view of GET /health. With the
+ * store on and a verified sub, every account goes through the SAME single
+ * resolution point as the /api/v1/:account routes: a paired sub gets its own
+ * profile, a sub without rows gets `no_credential` with the explicit error —
+ * never the house accounts' status. Returns null (caller keeps the legacy
+ * probe loop untouched) when the store is off or the caller has no sub.
+ */
+export async function resolveHealthForActor(
+  opts: Omit<ResolveInstagramEntryOptions, 'accountName'> & { accountNames: string[] }
+): Promise<Record<string, unknown> | null> {
+  const actor = actorFromHeaders(opts.headers as never);
+  if (!opts.store || !actor.sub) return null;
+  const results: Record<string, unknown> = {};
+  for (const accountName of opts.accountNames) {
+    try {
+      const resolution = await resolveInstagramEntry({ ...opts, accountName });
+      if ('error' in resolution) {
+        results[accountName] = {
+          status: 'no_credential',
+          error: resolution.error.code,
+          message: resolution.error.message,
+        };
+        continue;
+      }
+      const profile = await resolution.entry.api.getProfile();
+      results[accountName] = {
+        status: 'ok',
+        username: profile.username,
+        followers: profile.followers_count,
+      };
+    } catch (error) {
+      results[accountName] = { status: 'degraded', error: String(error) };
+    }
+  }
+  return results;
+}

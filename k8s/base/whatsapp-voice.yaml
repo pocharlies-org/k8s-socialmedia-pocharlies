@@ -1,0 +1,157 @@
+# INFRA-364 fase 0 — transcripción de las notas de voz de WhatsApp (ADR 0002).
+#
+# Las filas AUDIO/PTT de `messages` (plataforma whatsapp) entran con `content`
+# vacío: los bytes se suben a MinIO pero nadie los transcribía, así que el brain
+# nunca los veía. Telegram sí lo hace (connectors/telegram-sync, faster-whisper
+# en el propio pod). Aquí se reutiliza el CONTRATO de metadata de Telegram
+# (needs_transcription / transcription_status pending→processing→done/failed /
+# transcription_attempts) pero el STT es el servicio ya residente `stt-turbo`
+# (ns llm, whisper-large-v3, API OpenAI /v1/audio/transcriptions): el worker es
+# un cliente HTTP fino, no monta modelo ni GPU propios.
+#
+# Los dos CronJobs corren en `topology: lan, amd64` (sauvage/ks5/ubuntu), como
+# todo el namespace: NADA se programa en los Sparks (gx10-ec3d / nvidia-dgx).
+# stt-turbo vive en gx10-ec3d porque es un servicio residente preexistente del
+# plano llm; llamarlo por HTTP no añade carga de programación a los Sparks y su
+# cola es de un solo worker (VOICE_CONCURRENCY=2 es un tope de cortesía).
+#
+# Imagen: la misma que mcp-server/brain-ingest (whatsappmcp-mcp-server, fuente
+# + tsx). El pin de digest del overlay (`patch-image.yaml` / `images:` del
+# prod kustomization) reescribe el nombre de imagen para TODOS los consumidores,
+# así que este CronJob viaja con el mismo digest que el mcp-server.
+---
+# (a) RUTA VIVA: cada 5 min transcribe lo que el conector marcó `pending` al
+# insertar (más las filas frescas sin marcar dentro de la ventana de adopción).
+# NO toca el histórico: las filas viejas sin marcar solo entran por el Job de
+# backfill, así que desplegar esto no lanza 4.5k transcripciones de golpe.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: whatsapp-voice-transcribe
+  namespace: whatsapp-mcp
+spec:
+  schedule: "*/5 * * * *"
+  timeZone: Europe/Madrid
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+          containers:
+            - name: voice-transcribe
+              image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+              command:
+                - sh
+                - -c
+                - |
+                  cd mcp-server
+                  node --import tsx src/jobs/voice-transcribe.ts
+              env:
+                - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+                # MinIO: bucket nuevo (skirmshop-drive, prefijo socialmedia) +
+                # legacy (socialmedia-media en el minio del ns). Idéntico al
+                # bloque del mcp-server; las refs `s3://…` y crudas se resuelven
+                # con parseStorageRef en minio-client.ts.
+                - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+                - { name: S3_BUCKET, value: "skirmshop-drive" }
+                - { name: S3_REGION, value: "us-east-1" }
+                - { name: S3_PREFIX, value: "socialmedia" }
+                - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+                - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
+                - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+                - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+                - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+                - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+                - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
+                # STT residente (whisper-large-v3). OpenAI-compatible.
+                - { name: VOICE_STT_URL, value: "http://stt-turbo.llm.svc.cluster.local:8000" }
+                - { name: VOICE_LANGUAGE, value: "es" }
+                - { name: VOICE_BATCH, value: "20" }
+                - { name: VOICE_CONCURRENCY, value: "2" }
+                - { name: VOICE_MAX_RUNTIME_MS, value: "240000" }
+                - { name: VOICE_MAX_ATTEMPTS, value: "3" }
+                - { name: VOICE_ADOPT_WINDOW_DAYS, value: "7" }
+                - { name: VOICE_MEDIA_GRACE_HOURS, value: "6" }
+              envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits:   { memory: 512Mi }
+---
+# (b) BACKFILL del histórico (~4.577 filas AUDIO/PTT con content vacío; ~3.584
+# con bytes en MinIO = recuperables, el resto perdió el media en su día).
+# SUSPENDIDO a propósito: es un Job manual, no una pasada programada.
+#   1ª pasada (seca, DRY_RUN=true ya es el default del manifiesto):
+#     kubectl -n whatsapp-mcp create job voice-backfill-dry --from=cronjob/whatsapp-voice-backfill
+#   2ª pasada (ejecuta): clonar el yaml del cron, DRY_RUN="false", y aplicar; o
+#     kubectl create job ... --from=... y luego parchear el env del Job.
+# Idempotente y resumible: marca solo filas nunca transcritas y la pasada
+# consume la cola pending; se puede interrumpir y relanzar (véase el header de
+# mcp-server/src/jobs/voice-backfill.ts).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: whatsapp-voice-backfill
+  namespace: whatsapp-mcp
+spec:
+  schedule: "17 4 * * 1"
+  timeZone: Europe/Madrid
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # El histórico completo son ~3.6k clips; a ~2 paralelos y varios s por
+      # clip, caben en tandas. activeDeadlineSeconds deja la cola pending para
+      # la siguiente ejecución (eso es lo resumible).
+      activeDeadlineSeconds: 3500
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+          containers:
+            - name: voice-backfill
+              image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+              command:
+                - sh
+                - -c
+                - |
+                  cd mcp-server
+                  node --import tsx src/jobs/voice-backfill.ts
+              env:
+                - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+                - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+                - { name: S3_BUCKET, value: "skirmshop-drive" }
+                - { name: S3_REGION, value: "us-east-1" }
+                - { name: S3_PREFIX, value: "socialmedia" }
+                - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
+                - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
+                - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
+                - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
+                - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
+                - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+                - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
+                - { name: VOICE_STT_URL, value: "http://stt-turbo.llm.svc.cluster.local:8000" }
+                - { name: VOICE_LANGUAGE, value: "es" }
+                - { name: VOICE_BATCH, value: "20" }
+                - { name: VOICE_CONCURRENCY, value: "2" }
+                - { name: VOICE_MAX_RUNTIME_MS, value: "3300000" }
+                - { name: VOICE_MAX_ATTEMPTS, value: "3" }
+                # Seguridad: el manifiesto queda en seco por defecto.
+                - { name: DRY_RUN, value: "true" }
+              envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits:   { memory: 512Mi }

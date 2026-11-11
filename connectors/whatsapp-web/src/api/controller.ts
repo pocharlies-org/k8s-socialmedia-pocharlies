@@ -1,12 +1,31 @@
+import { createConnectorAccess, secretEquals } from './access';
 import express, { Request, Response } from 'express';
 import { createHash } from 'crypto';
 import {
   BaileysClient,
+  ProfilePictureDownloadError,
+  ProfilePictureTimeoutError,
   classifyWhatsAppSendFailure,
+  normalizeChatModifyAction,
+  WhatsAppSendError,
   WhatsAppSendFailureClass,
+  MEDIA_VIEW_ONCE_MIME_TYPES,
+  NOVEDADES_STATUS_CAPTION_MAX_CHARS,
+  NOVEDADES_STATUS_IMAGE_MIME_TYPES,
+  NOVEDADES_STATUS_MEDIA_MAX_BYTES,
+  NOVEDADES_STATUS_RECIPIENTS_MAX,
+  NOVEDADES_STATUS_FONT_MIN,
+  NOVEDADES_STATUS_FONT_MAX,
+  NOVEDADES_STATUS_VIDEO_MIME_TYPES,
+  StatusSendUncertainError,
+  type NovedadesStatusPublishInput,
 } from '../baileys-client';
+import { MuteState } from '../chat-state';
+import { MessageInfoError } from '../message-receipts';
 import { QRHandler } from '../qr-handler';
 import { createHMACAuth, AuthenticatedRequest } from './auth';
+import { contactBlockJid, ContactBlockError } from '../contact-block';
+import { sendCurrentQR } from './auth-qr';
 import {
   connectorAccount,
   createWhatsAppManualOpenRequest,
@@ -14,6 +33,7 @@ import {
   updateWhatsAppManualOpenRequestStatus,
   upsertWhatsAppCustomerAllowlist,
   WhatsAppManualOpenStatus,
+  stripAccountKey,
 } from '../db-writer';
 import {
   appendCompanyToDisplayName,
@@ -23,6 +43,470 @@ import {
   normalizePhoneForWhatsApp,
   WhatsAppContactSeedInput,
 } from '../contact-sync';
+import { MessageUnavailableError } from '../durable-message-store';
+import { MessageMutationError } from '../message-mutations';
+import { parsePinRequest, parseStarredQuery, parseStarRequest } from '../message-stars-pins';
+import {
+  parseChannelPostsQuery,
+  parseStatusListQuery,
+  parseStatusPublishRequest,
+  STATUS_JID,
+  statusPublishEnabled,
+} from '../statuses';
+import { PollEventInputError, validatePollInput } from '../poll-votes';
+import { validateEventInput, validateEventResponse } from '../event-responses';
+import { availablePresenceAllowed, parsePresenceRequest } from '../presence';
+import { parsePrivacyRequest } from '../privacy-settings';
+import {
+  fetchProfilePhoto,
+  parseProfilePhotoRemoveRequest,
+  parseProfilePhotoRequest,
+  parseProfileUpdateRequest,
+  ProfileError,
+  profileFailureClass,
+} from '../profile-service';
+import { parseMediaQuality, parseViewOnce } from '../media-quality';
+import { parseDisappearingExpiration } from '../disappearing';
+import {
+  parseCreateContactRequest,
+  parseShareContactRequest,
+  parseStartChatRequest,
+  StartedChat,
+} from '../contacts';
+import { parseStickerGifRequest, stickerGifHashInput } from '../sticker-gif';
+import { parseContactBlockRequest } from '../contact-block';
+import { cleanFileName } from '../ingest-extras';
+import {
+  parseCommunityDescription,
+  parseCommunityGroupRequest,
+  parseCommunityJid,
+  parseCommunitySubject,
+  requireLeaveConfirmation,
+} from '../communities';
+import { parseChannelJid, parseChannelQuery, parseChannelSubscriptionAction } from '../channels';
+import {
+  GroupActionError,
+  normalizeGroupParticipantAction,
+  parseGroupJid,
+  parseGroupInviteParticipants,
+  parseGroupInviteText,
+  parseGroupParticipants,
+  parseGroupSubject,
+  parseGroupUpdate,
+} from '../group-management';
+import {
+  claimSendAttempt,
+  confirmSend,
+  mediaRequestHash,
+  readIdempotencyKey,
+  recordSendFailure,
+  reserveSend,
+  SendAlreadyClaimedError,
+  SendReservation,
+  structuredRequestHash,
+  textRequestHash,
+  voiceRequestHash,
+} from '../send-idempotency';
+import { CapabilityError } from '../whatsapp-capabilities';
+import { CommunityError } from '../novedades-communities';
+import { EventSendError } from '../event-send';
+import { PinSendError } from '../pinned-send';
+import { StructuredSendError } from '../structured-send';
+import {
+  NOVEDADES_MEDIA_MAX_BYTES,
+  NovedadesReaderError,
+  avatarHostAllowed,
+  createNovedadesReader,
+  novedadesErrorBody,
+  parseByteRange,
+  type NovedadesPorts,
+  type NovedadesReader,
+} from '../novedades-reader';
+import { ChannelService, ChannelSubscriptionUncertainError } from '../novedades-channels';
+
+/* --------------------------------------------------------------------------
+ * Novedades read routes: local store only, no WhatsApp traffic
+ * ------------------------------------------------------------------------ */
+
+/** The app proxy abandons a connector call at 30 s, so stop before it does. */
+function novedadesDeadlineMs(): number {
+  const raw = Number(process.env.NOVEDADES_MEDIA_DEADLINE_MS || 22000);
+  return Number.isSafeInteger(raw) && raw >= 1000 && raw <= 28000 ? raw : 22000;
+}
+
+function novedadesAvatarTimeoutMs(): number {
+  const raw = Number(process.env.NOVEDADES_AVATAR_TIMEOUT_MS || 15000);
+  return Number.isSafeInteger(raw) && raw >= 1000 && raw <= 28000 ? raw : 15000;
+}
+
+/** Applies the live-account mutation gate with the capability response envelope. */
+function sendingAllowed(res: Response): boolean {
+  if (process.env.ENABLE_SENDING === 'true' && process.env.EMERGENCY_DISABLE_SENDING !== 'true')
+    return true;
+  res.status(403).json({
+    ok: false,
+    error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' },
+  });
+  return false;
+}
+
+/** Only conflicts and pending sends stop here; each route retains its success envelope. */
+
+function novedadesSuccess<T extends object>(res: Response, data: T): void {
+  res.json({ ok: true, ...data });
+}
+
+function novedadesFailure(res: Response, error: unknown): void {
+  const { status, body } = novedadesErrorBody(error);
+  res.status(status).json(body);
+}
+
+/** New fork endpoints accept the same explicit key contract as production. */
+
+/** Turns a hung provider call into an honest 504 inside the caller's budget. */
+function novedadesWithDeadline<T>(
+  work: () => Promise<T>,
+  ms: number,
+  code: string,
+  message: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guard = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new NovedadesReaderError(code, message, 504)), ms);
+  });
+  return Promise.race([
+    work().finally(() => {
+      if (timer) clearTimeout(timer);
+    }),
+    guard,
+  ]);
+}
+
+/**
+ * Channel lookup and follow/unfollow run over the live socket: rc13 exposes
+ * newsletterMetadata/Follow/Unfollow only there, so BaileysClient hands out a
+ * narrow newsletter port instead of the socket itself. One service is kept per
+ * client session so two concurrent requests for the same channel cannot both
+ * pass the pre-read and mutate twice; the socket is resolved per call, so a
+ * reconnect is never pinned to a dead handle. When no session is connected the
+ * port is null and the service answers 503, never a TypeError.
+ */
+const novedadesChannelServices = new WeakMap<BaileysClient, ChannelService>();
+
+function novedadesChannelService(client: BaileysClient): ChannelService {
+  const cached = novedadesChannelServices.get(client);
+  if (cached) return cached;
+  const service = new ChannelService(() =>
+    // An old client build without the port has no channel capability at all,
+    // which the service reports as 501; a connected session whose socket is
+    // already gone reports null and becomes 503.
+    typeof client.novedadesChannelSocket === 'function' ? client.novedadesChannelSocket() : {}
+  );
+  novedadesChannelServices.set(client, service);
+  return service;
+}
+
+function novedadesPorts(client: BaileysClient): NovedadesPorts {
+  const ports: NovedadesPorts = { ownJid: () => client.ownJid };
+  if (typeof client.downloadNovedadesMedia === 'function') {
+    ports.downloadMedia = request => {
+      if (typeof client.isConnected === 'function' && !client.isConnected())
+        throw new NovedadesReaderError(
+          'NOVEDADES_SESSION_DOWN',
+          'This WhatsApp session is not connected, so media cannot be fetched',
+          503
+        );
+      return novedadesWithDeadline(
+        () =>
+          client.downloadNovedadesMedia({
+            key: request.key,
+            message: request.message,
+          } as unknown as Parameters<typeof client.downloadNovedadesMedia>[0]),
+        novedadesDeadlineMs(),
+        'NOVEDADES_MEDIA_TIMEOUT',
+        'The media download exceeded the connector deadline; nothing was sent to WhatsApp'
+      );
+    };
+  }
+  ports.fetchAvatar = fetchNovedadesAvatar;
+  return ports;
+}
+
+/**
+ * Fetches a stored avatar over https. A stored reference is data, not a
+ * permission: the host is re-checked after redirects so a provider CDN cannot
+ * bounce this connector to an internal address, and the size cap is applied
+ * before the body is buffered.
+ */
+export async function fetchNovedadesAvatar(url: string): Promise<Buffer | null> {
+  const signal = AbortSignal.timeout(novedadesAvatarTimeoutMs());
+  let response: Awaited<ReturnType<typeof fetch>> | undefined;
+  try {
+    for (let redirects = 0; redirects <= 3; redirects++) {
+      const target = new URL(url);
+      if (target.protocol !== 'https:' || !avatarHostAllowed(target))
+        throw new NovedadesReaderError(
+          'NOVEDADES_AVATAR_UNAVAILABLE',
+          'Avatar host is not allowed',
+          404
+        );
+      response = await fetch(target, { redirect: 'manual', signal });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      await response.body?.cancel();
+      const location = response.headers.get('location');
+      if (!location || redirects === 3)
+        throw new NovedadesReaderError(
+          'NOVEDADES_AVATAR_UNAVAILABLE',
+          'Avatar redirect is unavailable',
+          404
+        );
+      // Validate the next target before any network request, not after following it.
+      url = new URL(location, target).href;
+    }
+    if (!response?.ok) {
+      await response?.body?.cancel();
+      return null;
+    }
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > NOVEDADES_MEDIA_MAX_BYTES) {
+      await response.body?.cancel();
+      throw new NovedadesReaderError(
+        'NOVEDADES_MEDIA_TOO_LARGE',
+        'Avatar exceeds the download size cap',
+        413
+      );
+    }
+    if (!response.body) return null;
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      let done = false;
+      while (!done) {
+        const chunk = await reader.read();
+        done = chunk.done;
+        if (done) break;
+        const value = chunk.value;
+        size += value.byteLength;
+        if (size > NOVEDADES_MEDIA_MAX_BYTES)
+          throw new NovedadesReaderError(
+            'NOVEDADES_MEDIA_TOO_LARGE',
+            'Avatar exceeds the download size cap',
+            413
+          );
+        chunks.push(Buffer.from(value));
+      }
+      return size ? Buffer.concat(chunks, size) : null;
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  } catch (error) {
+    if (error instanceof NovedadesReaderError) throw error;
+    const name = (error as { name?: string } | null)?.name;
+    if (name === 'TimeoutError' || name === 'AbortError')
+      throw new NovedadesReaderError(
+        'NOVEDADES_AVATAR_TIMEOUT',
+        'The avatar host exceeded the connector deadline',
+        504
+      );
+    throw new NovedadesReaderError(
+      'NOVEDADES_AVATAR_FAILED',
+      'The avatar host could not be reached',
+      502
+    );
+  }
+}
+
+/**
+ * Binary media for direct clients (`raw=1`). A single satisfiable range gets
+ * 206 with the exact slice; a present but unsatisfiable one gets 416; anything
+ * the parser does not recognize is served whole, which is what the caller can
+ * safely fall back to.
+ */
+function novedadesRawMedia(
+  res: Response,
+  media: { bytes: Buffer; mimeType: string; fileName: string | null },
+  rangeHeader: unknown
+): void {
+  const size = media.bytes.length;
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Type', media.mimeType || 'application/octet-stream');
+  if (media.fileName)
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename*=UTF-8''${encodeURIComponent(media.fileName)}`
+    );
+  const header = typeof rangeHeader === 'string' ? rangeHeader.trim() : undefined;
+  const single = header !== undefined && /^bytes=(\d*)-(\d*)$/.test(header);
+  if (single) {
+    const range = parseByteRange(header, size);
+    if (!range) {
+      res.setHeader('Content-Range', `bytes */${size}`);
+      res.status(416).end();
+      return;
+    }
+    const slice = media.bytes.subarray(range.start, range.end + 1);
+    res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
+    res.setHeader('Content-Length', String(slice.length));
+    res.status(206).send(slice);
+    return;
+  }
+  res.setHeader('Content-Length', String(size));
+  res.status(200).send(media.bytes);
+}
+
+/* --------------------------------------------------------------------------
+ * Novedades status publishing: HTTP contract validation. Every rejection
+ * happens before the client is called, so an invalid body never reaches the
+ * WhatsApp socket; the client repeats the checks as defense in depth.
+ * ------------------------------------------------------------------------ */
+
+/** Direct-message JIDs only: no groups, channels, broadcasts or malformed ids. */
+const novedadesStatusDirectJid = /^\d{1,20}(?::\d{1,3})?@(?:s\.whatsapp\.net|c\.us|lid)$/;
+
+/**
+ * Canonical addressing of a person, not of one handset: the `:device` suffix
+ * and the `@c.us` spelling are stripped or mapped, and spellings of the same
+ * contact collapse in first-occurrence order. The client re-canonicalizes
+ * before `statusJidList`, so this keeps the forwarded list and the echoed
+ * count equal to the audience that will actually be addressed.
+ */
+function parseNovedadesStatusRecipients(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0)
+    throw new CapabilityError(
+      'INVALID_CAPABILITY_INPUT',
+      'recipients must be a non-empty array of direct WhatsApp JIDs'
+    );
+  if (value.length > NOVEDADES_STATUS_RECIPIENTS_MAX)
+    throw new CapabilityError(
+      'INVALID_CAPABILITY_INPUT',
+      `recipients must not exceed ${NOVEDADES_STATUS_RECIPIENTS_MAX} entries`
+    );
+  const canonical = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string')
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        'recipients must contain WhatsApp JID strings'
+      );
+    const bare = stripAccountKey(entry.trim());
+    if (!novedadesStatusDirectJid.test(bare))
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        `recipients must be direct WhatsApp JIDs, got ${entry}`
+      );
+    canonical.add(bare.replace(/:\d+@/, '@').replace(/@c\.us$/, '@s.whatsapp.net'));
+  }
+  return Array.from(canonical);
+}
+
+function decodeNovedadesStatusData(value: unknown): Buffer {
+  if (typeof value !== 'string')
+    throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'data must be a base64 string');
+  const compact = value.replace(/\s/g, '');
+  if (
+    !compact ||
+    compact.length % 4 !== 0 ||
+    // A group-repetition regex blows V8's stack on ten-megabyte payloads, so
+    // the shape gate is linear; the canonical round trip below is the real
+    // correctness check (it rejects stray bits and misplaced padding).
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)
+  )
+    throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'data must be valid base64');
+  const bytes = Buffer.from(compact, 'base64');
+  // A canonical round trip rejects non-canonical payloads (stray bits in the
+  // last quantum) that a lenient decode would silently accept.
+  if (bytes.length === 0 || bytes.toString('base64') !== compact)
+    throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'data must be valid base64');
+  if (bytes.length > NOVEDADES_STATUS_MEDIA_MAX_BYTES)
+    throw new CapabilityError(
+      'INVALID_CAPABILITY_INPUT',
+      `status media must not exceed ${NOVEDADES_STATUS_MEDIA_MAX_BYTES} decoded bytes`
+    );
+  return bytes;
+}
+
+function parseNovedadesStatusInput(body: Record<string, unknown>): NovedadesStatusPublishInput {
+  const type = body.type;
+  if (type !== 'text' && type !== 'image' && type !== 'video')
+    throw new CapabilityError(
+      'INVALID_CAPABILITY_INPUT',
+      "type must be one of 'text', 'image' or 'video'"
+    );
+  const recipients = parseNovedadesStatusRecipients(body.recipients);
+
+  if (body.text !== undefined && typeof body.text !== 'string')
+    throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'text must be a string');
+  const text = typeof body.text === 'string' && body.text.trim() ? body.text : undefined;
+
+  let backgroundColor: string | undefined;
+  if (body.backgroundColor !== undefined && body.backgroundColor !== null) {
+    if (
+      typeof body.backgroundColor !== 'string' ||
+      !/^#?(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(body.backgroundColor.trim())
+    )
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        'backgroundColor must be a 6 or 8 digit hex color'
+      );
+    backgroundColor = body.backgroundColor.trim();
+  }
+
+  let font: number | undefined;
+  if (body.font !== undefined && body.font !== null) {
+    if (
+      typeof body.font !== 'number' ||
+      !Number.isInteger(body.font) ||
+      body.font < NOVEDADES_STATUS_FONT_MIN ||
+      body.font > NOVEDADES_STATUS_FONT_MAX
+    )
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        `font must be an integer between ${NOVEDADES_STATUS_FONT_MIN} and ${NOVEDADES_STATUS_FONT_MAX}`
+      );
+    font = body.font;
+  }
+
+  const textStyle = {
+    ...(backgroundColor ? { backgroundColor } : {}),
+    ...(font ? { font } : {}),
+  };
+
+  if (type === 'text') {
+    if (body.data !== undefined || body.mimeType !== undefined)
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        'data and mimeType only apply to image or video statuses'
+      );
+    if (!text)
+      throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'text is required for a text status');
+    return { type, text, recipients, ...textStyle };
+  }
+
+  // Media captions are capped at the width the app composer enforces, so a
+  // direct connector call cannot carry a caption the UI would never allow.
+  if (text && text.length > NOVEDADES_STATUS_CAPTION_MAX_CHARS)
+    throw new CapabilityError(
+      'INVALID_CAPABILITY_INPUT',
+      `text caption must not exceed ${NOVEDADES_STATUS_CAPTION_MAX_CHARS} characters`
+    );
+  if (body.data === undefined || body.data === null)
+    throw new CapabilityError('INVALID_CAPABILITY_INPUT', `data is required for a ${type} status`);
+  const data = decodeNovedadesStatusData(body.data);
+  const mimeType =
+    typeof body.mimeType === 'string' ? body.mimeType.split(';', 1)[0].trim().toLowerCase() : '';
+  const allowed =
+    type === 'image' ? NOVEDADES_STATUS_IMAGE_MIME_TYPES : NOVEDADES_STATUS_VIDEO_MIME_TYPES;
+  if (!allowed.has(mimeType))
+    throw new CapabilityError(
+      'INVALID_CAPABILITY_INPUT',
+      `mimeType must be one of ${Array.from(allowed).join(', ')} for a ${type} status`
+    );
+  return { type, data, mimeType, ...(text ? { text } : {}), recipients };
+}
 
 function statusForSendFailure(
   failureClass: WhatsAppSendFailureClass | 'disabled_sending' | 'invalid_request'
@@ -38,9 +522,71 @@ function statusForSendFailure(
   return 500;
 }
 
+/**
+ * The first-contact guard of a 1:1 send (or another classified send failure)
+ * keeps its status — 403 account_restricted — on routes that otherwise
+ * answer 500.
+ */
+function directSendRefused(res: Response, error: unknown): boolean {
+  if (!(error instanceof WhatsAppSendError)) return false;
+  const failureClass = classifyWhatsAppSendFailure(error);
+  res.status(statusForSendFailure(failureClass)).json({ error: errorMessage(error), failureClass });
+  return true;
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || String(error);
   return String(error);
+}
+
+function readJson(res: Response, operation: () => Promise<unknown>): void {
+  void operation()
+    .then(data => res.json(data))
+    .catch(error => res.status(500).json({ error: String(error) }));
+}
+
+function capabilityErrorResponse(res: Response, error: unknown): void {
+  if (error instanceof MessageUnavailableError) {
+    res
+      .status(error.status)
+      .json({ ok: false, error: { code: error.failureClass, message: error.message } });
+    return;
+  }
+  if (error instanceof ContactBlockError) {
+    res
+      .status(error.status)
+      .json({ ok: false, error: { code: 'CONTACT_BLOCK_ERROR', message: error.message } });
+    return;
+  }
+  if (error instanceof EventSendError || error instanceof PinSendError) {
+    res
+      .status(error.status)
+      .json({ ok: false, error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof StructuredSendError) {
+    res.status(error.status).json({
+      ok: false,
+      error: { code: error.code, message: error.message, details: error.details || undefined },
+    });
+    return;
+  }
+  if (error instanceof CommunityError) {
+    res
+      .status(error.status)
+      .json({ ok: false, error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof CapabilityError) {
+    res.status(error.status).json({
+      ok: false,
+      error: { code: error.code, message: error.message, details: error.details || undefined },
+    });
+    return;
+  }
+  res
+    .status(500)
+    .json({ ok: false, error: { code: 'CONNECTOR_ERROR', message: errorMessage(error) } });
 }
 
 function phoneFromDirectWhatsAppId(chatId: unknown): string | null {
@@ -68,6 +614,32 @@ function accountRestrictedFallback(
   };
 }
 
+function requiredStructuredChat(body: Record<string, unknown>, res: Response): string | null {
+  const chatId = optionalString(body.conversationId ?? body.chatId);
+  if (chatId) return chatId;
+  res.status(400).json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+  return null;
+}
+
+function validResultIds(
+  chatId: string | undefined,
+  ids: unknown[],
+  res: Response
+): ids is string[] {
+  if (
+    chatId &&
+    ids.length &&
+    ids.length <= 50 &&
+    ids.every(id => typeof id === 'string' && id.trim() && id.length <= 512)
+  )
+    return true;
+  res.status(400).json({
+    error: 'conversationId and 1 to 50 message IDs are required',
+    failureClass: 'invalid_request',
+  });
+  return false;
+}
+
 function optionalString(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
   const text = String(value).trim();
@@ -78,6 +650,105 @@ function optionalObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+/**
+ * Edits, deletes and reactions go out to WhatsApp: the same two kill switches
+ * as sends. Answers 403 and returns true when sending is off.
+ */
+function rejectWhenSendingDisabled(res: Response): boolean {
+  const disabled = process.env.ENABLE_SENDING !== 'true';
+  if (!disabled && process.env.EMERGENCY_DISABLE_SENDING !== 'true') return false;
+  res.status(statusForSendFailure('disabled_sending')).json({
+    error: disabled ? 'Sending is disabled' : 'Sending is emergency disabled',
+    failureClass: 'disabled_sending',
+  });
+  return true;
+}
+
+/** Optional `actor` of a mutation body: who asked, for the record (≤ 200 chars). */
+function actorFromBody(value: unknown): string | undefined {
+  const actor = typeof value === 'string' ? value.trim() : '';
+  return actor ? actor.slice(0, 200) : undefined;
+}
+
+/** Error of an edit/delete/reaction → status + failureClass (same classes as sends). */
+function mutationErrorResponse(res: Response, error: unknown, what: string): void {
+  if (error instanceof PollEventInputError) {
+    res.status(error.status).json({
+      error: error.message,
+      failureClass: error.failureClass,
+      ...(error.details ? { details: error.details } : {}),
+    });
+    return;
+  }
+  if (error instanceof MessageUnavailableError || error instanceof MessageMutationError) {
+    res.status(error.status).json({
+      error: error.message,
+      failureClass: error.failureClass,
+      ...(error instanceof MessageMutationError && error.code ? { code: error.code } : {}),
+      // Group actions: per-participant results, what was already applied.
+      ...(error instanceof GroupActionError && error.details ? error.details : {}),
+    });
+    return;
+  }
+  const failureClass = classifyWhatsAppSendFailure(error);
+  res.status(statusForSendFailure(failureClass)).json({
+    error: `Failed to ${what}: ${errorMessage(error)}`,
+    failureClass,
+  });
+}
+
+/** Longest timed mute accepted; beyond that, mute without an end ("always"). */
+const MAX_MUTE_MS = 366 * 24 * 60 * 60 * 1000;
+
+/**
+ * Mute end of a /chats/modify body: `durationMs` (from now) or `muteUntil`
+ * (ISO-8601 or epoch ms), neither = forever. A string is the 400 reason.
+ */
+function muteFromBody(body: Record<string, unknown>): MuteState | string {
+  const hasDuration = body.durationMs !== undefined && body.durationMs !== null;
+  const hasUntil = body.muteUntil !== undefined && body.muteUntil !== null;
+  if (hasDuration && hasUntil) return 'Pass durationMs or muteUntil, not both';
+  const now = Date.now();
+  let until: number | undefined;
+  if (hasDuration) {
+    const ms = typeof body.durationMs === 'number' ? body.durationMs : Number(body.durationMs);
+    if (!Number.isInteger(ms) || ms <= 0) return 'durationMs must be a positive integer';
+    until = now + ms;
+  } else if (hasUntil) {
+    const raw = body.muteUntil;
+    until = typeof raw === 'number' ? raw : typeof raw === 'string' ? Date.parse(raw) : NaN;
+    if (!Number.isFinite(until) || until <= now) return 'muteUntil must be a future time';
+  }
+  if (until !== undefined && until - now > MAX_MUTE_MS) {
+    return 'A timed mute is at most 366 days (omit durationMs / muteUntil to mute always)';
+  }
+  return { until: until === undefined ? null : new Date(until) };
+}
+
+/** ProfileError → its status + failureClass (and code / details); anything else as a mutation error. */
+function profileErrorResponse(res: Response, error: unknown, what: string): void {
+  if (error instanceof ProfileError) {
+    const { code, ...details } = error.details || {};
+    res.status(error.status).json({
+      error: error.message,
+      failureClass: profileFailureClass(error),
+      code: typeof code === 'string' ? code : error.code,
+      ...(Object.keys(details).length ? { details } : {}),
+    });
+    return;
+  }
+  mutationErrorResponse(res, error, what);
+}
+
+function rejectWhenDisconnected(client: BaileysClient, res: Response): boolean {
+  if (client.isConnected()) return false;
+  res.status(statusForSendFailure('disconnected')).json({
+    error: `WhatsApp is not connected (state=${client.getCachedState() || 'unknown'})`,
+    failureClass: 'disconnected',
+  });
+  return true;
 }
 
 function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
@@ -93,6 +764,137 @@ function statusFromBody(value: unknown): WhatsAppManualOpenStatus | null {
     return status;
   }
   return null;
+}
+
+/**
+ * One send under an explicit Idempotency-Key (fase 3 / PR-2). `beforeSend`
+ * claims the attempt right before the network send; `claimed` says whether it
+ * did, i.e. whether a failure may have reached WhatsApp.
+ */
+interface IdempotentSend {
+  key: string;
+  messageId?: string;
+  claimed: boolean;
+  beforeSend: () => Promise<void>;
+}
+
+function uncertainOutcomeBody(messageId: string | undefined): Record<string, unknown> {
+  return {
+    error:
+      'The outcome of an earlier send with this Idempotency-Key is unknown; check the chat before sending again',
+    failureClass: 'send_outcome_uncertain',
+    messageId,
+  };
+}
+
+// CONTRACT: http.whatsapp-connector.send-idempotency.v1 — opt-in Idempotency-Key, replay + deduplicated, 409 idempotency_key_reused / send_outcome_uncertain
+/**
+ * Opt-in idempotency for a send route. Returns null when the request carries
+ * no key (or the client keeps no DB state, or the store is unavailable): the
+ * route then runs its legacy path, byte for byte. 'answered' when the response
+ * is already sent (invalid key, replay, 409).
+ */
+async function beginIdempotentSend(
+  client: BaileysClient,
+  req: AuthenticatedRequest,
+  res: Response,
+  requestHash: () => string,
+  replayBody: (reservation: SendReservation) => Record<string, unknown>
+): Promise<IdempotentSend | null | 'answered'> {
+  const { key, error } = readIdempotencyKey(req.headers, req.body);
+  if (error) {
+    res.status(400).json({ error, failureClass: 'invalid_request' });
+    return 'answered';
+  }
+  // SC-1225: a pairing-only client (ingest off) never touches the table.
+  if (!key || !client.isIngestEnabled()) return null;
+  const hash = requestHash();
+  const reservation = await reserveSend(key, hash);
+  switch (reservation.state) {
+    case 'unavailable':
+      return null;
+    case 'conflict':
+      res.status(409).json({
+        error: 'Idempotency-Key was already used for a different request',
+        failureClass: 'idempotency_key_reused',
+      });
+      return 'answered';
+    case 'pending':
+      res.status(409).json(uncertainOutcomeBody(reservation.messageId));
+      return 'answered';
+    case 'sent':
+      console.info(`WhatsApp send replayed messageId=${reservation.messageId || ''}`);
+      res.json({ ...replayBody(reservation), deduplicated: true });
+      return 'answered';
+    default: {
+      const attempt: IdempotentSend = {
+        key,
+        messageId: reservation.messageId,
+        claimed: false,
+        beforeSend: async () => {
+          await claimSendAttempt(key, hash);
+          attempt.claimed = true;
+        },
+      };
+      return attempt;
+    }
+  }
+}
+
+/** Error path of an idempotent send: true when the response was answered here. */
+async function failIdempotentSend(
+  attempt: IdempotentSend | null,
+  error: unknown,
+  res: Response
+): Promise<boolean> {
+  if (!attempt) return false;
+  if (error instanceof SendAlreadyClaimedError) {
+    res.status(409).json(uncertainOutcomeBody(attempt.messageId));
+    return true;
+  }
+  await recordSendFailure(attempt.key, attempt.claimed, error);
+  return false;
+}
+
+/**
+ * Polls, votes, events and responses (fase 3 / PR-7): the send gate, the
+ * connection and the opt-in Idempotency-Key, after the body was validated.
+ * null when the response was already sent (403 / 503 / replay / 409);
+ * otherwise the attempt (null inside when there is no key) to hand the client.
+ */
+async function beginStructuredSend(
+  client: BaileysClient,
+  req: AuthenticatedRequest,
+  res: Response,
+  requestHash: () => string
+): Promise<{ attempt: IdempotentSend | null } | null> {
+  if (rejectWhenSendingDisabled(res)) return null;
+  if (rejectWhenDisconnected(client, res)) return null;
+  const begun = await beginIdempotentSend(client, req, res, requestHash, reservation => ({
+    messageId: reservation.messageId,
+    sentAt: reservation.sentAt,
+    ok: true,
+    sent: true,
+  }));
+  if (begun === 'answered') return null;
+  return { attempt: begun };
+}
+
+function structuredSendOptions(attempt: IdempotentSend | null, actor: string | undefined) {
+  return attempt
+    ? { messageId: attempt.messageId, beforeSend: attempt.beforeSend, actor }
+    : { actor };
+}
+
+/** Error path of a structured send: the idempotency bookkeeping, then the usual mapping. */
+async function failStructuredSend(
+  attempt: IdempotentSend | null,
+  error: unknown,
+  res: Response,
+  what: string
+): Promise<void> {
+  if (await failIdempotentSend(attempt, error, res)) return;
+  mutationErrorResponse(res, error, what);
 }
 
 function manualOpenIdempotencyKey(phoneE164: string, text: string): string {
@@ -111,7 +913,7 @@ function createManualOpenAuth(
   return (req, res, next): void => {
     const authz = req.headers.authorization || '';
     const bearer = authz.startsWith('Bearer ') ? authz.slice('Bearer '.length).trim() : '';
-    if (adminToken && bearer && bearer === adminToken) {
+    if (adminToken && bearer && secretEquals(bearer, adminToken)) {
       next();
       return;
     }
@@ -273,16 +1075,31 @@ load();
 </html>`;
 }
 
+// Alias de la app (whatsapp.e-dani.com): la app pone el id en la ruta y firma el
+// body que manda; las rutas planas lo leen del body. El merge va DESPUÉS del
+// HMAC (que firma JSON.stringify(req.body)) y reutiliza el mismo handler.
+function mergePathParam(req: AuthenticatedRequest, param: string, field: string): void {
+  const raw = req.params[param];
+  if (typeof raw !== 'string') return;
+  const body = optionalObject(req.body);
+  if (body[field] === undefined) body[field] = decodeURIComponent(raw);
+  req.body = body;
+}
+
 export function createRouter(
   client: BaileysClient,
   qrHandler: QRHandler,
-  sharedSecret: string
+  sharedSecret: string,
+  /** Test seam: a reader bound to another store. Defaults to the live store. */
+  novedadesReader?: NovedadesReader
 ): express.Router {
   const router = express.Router();
+  router.use(createConnectorAccess(sharedSecret));
   const auth = createHMACAuth(sharedSecret);
   const manualOpenAuth = createManualOpenAuth(auth, sharedSecret);
+  const novedades = novedadesReader ?? createNovedadesReader({ ports: novedadesPorts(client) });
 
-  // Health check (no auth required)
+  // Detailed health requires authentication; access middleware provides anonymous liveness.
   router.get('/health', (_req: Request, res: Response) => {
     const qr = qrHandler.getCurrentQR();
     const connected = client.isConnected();
@@ -500,19 +1317,9 @@ export function createRouter(
     })();
   });
 
-  // Get QR code (no auth required for local dev)
-  // CONTRACT: http.whatsapp-connector.auth-qr — path, no-auth and {qrCode, expiresAt} are frozen
-  router.get('/auth/qr', (req: Request, res: Response) => {
-    const qr = qrHandler.getCurrentQR();
-    if (!qr) {
-      res.status(404).json({ error: 'No QR code available' });
-      return;
-    }
-    res.json({
-      qrCode: qr.qrCode,
-      expiresAt: qr.expiresAt.toISOString(),
-    });
-  });
+  // CONTRACT: http.whatsapp-connector.auth-qr.v3 — auth, path and response are frozen.
+  // The connector access middleware protects this QR response.
+  router.get('/auth/qr', (_req: Request, res: Response) => sendCurrentQR(qrHandler, res));
 
   // Logout and clear session (requires auth)
   router.post('/auth/logout', auth, (req: AuthenticatedRequest, res: Response): void => {
@@ -534,7 +1341,7 @@ export function createRouter(
     void (async (): Promise<void> => {
       let requestConversationId: unknown;
       let requestContent: unknown;
-      let requestSendToken: unknown;
+      let idempotent: IdempotentSend | null = null;
       try {
         const body = req.body as {
           sendToken?: string;
@@ -543,11 +1350,18 @@ export function createRouter(
           replyToMessageId?: string;
         };
         const { sendToken, conversationId, content, replyToMessageId } = body;
-        requestSendToken = sendToken;
         requestConversationId = conversationId;
         requestContent = content;
 
-        if (!sendToken || !conversationId || !content) {
+        if (
+          typeof sendToken !== 'string' ||
+          !sendToken.trim() ||
+          sendToken.length > 200 ||
+          typeof conversationId !== 'string' ||
+          !conversationId ||
+          typeof content !== 'string' ||
+          !content
+        ) {
           console.warn(
             `WhatsApp send rejected failureClass=invalid_request conversationId=${conversationId || ''}`
           );
@@ -558,8 +1372,6 @@ export function createRouter(
           return;
         }
 
-        // In production, validate sendToken here
-        // For now, we'll just check if sending is enabled
         if (process.env.ENABLE_SENDING !== 'true') {
           console.warn(
             `WhatsApp send blocked failureClass=disabled_sending conversationId=${conversationId}`
@@ -594,16 +1406,40 @@ export function createRouter(
           return;
         }
 
-        const messageId = await client.sendMessage(conversationId, content, { replyToMessageId });
+        // Opt-in: only an explicit Idempotency-Key, never sendToken (callers reuse it).
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () => textRequestHash({ conversationId, content, replyToMessageId }),
+          reservation => ({ messageId: reservation.messageId, sentAt: reservation.sentAt })
+        );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        const messageId = await client.sendMessage(
+          conversationId,
+          content,
+          idempotent
+            ? {
+                replyToMessageId,
+                messageId: idempotent.messageId,
+                beforeSend: idempotent.beforeSend,
+              }
+            : { replyToMessageId }
+        );
         console.info(
           `WhatsApp send ok conversationId=${conversationId} messageId=${messageId || ''}`
         );
 
         res.json({
           messageId,
-          sentAt: new Date().toISOString(),
+          sentAt: idempotent
+            ? await confirmSend(idempotent.key, messageId)
+            : new Date().toISOString(),
         });
       } catch (error) {
+        if (await failIdempotentSend(idempotent, error, res)) return;
         const failureClass = classifyWhatsAppSendFailure(error);
         const details = (error as any)?.details || {};
         console.error(
@@ -621,7 +1457,7 @@ export function createRouter(
             const manualRequest = await enqueueManualOpenFromSendFailure(
               details.normalizedJid || details.rawJid || requestConversationId,
               requestContent,
-              requestSendToken,
+              undefined,
               details
             );
             if (manualRequest) fallback.manualRequest = manualRequest;
@@ -635,6 +1471,9 @@ export function createRouter(
           actionable: details.actionable,
           details,
           fallback,
+          ...(idempotent?.claimed
+            ? { messageId: idempotent.messageId, outcomeUncertain: true }
+            : {}),
         });
       }
     })();
@@ -643,16 +1482,39 @@ export function createRouter(
   // Send a voice note (requires auth) — {conversationId, audioBase64, mimeType}
   router.post('/messages/audio', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
+      let idempotent: IdempotentSend | null = null;
       try {
         const body = req.body as {
           conversationId?: string;
           audioBase64?: string;
           mimeType?: string;
+          sendToken?: string;
+          sourceDigest?: string;
+          sourceMimeType?: string;
+          viewOnce?: boolean;
         };
-        const { conversationId, audioBase64, mimeType } = body;
+        const { conversationId, audioBase64, mimeType, sendToken, sourceDigest, sourceMimeType } =
+          body;
 
-        if (!conversationId || !audioBase64) {
-          res.status(400).json({ error: 'Missing conversationId or audioBase64' });
+        if (
+          !conversationId ||
+          !audioBase64 ||
+          (body.viewOnce !== undefined && typeof body.viewOnce !== 'boolean') ||
+          (sendToken !== undefined &&
+            (typeof sendToken !== 'string' || !sendToken.trim() || sendToken.length > 200))
+        ) {
+          res.status(400).json({
+            error:
+              'Missing or invalid conversationId, audioBase64, viewOnce (must be a boolean), or sendToken',
+          });
+          return;
+        }
+        // A voice note is a ptt audio clip; WhatsApp has no play-once voice.
+        if (body.viewOnce === true) {
+          res.status(400).json({
+            error: 'viewOnce is only supported for image and video messages',
+            failureClass: 'invalid_request',
+          });
           return;
         }
         if (
@@ -673,61 +1535,301 @@ export function createRouter(
           return;
         }
 
-        const buf = Buffer.from(audioBase64, 'base64');
-        const messageId = await client.sendVoice(
-          conversationId,
-          buf,
-          mimeType || 'audio/ogg; codecs=opus'
+        const effectiveMimeType = mimeType || 'audio/ogg; codecs=opus';
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () =>
+            voiceRequestHash({
+              conversationId,
+              audioBase64,
+              mimeType: effectiveMimeType,
+              sourceDigest,
+              sourceMimeType,
+            }),
+          reservation => ({ messageId: reservation.messageId, sentAt: reservation.sentAt })
         );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        const buf = Buffer.from(audioBase64, 'base64');
+        const messageId = idempotent
+          ? await client.sendVoice(conversationId, buf, effectiveMimeType, {
+              messageId: idempotent.messageId,
+              beforeSend: idempotent.beforeSend,
+            })
+          : await client.sendVoice(conversationId, buf, effectiveMimeType);
         console.info(
           `WhatsApp voice sent conversationId=${conversationId} messageId=${messageId || ''}`
         );
-        res.json({ messageId, sentAt: new Date().toISOString() });
+        res.json({
+          messageId,
+          sentAt: idempotent
+            ? await confirmSend(idempotent.key, messageId)
+            : new Date().toISOString(),
+        });
       } catch (error) {
+        if (await failIdempotentSend(idempotent, error, res)) return;
         const failureClass = classifyWhatsAppSendFailure(error);
         res.status(statusForSendFailure(failureClass)).json({
           error: `Failed to send voice: ${errorMessage(error)}`,
           failureClass,
+          ...(idempotent?.claimed
+            ? { messageId: idempotent.messageId, outcomeUncertain: true }
+            : {}),
         });
       }
     })();
   });
 
-  // React to a message (requires auth)
+  // React to a message ('' removes our reaction). Fase 3 / PR-4: same gate
+  // as every send, the key survives restarts, an unknown message is a 404
+  // instead of a silent 200, and the reaction is recorded.
+  // CONTRACT: http.whatsapp-connector.messages-react.v1 — body {conversationId, messageId, emoji}, 200 {reacted, emoji, messageId, reactedAt}
   router.post('/messages/react', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async (): Promise<void> => {
       try {
-        const body = req.body as { conversationId?: string; messageId?: string; emoji?: string };
-        const { conversationId, messageId, emoji } = body;
-
-        // Empty `emoji` is a valid signal to REMOVE the reaction. Baileys
-        // accepts `{ react: { text: '', key } }` for un-react.
-        if (!conversationId || !messageId) {
-          res.status(400).json({ error: 'Missing conversationId or messageId' });
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId);
+        const emoji = body.emoji ?? '';
+        if (!chatId || !messageId || typeof emoji !== 'string') {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId (emoji must be a string)',
+            failureClass: 'invalid_request',
+          });
           return;
         }
-
-        if (process.env.ENABLE_SENDING !== 'true') {
-          res.status(403).json({ error: 'Sending is disabled' });
-          return;
-        }
-
-        await client.reactToMessage(conversationId, messageId, emoji || '');
-
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.reactToMessage(chatId, messageId, emoji);
         res.json({
           reacted: true,
-          emoji: emoji || '',
+          emoji: result.emoji,
+          // As before: the id the caller sent (bare or namespaced).
           messageId,
-          reactedAt: new Date().toISOString(),
+          reactionId: result.reactionId,
+          reactedAt: result.reactedAt,
         });
       } catch (error) {
-        res.status(500).json({ error: 'Failed to react: ' + String(error) });
+        mutationErrorResponse(res, error, 'react');
+      }
+    })();
+  });
+
+  // Polls and events (fase 3 / PR-7). Ids inside the signed body. The body is
+  // validated first (400), then — for the four that reach people — the same
+  // gate as every send (403), the connection (503) and the opt-in
+  // Idempotency-Key (PR-2). Results are reads: no gate.
+
+  // CONTRACT: http.whatsapp-connector.messages-poll.v1 — body {conversationId, name, options[2..12], selectableCount?, actor?}, 200 {sent, messageId, conversationId, sentAt}
+  router.post('/messages/poll', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = requiredStructuredChat(body, res);
+        if (!chatId) return;
+        const poll = validatePollInput({
+          name: body.name,
+          options: body.options ?? body.values,
+          selectableCount: body.selectableCount,
+        });
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('poll', chatId, poll)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.sendPoll(
+          chatId,
+          poll,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          sent: true,
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'send poll');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-poll-vote.v1 — body {conversationId, messageId, options[], actor?} ([] retracts), 200 {voted, messageId, pollMessageId, conversationId, options, retracted, votedAt, persisted}
+  // CONTRACT: http.whatsapp-connector.poll-vote.v2 — explicit idempotency keys preserve the fork retry contract.
+  router.post('/messages/poll/vote', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId ?? body.pollMessageId);
+        const options = body.options;
+        if (
+          !chatId ||
+          !messageId ||
+          !Array.isArray(options) ||
+          options.some(option => typeof option !== 'string')
+        ) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId, or options is not a list of option names',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('poll-vote', chatId, { messageId, options })
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.sendPollVote(
+          chatId,
+          messageId,
+          options,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        if (attempt) await confirmSend(attempt.key, result.messageId);
+        res.json({ voted: true, ok: true, sent: true, ...result });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'vote');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-poll-results.v1 — body {conversationId, messageId}, 200 {poll: {messageId, conversationId, question, selectableCount, options: [{name, votes, voters}], totalVoters, myVote, persisted}}
+  router.post('/messages/poll/results', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (Array.isArray(body.pollMessageIds)) {
+          const ids = body.pollMessageIds;
+          if (!validResultIds(chatId, ids, res) || !chatId) return;
+          const entries = await client.getPollResults(chatId, ids);
+          res.json({ ok: true, polls: entries });
+          return;
+        }
+        const messageId = optionalString(body.messageId);
+        if (!chatId || !messageId) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        res.json({ poll: await client.getPollResults(chatId, messageId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read poll results');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-event.v1 — body {conversationId, name, description?, startTime, endTime?, location?, call?, extraGuestsAllowed?, actor?}, 200 {sent, messageId, conversationId, sentAt}
+  router.post('/messages/event', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = requiredStructuredChat(body, res);
+        if (!chatId) return;
+        const event = validateEventInput({
+          ...body,
+          startTime: body.startTime ?? body.startDate,
+          endTime: body.endTime ?? body.endDate,
+          isCanceled: body.isCanceled ?? body.isCancelled,
+        });
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('event', chatId, event)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.sendEvent(
+          chatId,
+          event,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          sent: true,
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'send event');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-event-respond.v1 — body {conversationId, messageId, response: going|not_going|maybe, extraGuestCount?, actor?}, 200 {responded, messageId, eventMessageId, conversationId, response, extraGuestCount, respondedAt, persisted}
+  router.post('/messages/event/respond', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const messageId = optionalString(body.messageId ?? body.eventMessageId);
+        if (!chatId || !messageId) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const answer = validateEventResponse(
+          body.response ?? body.attendance,
+          body.extraGuestCount
+        );
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('event-response', chatId, { messageId, ...answer })
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.respondToEvent(
+          chatId,
+          messageId,
+          answer,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        if (attempt) await confirmSend(attempt.key, result.messageId);
+        res.json({ responded: true, ...result });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'respond to event');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-event-results.v1 — body {conversationId, messageId}, 200 {event: {messageId, conversationId, name, startTime, endTime, location, isCanceled, counts, extraGuests, responses, myResponse, persisted}}
+  router.post('/messages/event/results', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        if (Array.isArray(body.eventMessageIds)) {
+          const ids = body.eventMessageIds;
+          if (!validResultIds(chatId, ids, res) || !chatId) return;
+          const entries = await client.getEventResults(chatId, ids);
+          res.json({ ok: true, events: entries });
+          return;
+        }
+        const messageId = optionalString(body.messageId);
+        if (!chatId || !messageId) {
+          res.status(400).json({
+            error: 'Missing conversationId or messageId',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        res.json({ event: await client.getEventResults(chatId, messageId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read event results');
       }
     })();
   });
 
   // History sync endpoint
-  router.post('/history/sync', (req: Request, res: Response): void => {
+  // CONTRACT: http.whatsapp-connector.history-sync.v1 — POST ?limit= (signed over "{}"), 200 {status, limit, message}, 503 {error}
+  router.post('/history/sync', auth, (req: AuthenticatedRequest, res: Response): void => {
     const limit = parseInt((req.query as any).limit || '500', 10);
 
     if (!client.isConnected()) {
@@ -760,7 +1862,8 @@ export function createRouter(
   });
 
   // Get chat history
-  router.get('/history/:chatId', (req: Request, res: Response): void => {
+  // CONTRACT: http.whatsapp-connector.history-chat.v1 — GET ?limit= (signed over "{}"), 200 {chatId, count, messages}, 500 {error}
+  router.get('/history/:chatId', auth, (req: AuthenticatedRequest, res: Response): void => {
     const chatId = req.params.chatId;
     const limit = parseInt((req.query as any).limit || '100', 10);
 
@@ -775,6 +1878,22 @@ export function createRouter(
   });
 
   // Request older Baileys history for chats where we have persisted message keys.
+  // CONTRACT: http.whatsapp-connector.history-recover.v2
+  router.post('/history/recover', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const chatId = req.body?.chatId;
+        if (typeof chatId !== 'string' || !chatId.trim()) {
+          res.status(400).json({ error: 'chatId required', failureClass: 'invalid_request' });
+          return;
+        }
+        res.json(await client.recoverChatHistory(chatId));
+      } catch (error) {
+        mutationErrorResponse(res, error, 'recover chat history');
+      }
+    })();
+  });
+
   router.post('/history/backfill', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
@@ -794,28 +1913,198 @@ export function createRouter(
   });
 
   // Get authenticated account info
-  router.get('/me', auth, (req: AuthenticatedRequest, res: Response): void => {
+  router.get('/me', auth, (_req: Request, res: Response): void => {
+    readJson(res, () => client.getMe());
+  });
+
+  // ---------------------------------------------------------------------
+  // Own account profile (display name, about, profile photo).
+  //
+  // Reads only issue provider lookups (IQ get / USync) and never mutate the
+  // account. Writes change the live WhatsApp account, so they obey the same
+  // emergency gates as message sending. Every response carries the connector
+  // account so a caller can prove which number was touched.
+  // ---------------------------------------------------------------------
+  const profileGateFailure = (): { status: number; code: string; message: string } | null => {
+    if (process.env.ENABLE_SENDING !== 'true') {
+      return {
+        status: 403,
+        code: 'SENDING_DISABLED',
+        message: 'Profile changes are disabled while sending is disabled',
+      };
+    }
+    if (process.env.EMERGENCY_DISABLE_SENDING === 'true') {
+      return {
+        status: 403,
+        code: 'EMERGENCY_DISABLE_SENDING',
+        message: 'Profile changes are blocked by the emergency switch',
+      };
+    }
+    return null;
+  };
+
+  const forkProfileErrorResponse = (res: Response, error: unknown): void => {
+    if (error instanceof ProfileError) {
+      res.status(error.status).json({
+        ok: false,
+        account: connectorAccount(),
+        error: { code: error.code, message: error.message, details: error.details },
+      });
+      return;
+    }
+    capabilityErrorResponse(res, error);
+  };
+
+  const updateOwnProfile = (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      const gate = profileGateFailure();
+      if (gate) {
+        console.warn(
+          `WhatsApp profile update blocked code=${gate.code} account=${connectorAccount()}`
+        );
+        res.status(gate.status).json({
+          ok: false,
+          account: connectorAccount(),
+          error: { code: gate.code, message: gate.message },
+        });
+        return;
+      }
+      try {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const input: { name?: unknown; about?: unknown } = {};
+        if ('name' in body) input.name = body.name;
+        if ('about' in body) input.about = body.about;
+        const data = await client.updateOwnProfile(input);
+        res.json({ ok: true, account: connectorAccount(), data });
+      } catch (error) {
+        forkProfileErrorResponse(res, error);
+      }
+    })();
+  };
+
+  router.patch('/profile/me', auth, updateOwnProfile);
+
+  router.delete('/profile/me/photo', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      const gate = profileGateFailure();
+      if (gate) {
+        res.status(gate.status).json({
+          ok: false,
+          account: connectorAccount(),
+          error: { code: gate.code, message: gate.message },
+        });
+        return;
+      }
+      try {
+        res.json({
+          ok: true,
+          account: connectorAccount(),
+          data: await client.removeOwnProfilePhoto(),
+        });
+      } catch (error) {
+        forkProfileErrorResponse(res, error);
+      }
+    })();
+  });
+
+  // The account's own photo bytes, mirroring the shape of /chats/:jid/photo so
+  // the app can proxy it without learning any provider URL.
+  router.get('/profile/me/photo', auth, (_req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
-        const me = await client.getMe();
-        res.json(me);
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
+        const bytes = await client.getOwnProfilePhotoBytes();
+        if (!bytes) {
+          res.status(404).json({
+            ok: false,
+            account: connectorAccount(),
+            error: {
+              code: 'PROFILE_PHOTO_UNAVAILABLE',
+              message: 'This account has no profile photo',
+            },
+          });
+          return;
+        }
+        res.json({
+          ok: true,
+          account: connectorAccount(),
+          data: {
+            data: bytes.toString('base64'),
+            size: bytes.length,
+            contentType: 'image/jpeg',
+          },
+        });
+      } catch (error) {
+        forkProfileErrorResponse(res, error);
       }
     })();
   });
 
   // Get unread chats
-  router.get('/chats/unread', auth, (req: AuthenticatedRequest, res: Response): void => {
-    void (async () => {
+  router.get('/chats/unread', auth, (_req: Request, res: Response): void => {
+    readJson(res, async () => ({ chats: await client.getUnreadChats() }));
+  });
+
+  // Archive / pin / mute / read-unread a chat (fase 3 / PR-5): an app-state
+  // patch to WhatsApp, same gate as every send, recorded on the canonical
+  // conversation. Ids travel inside the signed body.
+  // CONTRACT: http.whatsapp-connector.chats-modify.v1 — body {conversationId, action, durationMs?, muteUntil?, actor?}, 200 {modified, action, chatId, conversationId, persisted, state}
+  const chatsModifyHandler = (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
       try {
-        const chats = await client.getUnreadChats();
-        res.json({ chats });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.conversationId ?? body.chatId);
+        const action = normalizeChatModifyAction(body.action);
+        if (!chatId || !action) {
+          res.status(400).json({
+            error:
+              'Missing conversationId or action (archive, unarchive, pin, unpin, mute, unmute, markRead, markUnread)',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const mute = action === 'mute' ? muteFromBody(body) : undefined;
+        if (typeof mute === 'string') {
+          res.status(400).json({ error: mute, failureClass: 'invalid_request' });
+          return;
+        }
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.modifyChat(chatId, action, {
+          mute,
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ modified: true, ...result });
+      } catch (error) {
+        mutationErrorResponse(res, error, 'modify chat');
       }
     })();
-  });
+  };
+  router.post('/chats/modify', auth, chatsModifyHandler);
+  // Alias de la app: POST /chats/:chatId/modify (id en la ruta; mute manda
+  // `value` en ms). Mismo handler y mismo gate tras el HMAC.
+  // CONTRACT: http.whatsapp-connector.chats-modify-parameterized.v1
+  router.post(
+    '/chats/:chatId/modify',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      // Capability actions have a dedicated handler below. Skip this route
+      // before merging parameters so its HMAC still sees the signed body.
+      if (req.body?.action === 'star' || req.body?.action === 'unstar') {
+        next('route');
+        return;
+      }
+      mergePathParam(req, 'chatId', 'conversationId');
+      const body = optionalObject(req.body);
+      if (body.action === 'mute' && body.durationMs === undefined && body.muteUntil === undefined) {
+        const value = Number(body.value);
+        if (Number.isFinite(value) && value > 0) body.durationMs = value;
+        delete body.value;
+      }
+      req.body = body;
+      next();
+    },
+    chatsModifyHandler
+  );
 
   // Force app-state resync → persists current unread/archived to the DB.
   router.post('/chats/resync-state', auth, (req: AuthenticatedRequest, res: Response): void => {
@@ -829,14 +2118,43 @@ export function createRouter(
     })();
   });
 
+  router.post(
+    '/chats/archive-snapshot/preview',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          res.json({ ok: true, ...(await client.previewArchiveSnapshot()) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.post(
+    '/chats/archive-snapshot/apply',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          res.json({ ok: true, ...(await client.syncArchiveSnapshot()) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
   // Get group info
+
   router.get('/groups/:id/info', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
         const info = await client.getGroupInfo(req.params.id);
         res.json(info);
       } catch (e) {
-        res.status(500).json({ error: String(e) });
+        capabilityErrorResponse(res, e);
       }
     })();
   });
@@ -848,12 +2166,766 @@ export function createRouter(
         const participants = await client.getGroupParticipants(req.params.id);
         res.json({ participants });
       } catch (e) {
-        res.status(500).json({ error: String(e) });
+        capabilityErrorResponse(res, e);
+      }
+    })();
+  });
+
+  // Group management (fase 3 / PR-6). Ids inside the signed body; only group
+  // jids (…@g.us). The body is validated before anything else (400), then —
+  // for the three that change the group, which notify its members — the same
+  // gate as every send, then the connection. What this account may do comes
+  // from its own participant row in fresh metadata (403 not_group_admin /
+  // not_group_member).
+
+  // CONTRACT: http.whatsapp-connector.groups-state.v1 — body {groupId}, 200 {group: {groupId, subject, description, announce, restrict, memberAddMode, community, size, createdAt, owner, capabilities, participants}}
+  router.post('/groups/state', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ group: await client.getGroupState(groupId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-create.v1 — body {subject, participants[], actor?}, 200 {created, groupId, conversationId, subject, persisted, participants, succeeded, failed, group}
+  router.post('/groups/create', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const subject = parseGroupSubject(body.subject);
+        const participants = parseGroupParticipants(body.participants);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.createGroup(
+          subject,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ created: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'create group');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.groups-update.v1 — body {groupId, subject?, description?, settings?: {announce?, restrict?}, actor?}, 200 {updated, groupId, changed, unchanged, persisted, group}
+  const groupsUpdateHandler = (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const update = parseGroupUpdate(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateGroup(groupId, update, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update group');
+      }
+    })();
+  };
+  router.post('/groups/update', auth, groupsUpdateHandler);
+  // Alias de la app: POST /groups/:chatId/update (id en la ruta).
+  // CONTRACT: http.whatsapp-connector.groups-update-parameterized.v1
+  router.post(
+    '/groups/:chatId/update',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      mergePathParam(req, 'chatId', 'groupId');
+      next();
+    },
+    groupsUpdateHandler
+  );
+
+  // CONTRACT: http.whatsapp-connector.groups-participants.v1 — body {groupId, action: add|remove|promote|demote, participants[], actor?}, 200 {updated, action, groupId, results, succeeded, failed, partial, persisted, group}
+  router.post('/groups/participants', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const action = normalizeGroupParticipantAction(body.action);
+        if (!action) {
+          res.status(400).json({
+            error: 'action must be one of add, remove, promote, demote',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        const participants = parseGroupParticipants(body.participants);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateGroupParticipants(
+          groupId,
+          action,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update group participants');
+      }
+    })();
+  });
+
+  // Invite by private message the people WhatsApp would not add (403 on
+  // /groups/participants add → inviteRequired): opt-in, admin only, a real
+  // message to each person — validated (400), gated (403), connected (503).
+  // CONTRACT: http.whatsapp-connector.groups-invite.v1 — body {groupId, participants[], text?, actor?}, 200 {invited, groupId, results[{participant, jid, ok, reason, invite, messageId}], succeeded, failed, partial}
+  router.post('/groups/invite', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const participants = parseGroupInviteParticipants(body.participants);
+        const text = parseGroupInviteText(body.text);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.sendGroupInvites(
+          groupId,
+          participants.map(p => p.input),
+          { actor: actorFromBody(body.actor), text }
+        );
+        res.json({ invited: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'send group invites');
+      }
+    })();
+  });
+
+  // Set the icon of a group: admins only (restrict locks it too), the bytes
+  // decoded and sniffed like the own-profile photo, confirmed by picture
+  // identity. Validated (400) → sending gate (403) → connection (503).
+  // CONTRACT: http.whatsapp-connector.groups-photo.v1 — body {groupId, fileUrl | imageBase64 + mimeType (jpeg|png|webp, ≤ 8 MB), confirm: true, actor?}, 200 {updated, groupId, photo: {available, accepted, confirmed, reason}, mimeType, bytes}
+  router.post('/groups/photo', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const groupId = parseGroupJid(body.groupId ?? body.conversationId);
+        const request = parseProfilePhotoRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const input =
+          request.kind === 'url'
+            ? await fetchProfilePhoto(request.fileUrl)
+            : { imageBase64: request.imageBase64, mimeType: request.mimeType };
+        const result = await client.setGroupPhoto(groupId, input, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        profileErrorResponse(res, e, 'set the group photo');
+      }
+    })();
+  });
+
+  // Communities. Ids inside the signed body (communityId / groupId:
+  // …@g.us). Reads are not gated; create / link / unlink / leave reach every
+  // member: validated first (400, leave also needs confirm: true), then the
+  // sending gate (403), then the connection (503). Admin checks against fresh
+  // metadata (403 not_community_admin / not_community_member / not_group_admin);
+  // every write is read back (409 change_not_confirmed when it does not show).
+
+  // CONTRACT: http.whatsapp-connector.communities-list.v1 — GET (signed over "{}"), 200 {communities: [{communityId, subject, description, size, createdAt, owner, capabilities, announcementGroup, linkedGroups, linkedGroupsComplete}], count}
+  router.get('/communities', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        const { communities } = await client.listCommunities();
+        res.json({ communities, count: communities.length });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list communities');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-state.v1 — body {communityId}, 200 {community: {communityId, subject, description, size, createdAt, owner, capabilities, announcementGroup, linkedGroups, linkedGroupsComplete}}, 422 not_a_community
+  router.post('/communities/state', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const communityId = parseCommunityJid(body.communityId ?? body.conversationId);
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ community: await client.getCommunityState(communityId) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read community');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-create.v1 — body {subject, description?, actor?}, 200 {created, communityId, community}, 409 change_not_confirmed
+  router.post('/communities/create', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const subject = parseCommunitySubject(body.subject);
+        const description = parseCommunityDescription(body.description);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.createCommunity(subject, description, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ created: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'create community');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-groups.v1 — body {communityId, groupId, action: link|unlink, actor?}, 200 {updated, action, communityId, groupId, changed, confirmed, community}, 409 linked_elsewhere|change_not_confirmed, 422 not_a_community|not_linkable_group|announcement_group
+  router.post('/communities/groups', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseCommunityGroupRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updateCommunityGroup(
+          request.communityId,
+          request.groupId,
+          request.action,
+          { actor: actorFromBody(body.actor) }
+        );
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update community groups');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.communities-leave.v1 — body {communityId, confirm: true, actor?}, 200 {left, communityId, changed, confirmed}, 403 not_community_member, 409 change_not_confirmed
+  router.post('/communities/leave', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const communityId = parseCommunityJid(body.communityId ?? body.conversationId);
+        requireLeaveConfirmation(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.leaveCommunity(communityId, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ left: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'leave community');
+      }
+    })();
+  });
+
+  // Channels (newsletters). Look-up and the followed list are reads (not
+  // gated); follow / unfollow / mute / unmute are validated (400), gated
+  // (403), connected (503) and proven by the channel's own metadata.
+
+  // CONTRACT: http.whatsapp-connector.channels-lookup.v1 — body {channel: jid | whatsapp.com/channel link | invite code}, 200 {channel: {channelId, name, description, subscribers, verification, createdAt, inviteLink, role, following, muted}}, 404 channel_unavailable
+  router.post('/channels/lookup', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const query = body.channel ?? body.channelId;
+        parseChannelQuery(query);
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ channel: await client.lookupChannel(query) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'look up channel');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.channels-list.v1 — GET (signed over "{}"), 200 {channels: [channel], count, coverage: {complete: false, source, candidates, checked, unreadable}}
+  router.get('/channels', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.listChannels();
+        res.json({
+          channels: result.channels,
+          count: result.channels.length,
+          coverage: result.coverage,
+        });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list channels');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.channels-subscription.v1 — body {channelId, action: follow|unfollow|mute|unmute, actor?}, 200 {updated, action, channelId, changed, confirmed, channel}, 409 change_not_confirmed, 422 not_following|rejected_by_whatsapp
+  router.post('/channels/subscription', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const channelId = parseChannelJid(body.channelId ?? body.channel);
+        const action = parseChannelSubscriptionAction(body.action);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.setChannelSubscription(channelId, action, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'change the channel subscription');
+      }
+    })();
+  });
+
+  // Presence, privacy settings and disappearing messages (fase 3 / PR-8).
+  // Ids inside the signed body. Reads are not gated; what reaches WhatsApp
+  // (our typing indicator, a privacy change, a timer) is validated first
+  // (400), then the same gate as every send (403), then the connection (503).
+
+  // CONTRACT: http.whatsapp-connector.chats-presence.v1 — body {conversationId?, state: composing|recording|paused|unavailable|available, actor?}, 200 {ok, state, scope, chatId, conversationId, sent, throttled}
+  router.post('/chats/presence', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parsePresenceRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        // Never online by default: `available` stops the phone's push
+        // notifications. Only with the deployment's explicit opt-in.
+        if (request.state === 'available' && !availablePresenceAllowed()) {
+          res.status(403).json({
+            error:
+              'Presence available is disabled on this connector (WA_PRESENCE_ALLOW_AVAILABLE): being online on a linked device silences the phone',
+            failureClass: 'presence_available_disabled',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.sendPresence(request.state, request.conversationId, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ ok: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'send presence');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.chats-presence-read.v1 — body {conversationId, participant?}, 200 {presence: {chatId, conversationId, isGroup, presence: {participantId, status, lastSeen, observedAt}, participants, refreshing}}
+  router.post('/chats/presence/read', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = requiredStructuredChat(body, res);
+        if (!chatId) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ presence: await client.getPresence(chatId, body.participant) });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read presence');
+      }
+    })();
+  });
+
+  // Own profile (ported from the NAS fork's controller-profile): name, about,
+  // photo. Reads are ungated; every change is visible to every contact, so it
+  // takes confirm: true and the same two kill switches as a send.
+  // CONTRACT: http.whatsapp-connector.profile-me-read.v1 — GET, 200 {profile: {jid, phone, name, about, aboutSetAt, photo: {available}, capabilities: {name, about, photo, photoRemove}, aboutKnown, photoKnown}}, 503 disconnected
+  router.get('/profile/me', auth, (_req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ profile: await client.getOwnProfile() });
+      } catch (e) {
+        profileErrorResponse(res, e, 'read the profile');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.profile-me-update.v1 — body {name?, about?, confirm: true, actor?}, 200 {updated, name?: {requested, current, accepted, confirmed, reason}, about?: {…}, applied, failed, partial}
+  router.post('/profile/me', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const input = parseProfileUpdateRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const actor = actorFromBody(body.actor);
+        console.log(
+          `[profile] update ${Object.keys(input).join('+')}${actor ? ` by ${actor}` : ''}`
+        );
+        res.json({ updated: true, ...(await client.updateOwnProfile(input)) });
+      } catch (e) {
+        profileErrorResponse(res, e, 'update the profile');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.profile-me-photo.v1 — body {fileUrl | imageBase64 + mimeType (jpeg|png|webp, ≤ 8 MB), confirm: true, actor?}, 200 {updated, photo: {available, accepted, confirmed, reason}, mimeType, bytes}
+  router.post('/profile/me/photo', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseProfilePhotoRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const input =
+          request.kind === 'url'
+            ? await fetchProfilePhoto(request.fileUrl)
+            : { imageBase64: request.imageBase64, mimeType: request.mimeType };
+        const actor = actorFromBody(body.actor);
+        console.log(`[profile] photo set${actor ? ` by ${actor}` : ''}`);
+        res.json({ updated: true, ...(await client.setOwnProfilePhoto(input)) });
+      } catch (e) {
+        profileErrorResponse(res, e, 'set the profile photo');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.profile-me-photo-remove.v1 — body {confirm: true, actor?}, 200 {updated, photo: {available, accepted, confirmed, reason}}
+  router.post(
+    '/profile/me/photo/remove',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          const body = optionalObject(req.body);
+          parseProfilePhotoRemoveRequest(body);
+          if (rejectWhenSendingDisabled(res)) return;
+          if (rejectWhenDisconnected(client, res)) return;
+          const actor = actorFromBody(body.actor);
+          console.log(`[profile] photo removed${actor ? ` by ${actor}` : ''}`);
+          res.json({ updated: true, ...(await client.removeOwnProfilePhoto()) });
+        } catch (e) {
+          profileErrorResponse(res, e, 'remove the profile photo');
+        }
+      })();
+    }
+  );
+
+  // CONTRACT: http.whatsapp-connector.privacy-read.v1 — GET, 200 {privacy: {settings: {lastSeen, online, profilePicture, status, readReceipts, groupsAdd, call, messages}, defaultDisappearing, other, allowed}}
+  router.get('/privacy', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json({ privacy: await client.getPrivacySettings() });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read privacy settings');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.privacy-update.v1 — body {setting, value, confirm: true, actor?}, 200 {updated, setting, value, previous, changed, privacy}
+  router.post('/privacy', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        // Setting + value (Baileys' exact names) and confirm: true, or 400.
+        const update = parsePrivacyRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.updatePrivacySetting(update.setting, update.value, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'update privacy settings');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.chats-disappearing-read.v1 — body {conversationId}, 200 {disappearing: {chatId, conversationId, isGroup, expiration, label, known, setAt, source, canChange, contactDefault}}
+  router.post(
+    '/chats/disappearing/read',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          const body = optionalObject(req.body);
+          const chatId = optionalString(body.conversationId ?? body.chatId);
+          if (!chatId) {
+            res
+              .status(400)
+              .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+            return;
+          }
+          res.json({ disappearing: await client.getDisappearing(chatId) });
+        } catch (e) {
+          mutationErrorResponse(res, e, 'read the disappearing timer');
+        }
+      })();
+    }
+  );
+
+  // CONTRACT: http.whatsapp-connector.chats-disappearing.v1 — body {conversationId, expiration: 0|86400|604800|7776000 (or off|24h|7d|90d), actor?}, 200 {updated, chatId, conversationId, isGroup, expiration, label, previous, changed, persisted}
+  const chatsDisappearingHandler = (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const chatId = requiredStructuredChat(body, res);
+        if (!chatId) return;
+        const expiration = parseDisappearingExpiration(body.expiration);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.setDisappearing(chatId, expiration, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ updated: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'change the disappearing timer');
+      }
+    })();
+  };
+  router.post('/chats/disappearing', auth, chatsDisappearingHandler);
+  // Alias de la app: POST /chats/:chatId/disappearing (id en la ruta).
+  // CONTRACT: http.whatsapp-connector.chats-disappearing-parameterized.v1
+  router.post(
+    '/chats/:chatId/disappearing',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      mergePathParam(req, 'chatId', 'conversationId');
+      next();
+    },
+    chatsDisappearingHandler
+  );
+
+  // Start chat, stickers / GIFs and contacts (fase 3 / PR-9). Ids inside the
+  // signed body (GET /contacts: its query only filters a read). The body is
+  // validated first (400); what reaches WhatsApp then takes the same gate as
+  // every send (403) and the connection (503), and sends take the opt-in
+  // Idempotency-Key. Starting a chat is gated even without a first message:
+  // it asks WhatsApp about a number, and bulk number lookups are what gets an
+  // account restricted. The contact list is a read: no gate.
+
+  // CONTRACT: http.whatsapp-connector.chats-start.v1 — body {phone, message?, actor?}, 200 {started, chat: {conversationId, chatId, phone, lid, name, created, existing, persisted}, message?: {sent, messageId, sentAt}}, 422 not_on_whatsapp
+  router.post('/chats/start', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      let attempt: IdempotentSend | null = null;
+      let chat: StartedChat | undefined;
+      try {
+        const body = optionalObject(req.body);
+        const request = parseStartChatRequest(body);
+        const actor = actorFromBody(body.actor);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        chat = await client.startChat(request.phone, { actor });
+        if (!request.message) {
+          res.json({ started: true, chat });
+          return;
+        }
+        const started = chat;
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () =>
+            structuredRequestHash('start-chat', request.phone.phoneE164, {
+              message: request.message,
+            }),
+          reservation => ({
+            started: true,
+            chat: started,
+            message: { sent: true, messageId: reservation.messageId, sentAt: reservation.sentAt },
+          })
+        );
+        if (begun === 'answered') return;
+        attempt = begun;
+        // The normal send path, to the chat's own jid (the LID when it has one):
+        // the echo then lands on this conversation, not on a phone-jid twin.
+        const messageId = await client.sendMessage(
+          chat.chatId,
+          request.message,
+          attempt ? { messageId: attempt.messageId, beforeSend: attempt.beforeSend } : undefined
+        );
+        const sentAt = attempt
+          ? await confirmSend(attempt.key, messageId)
+          : new Date().toISOString();
+        res.json({ started: true, chat, message: { sent: true, messageId, sentAt } });
+      } catch (e) {
+        if (await failIdempotentSend(attempt, e, res)) return;
+        if (!chat) {
+          mutationErrorResponse(res, e, 'start chat');
+          return;
+        }
+        // The chat exists; only the first message failed.
+        const failureClass = classifyWhatsAppSendFailure(e);
+        res.status(statusForSendFailure(failureClass)).json({
+          error: `Chat started but the first message failed: ${errorMessage(e)}`,
+          failureClass,
+          started: true,
+          chat,
+          message: { sent: false },
+          ...(failureClass === 'account_restricted'
+            ? { fallback: accountRestrictedFallback(chat.phone, optionalObject(req.body).message) }
+            : {}),
+        });
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-sticker.v1 — body {conversationId, fileUrl (image/webp ≤ 1 MiB), replyTo?, actor?}, 200 {sent, messageId, conversationId, sentAt, kind, animated}
+  // CONTRACT: http.whatsapp-connector.messages-gif.v1 — body {conversationId, fileUrl (video/mp4 ≤ 16 MiB, never .gif), caption?, replyTo?, actor?}, 200 {sent, messageId, conversationId, sentAt, kind}
+  for (const [path, kind] of [
+    ['/messages/sticker', 'sticker'],
+    ['/messages/gif', 'gif'],
+  ] as const) {
+    router.post(path, auth, (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        let attempt: IdempotentSend | null = null;
+        try {
+          const body = optionalObject(req.body);
+          if (body.viewOnce !== undefined && body.viewOnce !== false && body.viewOnce !== null) {
+            throw new MessageMutationError(
+              'viewOnce is only supported for image and video messages',
+              400,
+              'invalid_request',
+              'view_once_unsupported'
+            );
+          }
+          const request = parseStickerGifRequest(kind, body);
+          const begun = await beginStructuredSend(client, req, res, () =>
+            structuredRequestHash(kind, request.conversationId, stickerGifHashInput(kind, request))
+          );
+          if (!begun) return;
+          attempt = begun.attempt;
+          const result = await client.sendStickerOrGif(
+            kind,
+            request,
+            structuredSendOptions(attempt, actorFromBody(body.actor))
+          );
+          res.json({
+            sent: true,
+            ...result,
+            ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+          });
+        } catch (e) {
+          await failStructuredSend(attempt, e, res, `send ${kind}`);
+        }
+      })();
+    });
+  }
+
+  // CONTRACT: http.whatsapp-connector.contacts-list.v1 — GET ?q&limit (signed over "{}"), 200 {contacts: [{id, name, pushName, phone, jids, conversationId, lastActivityAt}], count}
+  router.get('/contacts', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+        const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+          res
+            .status(400)
+            .json({ error: 'limit must be a positive integer', failureClass: 'invalid_request' });
+          return;
+        }
+        const contacts = await client.listContacts({ query: q, limit });
+        res.json({ contacts, count: contacts.length });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list contacts');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.contacts-create.v1 — body {phone, name, firstName?, actor?} (POST /contacts/create or POST /contacts), 200 {created, contact: {phone, jid, lid, name, addressBookSync, persisted}}, 422 not_on_whatsapp
+  const createContactRoute = (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseCreateContactRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const contact = await client.createContact(request, { actor: actorFromBody(body.actor) });
+        res.json({ created: true, contact });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'create contact');
+      }
+    })();
+  };
+  router.post('/contacts/create', auth, createContactRoute);
+  router.post('/contacts', auth, createContactRoute);
+
+  // CONTRACT: http.whatsapp-connector.contacts-share.v1 — body {conversationId, displayName + phone (+ organization?, email?) | contacts[1..5], actor?}, 200 {sent, messageId, conversationId, sentAt, contacts}
+  router.post('/contacts/share', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const chatId = requiredStructuredChat(body, res);
+        if (!chatId) return;
+        const cards = parseShareContactRequest(body);
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('contact-share', chatId, cards)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.shareContacts(
+          chatId,
+          cards,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          sent: true,
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'share contact');
+      }
+    })();
+  });
+
+  // Contact block / unblock and the account's blocklist. Blocking is outward
+  // and visible (the contact can no longer reach us; every linked device
+  // shows it): the body is validated first, `confirm: true` included (400),
+  // then the sending gate (403) and the connection (503). The blocklist is a
+  // read: no gate, only the connection. Ids inside the signed body.
+
+  // CONTRACT: http.whatsapp-connector.contacts-block.v1 — body {phone | conversationId, action: block|unblock, confirm: true, actor?}, 200 {ok, action, blocked, changed, confirmed, jid, jids, conversationId}, 409 block_not_confirmed, 422 identity_unresolved|rejected_by_whatsapp
+  const contactsBlockHandler = (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseContactBlockRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.setContactBlock(request, { actor: actorFromBody(body.actor) });
+        res.json({ ok: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'change the contact block');
+      }
+    })();
+  };
+  router.post('/contacts/block', auth, contactsBlockHandler);
+  // Alias de la app: POST /chats/:chatId/block con {blocked: boolean}; la app ya
+  // confirma con el usuario y pasa su propio gate de envío, así que aquí el
+  // confirm del contrato se da por cumplido (consumidor interno firmado).
+  // CONTRACT: http.whatsapp-connector.contacts-block-parameterized.v1
+  router.post(
+    '/chats/:chatId/block',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      const body = optionalObject(req.body);
+      const action = body.blocked === false ? 'unblock' : 'block';
+      req.body = {
+        ...body,
+        conversationId: decodeURIComponent(req.params.chatId),
+        action,
+        confirm: true,
+      };
+      next();
+    },
+    contactsBlockHandler
+  );
+
+  // CONTRACT: http.whatsapp-connector.contacts-blocklist.v1 — GET ?fresh=1 (signed over "{}"), 200 {blocked: [{id, jids, blockedJids, phone, name, pushName, conversationId}], count, readAt, cached}
+  router.get('/contacts/blocklist', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenDisconnected(client, res)) return;
+        const fresh = req.query.fresh === '1' || req.query.fresh === 'true';
+        const result = await client.listBlockedContacts({ fresh });
+        res.json({ ...result, count: result.blocked.length });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'read the blocklist');
       }
     })();
   });
 
   // Download a chat/contact's profile picture as base64 (mirrors telegram-connector shape).
+  // CONTRACT: http.whatsapp-connector.chat-photo.v1 — path and 200 {data, size, contentType}; 404 no photo, 504 lookup timeout, 502 download
   router.get('/chats/:jid/photo', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
@@ -868,6 +2940,14 @@ export function createRouter(
           contentType: 'image/jpeg',
         });
       } catch (e) {
+        if (e instanceof ProfilePictureTimeoutError) {
+          res.status(504).json({ error: 'WhatsApp profile picture timed out' });
+          return;
+        }
+        if (e instanceof ProfilePictureDownloadError) {
+          res.status(502).json({ error: e.message });
+          return;
+        }
         res.status(500).json({ error: String(e) });
       }
     })();
@@ -920,41 +3000,180 @@ export function createRouter(
   );
 
   // Send file/media
+  // CONTRACT: http.whatsapp-connector.messages-media-send.v1 — body {conversationId, fileUrl, caption?, asSticker?, kind?, replyTo?, viewOnce?, quality? (source|standard|hd)}, 200 {sent, sentAt, messageId?}, 400 view_once_unsupported / quality_unsupported
+  // CONTRACT: http.whatsapp-connector.messages-media-send-filename.v1 — optional body fileName (a document's name; default the URL's last path segment without the query), 400 invalid_file_name
   router.post('/messages/media/send', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
+      let idempotent: IdempotentSend | null = null;
       try {
-        if (process.env.ENABLE_SENDING !== 'true') {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
-        const { conversationId, fileUrl, caption, asSticker, kind, replyTo } = req.body as {
+        const {
+          conversationId,
+          fileUrl,
+          caption,
+          asSticker,
+          kind,
+          replyTo,
+          sendToken,
+          sourceDigest,
+          sourceMimeType,
+        } = req.body as {
           conversationId?: string;
           fileUrl?: string;
+          fileName?: string;
           caption?: string;
           asSticker?: boolean;
           kind?: string;
           replyTo?: string;
+          sendToken?: string;
+          sourceDigest?: string;
+          sourceMimeType?: string;
+          viewOnce?: boolean;
         };
-        if (!conversationId || !fileUrl) {
-          res.status(400).json({ error: 'Missing conversationId or fileUrl' });
+        if (
+          !conversationId ||
+          !fileUrl ||
+          (req.body?.viewOnce !== undefined && typeof req.body.viewOnce !== 'boolean') ||
+          (sendToken !== undefined &&
+            (typeof sendToken !== 'string' || !sendToken.trim() || sendToken.length > 200))
+        ) {
+          res.status(400).json({
+            error:
+              'Missing or invalid conversationId, fileUrl, viewOnce (must be a boolean), or sendToken',
+            failureClass: 'invalid_request',
+          });
           return;
         }
-        await client.sendFile(conversationId, fileUrl, caption, {
-          asSticker: !!asSticker || kind === 'sticker',
-          replyToMessageId: optionalString(replyTo),
+        const sticker = !!asSticker || kind === 'sticker';
+        const replyToMessageId = optionalString(replyTo);
+        // Additive (QA 02-10): the name a document carries. Without it the
+        // name came from the presigned URL (query string included).
+        const rawFileName = (req.body as { fileName?: unknown }).fileName;
+        if (rawFileName !== undefined && rawFileName !== null && typeof rawFileName !== 'string') {
+          res
+            .status(400)
+            .json({ error: 'fileName must be a string', failureClass: 'invalid_file_name' });
+          return;
+        }
+        const fileName = rawFileName ? cleanFileName(rawFileName) || undefined : undefined;
+        // Additive (fase 3): play-once photo/video and image re-encoding; both
+        // absent = the same send as before (and the same idempotency hash).
+        const viewOnce = parseViewOnce(req.body?.viewOnce);
+        const quality = parseMediaQuality(req.body?.quality);
+        if (viewOnce) {
+          const dataMime = fileUrl
+            .match(/^data:([^,;]*)/i)?.[1]
+            ?.trim()
+            .toLowerCase();
+          if (
+            sticker ||
+            kind === 'gif' ||
+            (dataMime && !MEDIA_VIEW_ONCE_MIME_TYPES.has(dataMime))
+          ) {
+            throw new MessageMutationError(
+              'viewOnce is only supported for image and video messages',
+              400,
+              'invalid_request',
+              'view_once_unsupported'
+            );
+          }
+        }
+        const mediaOptions = {
+          ...(kind === 'gif' ? { asGif: true } : {}),
+          ...(viewOnce ? { viewOnce } : {}),
+          ...(quality !== 'source' ? { quality } : {}),
+          ...(fileName ? { fileName } : {}),
+        };
+        const begun = await beginIdempotentSend(
+          client,
+          req,
+          res,
+          () =>
+            mediaRequestHash({
+              conversationId,
+              fileUrl,
+              caption,
+              asSticker: sticker,
+              sourceDigest,
+              sourceMimeType,
+              replyToMessageId,
+              ...mediaOptions,
+            }),
+          reservation => ({
+            sent: true,
+            ...(viewOnce ? { viewOnce: true } : {}),
+            sentAt: reservation.sentAt,
+            messageId: reservation.messageId,
+          })
+        );
+        if (begun === 'answered') return;
+        idempotent = begun;
+
+        if (!idempotent) {
+          await client.sendFile(conversationId, fileUrl, caption, {
+            asSticker: sticker,
+            replyToMessageId,
+            ...mediaOptions,
+          });
+          res.json({
+            sent: true,
+            sentAt: new Date().toISOString(),
+            ...(viewOnce ? { viewOnce: true } : {}),
+          });
+          return;
+        }
+        // Idempotent sends also answer the message id (additive).
+        const messageId = await client.sendFile(conversationId, fileUrl, caption, {
+          asSticker: sticker,
+          replyToMessageId,
+          ...mediaOptions,
+          messageId: idempotent.messageId,
+          beforeSend: idempotent.beforeSend,
         });
-        res.json({ sent: true, sentAt: new Date().toISOString() });
+        res.json({
+          sent: true,
+          ...(viewOnce ? { viewOnce: true } : {}),
+          sentAt: await confirmSend(idempotent.key, messageId),
+          messageId,
+        });
       } catch (e) {
+        if (await failIdempotentSend(idempotent, e, res)) return;
+        if (e instanceof MessageUnavailableError) {
+          res.status(e.status).json({ error: e.message, failureClass: e.failureClass });
+          return;
+        }
+        // viewOnce / quality refused for this content (400), before WhatsApp.
+        if (e instanceof MessageMutationError) {
+          res
+            .status(e.status)
+            .json({ error: e.message, failureClass: e.failureClass, code: e.code });
+          return;
+        }
+        if (e instanceof CapabilityError && e.code === 'INVALID_CAPABILITY_INPUT') {
+          res.status(400).json({ error: e.message, failureClass: 'invalid_request' });
+          return;
+        }
+        if (directSendRefused(res, e)) return;
         res.status(500).json({ error: String(e) });
       }
     })();
   });
 
   // Forward message
+  // CONTRACT: http.whatsapp-connector.messages-forward.v1 — body, {forwarded, messageId}, 404 message_unavailable
   router.post('/messages/forward', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
-        if (process.env.ENABLE_SENDING !== 'true') {
+        if (
+          process.env.ENABLE_SENDING !== 'true' ||
+          process.env.EMERGENCY_DISABLE_SENDING === 'true'
+        ) {
           res.status(403).json({ error: 'Sending disabled' });
           return;
         }
@@ -963,34 +3182,312 @@ export function createRouter(
           res.status(400).json({ error: 'Missing chatId, messageId, or toChatId' });
           return;
         }
-        await client.forwardMessage(chatId, messageId, toChatId);
-        res.json({ forwarded: true });
+        const forwardedMessageId = await client.forwardMessage(chatId, messageId, toChatId);
+        res.json({ ok: true, forwarded: true, messageId: forwardedMessageId });
       } catch (e) {
+        if (e instanceof MessageUnavailableError) {
+          res.status(e.status).json({ error: e.message, failureClass: e.failureClass });
+          return;
+        }
+        if (directSendRefused(res, e)) return;
         res.status(500).json({ error: String(e) });
       }
     })();
   });
 
-  // Delete message
+  // Edit one of our own text messages (fase 3 / PR-3).
+  // CONTRACT: http.whatsapp-connector.messages-edit.v1 — body {chatId, messageId, content}, 200 {edited, messageId, editId, editedAt}
+  // CONTRACT: http.whatsapp-connector.messages-info.v2
+  router.post('/messages/info', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      const body = optionalObject(req.body);
+      const chatId = optionalString(body.chatId);
+      const messageId = optionalString(body.messageId);
+      if (
+        !chatId ||
+        !messageId ||
+        (body.refresh !== undefined && typeof body.refresh !== 'boolean')
+      ) {
+        res.status(400).json({ error: 'Missing chatId or messageId' });
+        return;
+      }
+      try {
+        res.json(
+          await client.getMessageInfo(chatId, messageId, { refresh: body.refresh === true })
+        );
+      } catch (error) {
+        res
+          .status(error instanceof MessageInfoError ? error.status : 500)
+          .json({ error: String(error instanceof Error ? error.message : error) });
+      }
+    })();
+  });
+
+  router.post('/messages/edit', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenSendingDisabled(res)) return;
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.chatId ?? body.conversationId);
+        const messageId = optionalString(body.messageId);
+        const content = typeof body.content === 'string' ? body.content : '';
+        if (!chatId || !messageId || !content.trim()) {
+          res.status(400).json({
+            error: 'Missing chatId, messageId or content',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.editMessage(chatId, messageId, content, {
+          actor: actorFromBody(body.actor),
+        });
+        res.json({ edited: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'edit message');
+      }
+    })();
+  });
+
+  // Delete for everyone (revoke) or, with forMe: true, only for this account.
+  // CONTRACT: http.whatsapp-connector.messages-delete.v1 — body {chatId, messageId, forMe?}, 200 {deleted, scope, messageId, deletedAt}
+  const messagesDeleteHandler = (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (rejectWhenSendingDisabled(res)) return;
+        const body = optionalObject(req.body);
+        const chatId = optionalString(body.chatId ?? body.conversationId);
+        const messageId = optionalString(body.messageId);
+        if (
+          !chatId ||
+          !messageId ||
+          (body.forMe !== undefined && typeof body.forMe !== 'boolean')
+        ) {
+          res.status(400).json({
+            error: 'Missing chatId or messageId (forMe must be a boolean)',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (rejectWhenDisconnected(client, res)) return;
+        const request = { actor: actorFromBody(body.actor) };
+        const forMe = body.forMe === true;
+        const result = forMe
+          ? await client.deleteMessageForMe(chatId, messageId, request)
+          : await client.deleteMessage(chatId, messageId, request);
+        res.json({ deleted: true, scope: forMe ? 'me' : 'everyone', ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'delete message');
+      }
+    })();
+  };
+  router.post('/messages/delete', auth, messagesDeleteHandler);
+  // Alias de la app: DELETE /messages/:chatId/:msgId/for-me (ids en la ruta, body vacío).
+  // CONTRACT: http.whatsapp-connector.messages-delete-parameterized.v1
+  router.delete(
+    '/messages/:chatId/:msgId/for-me',
+    auth,
+    (req: AuthenticatedRequest, _res: Response, next): void => {
+      mergePathParam(req, 'chatId', 'chatId');
+      mergePathParam(req, 'msgId', 'messageId');
+      (req.body as Record<string, unknown>).forMe = true;
+      next();
+    },
+    messagesDeleteHandler
+  );
+
+  // Legacy delete for everyone (path params are not covered by the HMAC:
+  // prefer POST /messages/delete). Same gate and behaviour.
+  router.delete(
+    '/messages/:chatId/:msgId/for-me',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (!sendingAllowed(res)) return;
+          await client.deleteMessageForMe(req.params.chatId, req.params.msgId);
+          res.json({ ok: true, deletedForMe: true, messageId: req.params.msgId });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
   router.delete(
     '/messages/:chatId/:msgId',
     auth,
     (req: AuthenticatedRequest, res: Response): void => {
       void (async () => {
         try {
-          await client.deleteMessage(req.params.chatId, req.params.msgId);
-          res.json({ deleted: true });
+          if (rejectWhenSendingDisabled(res)) return;
+          if (rejectWhenDisconnected(client, res)) return;
+          const result = await client.deleteMessage(req.params.chatId, req.params.msgId);
+          res.json({ deleted: true, scope: 'everyone', ...result });
         } catch (e) {
-          res.status(500).json({ error: String(e) });
+          mutationErrorResponse(res, e, 'delete message');
         }
       })();
     }
   );
 
+  // Starred and pinned messages. Ids inside the signed body; the body is
+  // validated first (400). Star and pin go out to WhatsApp: the send gate
+  // (403) and the connection (503); a pin is a message everyone in the chat
+  // sees, so it also takes the opt-in Idempotency-Key. The lists read the DB:
+  // no gate, and they answer while disconnected.
+
+  // CONTRACT: http.whatsapp-connector.messages-star.v1 — body {conversationId?, messageId, star, actor?}, 200 {starred, messageId, conversationId, starredAt, persisted}
+  router.post('/messages/star', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const request = parseStarRequest(body);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        res.json(
+          await client.starMessage(request.chatId, request.messageId, request.star, {
+            actor: actorFromBody(body.actor),
+          })
+        );
+      } catch (e) {
+        mutationErrorResponse(res, e, 'star message');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-starred.v1 — body {conversationId?, limit?, cursor?}, 200 {starred: [...], nextCursor, persisted, conversationId?}
+  router.post('/messages/starred', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        res.json(await client.listStarredMessages(parseStarredQuery(optionalObject(req.body))));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list starred messages');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-pin.v1 — body {conversationId?, messageId, pin, durationSeconds?, actor?}, 200 {pinned, messageId, pinnedMessageId, conversationId, pinnedAt?, expiresAt?, durationSeconds?, persisted, sentAt?}
+  router.post('/messages/pin', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const request = parsePinRequest({
+          ...body,
+          pin: body.pin ?? body.pinned,
+          durationSeconds: body.durationSeconds ?? body.duration,
+        });
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('pin', request.chatId || '', {
+            messageId: request.messageId,
+            pin: request.pin,
+            durationSeconds: request.durationSeconds ?? null,
+          })
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.pinMessage(
+          request,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'pin message');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.messages-pins.v1 — body {conversationId}, 200 {conversationId, pinned: [...], limit, persisted}
+  router.post('/messages/pins', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        const body = optionalObject(req.body);
+        const rawChatId = body.conversationId ?? body.chatId;
+        // Only a string is an id and broadcast/newsletter targets are never writable chats.
+        const chatId = typeof rawChatId === 'string' ? optionalString(rawChatId) : undefined;
+        if (!chatId || /@(?:broadcast|newsletter)$/.test(chatId)) {
+          res
+            .status(400)
+            .json({ error: 'Missing conversationId', failureClass: 'invalid_request' });
+          return;
+        }
+        res.json(await client.listPinnedMessages(chatId));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list pinned messages');
+      }
+    })();
+  });
+
+  // Statuses and channel posts (fase 3 follow-up). The lists read the DB: no
+  // gate, and they answer while disconnected. Publishing a status goes to
+  // every listed contact: off unless WA_STATUS_PUBLISH_ENABLED=true (403
+  // status_publish_disabled), then the send gate (403) and the connection
+  // (503); confirm: true and an explicit audience are validated first (400).
+
+  // CONTRACT: http.whatsapp-connector.statuses-list.v1 — body {contact?, includeExpired?, includeOwn?, limit?, cursor?}, 200 {statuses: [{messageId, conversationId, authorId, authorName, fromMe, messageType, text, hasMedia, mimeType, postedAt, expiresAt, active, audienceSize, source}], nextCursor, persisted, contact?}
+  router.post('/statuses', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        res.json(await client.listStatuses(parseStatusListQuery(optionalObject(req.body))));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list statuses');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.channels-posts.v1 — body {channelId?, limit?, cursor?}, 200 {posts: [{messageId, channelId, channelName, messageType, text, hasMedia, mimeType, postedAt, structured?}], nextCursor, channels}
+  router.post('/channels/posts', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      try {
+        res.json(await client.listChannelPosts(parseChannelPostsQuery(optionalObject(req.body))));
+      } catch (e) {
+        mutationErrorResponse(res, e, 'list channel posts');
+      }
+    })();
+  });
+
+  // CONTRACT: http.whatsapp-connector.statuses-publish.v1 — body {type: text|image, text?, url?, recipients[1..256], backgroundColor?, font?, confirm: true, actor?} + optional Idempotency-Key, 200 {published, messageId, conversationId, type, audienceSize, postedAt, expiresAt, persisted, sentAt?}, 403 status_publish_disabled
+  router.post('/statuses/publish', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async (): Promise<void> => {
+      let attempt: IdempotentSend | null = null;
+      try {
+        const body = optionalObject(req.body);
+        const request = parseStatusPublishRequest(body);
+        if (!statusPublishEnabled()) {
+          res.status(403).json({
+            error: 'Publishing statuses is disabled on this connector (WA_STATUS_PUBLISH_ENABLED)',
+            failureClass: 'status_publish_disabled',
+          });
+          return;
+        }
+        const begun = await beginStructuredSend(client, req, res, () =>
+          structuredRequestHash('status', STATUS_JID, request)
+        );
+        if (!begun) return;
+        attempt = begun.attempt;
+        const result = await client.publishStatus(
+          request,
+          structuredSendOptions(attempt, actorFromBody(body.actor))
+        );
+        res.json({
+          ...result,
+          ...(attempt ? { sentAt: await confirmSend(attempt.key, result.messageId) } : {}),
+        });
+      } catch (e) {
+        await failStructuredSend(attempt, e, res, 'publish status');
+      }
+    })();
+  });
+
   // Mark chat as read
   router.post('/messages/read/:chatId', auth, (req: AuthenticatedRequest, res: Response): void => {
     void (async () => {
       try {
+        if (!sendingAllowed(res)) return;
         await client.markAsRead(req.params.chatId);
         res.json({ markedAsRead: true });
       } catch (e) {
@@ -998,5 +3495,527 @@ export function createRouter(
       }
     })();
   });
+
+  router.patch(
+    '/messages/:chatId/:msgId',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (!sendingAllowed(res)) return;
+          const content = optionalString((req.body || {}).content || (req.body || {}).text);
+          if (!content) {
+            res.status(400).json({
+              ok: false,
+              error: { code: 'INVALID_REQUEST', message: 'content is required' },
+            });
+            return;
+          }
+          const messageId = await client.editMessage(req.params.chatId, req.params.msgId, content);
+          res.json({ ok: true, messageId, edited: true });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.get('/chats/:chatId/block', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const jid = contactBlockJid(req.params.chatId);
+        res.json({ ok: true, blocked: await client.contactBlocked(jid), confirmed: true });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  /*
+   * The whole blocklist of the connected account. One provider read, no contact
+   * lookup and no chat write, so it also covers blocked addresses that never
+   * had a conversation here. `account` names the socket that answered, which is
+   * what lets a multi-account caller refuse another account's list.
+   */
+
+  router.post('/chats/:chatId/block', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (!sendingAllowed(res)) return;
+        const jid = contactBlockJid(req.params.chatId);
+        if (typeof req.body?.blocked !== 'boolean') {
+          res.status(400).json({
+            ok: false,
+            error: { code: 'INVALID_REQUEST', message: 'blocked must be boolean' },
+          });
+          return;
+        }
+        res.json({ ok: true, ...(await client.blockContact(jid, req.body.blocked)) });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post('/chats/:chatId/modify', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const action = optionalString(body.action);
+        if (!action) {
+          res
+            .status(400)
+            .json({ ok: false, error: { code: 'INVALID_REQUEST', message: 'action is required' } });
+          return;
+        }
+        const ids = Array.isArray(body.messageIds)
+          ? (body.messageIds
+              .map(id => (typeof id === 'string' ? { id } : id))
+              .filter(item => item && typeof item.id === 'string') as Array<{
+              id: string;
+              fromMe?: boolean;
+            }>)
+          : [];
+        const value = body.value ?? body.enabled ?? body.durationMs;
+        if (!sendingAllowed(res)) return;
+        const result = await client.modifyCapabilityChat(req.params.chatId, action, value, ids);
+        res.json({ ok: true, data: result });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.get('/communities/:jid', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        res.json({ ok: true, ...(await client.getCommunity(req.params.jid)) });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  const communityWritesAllowed = (res: Response): boolean => {
+    if (process.env.ENABLE_SENDING === 'true' && process.env.EMERGENCY_DISABLE_SENDING !== 'true')
+      return true;
+    res
+      .status(403)
+      .json({ ok: false, error: { code: 'SENDING_DISABLED', message: 'Sending is disabled' } });
+    return false;
+  };
+
+  router.post('/communities', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (!communityWritesAllowed(res)) return;
+        res
+          .status(201)
+          .json({ ok: true, community: await client.createNovedadesCommunity(req.body) });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post(
+    '/communities/:jid/action',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (!communityWritesAllowed(res)) return;
+          res.json({ ok: true, ...(await client.communityAction(req.params.jid, req.body)) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.post('/groups/:id/update', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        if (!sendingAllowed(res)) return;
+        const result = await client.updateGroup(req.params.id, req.body || {});
+        res.json({ ok: true, data: result });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.post(
+    '/groups/:id/participants',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          if (!sendingAllowed(res)) return;
+          const body = (req.body || {}) as {
+            action?: 'add' | 'remove' | 'promote' | 'demote';
+            participants?: string[];
+          };
+          const result = await client.updateGroupParticipants(
+            req.params.id,
+            body.action || '',
+            Array.isArray(body.participants) ? body.participants : []
+          );
+          res.json({ ok: true, data: result });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  // CONTRACT: http.whatsapp-connector.poll-vote.v1
+
+  router.get('/chats/:chatId/presence', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const data = await client.getCapabilityPresence(
+          req.params.chatId,
+          optionalString(req.query.participant)
+        );
+        res.json({ ok: true, data });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.get(
+    '/chats/:chatId/presence/stream',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+        let publish:
+          ((presence: Awaited<ReturnType<typeof client.getPresence>>) => void) | undefined;
+        const close = () => {
+          if (heartbeat) clearInterval(heartbeat);
+          if (publish) client.off('presence-update', publish);
+        };
+        res.once('close', close);
+        try {
+          const initial = await client.getPresence(req.params.chatId);
+          if (res.destroyed) return;
+          res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-cache, no-transform',
+            connection: 'keep-alive',
+            'x-accel-buffering': 'no',
+          });
+          let pending = Promise.resolve();
+          publish = (presence: typeof initial) => {
+            pending = pending
+              .then(async () => {
+                const sameChat =
+                  presence.chatId === initial.chatId ||
+                  (await client.matchesPresenceChat(initial.chatId, presence.chatId));
+                if (sameChat && !res.destroyed) {
+                  // Initial reads are nested; live events are flat. Keep one SSE shape.
+                  const snapshot = presence.presence
+                    ? { chatId: initial.chatId, ...presence.presence }
+                    : { ...presence, chatId: initial.chatId };
+                  res.write(`event: presence\ndata: ${JSON.stringify(snapshot)}\n\n`);
+                }
+              })
+              .catch(() => {});
+          };
+          heartbeat = setInterval(() => {
+            if (!res.destroyed) res.write(': keepalive\n\n');
+          }, 15_000);
+          client.on('presence-update', publish);
+          publish(initial);
+          await client.subscribePresence(req.params.chatId);
+        } catch (error) {
+          if (!res.headersSent) capabilityErrorResponse(res, error);
+          else if (!res.destroyed) res.end();
+        } finally {
+          if (res.destroyed) close();
+        }
+      })();
+    }
+  );
+
+  router.post('/chats/:chatId/presence', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = (req.body || {}) as { action?: string; status?: any };
+        if (body.action === 'subscribe') {
+          res.json({ ok: true, data: await client.subscribePresence(req.params.chatId) });
+          return;
+        }
+        res.json({ ok: true, data: await client.updatePresence(req.params.chatId, body.status) });
+      } catch (error) {
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
+  router.get(
+    '/chats/:chatId/disappearing',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          res.json({ ok: true, data: await client.getCapabilityDisappearing(req.params.chatId) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  router.post(
+    '/chats/:chatId/disappearing',
+    auth,
+    (req: AuthenticatedRequest, res: Response): void => {
+      void (async () => {
+        try {
+          const expiration = (req.body || {}).expiration;
+          if (typeof expiration !== 'number' && typeof expiration !== 'boolean')
+            throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'expiration is required');
+          if (!sendingAllowed(res)) return;
+          res.json({ ok: true, data: await client.setDisappearing(req.params.chatId, expiration) });
+        } catch (error) {
+          capabilityErrorResponse(res, error);
+        }
+      })();
+    }
+  );
+
+  /* Novedades: reads only. Nothing on these paths writes to WhatsApp, and the
+   * store scopes every query to this connector's own account. */
+  router.get('/novedades/status/authors', auth, (_req: AuthenticatedRequest, res: Response) => {
+    void (async () => {
+      try {
+        novedadesSuccess(res, await novedades.statusAuthors());
+      } catch (error) {
+        novedadesFailure(res, error);
+      }
+    })();
+  });
+
+  router.get('/novedades/status', auth, (req: AuthenticatedRequest, res: Response) => {
+    void (async () => {
+      try {
+        novedadesSuccess(
+          res,
+          await novedades.statuses({
+            author: req.query.author,
+            limit: req.query.limit,
+            cursor: req.query.cursor,
+            includeExpired: req.query.includeExpired,
+            unreadOnly: req.query.unreadOnly,
+            includeDeleted: req.query.includeDeleted,
+            visibility: req.query.visibility,
+          })
+        );
+      } catch (error) {
+        novedadesFailure(res, error);
+      }
+    })();
+  });
+
+  router.get('/novedades/channels', auth, (req: AuthenticatedRequest, res: Response) => {
+    void (async () => {
+      try {
+        novedadesSuccess(
+          res,
+          await novedades.channels({ limit: req.query.limit, cursor: req.query.cursor })
+        );
+      } catch (error) {
+        novedadesFailure(res, error);
+      }
+    })();
+  });
+
+  /* Provider channel lookup: resolves exactly one channel by JID or invite
+   * link through newsletterMetadata. rc13 has no global channel directory, so
+   * this never lists or searches — it answers for the one address given, and a
+   * null answer is an honest 404. Read-only: it mutates nothing on WhatsApp. */
+  router.get('/novedades/channels/lookup', auth, (req: AuthenticatedRequest, res: Response) => {
+    void (async () => {
+      try {
+        if (typeof client.isConnected === 'function' && !client.isConnected())
+          throw new NovedadesReaderError(
+            'NOVEDADES_SESSION_DOWN',
+            'This WhatsApp session is not connected, so channels cannot be looked up',
+            503
+          );
+        novedadesSuccess(res, await novedadesChannelService(client).lookup(req.query.query));
+      } catch (error) {
+        novedadesFailure(res, error);
+      }
+    })();
+  });
+
+  /* Follow/unfollow a channel. This is a mutation of the live account, so it
+   * passes the same sending gates as a message send, validates before the
+   * socket, writes at most once, and confirms only through the viewer-role
+   * read-back. An unconfirmed read-back is reported once as outcomeUncertain. */
+  router.post(
+    '/novedades/channels/subscription',
+    auth,
+    (req: AuthenticatedRequest, res: Response) => {
+      void (async () => {
+        try {
+          if (!sendingAllowed(res)) return;
+          if (typeof client.isConnected === 'function' && !client.isConnected())
+            throw new NovedadesReaderError(
+              'NOVEDADES_SESSION_DOWN',
+              'This WhatsApp session is not connected, so channel subscriptions cannot change',
+              503
+            );
+          novedadesSuccess(res, await novedadesChannelService(client).subscription(req.body));
+        } catch (error) {
+          if (error instanceof ChannelSubscriptionUncertainError) {
+            res.status(502).json({
+              ok: false,
+              error: {
+                code: 'NOVEDADES_SUBSCRIPTION_UNCONFIRMED',
+                message: error.message,
+              },
+              outcomeUncertain: true,
+            });
+            return;
+          }
+          novedadesFailure(res, error);
+        }
+      })();
+    }
+  );
+
+  router.get('/novedades/channels/:jid/posts', auth, (req: AuthenticatedRequest, res: Response) => {
+    void (async () => {
+      try {
+        novedadesSuccess(
+          res,
+          await novedades.posts({
+            channelJid: req.params.jid,
+            limit: req.query.limit,
+            cursor: req.query.cursor,
+            includeDeleted: req.query.includeDeleted,
+            visibility: req.query.visibility,
+          })
+        );
+      } catch (error) {
+        novedadesFailure(res, error);
+      }
+    })();
+  });
+
+  router.get(
+    '/novedades/channels/:jid/posts/:messageId',
+    auth,
+    (req: AuthenticatedRequest, res: Response) => {
+      void (async () => {
+        try {
+          const item = await novedades.post({
+            channelJid: req.params.jid,
+            messageId: req.params.messageId,
+          });
+          res.json({ ok: true, account: connectorAccount(), item });
+        } catch (error) {
+          novedadesFailure(res, error);
+        }
+      })();
+    }
+  );
+
+  router.get('/novedades/media', auth, (req: AuthenticatedRequest, res: Response) => {
+    void (async () => {
+      try {
+        // Status and channel media travel over the live WhatsApp socket, so a
+        // disconnected session answers 503 before any store read; the avatar
+        // kind is a plain https CDN fetch and stays available while offline.
+        const kind = String(req.query.kind ?? '')
+          .trim()
+          .toLowerCase();
+        if (
+          (kind === 'channel' || kind === 'status') &&
+          typeof client.isConnected === 'function' &&
+          !client.isConnected()
+        )
+          throw new NovedadesReaderError(
+            'NOVEDADES_SESSION_DOWN',
+            'This WhatsApp session is not connected, so media cannot be fetched',
+            503
+          );
+        const media = await novedades.media({
+          kind: req.query.kind,
+          jid: req.query.jid,
+          messageId: req.query.messageId,
+        });
+        const raw = ['1', 'true', 'yes'].includes(
+          String(req.query.raw ?? '')
+            .trim()
+            .toLowerCase()
+        );
+        if (raw) {
+          novedadesRawMedia(res, media, req.headers.range);
+          return;
+        }
+        res.json({
+          ok: true,
+          account: connectorAccount(),
+          data: {
+            base64: media.bytes.toString('base64'),
+            size: media.bytes.length,
+            mimeType: media.mimeType,
+            fileName: media.fileName,
+          },
+        });
+      } catch (error) {
+        novedadesFailure(res, error);
+      }
+    })();
+  });
+
+  /* Novedades write route. Publishing to an explicit audience goes over the
+   * live socket, so it is gated by ENABLE_SENDING like every other send path.
+   * The client calls the socket at most once: an uncertain outcome is reported
+   * honestly (502 + outcomeUncertain) instead of retried or claimed as sent. */
+  router.post('/novedades/status', auth, (req: AuthenticatedRequest, res: Response) => {
+    void (async () => {
+      try {
+        if (!sendingAllowed(res)) return;
+        const input = parseNovedadesStatusInput((req.body || {}) as Record<string, unknown>);
+        const messageId = await client.publishNovedadesStatus(input);
+        if (typeof messageId !== 'string' || messageId.length === 0) {
+          res.status(502).json({
+            ok: false,
+            error: {
+              code: 'STATUS_SEND_UNCERTAIN',
+              message: 'WhatsApp returned no message id for the status send',
+            },
+            outcomeUncertain: true,
+          });
+          return;
+        }
+        res.json({
+          ok: true,
+          account: connectorAccount(),
+          messageId,
+          kind: input.type,
+          recipients: input.recipients.length,
+        });
+      } catch (error) {
+        if (error instanceof StatusSendUncertainError) {
+          res.status(502).json({
+            ok: false,
+            error: { code: 'STATUS_SEND_UNCERTAIN', message: error.message },
+            outcomeUncertain: true,
+          });
+          return;
+        }
+        capabilityErrorResponse(res, error);
+      }
+    })();
+  });
+
   return router;
 }

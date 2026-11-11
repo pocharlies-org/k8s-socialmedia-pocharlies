@@ -7,10 +7,16 @@ own account, a shared-group message — which both connectors publish — is pro
 exactly once per sync instance, under the correct account namespace. No second
 Telegram session is opened here.
 
+Text edits arrive on `telegram.MessageEdited` (our own through the connector's
+POST /messages/edit, and the ones Telegram dispatches) and are recorded on the
+row like the WhatsApp connector does: content = new text, is_edited = true, the
+replaced text appended to metadata.edit_history, metadata.edited_at.
+
 Caveats (inherent to the connector's NATS contract):
-  - core NATS, at-most-once: events lost while this consumer is down are
-    recovered by history.run's periodic backfill, not replayed here.
-  - no edit/delete/reaction events are published, so those are not captured.
+  - core NATS, at-most-once: messages lost while this consumer is down are
+    recovered by history.run's periodic backfill, not replayed here; an edit
+    lost that way is not (the backfill never rewrites an existing row).
+  - no delete/reaction events are published, so those are not captured.
 """
 from __future__ import annotations
 
@@ -29,6 +35,8 @@ from sync.connector_client import ConnectorClient
 logger = logging.getLogger(__name__)
 
 SUBJECT = "telegram.MessageReceived"
+# CONTRACT: nats.telegram-connector.message-edited.v1
+EDIT_SUBJECT = "telegram.MessageEdited"
 
 
 def _tls_context(nats_url: str) -> ssl.SSLContext | None:
@@ -71,15 +79,13 @@ async def _handle_event(event: dict, pool: asyncpg.Pool, connector: ConnectorCli
         kwargs["direction"], mt, bool(kwargs["content"]), chat_id, is_new,
     )
 
-    # Side effects only on a genuinely new row (idempotent vs history backfill).
-    if not is_new:
-        return
-
-    # Media → MinIO + attachment row (guarded internally too).
-    if event.get("attachments") and mt in mapping.DOWNLOADABLE_TYPES:
+    if mt in mapping.DOWNLOADABLE_TYPES:
         asyncio.create_task(
             media_download.download_and_store_media(connector, pool, event, message_id, mt)
         )
+
+    if not is_new:
+        return
 
     # Lazy avatars for the conversation and the sender.
     asyncio.create_task(
@@ -94,6 +100,25 @@ async def _handle_event(event: dict, pool: asyncpg.Pool, connector: ConnectorCli
                 name=kwargs["sender_name"], username=event.get("senderUsername"),
             )
         )
+
+
+async def _handle_edit(event: dict, pool: asyncpg.Pool, account: str) -> None:
+    # Same account filter as messages: each sync records only its own account.
+    if (event.get("account") or "personal") != account:
+        return
+    kwargs = mapping.to_edit_kwargs(event)
+    if kwargs is None:
+        return
+    try:
+        row_id = await db.mark_message_edited(pool, **kwargs)
+    except Exception as e:
+        logger.error("edit failed for tg msg %s/%s: %s",
+                     kwargs["chat_id"], kwargs["telegram_message_id"], e)
+        return
+    logger.info(
+        "Edit: chat=%s msg=%s source=%s recorded=%s",
+        kwargs["chat_id"], kwargs["telegram_message_id"], kwargs["source"], row_id is not None,
+    )
 
 
 async def run(pool: asyncpg.Pool, connector: ConnectorClient, account: str) -> None:
@@ -116,8 +141,8 @@ async def run(pool: asyncpg.Pool, connector: ConnectorClient, account: str) -> N
             logger.error("NATS connect failed (%s) — retrying in 5s", e)
             await asyncio.sleep(5)
 
-    logger.info("NATS connected (%s); subscribing to %s for account=%s",
-                nats_url, SUBJECT, account)
+    logger.info("NATS connected (%s); subscribing to %s and %s for account=%s",
+                nats_url, SUBJECT, EDIT_SUBJECT, account)
 
     async def _cb(msg):
         try:
@@ -127,7 +152,16 @@ async def run(pool: asyncpg.Pool, connector: ConnectorClient, account: str) -> N
             return
         await _handle_event(event, pool, connector, account)
 
+    async def _edit_cb(msg):
+        try:
+            event = json.loads(msg.data)
+        except Exception as e:
+            logger.warning("bad NATS edit payload: %s", e)
+            return
+        await _handle_edit(event, pool, account)
+
     await nc.subscribe(SUBJECT, cb=_cb)
+    await nc.subscribe(EDIT_SUBJECT, cb=_edit_cb)
 
     # Keep the task alive forever; nats-py handles reconnects under the hood.
     try:

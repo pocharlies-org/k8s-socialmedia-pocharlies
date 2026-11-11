@@ -1,23 +1,18 @@
-/**
- * Instagram Connector — Multi-account Express server with webhook + NATS publisher + API proxy.
- * Part of the mcpservers-lab monorepo.
- *
- * Accounts are configured via env vars:
- *   INSTAGRAM_ACCOUNTS=skirmshop,barbelpapis
- *   INSTAGRAM_SKIRMSHOP_ACCESS_TOKEN=...
- *   INSTAGRAM_SKIRMSHOP_BUSINESS_ACCOUNT_ID=...
- *   INSTAGRAM_BARBELPAPIS_ACCESS_TOKEN=...
- *   INSTAGRAM_BARBELPAPIS_BUSINESS_ACCOUNT_ID=...
- *
- * Backwards-compatible: if INSTAGRAM_ACCOUNTS is not set, falls back to
- * single-account mode using INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_BUSINESS_ACCOUNT_ID.
- */
+import { instagramMeUrl } from './url-config';
+/** Instagram connector with explicit registry accounts and isolated API authentication. */
 
-import express, { Request, Response } from 'express';
+import express, { Express, Request, Response } from 'express';
 import pino from 'pino';
-import { actorFromHeaders } from '@mcp-socialmedia/shared';
+import {
+  CredentialStore,
+  actorFromHeaders,
+  credentialStoreEnabled,
+} from '@mcp-socialmedia/shared';
+import { connectorApiGate } from './api-gate';
 import { discoverFacebookInstagramAccount, InstagramAPI, InstagramConfig } from './instagram-api';
-import { createWebhookRouter } from './webhook';
+import { WebhookEvent, WebhookLog, createWebhookRouter } from './webhook';
+import { webhookAuthorization } from './webhook-access';
+import { loadConfiguredAccounts, accountAuthorization, secretMatches } from './account-access';
 import { InstagramEventPublisher } from './publisher';
 import {
   IG_PAIRING_SCOPES,
@@ -28,36 +23,97 @@ import {
   pairInstagramAccount,
   signPairingState,
 } from './oauth-pairing';
-import { createInstagramCredentialStore, resolveInstagramEntry } from './credential-resolution';
+import {
+  createInstagramCredentialStore,
+  resolveHealthForActor,
+  resolveInstagramEntry,
+} from './credential-resolution';
 
 const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
-const PORT = parseInt(process.env.PORT || '3003', 10);
-const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
-const NATS_CA_CERT = process.env.NATS_CA_CERT;
-const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'instagram-verify-token';
-const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID || '';
-const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || '';
+// SC-1258: every env read moved inside the functions that use it (loadAccounts,
+// createInstagramApp, main) so a test can boot the connector with a synthetic
+// environment. The values themselves are unchanged.
 
 export interface AccountEntry {
   name: string;
   api: InstagramAPI;
   config: InstagramConfig;
+  ready?: boolean;
 }
 
-function loadAccounts(): Map<string, AccountEntry> {
+export interface LoadAccountsOptions {
+  /** Test seam; production reads process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Test seam; defaults to credentialStoreEnabled(env). */
+  storeEnabled?: boolean;
+  /**
+   * How to abort when the env contributes no usable account AND the store is
+   * off. Production keeps the historical `logger.error + process.exit(1)`;
+   * tests inject a spy so the runner survives the assertion.
+   */
+  onFatal?: (message: string) => void;
+  /** Test seam for the zero-accounts info log. */
+  info?: (message: string) => void;
+}
+
+/**
+ * SC-1258: with CREDENTIAL_STORE_ENABLED=true, zero env accounts is a VALID
+ * boot state — C10 (runbook 12731) removes the INSTAGRAM* fields from the
+ * 1Password item, and the per-actor store routes are what replaces them. The
+ * historical `exit(1)` is preserved when the flag is off (dark, no regression
+ * of the pre-flip posture). Both zero-account paths (no env vars at all, and
+ * INSTAGRAM_ACCOUNTS listing only entries without tokens) go through
+ * `zeroAccounts`, so the audit rule "any account-env boot abort obeys the
+ * flag" holds in one place.
+ */
+export function loadAccounts(
+  opts: LoadAccountsOptions = {}
+): Map<string, AccountEntry> {
+  const env = opts.env ?? process.env;
+  const storeEnabled = opts.storeEnabled ?? credentialStoreEnabled(env);
+  const die =
+    opts.onFatal ??
+    ((message: string) => {
+      logger.error(message);
+      process.exit(1);
+    });
+  const info = opts.info ?? ((message: string) => logger.info(message));
   const accounts = new Map<string, AccountEntry>();
-  const accountList = process.env.INSTAGRAM_ACCOUNTS;
+  if (env.SOCIAL_ACCOUNTS_FILE) {
+    for (const [name, entry] of loadConfiguredAccounts(env)) {
+      accounts.set(name, { ...entry, api: new InstagramAPI(entry.config) });
+    }
+    if (accounts.size) return accounts;
+    if (storeEnabled) {
+      info('No registry accounts configured. 0 legacy account(s), credential-store ENABLED');
+      return accounts;
+    }
+    die('No registry accounts configured. Set INSTAGRAM_ACCOUNTS.');
+    return accounts;
+  }
+  const accountList = env.INSTAGRAM_ACCOUNTS;
+  const fbAppId = env.FACEBOOK_APP_ID || '';
+  const fbAppSecret = env.FACEBOOK_APP_SECRET || '';
+
+  const zeroAccounts = (reason: string): Map<string, AccountEntry> => {
+    if (storeEnabled) {
+      info(`${reason} — 0 legacy account(s), credential-store ENABLED`);
+      return accounts;
+    }
+    die(`${reason} Set INSTAGRAM_ACCOUNTS or INSTAGRAM_ACCESS_TOKEN.`);
+    return accounts;
+  };
 
   if (accountList) {
     // Multi-account mode
     for (const raw of accountList.split(',')) {
       const name = raw.trim().toLowerCase();
       const prefix = `INSTAGRAM_${name.toUpperCase()}_`;
-      const accessToken = process.env[`${prefix}ACCESS_TOKEN`] || '';
-      const businessAccountId = process.env[`${prefix}BUSINESS_ACCOUNT_ID`] || '';
+      const accessToken = env[`${prefix}ACCESS_TOKEN`] || '';
+      const businessAccountId = env[`${prefix}BUSINESS_ACCOUNT_ID`] || '';
 
       if (!accessToken) {
         logger.warn({ account: name }, `Skipping account — no ${prefix}ACCESS_TOKEN`);
@@ -67,9 +123,9 @@ function loadAccounts(): Map<string, AccountEntry> {
       const config: InstagramConfig = {
         accessToken,
         businessAccountId,
-        appId: process.env[`${prefix}APP_ID`] || FACEBOOK_APP_ID,
-        appSecret: process.env[`${prefix}APP_SECRET`] || FACEBOOK_APP_SECRET,
-        fbAccessToken: process.env[`${prefix}FB_ACCESS_TOKEN`] || undefined,
+        appId: env[`${prefix}APP_ID`] || fbAppId,
+        appSecret: env[`${prefix}APP_SECRET`] || fbAppSecret,
+        fbAccessToken: env[`${prefix}FB_ACCESS_TOKEN`] || undefined,
       };
       accounts.set(name, { name, api: new InstagramAPI(config), config });
       logger.info(
@@ -79,18 +135,17 @@ function loadAccounts(): Map<string, AccountEntry> {
     }
   } else {
     // Legacy single-account mode
-    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN || '';
-    const businessAccountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '';
+    const accessToken = env.INSTAGRAM_ACCESS_TOKEN || '';
+    const businessAccountId = env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '';
     if (!accessToken) {
-      logger.error('No accounts configured. Set INSTAGRAM_ACCOUNTS or INSTAGRAM_ACCESS_TOKEN.');
-      process.exit(1);
+      return zeroAccounts('No accounts configured.');
     }
     const config: InstagramConfig = {
       accessToken,
       businessAccountId,
-      appId: FACEBOOK_APP_ID,
-      appSecret: FACEBOOK_APP_SECRET,
-      fbAccessToken: process.env.INSTAGRAM_FB_ACCESS_TOKEN || undefined,
+      appId: fbAppId,
+      appSecret: fbAppSecret,
+      fbAccessToken: env.INSTAGRAM_FB_ACCESS_TOKEN || undefined,
     };
     accounts.set('default', { name: 'default', api: new InstagramAPI(config), config });
     logger.info(
@@ -100,44 +155,67 @@ function loadAccounts(): Map<string, AccountEntry> {
   }
 
   if (accounts.size === 0) {
-    logger.error('No valid accounts configured');
-    process.exit(1);
+    return zeroAccounts('No valid accounts configured.');
   }
 
   return accounts;
 }
 
-async function main(): Promise<void> {
-  const accounts = loadAccounts();
+/** Minimal surface the routes need from the event publisher (SC-1258 seam). */
+export interface InstagramEventSink {
+  publish(account: string, event: WebhookEvent): void;
+}
 
-  // SC-1194 P1: per-sub credential store + Instagram Login pairing. Flag-gated:
-  // with CREDENTIAL_STORE_ENABLED unset the store is null and every route
-  // below behaves exactly like the legacy env path (no-regression rule).
-  const credentialStore = createInstagramCredentialStore();
-  const pairingConfig = instagramLoginConfigFromEnv();
-  const PAIRING_STATE_TTL_SEC = Math.max(
-    60,
-    parseInt(process.env.INSTAGRAM_OAUTH_STATE_TTL_SEC || '600', 10) || 600
-  );
-  if (credentialStore) {
-    logger.info(
-      { pairing: !!pairingConfig },
-      'credential-store: ENABLED — per-sub instagram resolution active'
-    );
-  }
+export interface InstagramAppOptions {
+  /** Test seam; production reads process.env. */
+  env?: NodeJS.ProcessEnv;
+  accounts: Map<string, AccountEntry>;
+  /** Null while CREDENTIAL_STORE_ENABLED is off (SC-1194 flag-gating). */
+  credentialStore: CredentialStore | null;
+  publisher: InstagramEventSink;
+  /** Test seam for the webhook's warnings; defaults to the module logger. */
+  log?: WebhookLog;
+}
 
-  // Build a reverse lookup: accountId → account name (for webhook routing)
-  // We register BOTH id formats because Meta uses different IDs depending on API version:
-  //   - businessAccountId (from .env, e.g. 25864160563286488) — legacy/Facebook Graph
-  //   - IG User ID (e.g. 17841444094675941) — Instagram Business Login webhooks
+/**
+ * SKIRM-102 (security F2-1): the closed list of Meta app secrets that may sign POST /webhook —
+ * the Facebook app, the Instagram Login app and the app secret of each loaded account. Empty
+ * values are dropped (main.ts gives '' when FACEBOOK_APP_SECRET is missing and the accounts
+ * inherit it) and repeats removed. INSTAGRAM_WEBHOOK_SECRET, INSTAGRAM_INTERNAL_API_TOKEN and
+ * WEBHOOK_VERIFY_TOKEN are not secrets of a Meta app and never enter.
+ */
+export function metaAppSecrets(
+  env: NodeJS.ProcessEnv,
+  accounts: Map<string, AccountEntry>
+): string[] {
+  const secrets = [
+    env.FACEBOOK_APP_SECRET,
+    env.INSTAGRAM_LOGIN_APP_SECRET,
+    ...[...accounts.values()].map(entry => entry.config.appSecret),
+  ];
+  return [...new Set(secrets.filter((secret): secret is string => !!secret))];
+}
+
+
+
+/**
+ * Build a reverse lookup: accountId → account name (for webhook routing).
+ * We register BOTH id formats because Meta uses different IDs depending on API version:
+ *   - businessAccountId (from .env, e.g. 25864160563286488) — legacy/Facebook Graph
+ *   - IG User ID (e.g. 17841444094675941) — Instagram Business Login webhooks
+ */
+async function registerInstagramIds(
+  accounts: Map<string, AccountEntry>
+): Promise<Map<string, string>> {
   const bizIdToAccount = new Map<string, string>();
   for (const [name, entry] of accounts) {
+    if (entry.ready === false) continue;
     if (entry.config.businessAccountId) {
       bizIdToAccount.set(entry.config.businessAccountId, name);
     }
     // Fetch the Instagram User ID (user_id) from /me and register it too
     try {
-      const meUrl = `https://graph.instagram.com/v21.0/me?fields=id,user_id&access_token=${entry.config.accessToken}`;
+      const meUrl = instagramMeUrl(entry.config.accessToken);
       const res = await fetch(meUrl);
       if (res.ok) {
         const data = (await res.json()) as { id?: string; user_id?: string };
@@ -187,26 +265,67 @@ async function main(): Promise<void> {
       logger.warn({ account: name, err: String(err) }, 'Error fetching IG IDs');
     }
   }
+  return bizIdToAccount;
+}
 
-  const publisher = new InstagramEventPublisher(
-    NATS_URL,
-    NATS_CA_CERT !== 'none' ? NATS_CA_CERT : undefined
+/**
+ * SC-1258: the full express surface, extracted verbatim from main() so a test
+ * can boot it with zero env accounts + a fake store. Same routes, same
+ * closures; only the wiring is parameterised.
+ */
+export async function createInstagramApp(opts: InstagramAppOptions): Promise<Express> {
+  const env = opts.env ?? process.env;
+  const { accounts, credentialStore, publisher } = opts;
+  const configured = env.SOCIAL_ACCOUNTS_FILE ? loadConfiguredAccounts(env) : undefined;
+  const pairingConfig = instagramLoginConfigFromEnv(env);
+  const PAIRING_STATE_TTL_SEC = Math.max(
+    60,
+    parseInt(env.INSTAGRAM_OAUTH_STATE_TTL_SEC || '600', 10) || 600
   );
-  await publisher.connect();
+  const WEBHOOK_VERIFY_TOKEN = env.WEBHOOK_VERIFY_TOKEN || '';
+
+  const bizIdToAccount = await registerInstagramIds(accounts);
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ verify: (req, _res, buffer) => {
+    (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+  } }));
+  const verifyToken = configured ? env.WEBHOOK_VERIFY_TOKEN || '' : WEBHOOK_VERIFY_TOKEN;
+  // CONTRACT: http.instagram-connector.webhook.v1 — raw-body signature required in every account mode.
+  // Meta signs webhooks in both registry and legacy environment account modes.
+  const webhookAccounts = configured ?? new Map([...accounts].map(([name, entry]) => [name, {
+    ready: entry.ready ?? Boolean(entry.config.accessToken),
+    config: entry.config,
+  }]));
+  if (configured) app.use('/webhook', webhookAuthorization(webhookAccounts, bizIdToAccount, verifyToken));
 
   // Webhook routes — shared endpoint, routes by business account ID in payload
   app.use(
     '/',
-    createWebhookRouter(WEBHOOK_VERIFY_TOKEN, bizIdToAccount, (account, event) => {
+    createWebhookRouter(verifyToken, bizIdToAccount, (account, event) => {
       publisher.publish(account, event);
-    })
+    }, { secrets: metaAppSecrets(env, accounts), log: opts.log })
   );
 
   // Health check — all accounts
-  app.get('/health', async (_req, res) => {
+  // CONTRACT: http.instagram-connector.health.v1
+  app.get('/health', async (req, res) => {
+    if (configured && !(credentialStore && actorFromHeaders(req.headers).sub)) {
+      res.json({ status: 'alive' });
+      return;
+    }
+    // SC-1256: flag ON + verified sub → per-actor view (never the house accounts).
+    const perActor = await resolveHealthForActor({
+      headers: req.headers as Record<string, string | string[] | undefined>,
+      accountNames: [...accounts.keys()],
+      store: credentialStore,
+      legacyLookup: getAccount,
+      log: msg => logger.info(msg),
+    });
+    if (perActor) {
+      res.json({ status: 'ok', platform: 'instagram', accounts: perActor });
+      return;
+    }
     const results: Record<string, unknown> = {};
     for (const [name, entry] of accounts) {
       try {
@@ -223,8 +342,20 @@ async function main(): Promise<void> {
     res.json({ status: 'ok', platform: 'instagram', accounts: results });
   });
 
+  // CONTRACT: http.instagram-connector.api-v1.v1
+  app.use('/api/v1', connectorApiGate(env, opts.log ?? logger));
+
   // List available accounts
-  app.get('/api/v1/accounts', (_req, res) => {
+  app.get('/api/v1/accounts', (req, res) => {
+    if (configured) {
+      const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
+      const list = [...configured.values()].filter(entry => secretMatches(token, entry.secret))
+        .map(entry => ({ name: entry.name, status: entry.ready ? 'configured' : 'setup-required' }));
+      if (!list.length) { res.status(401).json({ error: 'Authentication required' }); return; }
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ accounts: list });
+      return;
+    }
     const list = [...accounts.entries()].map(([name, entry]) => ({
       name,
       businessAccountId: entry.config.businessAccountId,
@@ -232,12 +363,10 @@ async function main(): Promise<void> {
     res.json({ accounts: list });
   });
 
-  // Helper to resolve account from route param
   function getAccount(name: string): AccountEntry | undefined {
-    return (
-      accounts.get(name.toLowerCase()) ||
-      (accounts.size === 1 ? accounts.values().next().value : undefined)
-    );
+    if (configured) return accounts.get(name);
+    return accounts.get(name.toLowerCase()) ||
+      (accounts.size === 1 ? accounts.values().next().value : undefined);
   }
 
   // === SC-1194 P1: Instagram Login pairing (per-sub) ===
@@ -355,6 +484,13 @@ async function main(): Promise<void> {
   });
 
   // === Per-account credential resolution (SC-1194 P1) ===
+  if (configured) {
+    const authorize = accountAuthorization(configured);
+    app.use('/api/v1/:account', (req, res, next) => {
+      if (credentialStore && actorFromHeaders(req.headers).sub) { next(); return; }
+      authorize(req, res, next);
+    });
+  }
   // With the store flag OFF (or an anonymous caller) this hands back the exact
   // env account the legacy routes used. With flag ON + a verified sub it
   // serves that sub's own row — never another user's account.
@@ -459,6 +595,20 @@ async function main(): Promise<void> {
     }
   });
 
+  app.post('/api/v1/:account/media/:mediaId/caption', async (req, res) => {
+    const entry = res.locals.igEntry as AccountEntry | undefined;
+    if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
+    const { caption } = req.body ?? {};
+    if (typeof caption !== 'string') {
+      return res.status(400).json({ error: 'caption must be a string' });
+    }
+    try {
+      res.json(await entry.api.updateMediaCaption(req.params.mediaId, caption));
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
   app.post('/api/v1/:account/publish', async (req, res) => {
     const entry = res.locals.igEntry as AccountEntry | undefined;
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
@@ -504,13 +654,26 @@ async function main(): Promise<void> {
     const entry = res.locals.igEntry as AccountEntry | undefined;
     if (!entry) return res.status(404).json({ error: `Account '${req.params.account}' not found` });
     try {
-      const { video_url, caption, share_to_feed } = req.body as {
-        video_url: string;
-        caption?: string;
-        share_to_feed?: boolean;
-      };
+      const { video_url, caption, share_to_feed, cover_url, thumb_offset, collaborators } =
+        req.body as {
+          video_url: string;
+          caption?: string;
+          share_to_feed?: boolean;
+          cover_url?: string;
+          thumb_offset?: number;
+          collaborators?: string[];
+        };
       if (!video_url) return res.status(400).json({ error: '`video_url` is required' });
-      res.json(await entry.api.publishReel(video_url, caption, share_to_feed ?? true));
+      res.json(
+        await entry.api.publishReel({
+          videoUrl: video_url,
+          caption,
+          shareToFeed: share_to_feed,
+          coverUrl: cover_url,
+          thumbOffsetMs: thumb_offset,
+          collaborators,
+        })
+      );
     } catch (error) {
       res.status(500).json({ error: String(error) });
     }
@@ -668,9 +831,37 @@ async function main(): Promise<void> {
     }
   });
 
+  return app;
+}
+
+async function main(): Promise<void> {
+  const env = process.env;
+  const accounts = loadAccounts({ env });
+
+  // SC-1194 P1: per-sub credential store + Instagram Login pairing. Flag-gated:
+  // with CREDENTIAL_STORE_ENABLED unset the store is null and every route
+  // below behaves exactly like the legacy env path (no-regression rule).
+  const credentialStore = createInstagramCredentialStore(env);
+  const pairingConfig = instagramLoginConfigFromEnv(env);
+  if (credentialStore) {
+    logger.info(
+      { pairing: !!pairingConfig },
+      'credential-store: ENABLED — per-sub instagram resolution active'
+    );
+  }
+
+  const publisher = new InstagramEventPublisher(
+    env.NATS_URL || 'nats://localhost:4222',
+    (env.NATS_CA_CERT ?? 'none') !== 'none' ? env.NATS_CA_CERT : undefined
+  );
+  await publisher.connect();
+
+  const app = await createInstagramApp({ env, accounts, credentialStore, publisher });
+  const PORT = parseInt(env.PORT || '3003', 10);
+
   app.listen(PORT, () => {
     logger.info(`Instagram Connector listening on port ${PORT} — ${accounts.size} account(s)`);
-    logger.info(`Accounts: ${[...accounts.keys()].join(', ')}`);
+    logger.info(`Accounts: ${[...accounts.keys()].join(', ') || '(none — credential-store only)'}`);
     logger.info(`Webhook: http://localhost:${PORT}/webhook`);
     logger.info(`Health: http://localhost:${PORT}/health`);
   });
@@ -682,7 +873,9 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch(error => {
-  logger.error('Fatal error:', error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(error => {
+    logger.error('Fatal error:', error);
+    process.exit(1);
+  });
+}

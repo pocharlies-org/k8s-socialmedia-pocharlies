@@ -6,30 +6,30 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
+import { ensureSearchIndexes } from '../application/search.service';
 import { syncSocialAccountsBestEffort } from '../infrastructure/database/social-accounts';
-import Redis, { RedisOptions } from 'ioredis';
-import * as fs from 'fs';
+import Redis from 'ioredis';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { writeNoSessionResponse } from './session-errors';
 import { randomUUID } from 'node:crypto';
-import { MCPServer } from './server';
+import { createMcpServer } from './runtime-server';
+import { publicPage } from './public-page';
+import {
+  activateCurrentChatTurn,
+  revokeCurrentChatTurn,
+  listCurrentChatProposals,
+  consumeCurrentChatProposal,
+} from './current-chat-proposals';
 import { actorFromHeaders, runWithRequestActor } from '@mcp-socialmedia/shared';
+import { loadMcpRuntimeConfig, redisOptionsFor } from './runtime-config';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5432/whatsappmcp';
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const REDIS_TLS_CA = process.env.REDIS_TLS_CA;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const LLM_BASE_URL = process.env.LLM_BASE_URL || '';
-const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || '';
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-change-in-production';
-const CONNECTOR_SHARED_SECRET =
-  process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
-const CONNECTOR_URL = process.env.CONNECTOR_URL || 'http://whatsapp-connector:3001';
+const config = loadMcpRuntimeConfig('sse');
 const SSE_PORT = parseInt(process.env.MCP_SSE_PORT || '3010', 10);
 const AUTH_TOKEN = process.env.MCP_SSE_AUTH_TOKEN || '';
+const LANDING_PAGE = publicPage();
 
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.SSE_HEARTBEAT_MS || '30000', 10);
 const SESSION_MAX_AGE_MS = parseInt(process.env.SSE_MAX_AGE_MS || `${6 * 3600 * 1000}`, 10);
@@ -65,7 +65,8 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     let size = 0;
     req.on('data', (c: Buffer) => {
       size += c.length;
-      if (size > 4 * 1024 * 1024) {
+      // Generated media may carry up to 8 MiB encoded as a base64 data URL.
+      if (size > 12 * 1024 * 1024) {
         reject(new Error('request body too large'));
         req.destroy();
         return;
@@ -130,7 +131,7 @@ function startSseHeartbeat(res: ServerResponse, onFail: () => void): () => void 
 
 async function main() {
   const dbPool = new Pool({
-    connectionString: DATABASE_URL,
+    connectionString: config.databaseUrl,
     max: 30,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
@@ -141,26 +142,24 @@ async function main() {
   await dbPool.query('SELECT 1');
   await syncSocialAccountsBestEffort(dbPool);
   console.log('[SSE] Connected to database (pool max=30, statement_timeout=10s)');
+  // Full-text index for unscoped social_search_messages (QA 02-10): built once,
+  // CONCURRENTLY, in the background on its own connection; never blocks boot.
+  void ensureSearchIndexes(
+    async () => {
+      const client = new Client({
+        connectionString: config.databaseUrl,
+        application_name: 'mcp-sse-index',
+      });
+      await client.connect();
+      return client;
+    },
+    message => console.log(`[SSE] ${message}`)
+  );
 
-  let redisOptions: RedisOptions = {};
-  if (REDIS_URL.startsWith('rediss://') && REDIS_TLS_CA) {
-    const ca = fs.readFileSync(REDIS_TLS_CA, 'utf-8');
-    redisOptions = { tls: { ca, rejectUnauthorized: true } };
-  }
-  const redisClient = new Redis(REDIS_URL, redisOptions);
+  const redisClient = new Redis(config.redisUrl, redisOptionsFor(config));
   console.log('[SSE] Connected to Redis');
 
-  const mcpServer = new MCPServer(
-    dbPool,
-    redisClient,
-    OPENAI_API_KEY,
-    ENCRYPTION_KEY,
-    CONNECTOR_SHARED_SECRET,
-    CONNECTOR_URL,
-    REDIS_URL,
-    LLM_BASE_URL || undefined,
-    LLM_CHAT_MODEL || undefined
-  );
+  const mcpServer = createMcpServer(dbPool, redisClient, config);
 
   const sessions = new Map<string, SessionRecord>();
 
@@ -246,6 +245,87 @@ async function main() {
       return;
     }
 
+    if (url.pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(req.method === 'HEAD' ? undefined : LANDING_PAGE);
+      return;
+    }
+
+    if (url.pathname.startsWith('/internal/hermes/')) {
+      const secret = process.env.HERMES_CHAT_TOOL_SECRET;
+      if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+        res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+      const reply = (status: number, body: unknown) => {
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(body));
+      };
+      try {
+        if (req.method === 'POST' && url.pathname === '/internal/hermes/turns/activate') {
+          const body = (await readJsonBody(req)) as Record<string, unknown>;
+          await activateCurrentChatTurn(
+            redisClient,
+            body?.account as string,
+            body?.chat as string,
+            body?.turn as string,
+            body?.ttl as number
+          );
+          reply(200, { ok: true });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/internal/hermes/turns/revoke') {
+          const body = (await readJsonBody(req)) as Record<string, unknown>;
+          await revokeCurrentChatTurn(
+            redisClient,
+            body?.account as string,
+            body?.chat as string,
+            body?.turn as string
+          );
+          reply(200, { ok: true });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/internal/hermes/proposals') {
+          const proposals = await listCurrentChatProposals(
+            redisClient,
+            url.searchParams.get('account') || '',
+            url.searchParams.get('chat') || ''
+          );
+          reply(200, { proposals });
+          return;
+        }
+        const match = /^\/internal\/hermes\/proposals\/([0-9a-f-]{36})\/consume$/.exec(
+          url.pathname
+        );
+        const rejected = /^\/internal\/hermes\/proposals\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if ((req.method === 'POST' && match) || (req.method === 'DELETE' && rejected)) {
+          if (match && process.env.EMERGENCY_DISABLE_SENDING === 'true') {
+            reply(503, { error: 'Sending is emergency disabled' });
+            return;
+          }
+          const body = (await readJsonBody(req)) as Record<string, unknown>;
+          const proposal = await consumeCurrentChatProposal(
+            redisClient,
+            (match || rejected)![1],
+            body?.account as string,
+            body?.chat as string,
+            body?.turn as string
+          );
+          reply(proposal ? 200 : 404, proposal ? { proposal } : { error: 'Not found' });
+          return;
+        }
+        reply(404, { error: 'Not found' });
+      } catch {
+        reply(400, { error: 'Invalid current-chat request' });
+      }
+      return;
+    }
+
     // Bearer token auth (when MCP_SSE_AUTH_TOKEN is set)
     if (AUTH_TOKEN) {
       const authHeader = req.headers.authorization || '';
@@ -292,16 +372,11 @@ async function main() {
           return;
         }
 
-        // No (valid) session: only an `initialize` request may open one.
+        // No (valid) session: only an `initialize` request may open one. A dead
+        // session id gets 404 (not 400) so spec-compliant clients re-initialize
+        // instead of retrying the zombie id forever — see session-errors.ts.
         if (!isInitializeRequest(body)) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              error: { code: -32000, message: 'Bad Request: no valid session id' },
-              id: null,
-            })
-          );
+          writeNoSessionResponse(res, sid);
           return;
         }
 
@@ -339,8 +414,7 @@ async function main() {
       if (req.method === 'GET' || req.method === 'DELETE') {
         const session = sid ? streamableSessions.get(sid) : undefined;
         if (!session) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid or missing mcp-session-id' }));
+          writeNoSessionResponse(res, sid);
           return;
         }
         if (req.method === 'DELETE') {

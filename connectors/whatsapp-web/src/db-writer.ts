@@ -2,12 +2,21 @@
  * Direct DB writer for WhatsApp messages.
  * Writes incoming messages directly to PostgreSQL, bypassing NATS/MCP.
  */
+import { namespaceAccountId } from '@mcp-socialmedia/shared';
 import pg from 'pg';
+import { readFileSync } from 'node:fs';
 import { WhatsAppCustomerAllowlistStatus, WhatsAppCustomerTokenStatus } from './contact-sync';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  'postgresql://whatsappmcp:whatsappmcp_dgx_2026@postgres:5432/whatsappmcp';
+// SC-1239 C2: no hardcoded fallback. This connector writes every incoming
+// message straight to Postgres, so a missing DATABASE_URL is a fatal config
+// error — fail at startup naming the variable, instead of silently dialling a
+// connection string baked into the image.
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is unset: refusing to start the whatsapp-web connector without an explicit database connection'
+  );
+}
 
 // Which WhatsApp account this connector instance serves. 'personal' keeps ids
 // bare (compat with the pre-existing single-account corpus); 'professional'
@@ -16,7 +25,23 @@ const DATABASE_URL =
 // Read at call time (not captured at module load) so the value is honoured even
 // if the env is set after import — and so tests can exercise both accounts.
 export function connectorAccount(): string {
-  return process.env.CONNECTOR_ACCOUNT || 'personal';
+  const account = process.env.CONNECTOR_ACCOUNT || 'personal';
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(account)) throw new Error('Invalid CONNECTOR_ACCOUNT');
+  const file = process.env.SOCIAL_ACCOUNTS_FILE;
+  const accounts = file
+    ? JSON.parse(readFileSync(file, 'utf8'))
+    : [
+        { channel: 'whatsapp', accountId: 'personal', enabled: true },
+        { channel: 'whatsapp', accountId: 'professional', enabled: true },
+      ];
+  if (
+    !Array.isArray(accounts) ||
+    !accounts.some(
+      entry => entry.channel === 'whatsapp' && entry.accountId === account && entry.enabled === true
+    )
+  )
+    throw new Error(`WhatsApp account is unknown or disabled: ${account}`);
+  return account;
 }
 
 /**
@@ -32,9 +57,7 @@ export function connectorAccount(): string {
  */
 export function accountKey(id: string): string {
   const account = connectorAccount();
-  if (account === 'personal') return id;
-  const prefix = `${account}:`;
-  return id.startsWith(prefix) ? id : `${prefix}${id}`;
+  return namespaceAccountId(account, id);
 }
 
 /**
@@ -94,6 +117,35 @@ export interface ParticipantData {
   name?: string;
   pushName?: string;
   profilePicUrl?: string;
+}
+
+export interface ConversationNameOptions {
+  /** Saved address-book/group names may replace an existing useful title. */
+  authoritative?: boolean;
+}
+
+function jidAliases(id: string): string[] {
+  const aliases = new Set([id]);
+  if (id.endsWith('@c.us')) aliases.add(id.replace(/@c\.us$/, '@s.whatsapp.net'));
+  if (id.endsWith('@s.whatsapp.net')) aliases.add(id.replace(/@s\.whatsapp\.net$/, '@c.us'));
+  return Array.from(aliases);
+}
+
+/** Resolve a PN chat only when one LID conversation in this account owns it. */
+export async function canonicalConversationId(id: string): Promise<string> {
+  const bare = stripAccountKey(id);
+  if (!/^\d+(?:\.\d+)?@(?:c\.us|s\.whatsapp\.net)$/.test(bare)) return bare;
+  const aliases = jidAliases(bare).map(accountKey);
+  const result = await getPool().query(
+    `SELECT id FROM conversations
+      WHERE account = $1 AND COALESCE(is_group, false) = false
+        AND id LIKE '%@lid' AND wa_chat_id = ANY($2::text[])
+      LIMIT 2`,
+    [connectorAccount(), aliases]
+  );
+  if (result.rows.length !== 1 || typeof result.rows[0].id !== 'string') return bare;
+  const canonical = stripAccountKey(result.rows[0].id);
+  return canonical.endsWith('@lid') ? canonical : bare;
 }
 
 export interface MessageKeyData {
@@ -479,7 +531,21 @@ export async function ensureConversation(data: ConversationData): Promise<void> 
     `INSERT INTO conversations (id, name, is_group, participant_count, avatar_url, last_message_at, account)
      VALUES ($1, $2, $3, $4, $5, now(), $6)
      ON CONFLICT (id) DO UPDATE SET
-       name = COALESCE(EXCLUDED.name, conversations.name),
+       -- A missing Baileys contact name is represented by the JID. Keep a
+       -- useful saved/group name, but allow a later real name to replace a
+       -- placeholder from history sync.
+       name = CASE
+         WHEN EXCLUDED.name IS NULL OR btrim(EXCLUDED.name) = '' THEN conversations.name
+         WHEN conversations.name IS NULL OR btrim(conversations.name) = '' THEN EXCLUDED.name
+         WHEN conversations.name = conversations.id
+           OR conversations.name = regexp_replace(conversations.id, '^[^:]+:', '')
+           OR conversations.name LIKE '%@lid'
+           OR conversations.name LIKE '%@c.us'
+           OR conversations.name LIKE '%@s.whatsapp.net'
+           OR conversations.name LIKE '%@g.us'
+         THEN EXCLUDED.name
+         ELSE conversations.name
+       END,
        participant_count = EXCLUDED.participant_count,
        avatar_url = COALESCE(EXCLUDED.avatar_url, conversations.avatar_url),
        last_message_at = now(),
@@ -495,13 +561,35 @@ export async function ensureConversation(data: ConversationData): Promise<void> 
   );
 }
 
+export async function ensureEmptyConversation(id: string, name: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO conversations (id, name, is_group, participant_count, account)
+     VALUES ($1, $2, false, 0, $3)
+     ON CONFLICT (id) DO NOTHING`,
+    [accountKey(id), name, connectorAccount()]
+  );
+}
+
 export async function ensureParticipant(data: ParticipantData): Promise<void> {
   const pool = getPool();
   await pool.query(
     `INSERT INTO participants (id, phone, name, push_name, profile_pic_url, last_seen, account)
      VALUES ($1, $2, $3, $4, $5, now(), $6)
      ON CONFLICT (id) DO UPDATE SET
-       name = COALESCE(EXCLUDED.name, participants.name),
+       -- name may be a phonebook value while push_name is the remote
+       -- profile name. Preserve the former once it is known, but refresh a
+       -- name that was only copied from an earlier push name.
+       name = CASE
+         WHEN EXCLUDED.name IS NULL OR btrim(EXCLUDED.name) = '' THEN participants.name
+         WHEN participants.name IS NULL OR btrim(participants.name) = ''
+           OR participants.name = participants.id
+           OR participants.name = participants.push_name
+           OR participants.name LIKE '%@lid'
+           OR participants.name LIKE '%@c.us'
+           OR participants.name LIKE '%@s.whatsapp.net'
+         THEN EXCLUDED.name
+         ELSE participants.name
+       END,
        push_name = COALESCE(EXCLUDED.push_name, participants.push_name),
        profile_pic_url = COALESCE(EXCLUDED.profile_pic_url, participants.profile_pic_url),
        last_seen = now()`,
@@ -513,6 +601,67 @@ export async function ensureParticipant(data: ParticipantData): Promise<void> {
       data.profilePicUrl || null,
       connectorAccount(),
     ]
+  );
+}
+
+/** Force a contact event's useful name into an existing participant row. */
+export async function setParticipantName(
+  id: string,
+  name: string,
+  pushName?: string
+): Promise<void> {
+  const cleanName = name.trim();
+  if (!id || !cleanName) return;
+  const pool = getPool();
+  await pool.query(
+    `UPDATE participants
+        SET name = $2,
+            push_name = COALESCE(NULLIF($3, ''), push_name),
+            last_seen = now()
+      WHERE id = ANY($1::text[])
+        AND account = $4`,
+    [jidAliases(id).map(accountKey), cleanName, pushName?.trim() || '', connectorAccount()]
+  );
+}
+
+/**
+ * Persist a contact/group name without allowing an account or JID mismatch.
+ * Both PN spellings are accepted because conversations store normalized
+ * `@c.us` ids while `wa_chat_id` may retain Baileys' `@s.whatsapp.net` form.
+ */
+export async function setConversationName(
+  id: string,
+  name: string,
+  options: ConversationNameOptions = {}
+): Promise<void> {
+  const cleanName = name.trim();
+  if (!id || !cleanName) return;
+  const pool = getPool();
+  const bareIds = jidAliases(stripAccountKey(id));
+  const scopedIds = bareIds.map(accountKey);
+  const account = connectorAccount();
+  const authoritative = options.authoritative !== false;
+  await pool.query(
+    `UPDATE conversations
+        SET name = CASE
+          WHEN $5::boolean
+            OR conversations.name IS NULL
+            OR btrim(conversations.name) = ''
+            OR conversations.name = conversations.id
+            OR conversations.name = regexp_replace(conversations.id, '^[^:]+:', '')
+            OR conversations.name LIKE '%@lid'
+            OR conversations.name LIKE '%@c.us'
+            OR conversations.name LIKE '%@s.whatsapp.net'
+            OR conversations.name LIKE '%@g.us'
+          THEN $3
+          ELSE conversations.name
+        END,
+        updated_at = now()
+      WHERE account = $4
+        AND (id = ANY($1::text[])
+          OR wa_chat_id = ANY($2::text[])
+          OR wa_chat_id = ANY($1::text[]))`,
+    [scopedIds, bareIds, cleanName, account, authoritative]
   );
 }
 
@@ -562,17 +711,58 @@ export async function setParticipantAvatar(id: string, profilePicUrl: string): P
  */
 export async function setConversationWaChatId(id: string, waChatId: string): Promise<void> {
   if (!id || !waChatId) return;
+  const bareId = stripAccountKey(id);
+  const bareWaChatId = stripAccountKey(waChatId);
+  if (!/^\d+@lid$/.test(bareId) || !/^\d+@(?:s\.whatsapp\.net|c\.us)$/.test(bareWaChatId)) return;
   const pool = getPool();
-  // conversations.id is stored namespaced; namespace the WHERE id so the UPDATE
-  // targets the real row on professional. The stored wa_chat_id value is also
-  // namespaced (UNIQUE column shared across accounts — see PR #22 invariant).
-  await pool.query(
-    `UPDATE conversations
-        SET wa_chat_id = $2, updated_at = now()
-      WHERE id = $1
-        AND (wa_chat_id IS NULL OR wa_chat_id = '' OR wa_chat_id = id)`,
-    [accountKey(id), accountKey(waChatId)]
-  );
+  const lidId = accountKey(bareId);
+  const pnId = accountKey(bareWaChatId);
+  const account = connectorAccount();
+  const aliasIds = jidAliases(bareWaChatId).map(accountKey);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const target = await client.query(
+      `SELECT wa_chat_id FROM conversations
+        WHERE id = $1 AND account = $2 AND COALESCE(is_group, false) = false
+        FOR UPDATE`,
+      [lidId, account]
+    );
+    const current = target.rows[0]?.wa_chat_id;
+    if (target.rows.length && (!current || current === lidId) && current !== pnId) {
+      const occupied = await client.query(
+        `SELECT id, account, is_group FROM conversations WHERE wa_chat_id = $1 FOR UPDATE`,
+        [pnId]
+      );
+      const owner = occupied.rows[0];
+      if (
+        !owner ||
+        (owner.account === account && owner.is_group !== true && aliasIds.includes(owner.id))
+      ) {
+        if (owner) {
+          await client.query(
+            `UPDATE conversations SET wa_chat_id = NULL, updated_at = now()
+              WHERE id = $1 AND account = $2 AND wa_chat_id = $3
+                AND COALESCE(is_group, false) = false`,
+            [owner.id, account, pnId]
+          );
+        }
+        await client.query(
+          `UPDATE conversations SET wa_chat_id = $2, updated_at = now()
+            WHERE id = $1 AND account = $3
+              AND COALESCE(is_group, false) = false
+              AND (wa_chat_id IS NULL OR wa_chat_id = '' OR wa_chat_id = id)`,
+          [lidId, pnId, account]
+        );
+      }
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getConversationAvatar(id: string): Promise<string | null> {
@@ -600,6 +790,8 @@ export async function setMessageStatus(waMessageId: string, status: string): Pro
     await pool.query(
       `UPDATE messages SET status = $2, status_at = now()
        WHERE wa_message_id = $1
+         AND NOT COALESCE(is_deleted,FALSE) AND status IS DISTINCT FROM 'deleted'
+         AND status IS DISTINCT FROM 'failed'
          AND $3::int > CASE status
               WHEN 'pending' THEN 1
               WHEN 'sent' THEN 2
@@ -609,10 +801,19 @@ export async function setMessageStatus(waMessageId: string, status: string): Pro
       [wamId, status, rank[status]]
     );
   } else {
-    // failed/deleted: overwrite regardless.
+    // A failure cannot erase delivery/read evidence or a deletion.
     await pool.query(
-      `UPDATE messages SET status = $2, status_at = now() WHERE wa_message_id = $1`,
-      [wamId, status]
+      status === 'deleted'
+        ? `UPDATE messages SET status = $2, is_deleted = TRUE, status_at = now(),
+             metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+               'deleted_at', COALESCE(NULLIF(metadata->>'deleted_at', ''),
+                 to_jsonb(messages)->>'deleted_at', now()::text),
+               'deleted_source', COALESCE(metadata->>'deleted_source', 'whatsapp'))
+           WHERE wa_message_id = $1 AND account = $3 AND platform = 'whatsapp'`
+        : `UPDATE messages SET status = $2, status_at = now() WHERE wa_message_id = $1
+             AND NOT COALESCE(is_deleted,FALSE)
+             AND (status IS NULL OR status NOT IN ('deleted','delivered','read'))`,
+      status === 'deleted' ? [wamId, status, connectorAccount()] : [wamId, status]
     );
   }
 }
@@ -620,28 +821,54 @@ export async function setMessageStatus(waMessageId: string, status: string): Pro
 /**
  * Persist the real unread badge + archived flag for a conversation.
  * No-op if the row doesn't exist yet (next message creates it). `archived`
- * is optional — pass undefined to leave the stored value untouched.
+ * is optional — pass undefined to leave the stored value untouched; so is
+ * `unreadCount`. A negative count is WhatsApp's "marked as unread" (Baileys
+ * emits -1): the badge becomes at least 1 instead of being cleared.
  */
 export async function setConversationState(
   id: string,
-  unreadCount: number,
+  unreadCount: number | undefined,
   archived?: boolean
 ): Promise<void> {
-  const pool = getPool();
+  if (unreadCount === undefined && archived === undefined) return;
   // conversations.id is stored namespaced; route the bare id through accountKey
   // so the state UPDATE is not a silent no-op on the professional account.
-  const convId = accountKey(id);
-  if (archived === undefined) {
-    await pool.query(
-      `UPDATE conversations SET unread_count = $2, updated_at = now() WHERE id = $1`,
-      [convId, Math.max(0, unreadCount | 0)]
-    );
-  } else {
-    await pool.query(
-      `UPDATE conversations SET unread_count = $2, archived = $3, updated_at = now() WHERE id = $1`,
-      [convId, Math.max(0, unreadCount | 0), archived]
-    );
-  }
+  const convId = accountKey(await canonicalConversationId(id));
+  const account = connectorAccount();
+  const bare = stripAccountKey(convId);
+  const pnAliases = /^\d+(?:\.\d+)?@(?:c\.us|s\.whatsapp\.net)$/.test(bare)
+    ? jidAliases(bare).map(accountKey)
+    : [];
+  await getPool().query(
+    `UPDATE conversations SET
+       unread_count = CASE
+         WHEN $2::integer IS NULL THEN unread_count
+         WHEN id = $1 THEN CASE WHEN $2 < 0 THEN GREATEST(unread_count, 1) ELSE $2 END
+         ELSE 0 END,
+       archived = COALESCE($3::boolean, archived), updated_at = now()
+     WHERE account = $4 AND (id = $1 OR id = ANY($5::text[]) OR id IN (
+       SELECT pn.id FROM conversations lid
+       JOIN conversations pn ON pn.account = lid.account
+         AND COALESCE(pn.is_group, false) = false
+         AND pn.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
+         AND regexp_replace(pn.id, '@c\\.us$', '@s.whatsapp.net') =
+             regexp_replace(lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')
+       WHERE lid.account = $4 AND lid.id = $1 AND lid.id ~ '@lid$'
+         AND COALESCE(lid.is_group, false) = false
+         AND (SELECT COUNT(*) FROM conversations other_lid
+              WHERE other_lid.account = $4 AND other_lid.id ~ '@lid$'
+                AND COALESCE(other_lid.is_group, false) = false
+                AND regexp_replace(other_lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net') =
+                    regexp_replace(lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')) = 1
+     ))`,
+    [
+      convId,
+      unreadCount === undefined ? null : unreadCount | 0,
+      archived ?? null,
+      account,
+      pnAliases,
+    ]
+  );
 }
 
 export async function getParticipantAvatar(id: string): Promise<string | null> {
@@ -653,13 +880,63 @@ export async function getParticipantAvatar(id: string): Promise<string | null> {
   return r.rows[0]?.profile_pic_url || null;
 }
 
-export async function storeMessage(data: MessageData): Promise<bigint | null> {
+/**
+ * INFRA-364 fase 0: las notas de voz de WhatsApp (AUDIO/PTT, con o sin `ptt`,
+ * INBOUND y OUTBOUND) se transcriben a `content` por el worker
+ * `mcp-server/src/jobs/voice-transcribe.ts`, con el MISMO contrato de metadata
+ * que Telegram (sync/db.py): `needs_transcription` + `transcription_status`
+ * pending → processing → done/failed + `transcription_attempts`. Marcarlas en el
+ * insert para que el worker las coja al instante; las filas viejas sin marcar las
+ * adopta el backfill (`voice-backfill.ts`) o la ventana de gracia del worker.
+ *
+ * Pure and idempotent: if the metadata already carries a transcription_status
+ * (replay after relink, or a row the worker already touched) it is left
+ * untouched — never reset a done/failed row back to pending here.
+ */
+export function withVoiceTranscriptionMetadata(
+  messageType: string,
+  metadata: Record<string, unknown>
+): Record<string, unknown> {
+  if (messageType !== 'AUDIO' && messageType !== 'PTT') return metadata;
+  if (metadata.transcription_status !== undefined) return metadata;
+  return {
+    ...metadata,
+    needs_transcription: true,
+    transcription_status: 'pending',
+    transcription_attempts: 0,
+  };
+}
+
+export async function storeMessage(data: MessageData): Promise<string | null> {
   const pool = getPool();
   try {
     const result = await pool.query(
       `INSERT INTO messages (wa_message_id, conversation_id, sender_wa_id, wa_timestamp, direction, content, message_type, is_forwarded, reply_to_message_id, platform, metadata, account)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       ON CONFLICT (wa_message_id) DO NOTHING
+       ON CONFLICT (wa_message_id) DO UPDATE SET
+         content = COALESCE(NULLIF(messages.content, ''), NULLIF(EXCLUDED.content, '')),
+         message_type = EXCLUDED.message_type,
+         metadata = EXCLUDED.metadata || COALESCE(messages.metadata, '{}'::jsonb)
+           || jsonb_build_object('contentUnavailable', false, 'recovered', true)
+           || CASE WHEN EXCLUDED.metadata->>'viewOnce' = 'true'
+             THEN '{"viewOnce":true}'::jsonb ELSE '{}'::jsonb END
+       WHERE messages.account = EXCLUDED.account
+         AND messages.platform = EXCLUDED.platform
+         AND NOT COALESCE(messages.is_edited, false)
+         AND EXCLUDED.message_type NOT IN
+           ('UNAVAILABLE', 'SECRETENCRYPTEDMESSAGE', 'MESSAGECONTEXTINFO',
+            'SENDERKEYDISTRIBUTIONMESSAGE', 'ENCREACTIONMESSAGE', 'POLLUPDATEMESSAGE', 'PLACEHOLDERMESSAGE')
+         AND (
+           (messages.message_type IN
+             ('UNAVAILABLE', 'SECRETENCRYPTEDMESSAGE', 'MESSAGECONTEXTINFO',
+              'SENDERKEYDISTRIBUTIONMESSAGE', 'ENCREACTIONMESSAGE', 'POLLUPDATEMESSAGE', 'PLACEHOLDERMESSAGE')
+             AND NULLIF(messages.content, '') IS NULL)
+           OR (messages.message_type = EXCLUDED.message_type
+             AND NULLIF(messages.content, '') IS NULL AND NULLIF(EXCLUDED.content, '') IS NOT NULL)
+           OR (messages.message_type = EXCLUDED.message_type
+             AND EXCLUDED.metadata->>'viewOnce' = 'true'
+             AND (messages.metadata->>'viewOnce') IS DISTINCT FROM 'true')
+         )
        RETURNING id`,
       [
         accountKey(data.waMessageId),
@@ -672,7 +949,7 @@ export async function storeMessage(data: MessageData): Promise<bigint | null> {
         data.isForwarded,
         data.replyToWaId ? accountKey(data.replyToWaId) : null,
         data.platform || 'whatsapp',
-        JSON.stringify(data.metadata || {}),
+        JSON.stringify(withVoiceTranscriptionMetadata(data.messageType, data.metadata || {})),
         connectorAccount(),
       ]
     );
@@ -684,7 +961,7 @@ export async function storeMessage(data: MessageData): Promise<bigint | null> {
 }
 
 export async function storeAttachment(
-  messageId: bigint,
+  messageId: string,
   attachment: {
     fileType: string;
     mimeType?: string;
@@ -734,6 +1011,74 @@ export async function storeMessageKey(data: MessageKeyData): Promise<void> {
       data.participantJid || null,
       data.messageTimestampMs,
     ]
+  );
+}
+
+/** Upper bound of read receipts sent by one markAsRead. */
+export const MARK_READ_MAX_KEYS = 100;
+
+export interface StoredMessageKey {
+  /** Bare WhatsApp message id (the prefix is stripped). */
+  id: string;
+  remoteJid: string;
+  fromMe: boolean;
+  participant?: string;
+}
+
+/**
+ * Keys of the inbound messages of a chat still to be read: not deleted, status
+ * not 'read', and newer than the chat's read watermark — our last outbound
+ * message or the last inbound one already read, whichever is later. Without
+ * the watermark every inbound row would qualify (messages.status defaults to
+ * 'sent' and is rarely updated for inbound), so a markAsRead would walk the
+ * whole history back in batches. A tombstone chat id reads its canonical chat.
+ * Newest first, at most `limit`.
+ */
+export async function getUnreadMessageKeysForChat(
+  chatId: string,
+  limit: number = MARK_READ_MAX_KEYS
+): Promise<StoredMessageKey[]> {
+  const pool = getPool();
+  const result = await pool.query(
+    `WITH conv AS (
+       SELECT COALESCE((SELECT merged_into FROM conversations WHERE id = $1), $1) AS id
+     ), mark AS (
+       SELECT MAX(m.wa_timestamp) AS ts
+         FROM messages m, conv
+        WHERE m.conversation_id = conv.id
+          AND (m.direction = 'OUTBOUND' OR m.status = 'read')
+     )
+     SELECT k.wa_message_id, k.remote_jid, k.from_me, k.participant_jid
+       FROM conv
+       JOIN whatsapp_message_keys k ON k.conversation_id = conv.id
+       JOIN messages m ON m.wa_message_id = k.wa_message_id
+       CROSS JOIN mark
+      WHERE m.account = $2
+        AND m.platform = 'whatsapp'
+        AND m.direction = 'INBOUND'
+        AND m.status IS DISTINCT FROM 'read'
+        AND NOT COALESCE(m.is_deleted, FALSE)
+        AND (mark.ts IS NULL OR m.wa_timestamp > mark.ts)
+      ORDER BY k.message_timestamp_ms DESC
+      LIMIT $3`,
+    [accountKey(chatId), connectorAccount(), Math.max(1, Math.min(limit, 1000))]
+  );
+  return result.rows.map(row => ({
+    id: stripAccountKey(String(row.wa_message_id)),
+    remoteJid: String(row.remote_jid),
+    fromMe: !!row.from_me,
+    participant: row.participant_jid || undefined,
+  }));
+}
+
+/** Record that read receipts went out for these (bare) message ids. */
+export async function markMessagesRead(waMessageIds: string[]): Promise<void> {
+  if (!waMessageIds.length) return;
+  const pool = getPool();
+  await pool.query(
+    `UPDATE messages SET status = 'read', status_at = now()
+      WHERE wa_message_id = ANY($1::text[]) AND account = $2 AND status IS DISTINCT FROM 'read'`,
+    [waMessageIds.map(id => accountKey(id)), connectorAccount()]
   );
 }
 
@@ -787,10 +1132,11 @@ export async function getHistorySyncStatus(limit: number = 200): Promise<History
   const r = await pool.query(
     `SELECT conversation_id, oldest_message_id, oldest_timestamp, newest_timestamp,
             total_imported, status, last_error, updated_at
-     FROM whatsapp_sync_state
+     FROM whatsapp_sync_state s
+     WHERE EXISTS (SELECT 1 FROM conversations c WHERE c.id = s.conversation_id AND c.account = $2)
      ORDER BY updated_at DESC
      LIMIT $1`,
-    [limit]
+    [limit, connectorAccount()]
   );
   return r.rows.map(row => ({
     conversationId: row.conversation_id,
@@ -802,6 +1148,26 @@ export async function getHistorySyncStatus(limit: number = 200): Promise<History
     lastError: row.last_error,
     updatedAt: row.updated_at,
   }));
+}
+
+/**
+ * A participant's display name (its saved name, else its push name), for the
+ * author of a quoted message. Null when unknown or when the stored "name" is
+ * only a jid. `participantId` is already namespaced (messages.sender_wa_id form).
+ */
+export async function participantDisplayName(participantId: string): Promise<string | null> {
+  const pool = getPool();
+  const r = await pool.query(
+    `SELECT COALESCE(
+              CASE WHEN NULLIF(name, '') IS NOT NULL AND position('@' in name) = 0 THEN name END,
+              CASE WHEN NULLIF(push_name, '') IS NOT NULL AND position('@' in push_name) = 0 THEN push_name END
+            ) AS name
+       FROM participants
+      WHERE id = $1`,
+    [participantId]
+  );
+  const name = r.rows[0]?.name;
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
 }
 
 export async function linkParticipantToConversation(
@@ -833,5 +1199,110 @@ export async function linkParticipantToConversation(
         `conversation_id=${convId}, participant_id=${partId}, ` +
         `pgcode=${err.code ?? '?'}, constraint=${err.constraint ?? '?'}): ${err.message ?? e}`
     );
+  }
+}
+
+export interface ArchiveSnapshotChat {
+  jid: string;
+  aliases?: string[];
+  name?: string;
+  archived: boolean;
+}
+
+/** Apply a complete app-state snapshot atomically for this connector's account. */
+export async function applyArchiveSnapshot(
+  chats: ArchiveSnapshotChat[],
+  startedAt: Date
+): Promise<{ archived: number; created: number }> {
+  if (!Number.isFinite(startedAt.getTime())) throw new Error('Invalid archive snapshot time');
+  const account = connectorAccount();
+  const archivedIds = Array.from(
+    new Set(
+      chats
+        .filter(chat => chat.archived)
+        .flatMap(chat => [chat.jid, ...(chat.aliases || [])])
+        .filter(jid => /@(?:g\.us|c\.us|s\.whatsapp\.net|lid)$/.test(jid))
+        .flatMap(jid => jidAliases(stripAccountKey(jid)))
+        .flatMap(jid => [jid, accountKey(jid)])
+    )
+  );
+  const db = await getPool().connect();
+  let created = 0;
+  try {
+    await db.query('BEGIN');
+    await db.query('SELECT pg_advisory_xact_lock(hashtext($1), $2)', [account, 20260923]);
+    // Events written while the remote snapshot was being fetched must win.
+    await db.query(
+      `UPDATE conversations SET archived = false, updated_at = now()
+       WHERE account = $1 AND archived = true AND updated_at <= $2
+         AND id <> ALL($3::text[])
+         AND (wa_chat_id IS NULL OR wa_chat_id <> ALL($3::text[]))`,
+      [account, startedAt, archivedIds]
+    );
+    for (const chat of chats) {
+      if (!chat.archived) continue;
+      if (!/@(?:g\.us|c\.us|s\.whatsapp\.net|lid)$/.test(chat.jid)) {
+        throw new Error('Invalid archive snapshot chat');
+      }
+      const bareIds = Array.from(
+        new Set(
+          [chat.jid, ...(chat.aliases || [])]
+            .filter(jid => /@(?:g\.us|c\.us|s\.whatsapp\.net|lid)$/.test(jid))
+            .flatMap(jid => jidAliases(stripAccountKey(jid)))
+        )
+      );
+      const ids = Array.from(new Set([...bareIds.map(accountKey), ...bareIds]));
+      const hint = chat.name?.trim();
+      const usefulHint = hint && !/@(?:g\.us|c\.us|s\.whatsapp\.net|lid)$/.test(hint) ? hint : null;
+      const updated = await db.query(
+        `UPDATE conversations SET archived = true, updated_at = now()
+         WHERE account = $1 AND (id = ANY($2::text[]) OR wa_chat_id = ANY($2::text[]))
+           AND updated_at <= $3 RETURNING id`,
+        [account, ids, startedAt]
+      );
+      if (usefulHint) {
+        await db.query(
+          `UPDATE conversations SET name = $3, updated_at = now()
+           WHERE account = $1 AND (id = ANY($2::text[]) OR wa_chat_id = ANY($2::text[]))
+             AND (name IS NULL OR btrim(name) = '' OR name = id
+               OR name = regexp_replace(id, '^[^:]+:', '')
+               OR name ~ '@(g\\.us|c\\.us|s\\.whatsapp\\.net|lid)$')`,
+          [account, ids, usefulHint]
+        );
+      }
+      if (updated.rowCount) continue;
+      const existing = await db.query(
+        `SELECT id FROM conversations WHERE account = $1
+           AND (id = ANY($2::text[]) OR wa_chat_id = ANY($2::text[])) LIMIT 1`,
+        [account, ids]
+      );
+      if (existing.rowCount) continue;
+      const normalized = chat.jid.replace(/@s\.whatsapp\.net$/, '@c.us');
+      const id = accountKey(normalized);
+      const inserted = await db.query(
+        `INSERT INTO conversations (id, name, is_group, participant_count, account, archived)
+         VALUES ($1, COALESCE($2, (
+           SELECT NULLIF(name, '') FROM whatsapp_contacts
+           WHERE account = $3 AND jid = ANY($4::text[])
+             AND name !~ '@(g\\.us|c\\.us|s\\.whatsapp\\.net|lid)$'
+           LIMIT 1
+         ), (
+           SELECT NULLIF(name, '') FROM participants
+           WHERE account = $3 AND id = ANY($4::text[])
+             AND name !~ '@(g\\.us|c\\.us|s\\.whatsapp\\.net|lid)$'
+           LIMIT 1
+         ), $5), $6, 0, $3, true)
+         ON CONFLICT (id) DO NOTHING RETURNING id`,
+        [id, usefulHint, account, ids, normalized, normalized.endsWith('@g.us')]
+      );
+      created += inserted.rowCount || 0;
+    }
+    await db.query('COMMIT');
+    return { archived: chats.filter(chat => chat.archived).length, created };
+  } catch (error) {
+    await db.query('ROLLBACK');
+    throw error;
+  } finally {
+    db.release();
   }
 }

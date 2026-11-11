@@ -1,7 +1,20 @@
 import { Pool } from 'pg';
+import { activeNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
 
-export const ACCOUNTS = ['personal', 'professional', 'leila'] as const;
-export type Account = (typeof ACCOUNTS)[number];
+/** A DB namespace of the account registry (the legacy `account` column). */
+export type Account = string;
+
+/**
+ * Namespaces to ingest: every namespace declared in the account registry
+ * (k8s/base/social-accounts.json), so a new account is ingested without a code
+ * change. Each namespace carries its WhatsApp, Telegram and Instagram rows.
+ */
+export function ingestNamespaces(): Account[] {
+  return activeNamespaces();
+}
+
+/** Backwards-compatible name; jobs now enumerate storage namespaces. */
+export const accounts = ingestNamespaces;
 export type Platform = 'whatsapp' | 'telegram' | 'instagram';
 
 export interface Cursor {
@@ -50,11 +63,11 @@ function assertCursorTableName(table: string): void {
   }
 }
 
+/** Brain instance of a namespace: the registry's `brainInstance`. */
 export function instanceForAccount(account: Account): string {
-  // 'leila' (SC-1144 fase 2) ingesta en la instancia 'personal' — su PVC arranca
-  // vacío y no hay mensajes hasta que el operador la empareje; si el CTO decide
-  // otra instancia, es un cambio de una línea aquí.
-  return account === 'professional' ? 'skirmshop' : 'personal';
+  const instance = brainInstanceForNamespace(account);
+  if (!instance) throw new Error(`namespace '${account}' is not declared in the account registry`);
+  return instance;
 }
 
 export function sourceId(platform: string, waMessageId: string): string {
@@ -79,22 +92,11 @@ export function adapterForPlatform(platform: string): string {
 }
 
 export async function ensureLiveCursorTable(pool: Pool): Promise<void> {
-  await pool.query(`
-    DO $$
-    DECLARE col_type text;
-    BEGIN
-      SELECT data_type INTO col_type FROM information_schema.columns
-        WHERE table_name = 'brain_ingest_cursor' AND column_name = 'last_id';
-      IF col_type IS NOT NULL AND col_type <> 'bigint' THEN
-        DROP TABLE brain_ingest_cursor;
-      END IF;
-    END $$;
-  `);
   await pool.query(
     `CREATE TABLE IF NOT EXISTS brain_ingest_cursor (
        account          text PRIMARY KEY,
        last_created_at  timestamptz NOT NULL,
-       last_id          bigint,
+       last_id          text,
        updated_at       timestamptz NOT NULL DEFAULT now()
      )`
   );
@@ -107,7 +109,7 @@ export async function ensureReplayCursorTable(pool: Pool): Promise<void> {
        account          text NOT NULL,
        platform         text NOT NULL,
        last_created_at  timestamptz NOT NULL,
-       last_id          bigint,
+       last_id          text,
        updated_at       timestamptz NOT NULL DEFAULT now(),
        PRIMARY KEY (run_id, account, platform)
      )`
@@ -191,7 +193,9 @@ export async function fetchBatch(
     `m.account = $1`,
     `m.is_deleted = false`,
     `m.content IS NOT NULL AND btrim(m.content) <> ''`,
-    `(m.created_at, m.id) > ($2::timestamptz, COALESCE($3::bigint, 0::bigint))`,
+    // PostgreSQL infers $3 from m.id, preserving UUID and legacy BIGINT ordering.
+    `(m.created_at > $2::timestamptz OR
+      (m.created_at = $2::timestamptz AND (m.id > $3 OR $3 IS NULL)))`,
   ];
   if (opts.platform) {
     params.push(opts.platform);
@@ -217,29 +221,82 @@ export async function fetchBatch(
   return r.rows as Row[];
 }
 
+export interface PushRetryOpts {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+function envInt(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// Presupuesto efectivo de reintento: BRAIN_PUSH_BUDGET_MS (240 s), recortado a
+// BRAIN_INGEST_MAX_RUNTIME_MS - 30 s para agotar y salir antes del tope del job.
+function pushBudgetMs(): number {
+  const budget = envInt('BRAIN_PUSH_BUDGET_MS', 240000);
+  const maxRuntime = Number(process.env.BRAIN_INGEST_MAX_RUNTIME_MS);
+  if (Number.isFinite(maxRuntime) && maxRuntime > 0) {
+    return Math.max(0, Math.min(budget, maxRuntime - 30000));
+  }
+  return budget;
+}
+
+// BRAIN_PUSH_RETRIES es techo de seguridad: manda el presupuesto y los intentos deben cubrirlo
+// con el backoff real (1,2,4,8,16 s y luego maxDelay): 240 s / 30 s piden 13 intentos.
 export async function pushToBrain(
   config: BrainPushConfig,
   instance: string,
   adapter: string,
-  documents: BrainDoc[]
+  documents: BrainDoc[],
+  opts: PushRetryOpts = {}
 ): Promise<number> {
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+  const maxAttempts = envInt('BRAIN_PUSH_RETRIES', 20);
+  const maxDelay = envInt('BRAIN_PUSH_RETRY_MAX_DELAY_MS', 30000);
+  const budget = pushBudgetMs();
+  const start = now();
   const url = `${config.brainUrl.replace(/\/$/, '')}/instances/${instance}/push-ingest`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
-    },
-    body: JSON.stringify({ adapter, documents }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(
-      `brain push-ingest ${instance}/${adapter} -> ${resp.status}: ${text.slice(0, 300)}`
+  const label = `brain push-ingest ${instance}/${adapter}`;
+
+  for (let attempt = 1; ; attempt++) {
+    let lastError: Error;
+    let fatal = false;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
+        },
+        body: JSON.stringify({ adapter, documents }),
+      });
+      if (resp.ok) {
+        const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+        return Number(body.chunks_ingested ?? 0);
+      }
+      const text = await resp.text().catch(() => '');
+      lastError = new Error(`${label} -> ${resp.status}: ${text.slice(0, 300)}`);
+      fatal = resp.status < 500; // 4xx: no se reintenta
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e)); // error de red
+    }
+    if (fatal) throw lastError;
+
+    const elapsed = now() - start;
+    if (attempt >= maxAttempts || elapsed >= budget) {
+      throw new Error(
+        `${lastError.message} (tras ${attempt - 1} reintentos, ${elapsed} ms gastados de ${budget} ms)`
+      );
+    }
+    // El último sueño se recorta al presupuesto restante: hay un intento final justo en el límite.
+    const delay = Math.min(1000 * 2 ** (attempt - 1), maxDelay, budget - elapsed);
+    console.warn(
+      `${label} fallo (${lastError.message}); reintento ${attempt}/${maxAttempts - 1} en ${delay} ms`
     );
+    await sleep(delay);
   }
-  const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
-  return Number(body.chunks_ingested ?? 0);
 }
 
 export function toDoc(row: Row): BrainDoc {

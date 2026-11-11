@@ -272,12 +272,17 @@ export class SessionPool {
    * State + current QR of ONE sub. Never opens a socket. After the start's
    * QR budget is spent it throws PoolLimitError('qr_limit') until a new
    * start is allowed.
+   *
+   * READ-ONLY (SC-1243): does NOT renew `lastTouched`. This is what the
+   * polling routes (`GET /pairing/whatsapp`, `/social/status`) call, so a
+   * client that polls must not be able to keep a half-done pairing session
+   * alive forever and starve the pool of its idle eviction. Only starts and
+   * real socket activity move the idle clock.
    */
   async status(sessionKey: string): Promise<PairingStatus> {
     assertSessionKey(sessionKey);
     const live = this.sessions.get(sessionKey);
     if (live) {
-      live.lastTouched = this.now();
       return this.statusOf(live);
     }
     const exhaustedAt = this.qrExhausted.get(sessionKey);

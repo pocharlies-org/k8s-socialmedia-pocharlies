@@ -2,6 +2,19 @@
 # (volumes whatsappmcp_postgres_data etc. and container hostnames are addressed by code/configs elsewhere).
 name: whatsappmcp
 
+x-semantic-env: &semantic-env
+  SEMANTIC_PROVIDER: ${SEMANTIC_PROVIDER:-brain}
+  BRAIN_SEARCH_URL: ${BRAIN_SEARCH_URL:-}
+  BRAIN_MESSAGING_SEARCH_KEY: ${BRAIN_MESSAGING_SEARCH_KEY:-}
+  BRAIN_SEARCH_TIMEOUT_MS: ${BRAIN_SEARCH_TIMEOUT_MS:-10000}
+  SEMANTIC_MIN_SCORE: ${SEMANTIC_MIN_SCORE:--5}
+  HINDSIGHT_URL: ${HINDSIGHT_URL:-}
+  HINDSIGHT_BANK_ID: ${HINDSIGHT_BANK_ID:-socialmedia-staticduo}
+  HINDSIGHT_API_KEY: ${HINDSIGHT_API_KEY:-}
+  HINDSIGHT_TIMEOUT_MS: ${HINDSIGHT_TIMEOUT_MS:-10000}
+  HINDSIGHT_RECALL_MAX_TOKENS: ${HINDSIGHT_RECALL_MAX_TOKENS:-4096}
+  HINDSIGHT_RECALL_BUDGET: ${HINDSIGHT_RECALL_BUDGET:-mid}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -142,6 +155,7 @@ services:
       dockerfile: ./mcp-server/Dockerfile
     command: ["sh", "-c", "cd mcp-server && npx tsx src/main.ts"]
     environment:
+      <<: *semantic-env
       DATABASE_URL: postgresql://whatsappmcp:${POSTGRES_PASSWORD:-whatsappmcp_dev}@postgres:5432/whatsappmcp?sslmode=disable
       REDIS_URL: rediss://redis:6379
       REDIS_TLS_CA: /certs/ca.crt
@@ -195,6 +209,7 @@ services:
       dockerfile: ./mcp-server/Dockerfile
     command: ["sh", "-c", "cd mcp-server && npx tsx src/mcp/sse-server.ts"]
     environment:
+      <<: *semantic-env
       DATABASE_URL: postgresql://whatsappmcp:${POSTGRES_PASSWORD:-whatsappmcp_dev}@postgres:5432/whatsappmcp?sslmode=disable
       REDIS_URL: rediss://redis:6379
       REDIS_TLS_CA: /certs/ca.crt
@@ -230,6 +245,29 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  hindsight-sync:
+    profiles: ["hindsight"]
+    build:
+      context: .
+      dockerfile: ./mcp-server/Dockerfile
+    command: ["sh", "-c", "cd mcp-server && exec tsx src/jobs/hindsight-sync.ts --loop"]
+    environment:
+      <<: *semantic-env
+      DATABASE_URL: postgresql://whatsappmcp:${POSTGRES_PASSWORD:-whatsappmcp_dev}@postgres:5432/whatsappmcp?sslmode=disable
+      HINDSIGHT_SYNC_BATCH: ${HINDSIGHT_SYNC_BATCH:-100}
+      HINDSIGHT_SYNC_INTERVAL_MS: ${HINDSIGHT_SYNC_INTERVAL_MS:-30000}
+      HINDSIGHT_SYNC_RETRY_MS: ${HINDSIGHT_SYNC_RETRY_MS:-30000}
+      HINDSIGHT_SYNC_EXCLUDED_PLATFORMS: ${HINDSIGHT_SYNC_EXCLUDED_PLATFORMS:-}
+      HINDSIGHT_SYNC_SINCE: ${HINDSIGHT_SYNC_SINCE:-1970-01-01T00:00:00Z}
+      HINDSIGHT_SYNC_CHAT_IDS: ${HINDSIGHT_SYNC_CHAT_IDS:-}
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+    volumes:
+      - ./certs/ca.crt:/certs/ca.crt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   telegram-connector:
     build:
       context: .
@@ -239,6 +277,7 @@ services:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
       TELEGRAM_SESSION_STRING: ${TELEGRAM_SESSION_STRING}
+      TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS: ${TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS:-120}
       CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET:-dev-secret-change-in-production}
       SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY:-dev-encryption-key-change-in-production}
       SESSION_PATH: /app/persistent-session
@@ -282,6 +321,7 @@ services:
       FACEBOOK_APP_ID: ${FACEBOOK_APP_ID}
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET}
       WEBHOOK_VERIFY_TOKEN: ${INSTAGRAM_WEBHOOK_VERIFY_TOKEN}
+      CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET:-dev-secret-change-in-production}
       NATS_URL: tls://nats:4222
       NATS_CA_CERT: /certs/ca.crt
       PORT: 3003

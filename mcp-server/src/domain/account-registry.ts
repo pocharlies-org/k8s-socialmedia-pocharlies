@@ -42,7 +42,19 @@ export interface SocialAccount {
    * Defaults to the namespace.
    */
   profile: string;
+  /**
+   * Brain instance this account's messages are ingested into (brain-ingest
+   * job). Every account sharing a DB namespace must agree, because the job
+   * ingests per namespace. Defaults to 'personal'.
+   */
+  brainInstance: string;
   capabilities: Record<string, boolean>;
+  /** Pairing/QR endpoint exposed by the connector (NAS deployments). */
+  qrUrl?: string;
+  /** Name of the env var holding this account's connector secret. */
+  secretEnv?: string;
+  /** Refuse cold sends until an inbound message is seen (per-account policy). */
+  requireInboundBeforeSend?: boolean;
 }
 
 const ID_RE = /^[a-z][a-z0-9_-]*$/;
@@ -130,6 +142,10 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     if (channel !== 'instagram' && namespace !== item.accountId) {
       throw new AccountRegistryError(`${key}: a ${channel} account is its own namespace`);
     }
+    const brainInstance = item.brainInstance ?? 'personal';
+    if (typeof brainInstance !== 'string' || !ID_RE.test(brainInstance)) {
+      throw new AccountRegistryError(`${key}: brainInstance must be an account-style id`);
+    }
     const profile = item.profile ?? namespace;
     if (typeof profile !== 'string' || !ID_RE.test(profile)) {
       throw new AccountRegistryError(`${key}: profile must be an account-style id`);
@@ -145,6 +161,19 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     ) {
       throw new AccountRegistryError(`${key}: capabilities must map names to booleans`);
     }
+    const qrUrl = httpUrl(item.qrUrl, 'qrUrl', key);
+    if (
+      item.requireInboundBeforeSend !== undefined &&
+      typeof item.requireInboundBeforeSend !== 'boolean'
+    ) {
+      throw new AccountRegistryError(`${key}: requireInboundBeforeSend must be a boolean`);
+    }
+    if (
+      item.secretEnv !== undefined &&
+      (typeof item.secretEnv !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(item.secretEnv))
+    ) {
+      throw new AccountRegistryError(`${key}: secretEnv must reference an env var name`);
+    }
     return {
       channel,
       accountId: item.accountId,
@@ -159,7 +188,15 @@ export function parseAccounts(value: unknown): SocialAccount[] {
       bridgeUrl: httpUrl(item.bridgeUrl, 'bridgeUrl', key),
       namespace,
       profile,
+      brainInstance,
       capabilities: { ...DEFAULT_CAPABILITIES[channel], ...(item.capabilities || {}) },
+      // Only present when declared: specs (and the connector payloads) must not
+      // see an undefined key for accounts that never opted in.
+      ...(qrUrl !== undefined ? { qrUrl } : {}),
+      ...(item.secretEnv !== undefined ? { secretEnv: item.secretEnv as string } : {}),
+      ...(item.requireInboundBeforeSend !== undefined
+        ? { requireInboundBeforeSend: item.requireInboundBeforeSend as boolean }
+        : {}),
     } as SocialAccount;
   });
   // An Instagram namespace must be a real WhatsApp/Telegram namespace, or its
@@ -171,6 +208,16 @@ export function parseAccounts(value: unknown): SocialAccount[] {
         `instagram:${a.accountId}: namespace '${a.namespace}' is not a declared account`
       );
     }
+  }
+  const instanceByNamespace = new Map<string, string>();
+  for (const a of accounts) {
+    const seenInstance = instanceByNamespace.get(a.namespace);
+    if (seenInstance && seenInstance !== a.brainInstance) {
+      throw new AccountRegistryError(
+        `namespace '${a.namespace}' mixes brainInstance '${seenInstance}' and '${a.brainInstance}'`
+      );
+    }
+    instanceByNamespace.set(a.namespace, a.brainInstance);
   }
   if (!namespaces.has('personal')) {
     throw new AccountRegistryError("registry must declare the 'personal' namespace (bare ids)");
@@ -188,11 +235,13 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       channel: 'whatsapp',
       accountId: 'professional',
       connectorUrl: env.WHATSAPP_PROFESSIONAL_URL || 'http://whatsapp-connector-professional:3001',
+      brainInstance: 'skirmshop',
     },
     {
       channel: 'whatsapp',
       accountId: 'leila',
       connectorUrl: env.WHATSAPP_LEILA_URL || 'http://whatsapp-connector-leila:3001',
+      brainInstance: 'leila',
     },
     {
       channel: 'telegram',
@@ -205,8 +254,25 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       accountId: 'professional',
       connectorUrl: env.TELEGRAM_PROFESSIONAL_URL || 'http://telegram-connector-professional:3002',
       bridgeUrl: env.TELEGRAM_BRIDGE_PROFESSIONAL_URL || 'http://telegram-sync-professional:3080',
+      brainInstance: 'skirmshop',
     },
-    { channel: 'instagram', accountId: 'skirmshop', namespace: 'professional' },
+    {
+      channel: 'telegram',
+      accountId: 'leila',
+      connectorUrl: env.TELEGRAM_LEILA_URL || 'http://telegram-connector-leila:3002',
+      bridgeUrl: env.TELEGRAM_BRIDGE_LEILA_URL || 'http://telegram-sync-leila:3080',
+      brainInstance: 'leila',
+      // SC-4749: apagado por decisión de Dani en vivo (02-11) — la cuenta
+      // nunca llegó a emparejarse y el conector crash-loopaba. Debe batir
+      // con k8s/base/social-accounts.json (account-registry.spec.ts).
+      enabled: false,
+    },
+    {
+      channel: 'instagram',
+      accountId: 'skirmshop',
+      namespace: 'professional',
+      brainInstance: 'skirmshop',
+    },
     { channel: 'instagram', accountId: 'barbelpapis', namespace: 'personal' },
   ]);
 }
@@ -289,4 +355,26 @@ export function declaredAccountIds(): Set<string> {
 /** Primary key of the account in social_accounts: '<channel>:<accountId>'. */
 export function socialAccountId(channel: AccountChannel, accountId: string): string {
   return `${channel}:${accountId}`;
+}
+
+/** Brain instance for a DB namespace (brain-ingest). Undeclared → undefined. */
+export function brainInstanceForNamespace(namespace: string): string | undefined {
+  return getAccounts(undefined, true).find(a => a.namespace === namespace)?.brainInstance;
+}
+
+/**
+ * Connector shared secret for an account (NAS fork): `secretEnv` names the env
+ * var when the account declares one, otherwise the shared
+ * CONNECTOR_SHARED_SECRET. Fail-closed: a missing secret is an error, not an
+ * unsigned request.
+ */
+export function connectorSecretFor(account: SocialAccount): string {
+  const secret = account.secretEnv
+    ? process.env[account.secretEnv]
+    : process.env.CONNECTOR_SHARED_SECRET;
+  if (!secret)
+    throw new AccountRegistryError(
+      `Missing connector secret for ${account.channel}:${account.accountId}`
+    );
+  return secret;
 }

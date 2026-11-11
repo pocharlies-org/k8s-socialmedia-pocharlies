@@ -9,11 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type {
-  CredentialChannel,
-  CredentialStore,
-  StoredCredential,
-} from '@mcp-socialmedia/shared';
+import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import { EventEmitter } from 'node:events';
 import {
   attachCredentialSession,
@@ -50,8 +46,6 @@ class FakeStore implements CredentialStore {
   }
 }
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 test('credentialSessionKeyFromEnv: flag off or key unset → null (legacy path)', () => {
   assert.equal(credentialSessionKeyFromEnv({}), null);
   assert.equal(credentialSessionKeyFromEnv({ CREDENTIAL_STORE_ENABLED: 'true' }), null);
@@ -67,7 +61,10 @@ test('credentialSessionKeyFromEnv: flag off or key unset → null (legacy path)'
 test('credentialSessionKeyFromEnv: sub and sub:account accepted, traversal rejected', () => {
   const env = { CREDENTIAL_STORE_ENABLED: 'true' };
   assert.equal(
-    credentialSessionKeyFromEnv({ ...env, CREDENTIAL_SESSION_KEY: 'e51253a7-9e1b-4f4a-9a1d-0f2b3c4d5e6f' }),
+    credentialSessionKeyFromEnv({
+      ...env,
+      CREDENTIAL_SESSION_KEY: 'e51253a7-9e1b-4f4a-9a1d-0f2b3c4d5e6f',
+    }),
     'e51253a7-9e1b-4f4a-9a1d-0f2b3c4d5e6f'
   );
   assert.equal(
@@ -107,15 +104,22 @@ test('loadCredentialSession: no row → fresh; row → applied into the auth dir
   assert.equal(await readFile(join(dst, 'creds.json'), 'utf-8'), '{"a":1}');
 });
 
-test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir', async () => {
+test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir', async t => {
   const store = new FakeStore();
   const authDir = await mkdtemp(join(tmpdir(), 'cred-wb-'));
   await writeFile(join(authDir, 'creds.json'), 'first');
 
+  // Filesystem latency must not advance the debounce window between saves.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const wb = createCredentialWriteBack(store, 'sub-1', authDir, () => {}, 10);
   wb.schedule();
+  t.mock.timers.tick(9);
   await writeFile(join(authDir, 'session-1'), 'second');
   wb.schedule(); // burst: only the trailing run must hit the store
+  t.mock.timers.tick(9);
+  assert.equal(store.puts.length, 0);
+  await wb.flush();
+  t.mock.timers.tick(10); // flush must also cancel the scheduled timer
   await wb.flush();
 
   assert.equal(store.puts.length, 1);
@@ -126,19 +130,76 @@ test('write-back: saveCreds bursts coalesce into serialized puts of the auth dir
   assert.equal(Buffer.from(files['session-1'], 'base64').toString(), 'second');
 });
 
-test('write-back: a put scheduled mid-flight runs a trailing put (last saveCreds lands)', async () => {
+test('write-back: a put scheduled mid-flight runs a trailing put (last saveCreds lands)', async t => {
   const store = new FakeStore();
   const authDir = await mkdtemp(join(tmpdir(), 'cred-wb2-'));
   await writeFile(join(authDir, 'creds.json'), 'v1');
 
-  const wb = createCredentialWriteBack(store, 'sub-1', authDir, () => {}, 0);
+  let notifyFirstPut!: () => void;
+  let notifySecondPut!: () => void;
+  let releaseFirstPut!: () => void;
+  const firstPutStarted = new Promise<void>(resolve => {
+    notifyFirstPut = resolve;
+  });
+  const firstPutReleased = new Promise<void>(resolve => {
+    releaseFirstPut = resolve;
+  });
+  const secondPutStarted = new Promise<void>(resolve => {
+    notifySecondPut = resolve;
+  });
+  const realSetTimeout = setTimeout;
+  const realClearTimeout = clearTimeout;
+  let activePuts = 0;
+  let maxActivePuts = 0;
+  const put = store.put.bind(store);
+  store.put = async (...args: Parameters<CredentialStore['put']>): Promise<void> => {
+    activePuts += 1;
+    maxActivePuts = Math.max(maxActivePuts, activePuts);
+    try {
+      await put(...args);
+      if (store.puts.length === 1) {
+        notifyFirstPut();
+        await firstPutReleased;
+      } else if (store.puts.length === 2) {
+        notifySecondPut();
+      }
+    } finally {
+      activePuts -= 1;
+    }
+  };
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const wb = createCredentialWriteBack(store, 'sub-1', authDir, () => {}, 10);
   wb.schedule();
-  await sleep(1); // fire the first put
-  await writeFile(join(authDir, 'creds.json'), 'v2');
-  wb.schedule(); // lands while the first put is still in flight
+  t.mock.timers.tick(10);
+  await firstPutStarted;
+  try {
+    await writeFile(join(authDir, 'creds.json'), 'v2');
+    wb.schedule();
+    t.mock.timers.tick(10); // request the trailing run while the first put is blocked
+    assert.equal(store.puts.length, 1);
+    assert.equal(activePuts, 1);
+  } finally {
+    releaseFirstPut();
+  }
+  let deadlineTimer!: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    deadlineTimer = realSetTimeout(() => reject(new Error('Trailing put did not start')), 2000);
+  });
+  try {
+    await Promise.race([secondPutStarted, deadline]);
+  } finally {
+    realClearTimeout(deadlineTimer);
+  }
+  // Let the completed put's promise chain settle; flush must only clean up.
+  await new Promise<void>(resolve => setImmediate(resolve));
   await wb.flush();
 
-  assert.equal(store.puts.length >= 2, true);
+  assert.equal(store.puts.length, 2);
+  assert.equal(maxActivePuts, 1);
+  assert.equal(activePuts, 0);
+  const firstFiles = (store.puts[0].payload as { files: Record<string, string> }).files;
+  assert.equal(Buffer.from(firstFiles['creds.json'], 'base64').toString(), 'v1');
   const last = store.puts[store.puts.length - 1];
   const files = (last.payload as { files: Record<string, string> }).files;
   assert.equal(Buffer.from(files['creds.json'], 'base64').toString(), 'v2');
@@ -195,7 +256,9 @@ test('attachCredentialSession (default = SC-705 main.ts path): load, every saveC
   store.rows.set('sub-1/whatsapp', {
     sessionKey: 'sub-1',
     channel: 'whatsapp',
-    payload: { files: { 'creds.json': Buffer.from('{"me":{"id":"1@s.whatsapp.net"}}').toString('base64') } },
+    payload: {
+      files: { 'creds.json': Buffer.from('{"me":{"id":"1@s.whatsapp.net"}}').toString('base64') },
+    },
     updatedAt: new Date(),
   });
   const dir = await mkdtemp(join(tmpdir(), 'cred-attach-'));

@@ -1,6 +1,21 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { TelegramClientWrapper } from '../telegram-client';
+import {
+  TelegramClientWrapper,
+  TelegramMessageEdit,
+  isTelegramDownloadTimeout,
+  telegramRetryAfter,
+  telegramDownloadRetryAfter,
+} from '../telegram-client';
+import { MessageMutationError, classifyEditError, sendingDisabledReason } from '../message-edit';
+import {
+  ADMIN_RIGHT_NAMES,
+  ModerationError,
+  classifyModerationError,
+  isRestriction,
+  requireNumericTarget,
+} from '../moderation';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
+import { readIdempotencyKey, sendOnce } from '../send-idempotency';
 import pino from 'pino';
 
 const logger = pino({
@@ -9,6 +24,46 @@ const logger = pino({
     options: { colorize: true },
   },
 });
+
+function respondRateLimit(res: Response, error: unknown): boolean {
+  const retryAfter = telegramRetryAfter(error);
+  if (retryAfter === null) return false;
+  res.set('Retry-After', String(retryAfter));
+  res.status(429).json({ error: 'Telegram rate limit', retryAfter });
+  return true;
+}
+
+function downloadRoute(
+  download: (req: Request) => Promise<Buffer | null>,
+  absent: string,
+  contentType?: string
+): (req: Request, res: Response) => void {
+  return (req, res) => {
+    void (async () => {
+      try {
+        const buffer = await download(req);
+        if (!buffer) {
+          res.status(404).json({ error: absent });
+          return;
+        }
+        res.json({
+          data: buffer.toString('base64'),
+          size: buffer.length,
+          ...(contentType ? { contentType } : {}),
+        });
+      } catch (error) {
+        if (respondRateLimit(res, error)) return;
+        const retryAfter = telegramDownloadRetryAfter(error);
+        if (retryAfter !== null) {
+          res.set('Retry-After', String(retryAfter));
+          res.status(503).json({ error: 'Telegram media temporarily unavailable', retryAfter });
+          return;
+        }
+        res.status(isTelegramDownloadTimeout(error) ? 504 : 502).json({ error: String(error) });
+      }
+    })();
+  };
+}
 
 /**
  * Authentication middleware
@@ -42,7 +97,107 @@ function authMiddleware(
   };
 }
 
-export function createRouter(client: TelegramClientWrapper, sharedSecret: string): Router {
+/** A Telegram peer as the edit route takes it: marked numeric id or (@)username. */
+const TELEGRAM_PEER_RE = /^(?:-?\d{1,20}|@?[A-Za-z][A-Za-z0-9_]{3,63})$/;
+
+/** Optional `actor` of a mutation body: who asked, for the record (≤ 200 chars). */
+function actorFromBody(value: unknown): string | undefined {
+  const actor = typeof value === 'string' ? value.trim() : '';
+  return actor ? actor.slice(0, 200) : undefined;
+}
+
+/** Error of an edit → status + failureClass (+ Telegram's code), the WhatsApp shape. */
+function mutationErrorResponse(res: Response, error: unknown): void {
+  const e = error instanceof MessageMutationError ? error : classifyEditError(error);
+  if (e.status >= 500) logger.error(`Error editing message: ${e.message}`);
+  if (e.retryAfterSeconds) res.setHeader('Retry-After', String(e.retryAfterSeconds));
+  res.status(e.status).json({
+    error: e.message,
+    failureClass: e.failureClass,
+    ...(e.code ? { code: e.code } : {}),
+    ...(e.retryAfterSeconds ? { retryAfterSeconds: e.retryAfterSeconds } : {}),
+  });
+}
+
+/**
+ * The sending gate of every outward route (sends, media, reactions, forwards,
+ * deletes, button clicks, group/admin/topic changes): 403 disabled_sending
+ * before Telegram is touched. Reads and mark-as-read stay open, like WhatsApp.
+ */
+export function requireSending(req: Request, res: Response, next: NextFunction): void {
+  const disabled = sendingDisabledReason();
+  if (disabled) {
+    res.status(403).json({ error: disabled, failureClass: 'disabled_sending' });
+    return;
+  }
+  next();
+}
+
+/** Error of a moderation route → status + canonical failureClass (INFRA-218), never an opaque 500. */
+function moderationErrorResponse(res: Response, error: unknown, action: string): void {
+  const e = error instanceof ModerationError ? error : classifyModerationError(error, action);
+  if (e.status >= 500) logger.error(`Error in Telegram ${action}: ${e.message}`);
+  if (e.retryAfterSeconds) res.setHeader('Retry-After', String(e.retryAfterSeconds));
+  res.status(e.status).json({
+    error: e.message,
+    failureClass: e.failureClass,
+    ...(e.code ? { code: e.code } : {}),
+    ...(e.retryAfterSeconds ? { retry_after_s: e.retryAfterSeconds } : {}),
+    ...(e.missingRight ? { missing_right: e.missingRight } : {}),
+  });
+}
+
+/** Optional ISO-8601 `until` of a moderation body → Date (undefined = no end). */
+function untilFromBody(value: unknown): Date | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const date = typeof value === 'string' ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime()) || !/^\d{4}-\d{2}-\d{2}/.test(value as string)) {
+    throw new ModerationError('invalid_request', 'until debe ser una fecha ISO-8601');
+  }
+  return date;
+}
+
+/**
+ * Validation of the moderation bodies (INFRA-746), a middleware so it answers
+ * 400 BEFORE the sending gate's 403 (an invalid request is invalid with the
+ * door open or closed). The participant is a numeric Telegram id: the bot
+ * works with the ids the participants route gives it, never usernames.
+ */
+function moderationBody(req: Request, res: Response, next: NextFunction): void {
+  const { userId } = (req.body ?? {}) as { userId?: unknown };
+  if (typeof userId !== 'string' && typeof userId !== 'number') {
+    res.status(400).json({ error: 'userId is required (numeric Telegram id)' });
+    return;
+  }
+  if (!/^\d{1,20}$/.test(String(userId))) {
+    res.status(400).json({ error: 'userId must be a numeric Telegram id' });
+    return;
+  }
+  next();
+}
+
+/** Chat param of a moderation route: a numeric chat id or a @username. */
+function chatParam(req: Request, res: Response, next: NextFunction): void {
+  if (!TELEGRAM_PEER_RE.test(req.params.id)) {
+    res.status(400).json({ error: 'invalid chat id' });
+    return;
+  }
+  next();
+}
+
+export interface RouterOptions {
+  /**
+   * Hand an edit this connector made to NATS (telegram.MessageEdited, written
+   * by telegram-sync). Returns whether it was published.
+   */
+  publishMessageEdited?: (edit: TelegramMessageEdit) => boolean;
+}
+
+export function createRouter(
+  client: TelegramClientWrapper,
+  sharedSecret: string,
+  options: RouterOptions = {}
+): Router {
   const router = Router();
 
   // Apply auth middleware to all routes
@@ -111,6 +266,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * GET /chats/:id/info - Get chat info
    */
+  // CONTRACT: http.telegram-connector.chats-info.v1
   router.get('/chats/:id/info', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -125,6 +281,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * GET /chats/:id/participants - Get chat participants
    */
+  // CONTRACT: http.telegram-connector.chats-participants.v1
   router.get('/chats/:id/participants', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -140,7 +297,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /groups - Create a group, supergroup/forum, or channel.
    */
-  router.post('/groups', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.groups.v1
+  router.post('/groups', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { title, type, description, forum, members } = req.body;
@@ -174,7 +332,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /chats/:id/members - Add members to a group, supergroup, or channel.
    */
-  router.post('/chats/:id/members', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-members.v1
+  router.post('/chats/:id/members', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { members, forwardCount } = req.body;
@@ -207,7 +366,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * PUT /chats/:id/admins/:userId - Set or revoke Telegram admin permissions.
    */
-  router.put('/chats/:id/admins/:userId', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-admins.v1
+  router.put('/chats/:id/admins/:userId', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { rights, rank } = req.body;
@@ -215,24 +375,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
           res.status(400).json({ error: 'rights must be an object of boolean permissions' });
           return;
         }
-        const allowedRights = new Set([
-          'changeInfo',
-          'postMessages',
-          'editMessages',
-          'deleteMessages',
-          'banUsers',
-          'inviteUsers',
-          'pinMessages',
-          'addAdmins',
-          'anonymous',
-          'manageCall',
-          'other',
-          'manageTopics',
-          'postStories',
-          'editStories',
-          'deleteStories',
-          'manageDirectMessages',
-        ]);
+        // Same 16 right names getChatMember reports (moderation.ts); one source.
+        const allowedRights = new Set<string>(ADMIN_RIGHT_NAMES);
         if (
           Object.entries(rights).some(
             ([name, value]) => !allowedRights.has(name) || typeof value !== 'boolean'
@@ -260,8 +404,136 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * POST /chats/:id/ban - Ban a member from a group, supergroup or channel
+   * (bot Sauvage verificacion, INFRA-746). Validation answers 400 before the
+   * sending gate's 403; the ban itself only after the gate.
+   */
+  // CONTRACT: http.telegram-connector.chats-ban.v1
+  router.post(
+    '/chats/:id/ban',
+    chatParam,
+    moderationBody,
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          const result = await client.banManagedChatMember(req.params.id, String(req.body.userId));
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error banning Telegram chat member: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
+
+  /**
+   * POST /chats/:id/unban - Lift a member's ban. Does NOT re-add them: the
+   * add is POST /chats/:id/members (chats-members.v1).
+   */
+  // CONTRACT: http.telegram-connector.chats-unban.v1
+  router.post(
+    '/chats/:id/unban',
+    chatParam,
+    moderationBody,
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          const result = await client.unbanManagedChatMember(
+            req.params.id,
+            String(req.body.userId)
+          );
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error unbanning Telegram chat member: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
+
+  /**
+   * POST /chats/:id/invite-export - Export the primary invite link of a
+   * channel/supergroup (fallback when the add is refused by the target's
+   * privacy: chats-members answers with `missing`). Telegram rotates the
+   * primary link on every export.
+   */
+  // CONTRACT: http.telegram-connector.chats-invite-export.v1
+  router.post('/chats/:id/invite-export', chatParam, requireSending, (req, res): void => {
+    void (async () => {
+      try {
+        const result = await client.exportManagedChatInvite(req.params.id);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error exporting Telegram chat invite: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * Member moderation (INFRA-218 / INFRA-344). Ids are numeric, in the path
+   * (chat) and the body (`user_id`); failures answer {error, failureClass,
+   * code?, retry_after_s?, missing_right?}, never a 500 nor outcome_unknown.
+   * POST /chats/:id/moderation/{ban|unban|kick|restrict|unrestrict}
+   * GET  /chats/:id/moderation/admin-rights   (this account's own rights)
+   */
+  // CONTRACT: http.telegram-connector.moderation.v1
+  const moderationRoute = (
+    action: 'ban' | 'unban' | 'kick' | 'restrict' | 'unrestrict',
+    run: (chatId: string, userId: string, body: Record<string, unknown>) => Promise<unknown>
+  ): void => {
+    router.post(
+      `/chats/:id/moderation/${action}`,
+      requireSending,
+      (req: Request, res: Response): void => {
+        void (async () => {
+          try {
+            const body = (req.body ?? {}) as Record<string, unknown>;
+            const chatId = requireNumericTarget('chat_id', req.params.id);
+            const userId = requireNumericTarget('user_id', body.user_id);
+            res.json(await run(chatId, userId, body));
+          } catch (e) {
+            moderationErrorResponse(res, e, action);
+          }
+        })();
+      }
+    );
+  };
+
+  moderationRoute('ban', (chat, user, body) =>
+    client.banChatMember(chat, user, untilFromBody(body.until))
+  );
+  moderationRoute('unban', (chat, user) => client.unbanChatMember(chat, user));
+  moderationRoute('kick', (chat, user) => client.kickChatMember(chat, user));
+  moderationRoute('restrict', (chat, user, body) => {
+    if (!isRestriction(body.restriction)) {
+      throw new ModerationError(
+        'invalid_request',
+        'restriction debe ser uno de: mute, no_media, no_invite, read_only'
+      );
+    }
+    return client.restrictChatMember(chat, user, body.restriction, untilFromBody(body.until));
+  });
+  moderationRoute('unrestrict', (chat, user) => client.unrestrictChatMember(chat, user));
+
+  router.get('/chats/:id/moderation/admin-rights', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        res.json(
+          await client.getOwnChatAdminRights(requireNumericTarget('chat_id', req.params.id))
+        );
+      } catch (e) {
+        moderationErrorResponse(res, e, 'get_admin_rights');
+      }
+    })();
+  });
+
+  /**
    * GET /chats/:id/topics - List forum topics for a supergroup
    */
+  // CONTRACT: http.telegram-connector.chats-topics.v1
   router.get('/chats/:id/topics', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -292,7 +564,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /chats/:id/topics - Create a forum topic
    */
-  router.post('/chats/:id/topics', (req: Request, res: Response): void => {
+  router.post('/chats/:id/topics', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -323,136 +595,161 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * PATCH /chats/:id/topics/:topicId - Edit a forum topic
    */
-  router.patch('/chats/:id/topics/:topicId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.patch(
+    '/chats/:id/topics/:topicId',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
 
-        const { title, closed, hidden, clearIcon } = req.body;
-        if (
-          title === undefined &&
-          closed === undefined &&
-          hidden === undefined &&
-          clearIcon === undefined
-        ) {
-          res.status(400).json({ error: 'Nothing to update' });
-          return;
-        }
+          const { title, closed, hidden, clearIcon } = req.body;
+          if (
+            title === undefined &&
+            closed === undefined &&
+            hidden === undefined &&
+            clearIcon === undefined
+          ) {
+            res.status(400).json({ error: 'Nothing to update' });
+            return;
+          }
 
-        const topic = await client.editForumTopic(req.params.id, topicId, {
-          title,
-          closed,
-          hidden,
-          clearIcon,
-        });
-        res.json(topic);
-      } catch (e) {
-        logger.error(`Error editing forum topic: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const topic = await client.editForumTopic(req.params.id, topicId, {
+            title,
+            closed,
+            hidden,
+            clearIcon,
+          });
+          res.json(topic);
+        } catch (e) {
+          logger.error(`Error editing forum topic: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * POST /chats/:id/topics/:topicId/closed - Open/close a forum topic
    */
-  router.post('/chats/:id/topics/:topicId/closed', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.post(
+    '/chats/:id/topics/:topicId/closed',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
-        if (typeof req.body.closed !== 'boolean') {
-          res.status(400).json({ error: 'closed must be a boolean' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
+          if (typeof req.body.closed !== 'boolean') {
+            res.status(400).json({ error: 'closed must be a boolean' });
+            return;
+          }
 
-        const topic = await client.toggleForumTopicClosed(req.params.id, topicId, req.body.closed);
-        res.json(topic);
-      } catch (e) {
-        logger.error(`Error toggling forum topic closed: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const topic = await client.toggleForumTopicClosed(
+            req.params.id,
+            topicId,
+            req.body.closed
+          );
+          res.json(topic);
+        } catch (e) {
+          logger.error(`Error toggling forum topic closed: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * POST /chats/:id/topics/:topicId/pinned - Pin/unpin a forum topic
    */
-  router.post('/chats/:id/topics/:topicId/pinned', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.post(
+    '/chats/:id/topics/:topicId/pinned',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
-        if (typeof req.body.pinned !== 'boolean') {
-          res.status(400).json({ error: 'pinned must be a boolean' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
+          if (typeof req.body.pinned !== 'boolean') {
+            res.status(400).json({ error: 'pinned must be a boolean' });
+            return;
+          }
 
-        const topic = await client.toggleForumTopicPinned(req.params.id, topicId, req.body.pinned);
-        res.json(topic);
-      } catch (e) {
-        logger.error(`Error toggling forum topic pinned: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const topic = await client.toggleForumTopicPinned(
+            req.params.id,
+            topicId,
+            req.body.pinned
+          );
+          res.json(topic);
+        } catch (e) {
+          logger.error(`Error toggling forum topic pinned: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * DELETE /chats/:id/topics/:topicId - Delete a forum topic and all its history
    * NOTE: topicId is in the path because the MCP server sends no body on DELETE.
    */
-  router.delete('/chats/:id/topics/:topicId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
+  router.delete(
+    '/chats/:id/topics/:topicId',
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          if (!client.isClientConnected()) {
+            res.status(503).json({ error: 'Not connected to Telegram' });
+            return;
+          }
 
-        const topicId = parseTopicId(req.params.topicId);
-        if (topicId === null) {
-          res.status(400).json({ error: 'Invalid topicId' });
-          return;
-        }
+          const topicId = parseTopicId(req.params.topicId);
+          if (topicId === null) {
+            res.status(400).json({ error: 'Invalid topicId' });
+            return;
+          }
 
-        const result = await client.deleteForumTopic(req.params.id, topicId);
-        res.json(result);
-      } catch (e) {
-        logger.error(`Error deleting forum topic: ${String(e)}`);
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+          const result = await client.deleteForumTopic(req.params.id, topicId);
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error deleting forum topic: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
 
   /**
    * POST /chats/:id/forum-settings - Toggle forum mode for a supergroup (owner only)
    */
-  router.post('/chats/:id/forum-settings', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-forum-settings.v1
+  router.post('/chats/:id/forum-settings', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -482,7 +779,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * PATCH /chats/:id/title - Change the chat title
    */
-  router.patch('/chats/:id/title', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-title.v1
+  router.patch('/chats/:id/title', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -508,7 +806,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * PATCH /chats/:id/description - Change the chat description ('' clears it)
    */
-  router.patch('/chats/:id/description', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-description.v1
+  router.patch('/chats/:id/description', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -534,7 +833,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * PATCH /chats/:id/photo - Change the chat photo/video
    */
-  router.patch('/chats/:id/photo', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.chats-photo.v1
+  router.patch('/chats/:id/photo', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -564,6 +864,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * GET /messages/:chatId - Get messages for a chat
    */
+  // CONTRACT: http.telegram-connector.messages-list.v1
   router.get('/messages/:chatId', (req: Request, res: Response): void => {
     void (async (): Promise<void> => {
       try {
@@ -579,8 +880,40 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
         const messages = await client.getMessages(chatId, limit, offsetId);
         res.json({ messages });
       } catch (error) {
+        if (respondRateLimit(res, error)) return;
         logger.error(`Error getting messages: ${String(error)}`);
         res.status(500).json({ error: 'Failed to get messages' });
+      }
+    })();
+  });
+
+  /**
+   * Fetch the exact message when repairing a previously failed media download.
+   */
+  // CONTRACT: http.telegram-connector.messages-single.v1
+  router.get('/messages/single/:chatId/:msgId', (req: Request, res: Response): void => {
+    void (async () => {
+      const messageId = Number(req.params.msgId);
+      if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+        res.status(400).json({ error: 'Invalid message ID' });
+        return;
+      }
+      if (!client.isClientConnected()) {
+        res.status(503).json({ error: 'Not connected to Telegram' });
+        return;
+      }
+      try {
+        const message = await client.getMessage(req.params.chatId, messageId);
+        if (!message) {
+          res.status(404).json({ error: 'Message not found' });
+          return;
+        }
+        res.json({ message });
+      } catch (error) {
+        if (respondRateLimit(res, error)) return;
+        res
+          .status(isTelegramDownloadTimeout(error) ? 504 : 502)
+          .json({ error: 'Failed to get message' });
       }
     })();
   });
@@ -641,6 +974,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
    * even when `reactors` is shorter: the list is paged at 100 per Telegram
    * call and `limit` (default 100) bounds how many pages we walk.
    */
+  // CONTRACT: http.telegram-connector.messages-reactors.v1
   router.get('/messages/reactors/:chatId/:msgId', (req: Request, res: Response): void => {
     void (async () => {
       try {
@@ -661,7 +995,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /messages/react - Add or clear an emoji reaction on a message
    */
-  router.post('/messages/react', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-react.v1
+  router.post('/messages/react', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, messageId, emoji } = req.body as {
@@ -683,9 +1018,73 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   });
 
   /**
+   * POST /messages/edit - Edit one of our own text messages.
+   * NOTE: Must be registered BEFORE the POST /messages/:chatId route.
+   *
+   * The edit is recorded through telegram.MessageEdited (telegram-sync writes
+   * the row); `published` says whether that event left. An unchanged text
+   * (MESSAGE_NOT_MODIFIED) is an idempotent 200 with nothing to record.
+   */
+  // CONTRACT: http.telegram-connector.messages-edit.v1 — body {chatId, messageId, content, actor?}, 200 {edited, messageId, chatId, editedAt, unchanged, published}
+  router.post('/messages/edit', requireSending, (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        const body =
+          req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+            ? (req.body as Record<string, unknown>)
+            : {};
+        const chatId =
+          typeof body.chatId === 'string' || typeof body.chatId === 'number'
+            ? String(body.chatId).trim()
+            : '';
+        const messageId = parseTopicId(body.messageId);
+        const content = typeof body.content === 'string' ? body.content : '';
+        if (!TELEGRAM_PEER_RE.test(chatId) || messageId === null || !content.trim()) {
+          res.status(400).json({
+            error:
+              'Missing chatId (Telegram id or @username), messageId (positive integer) or content',
+            failureClass: 'invalid_request',
+          });
+          return;
+        }
+        if (!client.isClientConnected()) {
+          res
+            .status(503)
+            .json({ error: 'Not connected to Telegram', failureClass: 'disconnected' });
+          return;
+        }
+        const actor = actorFromBody(body.actor);
+        const result = await client.editMessage(chatId, messageId, content);
+        const published = result.unchanged
+          ? false
+          : (options.publishMessageEdited?.({
+              conversationId: result.conversationId,
+              telegramMessageId: String(messageId),
+              content,
+              editedAt: result.editedAt,
+              isOutbound: true,
+              source: 'connector',
+              ...(actor ? { actor } : {}),
+            }) ?? false);
+        res.json({
+          edited: true,
+          messageId,
+          chatId: result.conversationId,
+          editedAt: result.editedAt.toISOString(),
+          unchanged: result.unchanged,
+          published,
+        });
+      } catch (e) {
+        mutationErrorResponse(res, e);
+      }
+    })();
+  });
+
+  /**
    * POST /messages/callback - Click a Telegram inline callback button.
    */
-  router.post('/messages/callback', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-callback.v1
+  router.post('/messages/callback', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         if (!client.isClientConnected()) {
@@ -739,7 +1138,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /messages/forward - Forward a message
    */
-  router.post('/messages/forward', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-forward.v1
+  router.post('/messages/forward', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { fromChatId, messageId, toChatId, threadId } = req.body as {
@@ -774,7 +1174,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /messages/media/send - Send a file
    */
-  router.post('/messages/media/send', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-media-send.v1
+  router.post('/messages/media/send', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, filePath, caption, voiceNote, videoNote, sticker, replyTo, threadId } =
@@ -822,7 +1223,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /messages/media/group - Send 2-10 images as one native Telegram album.
    */
-  router.post('/messages/media/group', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-media-group.v1
+  router.post('/messages/media/group', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, attachments, replyTo, threadId } = req.body as {
@@ -889,7 +1291,7 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /messages/voice - Send a voice note from base64 audio bytes.
    */
-  router.post('/messages/voice', (req: Request, res: Response): void => {
+  router.post('/messages/voice', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         const { chatId, audioBase64, caption, mimeType, voiceNote } = req.body as {
@@ -918,99 +1320,45 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * POST /messages/read/:chatId - Mark chat as read
    */
+  // CONTRACT: http.telegram-connector.messages-read.v1
   router.post('/messages/read/:chatId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        await client.markAsRead(req.params.chatId);
-        res.json({ markedAsRead: true });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
+    client
+      .markAsRead(req.params.chatId)
+      .then(() => res.json({ markedAsRead: true }))
+      .catch(error => res.status(500).json({ error: String(error) }));
   });
 
   /**
    * GET /messages/media/:chatId/:msgId - Download media
    */
-  router.get('/messages/media/:chatId/:msgId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        const buffer = await client.downloadMedia(req.params.chatId, parseInt(req.params.msgId));
-        if (!buffer) {
-          res.status(404).json({ error: 'No media' });
-          return;
-        }
-        res.json({ data: buffer.toString('base64'), size: buffer.length });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
+  // CONTRACT: http.telegram-connector.messages-media-download.v1
+  router.get(
+    '/messages/media/:chatId/:msgId',
+    downloadRoute(
+      req => client.downloadMedia(req.params.chatId, parseInt(req.params.msgId)),
+      'No media'
+    )
+  );
 
-  /**
-   * GET /peers/:id/photo - Download a peer's profile photo (big size).
-   * Returns {data: base64, size, contentType: 'image/jpeg'} or 404 if no photo.
-   */
+  /** GET /peers/:id/photo - Download a peer's profile photo. */
+  // CONTRACT: http.telegram-connector.peers-photo.v1
   router.get('/peers/:id/photo', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
-        const buffer = await client.downloadPeerPhoto(req.params.id);
-        if (!buffer) {
-          res.status(404).json({ error: 'No photo' });
-          return;
-        }
-        res.json({
-          data: buffer.toString('base64'),
-          size: buffer.length,
-          contentType: 'image/jpeg',
-        });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
-  });
-
-  /**
-   * POST /messages/voice - Send a voice note from base64 audio bytes.
-   *
-   * This route must be registered before /messages/:chatId so "voice" is not
-   * interpreted as a chat id by Express.
-   */
-  router.post('/messages/voice', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        const { chatId, audioBase64, caption, mimeType, voiceNote } = req.body as {
-          chatId?: string;
-          audioBase64?: string;
-          caption?: string;
-          mimeType?: string;
-          voiceNote?: boolean;
-        };
-        if (!chatId || !audioBase64) {
-          res.status(400).json({ error: 'Missing chatId or audioBase64' });
-          return;
-        }
-
-        const audio = Buffer.from(audioBase64, 'base64');
-        await client.sendFile(chatId, audio, {
-          caption,
-          voiceNote: voiceNote !== false,
-        });
-        res.json({ sent: true, mimeType: mimeType || 'audio/ogg' });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
+    if (!client.isClientConnected()) {
+      res.status(503).json({ error: 'Not connected to Telegram' });
+      return;
+    }
+    downloadRoute(
+      request => client.downloadPeerPhoto(request.params.id),
+      'No photo',
+      'image/jpeg'
+    )(req, res);
   });
 
   /**
    * POST /messages/:chatId - Send a message
    */
-  router.post('/messages/:chatId', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-send.v1
+  router.post('/messages/:chatId', requireSending, (req: Request, res: Response): void => {
     void (async (): Promise<void> => {
       try {
         if (!client.isClientConnected()) {
@@ -1046,6 +1394,20 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
           if (Number.isInteger(n) && n > 0) replyTo = n;
         }
 
+        // CONTRACT: http.telegram-connector.send-idempotency.v1 — opt-in Idempotency-Key, replay + deduplicated, 409 idempotency_key_reused / send_outcome_uncertain, 503 idempotency_unavailable
+        const { key, error: keyError } = readIdempotencyKey(req.headers, req.body);
+        if (keyError) {
+          res.status(400).json({ error: keyError, failureClass: 'invalid_request' });
+          return;
+        }
+        if (key) {
+          const outcome = await sendOnce(key, { chatId, text, topicId: tid, replyTo }, randomId =>
+            client.sendMessage(chatId, text, tid, replyTo, randomId)
+          );
+          res.status(outcome.status).json(outcome.body);
+          return;
+        }
+
         const messageId = await client.sendMessage(chatId, text, tid, replyTo);
         res.json({ success: true, messageId });
       } catch (error) {
@@ -1058,7 +1420,8 @@ export function createRouter(client: TelegramClientWrapper, sharedSecret: string
   /**
    * DELETE /messages/:chatId/:msgId - Delete a message
    */
-  router.delete('/messages/:chatId/:msgId', (req: Request, res: Response): void => {
+  // CONTRACT: http.telegram-connector.messages-delete.v1
+  router.delete('/messages/:chatId/:msgId', requireSending, (req: Request, res: Response): void => {
     void (async () => {
       try {
         await client.deleteMessage(req.params.chatId, parseInt(req.params.msgId));

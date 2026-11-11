@@ -1,3 +1,5 @@
+import { connectorSecretFor } from '../domain/account-registry';
+import { httpBase } from './public-page';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -11,6 +13,13 @@ import addFormats from 'ajv-formats';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { SearchService } from '../application/search.service';
+import {
+  isMediaType,
+  MEDIA_TYPES,
+  mediaTypePredicate,
+  messageTypesFor,
+  type MediaType,
+} from '../application/media-type-filter';
 import { SummarizationService } from '../application/summarization.service';
 import {
   UnreadDigestService,
@@ -20,24 +29,22 @@ import {
 } from '../application/unread-digest.service';
 import { DraftService } from '../application/draft.service';
 import { DatabaseRepository } from '../infrastructure/database/repository';
-import { actorRequestHeaders, generateHMACSignature } from '@mcp-socialmedia/shared';
 import {
-  accountList,
-  accountKey,
-  normalizeAccount,
-  stripAccount,
-  type Account,
-} from '../domain/account';
+  actorRequestHeaders,
+  generateHMACSignature,
+  getRequestActor,
+} from '@mcp-socialmedia/shared';
+import { accountKey, normalizeAccount, stripAccount, type Account } from '../domain/account';
 import { identityBindingEnabled, resolveBoundAccount } from '../domain/identity-bindings';
 import {
   findAccount,
   getAccounts,
+  requireAccount,
   socialAccountId,
   type AccountChannel,
   type SocialAccount,
 } from '../domain/account-registry';
 import { ConversationResolver } from '../infrastructure/database/social-accounts';
-import { getRequestActor } from '@mcp-socialmedia/shared';
 import { createHash, createHmac } from 'crypto';
 import { t } from '../infrastructure/i18n/i18n';
 import pino from 'pino';
@@ -48,6 +55,8 @@ import {
   type SocialToolDefinition,
 } from './tool-registry';
 import { SOCIALMEDIA_CONTRACT_DIGEST } from './contract.generated';
+import { verifyCurrentChatCapability } from './current-chat-capability';
+import { createCurrentChatProposal, requireCurrentChatTurn } from './current-chat-proposals';
 
 function isObject(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -142,30 +151,7 @@ function manualWhatsAppOpenUrl(chatId: unknown, text: unknown): string | undefin
   if (!phone) return undefined;
   const suffix =
     typeof text === 'string' && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
-  return `https://wa.me/${phone}${suffix}`;
-}
-
-function phoneFromManualOpenUrl(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const raw = value.trim();
-  if (!raw) return null;
-
-  try {
-    const url = new URL(raw);
-    if (/^(wa\.me|www\.wa\.me)$/i.test(url.hostname)) {
-      const phone = url.pathname.split('/').filter(Boolean)[0] || '';
-      return phone.replace(/\D/g, '') || null;
-    }
-    if (/(^|\.)whatsapp\.com$/i.test(url.hostname)) {
-      const phone = url.searchParams.get('phone') || '';
-      return phone.replace(/\D/g, '') || null;
-    }
-  } catch {
-    // Fall back to regex parsing below.
-  }
-
-  const match = raw.match(/(?:wa\.me\/|[?&]phone=)(\+?[0-9][0-9\s().-]{7,20})/i);
-  return match ? match[1].replace(/\D/g, '') : null;
+  return `${httpBase(process.env.WHATSAPP_LINK_BASE_URL || 'https://wa.me', 'WHATSAPP_LINK_BASE_URL')}/${phone}${suffix}`;
 }
 
 function phoneE164FromSendJid(sendJid: string): string {
@@ -174,52 +160,6 @@ function phoneE164FromSendJid(sendJid: string): string {
 
 function phoneWaJidFromSendJid(sendJid: string): string {
   return `${sendJid.split('@')[0].replace(/\D/g, '')}@c.us`;
-}
-
-function manualWhatsAppOpenUrlFromPhone(phoneE164: string, text: unknown): string {
-  const digits = phoneE164.replace(/\D/g, '');
-  const suffix =
-    typeof text === 'string' && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
-  return `https://wa.me/${digits}${suffix}`;
-}
-
-type TrustedPhoneEvidenceSource = 'phone' | 'phoneE164' | 'manualOpenUrl';
-
-interface TrustedPhoneEvidence {
-  sendJid: string;
-  phoneE164: string;
-  phoneWaJid: string;
-  manualOpenUrl?: string;
-  source: TrustedPhoneEvidenceSource;
-}
-
-function trustedPhoneEvidence(args: {
-  phone?: unknown;
-  phoneE164?: unknown;
-  manualOpenUrl?: unknown;
-}): TrustedPhoneEvidence | null {
-  const candidates: Array<{ source: TrustedPhoneEvidenceSource; value: unknown }> = [
-    { source: 'phoneE164', value: args.phoneE164 },
-    { source: 'phone', value: args.phone },
-    { source: 'manualOpenUrl', value: phoneFromManualOpenUrl(args.manualOpenUrl) },
-  ];
-
-  for (const candidate of candidates) {
-    const sendJid = normalizeDirectWhatsAppJid(candidate.value);
-    if (!sendJid) continue;
-    return {
-      sendJid,
-      phoneE164: phoneE164FromSendJid(sendJid),
-      phoneWaJid: phoneWaJidFromSendJid(sendJid),
-      manualOpenUrl:
-        typeof args.manualOpenUrl === 'string' && args.manualOpenUrl.trim()
-          ? args.manualOpenUrl.trim()
-          : undefined,
-      source: candidate.source,
-    };
-  }
-
-  return null;
 }
 
 /**
@@ -253,6 +193,63 @@ export function bareWhatsAppJid(chatId: string): string {
   return stripAccount(String(chatId).trim()).id;
 }
 
+/**
+ * The ways one WhatsApp chat id is written: with or without the account
+ * namespace, a phone jid as @c.us (how the index and the connector store it)
+ * or @s.whatsapp.net (how WhatsApp writes it).
+ */
+export function whatsAppChatKeys(chatId: string): string[] {
+  const bare = bareWhatsAppJid(chatId);
+  if (!bare) return [];
+  const keys = [bare];
+  if (bare.endsWith('@s.whatsapp.net')) keys.push(bare.replace(/@s\.whatsapp\.net$/, '@c.us'));
+  if (bare.endsWith('@c.us')) keys.push(bare.replace(/@c\.us$/, '@s.whatsapp.net'));
+  return keys;
+}
+
+/**
+ * Resolve a professional WhatsApp direct-send chatId into the conversation key
+ * to gate on and the jid to actually send to.
+ *
+ * - LID jids keep their opaque id verbatim. Caller-supplied phone hints never
+ *   change their destination; Baileys sends to the LID natively.
+ * - Bare phones / `@c.us` / `@s.whatsapp.net` normalize to a phone jid:
+ *   sendJid = `<digits>@s.whatsapp.net`, lookupKey = `professional:<jid>`.
+ *
+ * Returns null when the id is neither a LID jid nor a normalizable phone jid,
+ * so the caller can raise the "valid individual phone or WhatsApp chat ID" error.
+ */
+export function resolveProfessionalSendTarget(
+  chatId: unknown,
+  _evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {},
+  account: Account = 'personal'
+): {
+  lookupKey: string;
+  lookupKeys: string[];
+  sendJid: string;
+} | null {
+  let target: unknown = chatId;
+  if (typeof chatId === 'string') {
+    let raw = chatId.trim();
+    if (raw.startsWith('personal:')) {
+      if (account !== 'personal') return null;
+      raw = raw.slice('personal:'.length);
+      target = raw;
+    }
+    const parsed = stripAccount(raw);
+    if (parsed.id !== raw && parsed.account !== account) return null;
+  }
+  if (isLidJid(target)) {
+    const lidJid = stripAccount(String(target).trim()).id;
+    const lidLookupKey = accountKey(account, lidJid);
+    return { lookupKey: lidLookupKey, lookupKeys: [lidLookupKey], sendJid: lidJid };
+  }
+  const waJid = normalizeDirectWhatsAppJid(target);
+  if (!waJid) return null;
+  const lookupKey = accountKey(account, waJid);
+  return { lookupKey, lookupKeys: [lookupKey], sendJid: waJid };
+}
+
 export function normalizeDirectWhatsAppJid(chatId: unknown): string | null {
   if (typeof chatId !== 'string' && typeof chatId !== 'number') return null;
 
@@ -260,9 +257,13 @@ export function normalizeDirectWhatsAppJid(chatId: unknown): string | null {
   if (!raw) return null;
   raw = stripAccount(raw).id;
   if (raw.includes('@g.us')) return null;
+  if (raw.includes('@') && !/@(?:c\.us|s\.whatsapp\.net)$/.test(raw)) return null;
 
-  const user = raw.split('@')[0] || raw;
-  let digits = user.replace(/\D/g, '');
+  const user = raw.split('@')[0];
+  if (raw.includes('@') ? !/^\d+(?::\d+)?$/.test(user) : !/^\+?\d[\d\s().-]*$/.test(user)) {
+    return null;
+  }
+  let digits = user.split(':')[0].replace(/\D/g, '');
   if (digits.length === 9 && /^[6789]/.test(digits)) {
     digits = `34${digits}`;
   }
@@ -288,6 +289,10 @@ export class MCPServer {
   private telegramBridgeSecret: string;
   private instagramUrl: string;
   private connectorSecret: string;
+  // Kept as a test seam and fallback; production routing is resolved from the registry.
+  private waUrls!: Record<string, string>;
+  private tgUrls!: Record<string, string>;
+  private tgBridgeUrls!: Record<string, string>;
   private inputValidators?: Map<string, ValidateFunction>;
 
   constructor(
@@ -317,7 +322,7 @@ export class MCPServer {
     this.dbClient = dbClient;
     this.redisClient = redisClient;
     this.repository = new DatabaseRepository(dbClient);
-    this.searchService = new SearchService(openaiApiKey, dbClient, encryptionKey, llmBaseUrl);
+    this.searchService = new SearchService(dbClient);
     this.summarizationService = new SummarizationService(
       openaiApiKey,
       dbClient,
@@ -343,12 +348,25 @@ export class MCPServer {
     this.connectorUrl = _connectorUrl || 'http://whatsapp-connector:3001';
     this.telegramUrl = process.env.TELEGRAM_CONNECTOR_URL || 'http://telegram-connector:3002';
     this.telegramBridgeUrl = process.env.TELEGRAM_BRIDGE_URL || 'http://telegram-sync:3080';
-    this.telegramBridgeSecret = process.env.TELEGRAM_BRIDGE_SECRET || 'telegram-bridge-secret-2026';
+    this.telegramBridgeSecret = process.env.TELEGRAM_BRIDGE_SECRET || '';
     this.instagramUrl = process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003';
     this.connectorSecret = _connectorSharedSecret;
 
-    // Account routing comes from the account registry (account-registry.ts):
-    // one entry per connector instance, re-read on each call.
+    this.waUrls = Object.fromEntries(
+      getAccounts('whatsapp')
+        .filter(a => a.connectorUrl)
+        .map(a => [a.accountId, a.connectorUrl!])
+    );
+    this.tgUrls = Object.fromEntries(
+      getAccounts('telegram')
+        .filter(a => a.connectorUrl)
+        .map(a => [a.accountId, a.connectorUrl!])
+    );
+    this.tgBridgeUrls = Object.fromEntries(
+      getAccounts('telegram')
+        .filter(a => a.bridgeUrl)
+        .map(a => [a.accountId, a.bridgeUrl!])
+    );
 
     this.logger = pino({
       transport: {
@@ -360,9 +378,9 @@ export class MCPServer {
     this.setupHandlers();
   }
 
-  /** Registry entry for an account, or a canonical unsupported_capability error. */
+  /** Registry entry for an enabled account. */
   private registryAccount(channel: AccountChannel, account?: string): SocialAccount {
-    const id = account === undefined ? 'personal' : account;
+    const id = normalizeAccount(account, channel);
     const entry = findAccount(channel, id);
     if (!entry) {
       throw this.canonicalError(
@@ -373,25 +391,37 @@ export class MCPServer {
     return entry;
   }
 
-  /** WhatsApp connector URL for an account (every one is a Baileys instance). */
+  /** Connector URLs stay registry-driven; cached maps preserve older test seams. */
   private waUrl(account?: string): string {
-    return this.registryAccount('whatsapp', account).connectorUrl as string;
-  }
-
-  /** Telegram connector URL for an account (separate instance per account). */
-  private tgUrl(account?: string): string {
-    return this.registryAccount('telegram', account).connectorUrl as string;
-  }
-
-  /** Telegram-sync (Telethon) bridge URL for an account — used by live unread. */
-  private tgBridgeUrl(account?: string): string {
-    const url = this.registryAccount('telegram', account).bridgeUrl;
-    if (!url) {
+    const entry = this.registryAccount('whatsapp', account);
+    const url = entry.connectorUrl || this.waUrls[entry.accountId];
+    if (!url)
       throw this.canonicalError(
         'unsupported_capability',
-        `Telegram bridge account '${account}' is not configured`
+        `WhatsApp account '${entry.accountId}' is not configured`
       );
-    }
+    return url;
+  }
+
+  private tgUrl(account?: string): string {
+    const entry = this.registryAccount('telegram', account);
+    const url = entry.connectorUrl || this.tgUrls[entry.accountId];
+    if (!url)
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Telegram account '${entry.accountId}' is not configured`
+      );
+    return url;
+  }
+
+  private tgBridgeUrl(account?: string): string {
+    const entry = this.registryAccount('telegram', account);
+    const url = entry.bridgeUrl || this.tgBridgeUrls[entry.accountId];
+    if (!url)
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Telegram bridge account '${entry.accountId}' is not configured`
+      );
     return url;
   }
 
@@ -445,6 +475,37 @@ export class MCPServer {
   ): Promise<any> {
     this.applyIdentityBinding(definition, args);
     this.validateCanonicalArguments(definition, args);
+    if (['readCurrentChat', 'sendCurrentChat', 'deliverCurrentChat'].includes(definition.handler)) {
+      const scope = verifyCurrentChatCapability(
+        args.capability,
+        definition.handler === 'readCurrentChat'
+          ? 'read'
+          : definition.handler === 'sendCurrentChat'
+            ? 'propose'
+            : 'send'
+      );
+      await requireCurrentChatTurn(this.redisClient, scope);
+    }
+    if (definition.handler === 'sendCurrentChat') {
+      if (
+        process.env.HERMES_CHAT_ALLOW_PROPOSALS !== 'true' ||
+        process.env.EMERGENCY_DISABLE_SENDING === 'true'
+      ) {
+        return this.errorResponse('unsupported_capability', 'Current-chat proposals are disabled');
+      }
+    } else if (definition.handler === 'deliverCurrentChat') {
+      if (
+        process.env.HERMES_CHAT_ALLOW_DIRECT_SEND !== 'true' ||
+        process.env.EMERGENCY_DISABLE_SENDING === 'true'
+      ) {
+        return this.errorResponse('unsupported_capability', 'Hermes direct sending is disabled');
+      }
+    } else if (
+      (definition.effect === 'externalWrite' || definition.effect === 'destructive') &&
+      (process.env.ENABLE_SENDING !== 'true' || process.env.EMERGENCY_DISABLE_SENDING === 'true')
+    ) {
+      return this.errorResponse('unsupported_capability', 'External writes are disabled');
+    }
 
     const execute = async () => {
       try {
@@ -466,16 +527,31 @@ export class MCPServer {
       }
     };
 
+    const directScope =
+      definition.handler === 'deliverCurrentChat'
+        ? verifyCurrentChatCapability(args.capability, 'send')
+        : null;
     const idempotencyKey =
-      typeof args.idempotencyKey === 'string' ? args.idempotencyKey.trim() : '';
+      (directScope ? `${directScope.requestId}\0${args.idempotencyKey || 'default'}` : '') ||
+      (typeof args.idempotencyKey === 'string' ? args.idempotencyKey.trim() : '');
     const mutates = definition.effect !== 'read' && definition.effect !== 'compute';
+    if (definition.handler === 'sendCurrentChat') return execute();
     if (!idempotencyKey || !mutates) return execute();
 
     const payload = { ...args };
     delete payload.idempotencyKey;
-    const payloadHash = createHash('sha256').update(this.stableJson(payload)).digest('hex');
+    const payloadHash = createHash('sha256')
+      .update(
+        directScope
+          ? this.stableJson({ text: args.text || '', ...(args.media ? { media: args.media } : {}) })
+          : this.stableJson(payload)
+      )
+      .digest('hex');
+    const idempotencyScope = directScope
+      ? `${directScope.account}\0${directScope.chat}`
+      : `${args.channel}\0${args.accountId}`;
     const storageKey = `social:v2:idempotency:${createHash('sha256')
-      .update(`${definition.name}\0${args.channel}\0${args.accountId}\0${idempotencyKey}`)
+      .update(`${definition.name}\0${idempotencyScope}\0${idempotencyKey}`)
       .digest('hex')}`;
     const pending = JSON.stringify({
       payloadHash,
@@ -548,7 +624,11 @@ export class MCPServer {
       );
     }
     const mutates = definition.effect !== 'read' && definition.effect !== 'compute';
-    if (mutates) {
+    if (
+      mutates &&
+      definition.handler !== 'sendCurrentChat' &&
+      definition.handler !== 'deliverCurrentChat'
+    ) {
       if (typeof args.channel !== 'string' || !args.channel.trim()) {
         throw this.canonicalError('invalid_request', 'channel is required for every write');
       }
@@ -576,6 +656,106 @@ export class MCPServer {
 
   private async dispatchCanonicalTool(handler: string, args: Record<string, any>): Promise<any> {
     switch (handler) {
+      case 'readCurrentChat': {
+        const scope = verifyCurrentChatCapability(args.capability, 'read');
+        await requireCurrentChatTurn(this.redisClient, scope);
+        const chat = await this.resolveCurrentChatReadScope(scope.account, scope.chat);
+        return this.handleWhatsAppGetMessages({
+          account: scope.account,
+          chatId: chat.chatId,
+          conversationIds: chat.conversationIds,
+          limit: args.limit || 20,
+        });
+      }
+      case 'sendCurrentChat': {
+        const scope = verifyCurrentChatCapability(args.capability, 'propose');
+        const result = await createCurrentChatProposal(
+          this.redisClient,
+          scope,
+          args.text,
+          args.idempotencyKey
+        );
+        return this.jsonResponse({
+          proposalId: result.proposal.id,
+          account: scope.account,
+          chat: scope.chat,
+          turn: scope.turn,
+          text: result.proposal.text,
+          expiresAt: result.proposal.expiresAt,
+          replayed: result.replayed,
+          requiresOwnerApproval: true,
+        });
+      }
+      case 'deliverCurrentChat': {
+        const scope = verifyCurrentChatCapability(args.capability, 'send');
+        await requireCurrentChatTurn(this.redisClient, scope);
+        if (!args.media && !args.text?.trim())
+          throw this.canonicalError('invalid_request', 'Text or media is required');
+        if (args.media) {
+          const url = String(args.media.url);
+          const inline = /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,([a-z0-9+/]+={0,2})$/i.exec(url);
+          if (url.startsWith('data:')) {
+            if (
+              !inline ||
+              inline[1].length % 4 !== 0 ||
+              Buffer.from(inline[1], 'base64').length > 8 * 1024 * 1024
+            ) {
+              throw this.canonicalError(
+                'invalid_request',
+                'Inline media must be base64 and at most 8 MiB'
+              );
+            }
+          } else {
+            const parsed = new URL(url);
+            if (
+              !['http:', 'https:'].includes(parsed.protocol) ||
+              parsed.username ||
+              parsed.password
+            ) {
+              throw this.canonicalError(
+                'invalid_request',
+                'Media URL must use HTTP(S) without credentials'
+              );
+            }
+          }
+        }
+        const chat = await this.resolveCurrentChatReadScope(scope.account, scope.chat);
+        const digest = createHash('sha256')
+          .update(
+            `${scope.account}\0${scope.chat}\0${scope.requestId}\0${args.idempotencyKey || 'default'}`
+          )
+          .digest('hex');
+        const token = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
+        const destination = this.whatsAppProviderJid(chat.chatId, scope.account, 'chatId');
+        const result = args.media
+          ? await this.handleSendFile(
+              {
+                account: scope.account,
+                conversationId: destination,
+                fileUrl: args.media.url,
+                fileName: args.media.name,
+                caption: args.text || undefined,
+                scopedSendToken: token,
+              },
+              { idempotencyKey: `mcp-current-${digest}` }
+            )
+          : await this.handleSendMessage(
+              {
+                account: scope.account,
+                chatId: this.whatsAppProviderJid(chat.chatId, scope.account, 'chatId'),
+                text: args.text,
+                scopedSendToken: token,
+              },
+              { idempotencyKey: `mcp-current-${digest}` }
+            );
+        if (!pickString(asObject(this.legacyResultData(result)), ['messageId'])) {
+          throw this.canonicalError(
+            'outcome_unknown',
+            'Connector did not confirm a message ID; do not retry automatically'
+          );
+        }
+        return result;
+      }
       case 'listAccounts':
         return this.canonicalListAccounts(args);
       case 'listConversations':
@@ -605,7 +785,7 @@ export class MCPServer {
         return this.handleListDrafts({
           chatId: accountKey(
             normalizeAccount(this.account(args)),
-            bareWhatsAppJid(this.target(args))
+            this.whatsAppProviderTarget(args)
           ),
           status: args.status,
         });
@@ -671,6 +851,8 @@ export class MCPServer {
         return this.canonicalForwardMessage(args);
       case 'deleteMessage':
         return this.canonicalDeleteMessage(args);
+      case 'editMessage':
+        return this.canonicalEditMessage(args);
       case 'markRead':
         return this.canonicalMarkRead(args);
       case 'createDraft':
@@ -678,7 +860,7 @@ export class MCPServer {
         return this.handleDraftReply({
           chatId: accountKey(
             normalizeAccount(this.account(args)),
-            bareWhatsAppJid(this.target(args))
+            this.whatsAppProviderTarget(args)
           ),
           messageId: args.messageId,
           lastN: args.lastN,
@@ -727,12 +909,102 @@ export class MCPServer {
         return this.canonicalClickInteraction(args);
       case 'manageForum':
         return this.canonicalManageForum(args);
+      case 'moderateMembers':
+        return this.canonicalModerateMembers(args);
       case 'manageChat':
         return this.canonicalManageChat(args);
       case 'publishContent':
         return this.canonicalPublishContent(args);
+      case 'updateContent':
+        return this.canonicalUpdateContent(args);
       case 'manageComment':
         return this.canonicalManageComment(args);
+      case 'reactMessage':
+        return this.canonicalReactMessage(args);
+      case 'getReactions':
+        this.requireChannel(args, 'telegram');
+        this.providerOnlyRead(args, 'Telegram reactions');
+        return this.handleTelegramGetReactions({
+          chatId: this.target(args),
+          account: this.account(args),
+          messageId: args.messageId,
+          topicId: args.topicId,
+          limit: args.limit,
+        });
+      case 'starMessage':
+        return this.canonicalStarMessage(args);
+      case 'pinMessage':
+        return this.canonicalPinMessage(args);
+      case 'listPinned':
+        return this.canonicalListPinned(args);
+      case 'listStarred':
+        return this.canonicalListStarred(args);
+      case 'listStatuses':
+        return this.canonicalListStatuses(args);
+      case 'listChannelPosts':
+        return this.canonicalListChannelPosts(args);
+      case 'publishStatus':
+        return this.canonicalPublishStatus(args);
+      case 'setChatState':
+        return this.canonicalSetChatState(args);
+      case 'getGroup':
+        return this.canonicalGetGroup(args);
+      case 'manageGroup':
+        return this.canonicalManageGroup(args);
+      case 'inviteToGroup':
+        return this.canonicalInviteToGroup(args);
+      case 'listCommunities':
+        return this.canonicalListCommunities(args);
+      case 'getCommunity':
+        return this.canonicalGetCommunity(args);
+      case 'manageCommunity':
+        return this.canonicalManageCommunity(args);
+      case 'lookupChannel':
+        return this.canonicalLookupChannel(args);
+      case 'listChannels':
+        return this.canonicalListChannels(args);
+      case 'manageChannelSubscription':
+        return this.canonicalManageChannelSubscription(args);
+      case 'sendPoll':
+        return this.canonicalSendPoll(args);
+      case 'votePoll':
+        return this.canonicalVotePoll(args);
+      case 'getPollResults':
+        return this.canonicalGetPollResults(args);
+      case 'sendEvent':
+        return this.canonicalSendEvent(args);
+      case 'respondEvent':
+        return this.canonicalRespondEvent(args);
+      case 'getEventResults':
+        return this.canonicalGetEventResults(args);
+      case 'startChat':
+        return this.canonicalStartChat(args);
+      case 'shareContact':
+        return this.canonicalShareContact(args);
+      case 'listContacts':
+        return this.canonicalListContacts(args);
+      case 'getPresence':
+        return this.canonicalGetPresence(args);
+      case 'getPrivacy':
+        return this.canonicalGetPrivacy(args);
+      case 'setPrivacy':
+        return this.canonicalSetPrivacy(args);
+      case 'setDisappearing':
+        return this.canonicalSetDisappearing(args);
+      case 'getMyProfile':
+        return this.canonicalGetMyProfile(args);
+      case 'updateMyProfile':
+        return this.canonicalUpdateMyProfile(args);
+      case 'sendTyping':
+        return this.canonicalSendTyping(args);
+      case 'sendSticker':
+        return this.canonicalSendSticker(args);
+      case 'sendGif':
+        return this.whatsAppStickerOrGif('gif', args);
+      case 'blockContact':
+        return this.canonicalBlockContact(args);
+      case 'listBlocked':
+        return this.canonicalListBlocked(args);
       default:
         throw this.canonicalError(
           'unsupported_capability',
@@ -741,9 +1013,13 @@ export class MCPServer {
     }
   }
 
-  private canonicalError(code: string, message: string): Error {
-    const error = new Error(message) as Error & { canonicalCode?: string };
+  private canonicalError(code: string, message: string, details?: unknown): Error {
+    const error = new Error(message) as Error & {
+      canonicalCode?: string;
+      canonicalDetails?: unknown;
+    };
     error.canonicalCode = code;
+    if (details !== undefined) error.canonicalDetails = details;
     return error;
   }
 
@@ -751,6 +1027,9 @@ export class MCPServer {
     const candidate = error as { canonicalCode?: string; code?: number; name?: string };
     if (candidate?.canonicalCode) return candidate.canonicalCode;
     const message = safeError(error).toLowerCase();
+    // fase 3 / PR-2: the WhatsApp connector's Idempotency-Key answers (409).
+    if (message.includes('send_outcome_uncertain')) return 'outcome_unknown';
+    if (message.includes('idempotency_key_reused')) return 'conflict';
     if (
       candidate?.name === 'TimeoutError' ||
       candidate?.name === 'AbortError' ||
@@ -792,6 +1071,10 @@ export class MCPServer {
         code,
         message,
         ...(details && !(details instanceof Error) ? { details } : {}),
+        // A canonical error may carry its own details (connector failureClass, fallback).
+        ...(details instanceof Error && (details as { canonicalDetails?: unknown }).canonicalDetails
+          ? { details: (details as { canonicalDetails?: unknown }).canonicalDetails }
+          : {}),
       },
     };
     return {
@@ -841,7 +1124,14 @@ export class MCPServer {
     } else if (requested === 'index') {
       kind = 'localIndex';
     } else if (
-      ['searchMessages', 'summarize', 'listDrafts', 'getDigest'].includes(definition.handler)
+      [
+        'searchMessages',
+        'summarize',
+        'listDrafts',
+        'getDigest',
+        'listContacts',
+        'readCurrentChat',
+      ].includes(definition.handler)
     ) {
       kind = 'localIndex';
     } else if (definition.handler === 'listMessages') {
@@ -855,7 +1145,8 @@ export class MCPServer {
       source: {
         kind,
         asOf: new Date().toISOString(),
-        completeness: 'complete',
+        // WhatsApp's followed-channel list cannot be read: only the channels seen.
+        completeness: definition.handler === 'listChannels' ? 'partial' : 'complete',
       },
     };
   }
@@ -920,11 +1211,16 @@ export class MCPServer {
     this.requireChannel(args, 'whatsapp');
     const accountIdValue = normalizeAccount(this.account(args));
     const raw = this.string(args, field);
+    return this.whatsAppProviderJid(raw, accountIdValue, field);
+  }
+
+  /** Validate the selected namespace, then remove it before calling Baileys. */
+  private whatsAppProviderJid(raw: string, accountIdValue: string, field = 'target'): string {
     const parsed = stripAccount(raw);
-    // Generalized from the professional-only guard (SC-1144 fase 2): a target
-    // namespaced to one account must never be served under another — bare
-    // (personal) targets stay allowed on every account, as before.
-    if (parsed.account !== 'personal' && accountIdValue !== parsed.account) {
+    if (raw.startsWith(`${accountIdValue}:`)) return raw.slice(accountIdValue.length + 1);
+    if (/^[a-z][a-z0-9_-]*:(?!\/\/)/.test(raw) && parsed.id === raw)
+      throw this.canonicalError('invalid_request', 'Unknown account namespace');
+    if (parsed.id !== raw && parsed.account !== accountIdValue) {
       throw this.canonicalError(
         'invalid_request',
         `${field} belongs to the ${parsed.account} WhatsApp namespace but accountId is '${accountIdValue}'`
@@ -950,8 +1246,7 @@ export class MCPServer {
 
   private async providerGet(baseUrl: string, path: string, timeoutMs = 30000): Promise<any> {
     const response = await fetch(`${baseUrl}${path}`, {
-      // SC-705: forward the verified caller identity to the connector.
-      headers: actorRequestHeaders(),
+      headers: { ...this.authHeaders(baseUrl), ...actorRequestHeaders() },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
@@ -963,21 +1258,61 @@ export class MCPServer {
   private async canonicalListAccounts(args: Record<string, any>): Promise<any> {
     const status = this.legacyResultData(await this.handleMessagingStatus());
     const selectedChannel = args.channel === undefined ? undefined : this.channel(args);
-    const accounts = getAccounts()
-      .map(item => ({
-        channel: item.channel,
-        accountId: item.accountId,
-        transport: item.transport,
-        capabilities: item.capabilities,
-      }))
-      .filter(item => !selectedChannel || item.channel === selectedChannel)
-      .map(item => ({
-        ...item,
-        status:
-          item.channel === 'instagram'
-            ? asObject(asObject(asObject(status).instagram).accounts)[item.accountId] || null
-            : asObject(asObject(status)[item.channel])[item.accountId] || null,
-      }));
+    const igStatus = (accountId: string) =>
+      asObject(asObject(asObject(status).instagram).accounts)[accountId] || null;
+    // SC-1256: the connector answers `no_credential` per account when the
+    // caller's sub has no row; those entries are omitted, never listed.
+    const noCredential = (item: { channel: string; accountId: string }) =>
+      item.channel === 'instagram' && asObject(igStatus(item.accountId)).status === 'no_credential';
+    const candidates = getAccounts(selectedChannel, true).map(item => ({
+      channel: item.channel,
+      accountId: item.accountId,
+      label: item.label,
+      namespace: item.namespace,
+      profile: item.profile,
+      brainInstance: item.brainInstance,
+      enabled: item.enabled,
+      qrUrl: item.qrUrl || null,
+      transport: item.transport,
+      capabilities: {
+        ...item.capabilities,
+        conversations: item.enabled && item.capabilities.conversations,
+        messages: item.enabled && item.capabilities.messages,
+        media: item.enabled && item.capabilities.media,
+        send:
+          item.enabled &&
+          item.capabilities.send &&
+          process.env.ENABLE_SENDING === 'true' &&
+          process.env.EMERGENCY_DISABLE_SENDING !== 'true',
+        groups: item.enabled && item.capabilities.groups,
+        publish:
+          item.enabled &&
+          item.capabilities.publish &&
+          item.channel === 'instagram' &&
+          process.env.ENABLE_SENDING === 'true' &&
+          process.env.EMERGENCY_DISABLE_SENDING !== 'true',
+      },
+      status: item.enabled
+        ? item.channel === 'instagram'
+          ? asObject(asObject(asObject(status).instagram).accounts)[item.accountId] ||
+            asObject(asObject(status)[item.channel])[item.accountId] ||
+            null
+          : asObject(asObject(status)[item.channel])[item.accountId] || null
+        : { status: 'disabled' },
+    }));
+    const omitted = candidates.filter(item => item.enabled && noCredential(item));
+    const accounts = candidates.filter(item => !item.enabled || !noCredential(item));
+    if (omitted.length) {
+      const first = asObject(igStatus(omitted[0].accountId));
+      const code = String(first.error || 'no_instagram_credential');
+      const message = String(first.message || 'no instagram credential for this user');
+      if (!accounts.length) throw this.canonicalError(code, message);
+      return this.jsonResponse({
+        contractDigest: SOCIALMEDIA_CONTRACT_DIGEST,
+        accounts,
+        partialErrors: [{ channel: 'instagram', code, message }],
+      });
+    }
     return this.jsonResponse({
       contractDigest: SOCIALMEDIA_CONTRACT_DIGEST,
       accounts,
@@ -988,11 +1323,7 @@ export class MCPServer {
     channel: SocialChannel;
     accountId: string;
   }> {
-    const all = getAccounts().map(item => ({
-      channel: item.channel as SocialChannel,
-      accountId: item.accountId,
-    }));
-    return channel ? all.filter(item => item.channel === channel) : all;
+    return getAccounts(channel);
   }
 
   private async canonicalListConversations(args: Record<string, any>): Promise<any> {
@@ -1167,16 +1498,25 @@ export class MCPServer {
       }
       const data = await this.providerGet(this.waUrl(accountIdValue), '/api/public/chats');
       const conversations = extractArrayPayload(data, ['chats']);
-      const conversation = conversations.find(
-        item => pickString(item, ['id', 'chatId']) === conversationTarget
+      const wanted = whatsAppChatKeys(conversationTarget);
+      const conversation = conversations.find(item =>
+        whatsAppChatKeys(pickString(item, ['id', 'chatId'])).some(key => wanted.includes(key))
       );
-      if (!conversation) {
+      if (conversation) return this.jsonResponse(conversation);
+      // The connector lists only the chats of its last history snapshot (10 in
+      // prod after a relink), so most 1:1 chats were "not_found" (QA 02-10).
+      // The index knows every chat, PN ↔ LID aliases and merges included.
+      const indexed = await this.whatsAppIndexedConversation(
+        normalizeAccount(accountIdValue),
+        wanted
+      );
+      if (!indexed) {
         throw this.canonicalError(
           'not_found',
-          `WhatsApp conversation '${conversationTarget}' was not returned by the provider`
+          `WhatsApp conversation '${conversationTarget}' was not returned by the provider nor found in the index`
         );
       }
-      return this.jsonResponse(conversation);
+      return this.jsonResponse(indexed);
     }
     if (channelName === 'telegram') {
       if (source === 'index') {
@@ -1219,6 +1559,51 @@ export class MCPServer {
       );
     }
     return this.jsonResponse(conversation);
+  }
+
+  /**
+   * A WhatsApp chat from the index in the provider's shape ({id, name, isGroup,
+   * timestamp}) plus its conversationId and `resolvedFrom: 'index'`. A 1:1
+   * chat whose stored name is only its jid is named after the other side.
+   */
+  private async whatsAppIndexedConversation(
+    account: Account,
+    refs: string[]
+  ): Promise<Record<string, unknown> | null> {
+    let row: Awaited<ReturnType<ConversationResolver['resolve']>> = null;
+    for (const ref of refs) {
+      row = await this.conversations().resolve('whatsapp', account, ref);
+      if (row && ConversationResolver.belongsTo(row, 'whatsapp', account)) break;
+      row = null;
+    }
+    if (!row) return null;
+    const externalId = String(row.external_id || bareWhatsAppJid(row.id));
+    const isGroup = row.is_group === true || externalId.endsWith('@g.us');
+    let name = typeof row.name === 'string' ? row.name : null;
+    if (!isGroup && (!name || name.includes('@'))) {
+      const other = await this.dbClient.query(
+        `SELECT COALESCE(
+                  CASE WHEN position('@' in COALESCE(p.name, '@')) = 0 THEN p.name END,
+                  CASE WHEN position('@' in COALESCE(p.push_name, '@')) = 0 THEN p.push_name END
+                ) AS name
+           FROM conversation_participants cp
+           JOIN participants p ON p.id = cp.participant_id
+          WHERE cp.conversation_id = $1
+          ORDER BY p.last_seen DESC NULLS LAST
+          LIMIT 1`,
+        [row.id]
+      );
+      name = (other.rows[0]?.name as string | null) || name;
+    }
+    const last = row.last_message_at ? new Date(row.last_message_at as string) : null;
+    return {
+      id: externalId,
+      name,
+      isGroup,
+      timestamp: last && !Number.isNaN(last.getTime()) ? Math.floor(last.getTime() / 1000) : 0,
+      conversationId: row.id,
+      resolvedFrom: 'index',
+    };
   }
 
   private async canonicalListParticipants(args: Record<string, any>): Promise<any> {
@@ -1287,12 +1672,15 @@ export class MCPServer {
     }
     if (channelName === 'telegram') {
       if (source === 'provider') {
+        // INFRA-1008: before/after travel in the query (unsigned, like limit);
+        // the connector pages past the 100-per-call cap of messages.getHistory.
+        const query = new URLSearchParams({ limit: String(args.limit || 50) });
+        if (args.before !== undefined) query.set('before', String(args.before));
+        if (args.after !== undefined) query.set('after', String(args.after));
         return this.jsonResponse(
           await this.providerGet(
             this.tgUrl(accountIdValue),
-            `/api/public/messages/${encodeURIComponent(conversationTarget)}?limit=${
-              args.limit || 50
-            }`
+            `/api/public/messages/${encodeURIComponent(conversationTarget)}?${query}`
           )
         );
       }
@@ -1324,12 +1712,13 @@ export class MCPServer {
         'Provider-side message search is not supported; use readSource=index'
       );
     }
-    if (args.channel === 'instagram') {
+    if (args.mediaType !== undefined && !isMediaType(args.mediaType)) {
       throw this.canonicalError(
-        'unsupported_capability',
-        'Instagram messages are not ingested into the searchable local index'
+        'invalid_request',
+        `mediaType must be one of ${MEDIA_TYPES.join(', ')}`
       );
     }
+    const mediaType: MediaType | undefined = args.mediaType;
     if (args.channel === 'telegram') {
       return this.handleTelegramSearch({
         query: this.string(args, 'query'),
@@ -1337,6 +1726,23 @@ export class MCPServer {
         topicId: args.threadId,
         account: this.account(args),
         limit: args.limit,
+        mediaType,
+      });
+    }
+    if (args.channel === 'instagram') {
+      // The ingester files Instagram rows under the account's DB namespace
+      // with ids that already carry the Instagram account (ig_<account>_…).
+      return this.handleSearchMessages({
+        query: this.string(args, 'query'),
+        chatId: args.target,
+        account: this.account(args),
+        platform: 'instagram',
+        rawIds: true,
+        from: args.from,
+        to: args.to,
+        sender: args.sender,
+        limit: args.limit,
+        mediaType,
       });
     }
     const account =
@@ -1352,11 +1758,12 @@ export class MCPServer {
       query: this.string(args, 'query'),
       chatId: args.target,
       account,
-      platform: args.channel === 'whatsapp' ? 'whatsapp' : undefined,
+      platform: args.channel,
       from: args.from,
       to: args.to,
       sender: args.sender,
       limit: args.limit,
+      mediaType,
     });
   }
 
@@ -1755,6 +2162,18 @@ export class MCPServer {
         'WhatsApp does not support Telegram threadId'
       );
     }
+    if (
+      channelName !== 'whatsapp' &&
+      attachments.some(item => {
+        const value = asObject(item);
+        return value.viewOnce === true || value.hd === true;
+      })
+    ) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'viewOnce and hd attachments are only supported for WhatsApp'
+      );
+    }
 
     const operations: unknown[] = [];
     try {
@@ -1781,15 +2200,18 @@ export class MCPServer {
       } else if (message) {
         const sent =
           channelName === 'whatsapp'
-            ? await this.handleSendMessage({
-                chatId: destination,
-                text: message,
-                account: accountIdValue,
-                replyTo:
-                  args.replyTo === null || args.replyTo === undefined
-                    ? undefined
-                    : String(args.replyTo),
-              })
+            ? await this.handleSendMessage(
+                {
+                  chatId: destination,
+                  text: message,
+                  account: accountIdValue,
+                  replyTo:
+                    args.replyTo === null || args.replyTo === undefined
+                      ? undefined
+                      : String(args.replyTo),
+                },
+                ...this.connectorIdempotency(args, 'text')
+              )
             : await this.handleTelegramSendMessage({
                 chatId: destination,
                 text: message,
@@ -1800,25 +2222,40 @@ export class MCPServer {
         operations.push(this.legacyResultData(sent));
       }
 
-      for (const item of mediaGroup ? [] : attachments) {
+      for (const [index, item] of (mediaGroup ? [] : attachments).entries()) {
         const attachmentValue = asObject(item);
         const location = pickString(attachmentValue, ['url']);
         const sent =
           channelName === 'whatsapp'
-            ? await this.handleSendFile({
-                conversationId: destination,
-                fileUrl: location,
-                caption: pickString(attachmentValue, ['caption']) || undefined,
-                account: accountIdValue,
-                replyTo:
-                  args.replyTo === null || args.replyTo === undefined
-                    ? undefined
-                    : String(args.replyTo),
-              })
+            ? await this.handleSendFile(
+                {
+                  conversationId: destination,
+                  fileUrl: location,
+                  caption: pickString(attachmentValue, ['caption']) || undefined,
+                  // Additive: absent unless asked, so a plain attachment sends as before.
+                  // The attachment's name is the document's name (QA 02-10: it was
+                  // taken from the URL); the connector cleans it.
+                  ...(pickString(attachmentValue, ['name'])
+                    ? { fileName: pickString(attachmentValue, ['name']) }
+                    : {}),
+                  ...(attachmentValue.viewOnce === true ? { viewOnce: true } : {}),
+                  ...(attachmentValue.hd === true ? { quality: 'hd' as const } : {}),
+                  account: accountIdValue,
+                  replyTo:
+                    args.replyTo === null || args.replyTo === undefined
+                      ? undefined
+                      : String(args.replyTo),
+                },
+                ...this.connectorIdempotency(args, `attachment:${index}`)
+              )
             : await this.handleTelegramSendFile({
                 chatId: destination,
                 filePath: location,
                 caption: pickString(attachmentValue, ['caption']) || undefined,
+                ...(pickString(attachmentValue, ['mimeType']).split(';')[0].trim().toLowerCase() ===
+                'audio/ogg'
+                  ? { voiceNote: true }
+                  : {}),
                 account: accountIdValue,
                 replyTo: args.replyTo ?? undefined,
                 threadId: args.threadId ?? undefined,
@@ -1850,6 +2287,26 @@ export class MCPServer {
     });
   }
 
+  /**
+   * The connector-side Idempotency-Key of one WhatsApp sub-operation of a
+   * canonical send (fase 3 / PR-2): the caller's idempotencyKey scoped like its
+   * Redis record (tool, channel, account) plus the sub-operation, so the text
+   * and each attachment of one call never share a key. [] without a key, so
+   * the legacy handlers keep their one-argument call.
+   */
+  private connectorIdempotency(
+    args: Record<string, any>,
+    operation: string,
+    toolName = 'social_send_message'
+  ): [] | [{ idempotencyKey: string }] {
+    const key = typeof args.idempotencyKey === 'string' ? args.idempotencyKey.trim() : '';
+    if (!key) return [];
+    const digest = createHash('sha256')
+      .update(`${toolName}\0${args.channel}\0${args.accountId}\0${key}\0${operation}`)
+      .digest('hex');
+    return [{ idempotencyKey: `mcp-${digest}` }];
+  }
+
   private async canonicalForwardMessage(args: Record<string, any>): Promise<any> {
     const channelName = this.channel(args);
     if (channelName === 'whatsapp') {
@@ -1877,12 +2334,21 @@ export class MCPServer {
 
   private async canonicalDeleteMessage(args: Record<string, any>): Promise<any> {
     const channelName = this.channel(args);
+    const forMe = args.forMe === true;
     if (channelName === 'whatsapp') {
       return this.handleDeleteMessage({
         chatId: this.whatsAppProviderTarget(args),
         messageId: this.string(args, 'messageId'),
         account: this.account(args),
+        forMe,
       });
+    }
+    if (forMe) {
+      // The Telegram connector always revokes for everyone.
+      throw this.canonicalError(
+        'unsupported_capability',
+        'Deleting a message only for this account (forMe) is only supported on WhatsApp'
+      );
     }
     if (channelName === 'telegram') {
       return this.handleTelegramDeleteMessage({
@@ -1895,6 +2361,984 @@ export class MCPServer {
       'unsupported_capability',
       'Instagram DM deletion is not supported by the deployed connector'
     );
+  }
+
+  private async canonicalEditMessage(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') {
+      return this.handleEditMessage({
+        chatId: this.whatsAppProviderTarget(args),
+        messageId: this.string(args, 'messageId'),
+        content: this.string(args, 'message'),
+        account: this.account(args),
+      });
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramEditMessage({
+        chatId: this.target(args),
+        messageId: this.string(args, 'messageId'),
+        content: this.string(args, 'message'),
+        account: this.account(args),
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      `Message editing is not supported by the deployed ${channelName} connector`
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Fase 3 WhatsApp capabilities (reactions, chat state, groups, polls /
+  // events, start chat, contacts, presence / privacy reads). Same pattern as
+  // social_edit_message: ids bare inside the HMAC-signed body, namespaced ids
+  // of another account refused, the connector applies ENABLE_SENDING and
+  // answers {error, failureClass}, which whatsAppCall maps to canonical codes.
+  // -------------------------------------------------------------------------
+
+  private async canonicalReactMessage(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    const emoji = typeof args.emoji === 'string' ? args.emoji : '';
+    if (channelName === 'whatsapp') {
+      const account = this.account(args);
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/messages/react', {
+          conversationId: this.whatsAppProviderTarget(args),
+          messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+          emoji,
+        })
+      );
+    }
+    if (channelName === 'telegram') {
+      return this.handleTelegramReactMessage({
+        chatId: this.target(args),
+        messageId: this.string(args, 'messageId'),
+        emoji,
+        account: this.account(args),
+      });
+    }
+    throw this.canonicalError(
+      'unsupported_capability',
+      'Reactions are not supported by the deployed instagram connector'
+    );
+  }
+
+  private async canonicalSetChatState(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    const action = this.string(args, 'action');
+    const mute =
+      action === 'mute'
+        ? {
+            ...(args.durationMs !== undefined ? { durationMs: args.durationMs } : {}),
+            ...(args.muteUntil !== undefined ? { muteUntil: args.muteUntil } : {}),
+          }
+        : {};
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/chats/modify', {
+        conversationId: chatId,
+        action,
+        ...mute,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  private async canonicalGetGroup(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Group state');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/groups/state', {
+        groupId: this.requireGroupJid(chatId),
+      })
+    );
+  }
+
+  private async canonicalManageGroup(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const action = this.string(args, 'action');
+    const participants = () =>
+      (Array.isArray(args.participants) ? args.participants : []).map((value: unknown) =>
+        this.whatsAppParticipant(value, account)
+      );
+    if (action === 'create') {
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/groups/create', {
+          subject: this.string(args, 'subject'),
+          participants: participants(),
+          ...this.connectorActor(),
+        })
+      );
+    }
+    const groupId = this.requireGroupJid(this.whatsAppProviderTarget(args));
+    if (action === 'update') {
+      const settings = {
+        ...(typeof args.announce === 'boolean' ? { announce: args.announce } : {}),
+        ...(typeof args.restrict === 'boolean' ? { restrict: args.restrict } : {}),
+      };
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/groups/update', {
+          groupId,
+          ...(typeof args.subject === 'string' ? { subject: args.subject } : {}),
+          ...(typeof args.description === 'string' ? { description: args.description } : {}),
+          ...(Object.keys(settings).length ? { settings } : {}),
+          ...this.connectorActor(),
+        })
+      );
+    }
+    if (action === 'setPhoto') {
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/groups/photo', {
+          groupId,
+          fileUrl: this.string(args, 'photoUrl'),
+          confirm: true,
+          ...this.connectorActor(),
+        })
+      );
+    }
+    const participantAction: Record<string, string> = {
+      addParticipants: 'add',
+      removeParticipants: 'remove',
+      promoteParticipants: 'promote',
+      demoteParticipants: 'demote',
+    };
+    if (!participantAction[action]) {
+      throw this.canonicalError('invalid_request', `Unknown group action '${action}'`);
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/groups/participants', {
+        groupId,
+        action: participantAction[action],
+        participants: participants(),
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /** Private "join group" cards for the people an add could not reach (inviteRequired). */
+  private async canonicalInviteToGroup(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const groupId = this.requireGroupJid(this.whatsAppProviderTarget(args));
+    const participants = (Array.isArray(args.participants) ? args.participants : []).map(
+      (value: unknown) => this.whatsAppParticipant(value, account)
+    );
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/groups/invite',
+        {
+          groupId,
+          participants,
+          ...(typeof args.text === 'string' ? { text: args.text } : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'group-invite', 'social_invite_to_group')
+      )
+    );
+  }
+
+  /** GET /communities: every community of the account, its groups and capabilities. */
+  private async canonicalListCommunities(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The community list');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(await this.whatsAppCall(account, 'GET', '/api/v1/communities'));
+  }
+
+  private async canonicalGetCommunity(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Community state');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/communities/state', {
+        communityId: this.requireGroupJid(chatId),
+      })
+    );
+  }
+
+  /**
+   * POST /communities/create | /communities/groups | /communities/leave. The
+   * connector checks admin rights on fresh metadata and reads every change
+   * back; leave passes the schema-forced confirm: true through.
+   */
+  private async canonicalManageCommunity(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const action = this.string(args, 'action');
+    if (action === 'create') {
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/communities/create', {
+          subject: this.string(args, 'subject'),
+          ...(typeof args.description === 'string' ? { description: args.description } : {}),
+          ...this.connectorActor(),
+        })
+      );
+    }
+    const communityId = this.requireGroupJid(this.whatsAppProviderTarget(args));
+    if (action === 'link' || action === 'unlink') {
+      return this.jsonResponse(
+        await this.whatsAppCall(account, 'POST', '/api/v1/communities/groups', {
+          communityId,
+          groupId: this.requireGroupJid(this.whatsAppProviderTarget(args, 'group')),
+          action,
+          ...this.connectorActor(),
+        })
+      );
+    }
+    if (action !== 'leave') {
+      throw this.canonicalError('invalid_request', `Unknown community action '${action}'`);
+    }
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true to leave a community');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/communities/leave', {
+        communityId,
+        confirm: true,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /** POST /channels/lookup: a channel by jid, share link or invite code. */
+  private async canonicalLookupChannel(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Channel look-up');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/channels/lookup', { channel: chatId })
+    );
+  }
+
+  /** GET /channels: the followed ones among the channels the connector has seen. */
+  private async canonicalListChannels(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The followed channels');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(await this.whatsAppCall(account, 'GET', '/api/v1/channels'));
+  }
+
+  private async canonicalManageChannelSubscription(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    if (!chatId.endsWith('@newsletter')) {
+      throw this.canonicalError(
+        'invalid_request',
+        'target must be a WhatsApp channel (…@newsletter); social_lookup_channel resolves a link'
+      );
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/channels/subscription', {
+        channelId: chatId,
+        action: this.string(args, 'action'),
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  private async canonicalSendPoll(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/messages/poll',
+        {
+          conversationId: chatId,
+          name: this.string(args, 'question'),
+          options: args.options,
+          ...(args.selectableCount !== undefined ? { selectableCount: args.selectableCount } : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'poll', 'social_send_poll')
+      )
+    );
+  }
+
+  private async canonicalVotePoll(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/messages/poll/vote',
+        {
+          conversationId: chatId,
+          messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+          options: Array.isArray(args.options) ? args.options : [],
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'poll-vote', 'social_vote_poll')
+      )
+    );
+  }
+
+  /** Optional chat of a message action: bare, never another account's (undefined when absent). */
+  private optionalWhatsAppTarget(args: Record<string, any>): { conversationId?: string } {
+    return args.target === undefined ? {} : { conversationId: this.whatsAppProviderTarget(args) };
+  }
+
+  private async canonicalStarMessage(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (typeof args.star !== 'boolean') {
+      throw this.canonicalError('invalid_request', 'star is required and must be a boolean');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/star', {
+        ...this.optionalWhatsAppTarget(args),
+        messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+        star: args.star,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  private async canonicalPinMessage(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (typeof args.pin !== 'boolean') {
+      throw this.canonicalError('invalid_request', 'pin is required and must be a boolean');
+    }
+    if (!args.pin && args.durationSeconds !== undefined) {
+      throw this.canonicalError('invalid_request', 'durationSeconds is only for a pin');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/messages/pin',
+        {
+          ...this.optionalWhatsAppTarget(args),
+          messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+          pin: args.pin,
+          ...(args.pin && args.durationSeconds !== undefined
+            ? { durationSeconds: args.durationSeconds }
+            : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'pin', 'social_pin_message')
+      )
+    );
+  }
+
+  private async canonicalListPinned(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Pinned messages');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/pins', { conversationId: chatId })
+    );
+  }
+
+  private async canonicalListStarred(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Starred messages');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/starred', {
+        ...this.optionalWhatsAppTarget(args),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+        ...(typeof args.cursor === 'string' && args.cursor.trim()
+          ? { cursor: args.cursor.trim() }
+          : {}),
+      })
+    );
+  }
+
+  /** Optional `cursor` / `limit` of a paged connector list. */
+  private pageArgs(args: Record<string, any>): Record<string, unknown> {
+    return {
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      ...(typeof args.cursor === 'string' && args.cursor.trim()
+        ? { cursor: args.cursor.trim() }
+        : {}),
+    };
+  }
+
+  /** POST /statuses: the account's statuses, optionally of one contact (bare, never another account's). */
+  private async canonicalListStatuses(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Statuses');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const contact =
+      args.contact === undefined ? undefined : this.whatsAppParticipant(args.contact, account);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/statuses', {
+        ...(contact ? { contact } : {}),
+        ...(typeof args.includeExpired === 'boolean'
+          ? { includeExpired: args.includeExpired }
+          : {}),
+        ...(typeof args.includeOwn === 'boolean' ? { includeOwn: args.includeOwn } : {}),
+        ...this.pageArgs(args),
+      })
+    );
+  }
+
+  private async canonicalListChannelPosts(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Channel posts');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    let channelId: string | undefined;
+    if (args.target !== undefined) {
+      channelId = this.whatsAppProviderTarget(args);
+      if (!/^\d+@newsletter$/.test(channelId)) {
+        throw this.canonicalError(
+          'invalid_request',
+          'target must be a WhatsApp channel (…@newsletter)'
+        );
+      }
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/channels/posts', {
+        ...(channelId ? { channelId } : {}),
+        ...this.pageArgs(args),
+      })
+    );
+  }
+
+  /**
+   * POST /statuses/publish: confirm: true and an explicit audience are forced
+   * by the schema and passed through (the connector refuses without them, and
+   * answers 403 status_publish_disabled unless WA_STATUS_PUBLISH_ENABLED).
+   * Recipients are bare; one namespaced to another account is refused.
+   */
+  private async canonicalPublishStatus(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    if (!Array.isArray(args.recipients) || args.recipients.length === 0) {
+      throw this.canonicalError('invalid_request', 'recipients must be a non-empty array');
+    }
+    const type = this.string(args, 'type');
+    const optional = (field: string) => (args[field] !== undefined ? { [field]: args[field] } : {});
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/statuses/publish',
+        {
+          type,
+          ...optional('text'),
+          ...optional('url'),
+          ...optional('backgroundColor'),
+          ...optional('font'),
+          recipients: args.recipients.map((recipient: unknown) =>
+            this.whatsAppParticipant(recipient, account)
+          ),
+          confirm: true,
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'status', 'social_publish_status')
+      )
+    );
+  }
+
+  private async canonicalGetPollResults(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Poll results');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/poll/results', {
+        conversationId: chatId,
+        messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+      })
+    );
+  }
+
+  private async canonicalSendEvent(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    const optional = (field: string) => (args[field] !== undefined ? { [field]: args[field] } : {});
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/messages/event',
+        {
+          conversationId: chatId,
+          name: this.string(args, 'name'),
+          startTime: this.string(args, 'startTime'),
+          ...optional('description'),
+          ...optional('endTime'),
+          ...optional('location'),
+          ...optional('call'),
+          ...optional('extraGuestsAllowed'),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'event', 'social_send_event')
+      )
+    );
+  }
+
+  private async canonicalRespondEvent(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/messages/event/respond',
+        {
+          conversationId: chatId,
+          messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+          response: this.string(args, 'response'),
+          ...(args.extraGuestCount !== undefined ? { extraGuestCount: args.extraGuestCount } : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, 'event-response', 'social_respond_event')
+      )
+    );
+  }
+
+  private async canonicalGetEventResults(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Event results');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/messages/event/results', {
+        conversationId: chatId,
+        messageId: this.bareWhatsAppMessageId(this.string(args, 'messageId'), account),
+      })
+    );
+  }
+
+  /**
+   * POST /chats/start: the connector resolves the number (gated: bulk lookups
+   * get accounts restricted), returns the canonical conversation and, with a
+   * message, sends it through the normal send path. account_restricted comes
+   * back with a wa.me link a human can open to send by hand.
+   */
+  private async canonicalStartChat(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const phone = this.string(args, 'phone');
+    const message = typeof args.message === 'string' ? args.message : undefined;
+    try {
+      return this.jsonResponse(
+        await this.whatsAppCall(
+          account,
+          'POST',
+          '/api/v1/chats/start',
+          { phone, ...(message ? { message } : {}), ...this.connectorActor() },
+          ...(message ? this.connectorIdempotency(args, 'start-chat', 'social_start_chat') : [])
+        )
+      );
+    } catch (error) {
+      const failure = error as Error & { canonicalCode?: string; canonicalDetails?: unknown };
+      if (failure.canonicalCode !== 'account_restricted') throw error;
+      const details = asObject(failure.canonicalDetails);
+      const jid = normalizeDirectWhatsAppJid(phone);
+      const manualOpenUrl =
+        asObject(details.fallback).manualOpenUrl ||
+        (jid ? manualWhatsAppOpenUrl(jid, message) : undefined);
+      if (!manualOpenUrl) throw error;
+      throw this.canonicalError(
+        'account_restricted',
+        `${failure.message} Manual fallback: open ${manualOpenUrl} in the official WhatsApp app/Web session and press send manually.`,
+        { ...details, fallback: { ...asObject(details.fallback), manualOpenUrl } }
+      );
+    }
+  }
+
+  private async canonicalShareContact(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        '/api/v1/contacts/share',
+        { conversationId: chatId, contacts: args.contacts, ...this.connectorActor() },
+        ...this.connectorIdempotency(args, 'contact-share', 'social_share_contact')
+      )
+    );
+  }
+
+  private async canonicalListContacts(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    if (this.readSource(args, 'index') === 'provider') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'WhatsApp contacts are only available from the local index'
+      );
+    }
+    const account = this.account(args);
+    const query = new URLSearchParams();
+    if (typeof args.query === 'string' && args.query.trim()) query.set('q', args.query.trim());
+    query.set('limit', String(clampInteger(args.limit, 50, 1, 500)));
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'GET', `/api/v1/contacts?${query.toString()}`)
+    );
+  }
+
+  private async canonicalGetPresence(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Presence');
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/chats/presence/read', {
+        conversationId: chatId,
+        ...(typeof args.participant === 'string'
+          ? { participant: this.whatsAppParticipant(args.participant, account) }
+          : {}),
+      })
+    );
+  }
+
+  private async canonicalGetPrivacy(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'Privacy settings');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const chatId = args.target === undefined ? undefined : this.whatsAppProviderTarget(args);
+    const privacy = await this.whatsAppCall(account, 'GET', '/api/v1/privacy');
+    const disappearing = chatId
+      ? await this.whatsAppCall(account, 'POST', '/api/v1/chats/disappearing/read', {
+          conversationId: chatId,
+        })
+      : undefined;
+    return this.jsonResponse({
+      ...asObject(privacy),
+      ...(disappearing ? asObject(disappearing) : {}),
+    });
+  }
+
+  /**
+   * POST /contacts/block: exactly one of target (the 1:1 conversation) or
+   * phone; confirm: true is forced by the schema and passed through (the
+   * connector refuses without it). The connector re-reads the blocklist as
+   * proof; changed: false = already so.
+   */
+  private async canonicalBlockContact(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    const hasTarget = typeof args.target === 'string' && args.target.trim() !== '';
+    const hasPhone = typeof args.phone === 'string' && args.phone.trim() !== '';
+    if (hasTarget === hasPhone) {
+      throw this.canonicalError('invalid_request', 'Provide exactly one of target or phone');
+    }
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/contacts/block', {
+        ...(hasTarget
+          ? { conversationId: this.whatsAppProviderTarget(args) }
+          : { phone: args.phone.trim() }),
+        action: this.string(args, 'action'),
+        confirm: true,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  private async canonicalListBlocked(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The blocklist');
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'GET',
+        `/api/v1/contacts/blocklist${args.fresh === true ? '?fresh=1' : ''}`
+      )
+    );
+  }
+
+  /**
+   * POST /privacy: one account-wide setting per call (every contact, every
+   * device). confirm: true is forced by the schema and passed through (the
+   * connector refuses without it); the connector reads the current value
+   * first and does not re-send an equal one (changed: false).
+   */
+  private async canonicalSetPrivacy(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/privacy', {
+        setting: this.string(args, 'setting'),
+        value: args.value,
+        confirm: true,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /** GET /profile/me: the account's own name, about, photo and what can change. */
+  private async canonicalGetMyProfile(args: Record<string, any>): Promise<any> {
+    this.providerOnlyRead(args, 'The own profile');
+    this.requireChannel(args, 'whatsapp');
+    return this.jsonResponse(
+      await this.whatsAppCall(this.account(args), 'GET', '/api/v1/profile/me')
+    );
+  }
+
+  /**
+   * POST /profile/me (name / about), then POST /profile/me/photo (photoUrl,
+   * fetched by the connector) or /profile/me/photo/remove. confirm: true is
+   * forced by the schema and passed through (the connector refuses without
+   * it). Name and about go in one call; when a later photo step fails after
+   * them, the answer is outcome_unknown naming what was already applied.
+   */
+  private async canonicalUpdateMyProfile(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'whatsapp');
+    const account = this.account(args);
+    if (args.confirm !== true) {
+      throw this.canonicalError('invalid_request', 'confirm must be true');
+    }
+    const fields: Record<string, string> = {};
+    if (typeof args.name === 'string') fields.name = args.name;
+    if (typeof args.about === 'string') fields.about = args.about;
+    const photoUrl = typeof args.photoUrl === 'string' ? args.photoUrl.trim() : '';
+    const removePhoto = args.removePhoto === true;
+    if (photoUrl && removePhoto) {
+      throw this.canonicalError('invalid_request', 'Provide photoUrl or removePhoto, not both');
+    }
+    if (!Object.keys(fields).length && !photoUrl && !removePhoto) {
+      throw this.canonicalError(
+        'invalid_request',
+        'Provide at least one of name, about, photoUrl or removePhoto'
+      );
+    }
+    const result: Record<string, unknown> = {};
+    if (Object.keys(fields).length) {
+      result.profile = await this.whatsAppCall(account, 'POST', '/api/v1/profile/me', {
+        ...fields,
+        confirm: true,
+        ...this.connectorActor(),
+      });
+    }
+    if (photoUrl || removePhoto) {
+      try {
+        result.photo = photoUrl
+          ? await this.whatsAppCall(account, 'POST', '/api/v1/profile/me/photo', {
+              fileUrl: photoUrl,
+              confirm: true,
+              ...this.connectorActor(),
+            })
+          : await this.whatsAppCall(account, 'POST', '/api/v1/profile/me/photo/remove', {
+              confirm: true,
+              ...this.connectorActor(),
+            });
+      } catch (error) {
+        if (result.profile) {
+          throw this.canonicalError(
+            'outcome_unknown',
+            `WhatsApp accepted ${Object.keys(fields).join(' and ')} but the photo change failed: ${safeError(
+              error
+            )}`
+          );
+        }
+        throw error;
+      }
+    }
+    return this.jsonResponse({ updated: true, ...result });
+  }
+
+  private async canonicalSetDisappearing(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/chats/disappearing', {
+        conversationId: chatId,
+        expiration: args.expiration,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /**
+   * Our typing indicator in ONE chat (POST /chats/presence with a chat-state).
+   * Never unavailable / available: those are account-wide, and available
+   * silences the phone's notifications.
+   */
+  private async canonicalSendTyping(args: Record<string, any>): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    const state = this.string(args, 'state');
+    if (!['composing', 'recording', 'paused'].includes(state)) {
+      throw this.canonicalError('invalid_request', 'state must be composing, recording or paused');
+    }
+    return this.jsonResponse(
+      await this.whatsAppCall(account, 'POST', '/api/v1/chats/presence', {
+        conversationId: chatId,
+        state,
+        ...this.connectorActor(),
+      })
+    );
+  }
+
+  /** WhatsApp: POST /messages/sticker. Telegram: its media send with sticker: true. */
+  private async canonicalSendSticker(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName === 'whatsapp') return this.whatsAppStickerOrGif('sticker', args);
+    if (channelName !== 'telegram') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `Stickers are not supported by the deployed ${channelName} connector`
+      );
+    }
+    const account = normalizeAccount(this.account(args));
+    const target = stripAccount(this.target(args));
+    if (target.account !== 'personal' && target.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `target belongs to the ${target.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const { chatId, topicId } = this.telegramTopicTarget(
+      this.target(args),
+      args.threadId ?? undefined
+    );
+    const replyTo =
+      args.replyTo === undefined || args.replyTo === null
+        ? undefined
+        : this.telegramMessageNumber(String(args.replyTo), chatId, account);
+    return this.jsonResponse(
+      await this.classifiedConnectorCall(
+        this.tgUrl(args.accountId),
+        'POST',
+        '/api/v1/messages/media/send',
+        {
+          chatId,
+          filePath: this.string(args, 'fileUrl'),
+          sticker: true,
+          ...(replyTo ? { replyTo } : {}),
+          ...(topicId ? { threadId: topicId } : {}),
+        }
+      )
+    );
+  }
+
+  /**
+   * POST /messages/sticker | /messages/gif: the connector fetches fileUrl,
+   * checks its bytes (WebP ≤ 1 MiB / MP4 ≤ 16 MiB, nothing converted) and
+   * takes the caller's idempotencyKey, scoped to the tool, as Idempotency-Key.
+   */
+  private async whatsAppStickerOrGif(
+    kind: 'sticker' | 'gif',
+    args: Record<string, any>
+  ): Promise<any> {
+    const { account, chatId } = this.whatsAppChat(args);
+    if (args.threadId !== undefined && args.threadId !== null) {
+      throw this.canonicalError(
+        'unsupported_capability',
+        'WhatsApp does not support Telegram threadId'
+      );
+    }
+    const replyTo =
+      args.replyTo === undefined || args.replyTo === null
+        ? undefined
+        : this.bareWhatsAppMessageId(String(args.replyTo), account);
+    return this.jsonResponse(
+      await this.whatsAppCall(
+        account,
+        'POST',
+        `/api/v1/messages/${kind}`,
+        {
+          conversationId: chatId,
+          fileUrl: this.string(args, 'fileUrl'),
+          ...(typeof args.caption === 'string' && args.caption.trim()
+            ? { caption: args.caption }
+            : {}),
+          ...(replyTo ? { replyTo } : {}),
+          ...this.connectorActor(),
+        },
+        ...this.connectorIdempotency(args, kind, `social_send_${kind}`)
+      )
+    );
+  }
+
+  /** WhatsApp account + bare chat jid of a canonical call (another account's target refused). */
+  private whatsAppChat(args: Record<string, any>): { account: string; chatId: string } {
+    const chatId = this.whatsAppProviderTarget(args);
+    return { account: this.account(args), chatId };
+  }
+
+  private requireGroupJid(chatId: string): string {
+    if (!chatId.endsWith('@g.us')) {
+      throw this.canonicalError('invalid_request', `target must be a WhatsApp group (…@g.us)`);
+    }
+    return chatId;
+  }
+
+  /** Participant phone / jid, bare; one namespaced to another account is refused. */
+  private whatsAppParticipant(value: unknown, accountArg: string): string {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw) throw this.canonicalError('invalid_request', 'participants must be strings');
+    const account = normalizeAccount(accountArg);
+    const parsed = stripAccount(raw);
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `participant ${raw} belongs to the ${parsed.account} WhatsApp namespace but accountId is '${account}'`
+      );
+    }
+    return parsed.id;
+  }
+
+  /** These reads only exist at the provider (the connector); readSource=index is unsupported. */
+  private providerOnlyRead(args: Record<string, any>, what: string): void {
+    if (this.readSource(args, 'provider') === 'index') {
+      throw this.canonicalError(
+        'unsupported_capability',
+        `${what} is only available from the provider`
+      );
+    }
+  }
+
+  /**
+   * connectorCall to the account's WhatsApp connector, with its `{error,
+   * failureClass}` answers mapped to canonical codes: invalid_request stays,
+   * idempotency_key_reused → conflict, send_outcome_uncertain →
+   * outcome_unknown, a route the deployed connector lacks (404 without
+   * failureClass) → unsupported_capability, any other failureClass
+   * (disabled_sending, disconnected, not_group_admin, not_on_whatsapp,
+   * account_restricted, rejected_by_whatsapp, message_unavailable…) is the
+   * code itself. The connector payload travels as error.details. Timeouts are
+   * rethrown untouched (outcome_unknown via errorCode).
+   */
+  private async whatsAppCall(
+    account: string,
+    method: 'GET' | 'POST',
+    path: string,
+    body?: Record<string, unknown>,
+    idempotency?: { idempotencyKey: string }
+  ): Promise<any> {
+    return this.classifiedConnectorCall(this.waUrl(account), method, path, body, idempotency);
+  }
+
+  /** whatsAppCall's error mapping for any connector (the Telegram edit / delete answer the same shape). */
+  private async classifiedConnectorCall(
+    baseUrl: string,
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: Record<string, unknown>,
+    idempotency?: { idempotencyKey: string }
+  ): Promise<any> {
+    try {
+      return idempotency
+        ? await this.connectorCall(baseUrl, method, path, body, undefined, {
+            'Idempotency-Key': idempotency.idempotencyKey,
+          })
+        : await this.connectorCall(baseUrl, method, path, body);
+    } catch (error) {
+      const match = /^Connector error (\d{3}): ([\s\S]*)$/.exec(safeError(error));
+      if (!match) throw error;
+      const status = Number(match[1]);
+      let payload: Record<string, any>;
+      try {
+        payload = asObject(JSON.parse(match[2]));
+      } catch {
+        payload = {};
+      }
+      const failureClass = typeof payload.failureClass === 'string' ? payload.failureClass : '';
+      const code =
+        failureClass === 'invalid_request' || (!failureClass && status === 400)
+          ? 'invalid_request'
+          : failureClass === 'idempotency_key_reused'
+            ? 'conflict'
+            : failureClass === 'send_outcome_uncertain'
+              ? 'outcome_unknown'
+              : !failureClass && status === 404
+                ? 'unsupported_capability'
+                : failureClass || 'provider_error';
+      throw this.canonicalError(code, safeError(error), { status, ...payload });
+    }
   }
 
   private async canonicalMarkRead(args: Record<string, any>): Promise<any> {
@@ -1952,7 +3396,7 @@ export class MCPServer {
    * renders it as text, the same way the WhatsApp flow already hands out its
    * QR page link — so no new screen is needed (epic gate C5). The connector
    * owns the OAuth app config; this call only needs the verified actor, which
-   * connectorCall forwards as x-user-sub (SC-705 pattern).
+   * instagramCall forwards as x-user-sub (SC-705 pattern).
    */
   private async handleInstagramStartPairing(): Promise<any> {
     const actor = getRequestActor();
@@ -1962,11 +3406,7 @@ export class MCPServer {
         'Instagram pairing requires a verified user: this call carries no x-user-sub. Start it from your own chat.e-dani.com conversation.'
       );
     }
-    const data = await this.connectorCall(
-      this.instagramUrl,
-      'GET',
-      '/api/v1/oauth/instagram/authorize-url'
-    );
+    const data = asObject(await this.instagramCall('GET', '/api/v1/oauth/instagram/authorize-url'));
     return this.jsonResponse({
       action: 'startPairing',
       channel: 'instagram',
@@ -2069,6 +3509,158 @@ export class MCPServer {
     }
   }
 
+  /**
+   * social_moderate_members (INFRA-218 P2, dictamen CTO §1-§4). The connector
+   * routes (http.telegram-connector.moderation.v1) answer {error, failureClass}
+   * and classifiedConnectorCall maps each failureClass to the canonical code;
+   * nothing here invents a code. The audit row is written HERE because the
+   * handler is the one that knows the gateway principal (getRequestActor): one
+   * row per mutation attempt — failures included — and a row that cannot be
+   * written refuses the mutation (audit_unavailable) before any connector
+   * call. get_admin_rights is a read and is not audited.
+   */
+  private async canonicalModerateMembers(args: Record<string, any>): Promise<any> {
+    const channelName = this.channel(args);
+    if (channelName !== 'telegram') {
+      throw this.canonicalError(
+        'unsupported_platform',
+        'social_moderate_members only supports Telegram (this call asked for ' + `'${channelName}')`
+      );
+    }
+    const action = this.string(args, 'action');
+    const account = this.account(args);
+    // C6: numeric ids are checked here, before the connector (invalid_target,
+    // never a 500 and never a raw FLOOD_WAIT from Telegram).
+    const chatId = this.moderationNumericId('target', args.target);
+    if (action === 'get_admin_rights') {
+      const data = await this.classifiedConnectorCall(
+        this.tgUrl(account),
+        'GET',
+        `/api/v1/chats/${encodeURIComponent(chatId)}/moderation/admin-rights`
+      );
+      return this.jsonResponse(data);
+    }
+    const userId = this.moderationNumericId('userId', args.userId);
+    if (['ban', 'kick', 'restrict'].includes(action) && args.confirm !== true) {
+      throw this.canonicalError(
+        'confirmation_required',
+        `${action} requiere confirm: true; ninguna llamada salió a Telegram`
+      );
+    }
+    if (['ban', 'kick', 'restrict'].includes(action) && typeof args.reason !== 'string') {
+      throw this.canonicalError(
+        'invalid_request',
+        `reason es obligatorio en ${action} y se guarda en la auditoría`
+      );
+    }
+    const body: Record<string, unknown> = { user_id: userId };
+    if (args.until !== undefined && (action === 'ban' || action === 'restrict')) {
+      body.until = args.until;
+    }
+    if (action === 'restrict') body.restriction = args.restriction;
+    const auditId = await this.openModerationAudit({
+      account,
+      chatId,
+      userId,
+      action,
+      restriction: action === 'restrict' ? String(args.restriction) : undefined,
+      until: typeof args.until === 'string' ? args.until : undefined,
+      reason: typeof args.reason === 'string' ? args.reason : undefined,
+    });
+    let data: any;
+    try {
+      data = await this.classifiedConnectorCall(
+        this.tgUrl(account),
+        'POST',
+        `/api/v1/chats/${encodeURIComponent(chatId)}/moderation/${action}`,
+        body
+      );
+    } catch (error) {
+      await this.closeModerationAudit(auditId, error);
+      throw error;
+    }
+    await this.closeModerationAudit(auditId, null);
+    return this.jsonResponse(data);
+  }
+
+  /** Numeric Telegram id (marked -100… included); @username and 'abc' → invalid_target. */
+  private moderationNumericId(name: string, value: unknown): string {
+    const text =
+      typeof value === 'number' && Number.isInteger(value) ? String(value) : String(value ?? '');
+    if (!/^-?\d{1,20}$/.test(text)) {
+      throw this.canonicalError(
+        'invalid_target',
+        `${name} debe ser id numérico de Telegram (no @nombre)`
+      );
+    }
+    return text;
+  }
+
+  /**
+   * Dictamen §4: the row exists before the mutation goes out (outcome
+   * 'pending', so an attempt interrupted between audit and connector stays
+   * visible); closeModerationAudit stamps the final outcome. A failed INSERT
+   * denies the mutation: audit_unavailable, zero connector calls.
+   */
+  private async openModerationAudit(entry: {
+    account: string;
+    chatId: string;
+    userId: string;
+    action: string;
+    restriction?: string;
+    until?: string;
+    reason?: string;
+  }): Promise<number> {
+    const actor = getRequestActor();
+    try {
+      const result = await this.dbClient.query(
+        `INSERT INTO moderation_audit
+           (actor, account_id, platform, chat_id, target_user_id, action, restriction, "until", reason, outcome)
+         VALUES ($1, $2, 'telegram', $3, $4, $5, $6, $7, $8, 'pending')
+         RETURNING id`,
+        [
+          actor.sub || actor.name || null,
+          socialAccountId('telegram', entry.account),
+          entry.chatId,
+          entry.userId,
+          entry.action,
+          entry.restriction ?? null,
+          entry.until ?? null,
+          entry.reason ?? null,
+        ]
+      );
+      return Number(result.rows?.[0]?.id);
+    } catch (error) {
+      this.logger.error(
+        { tool: 'social_moderate_members', error: safeError(error) },
+        'moderation_audit write failed: mutation refused'
+      );
+      throw this.canonicalError(
+        'audit_unavailable',
+        'No se pudo registrar la auditoría de moderación; la mutación no se ejecutó'
+      );
+    }
+  }
+
+  /** Stamps the final outcome ('ok' or the canonical error code). The mutation
+   * already happened: a failed UPDATE is logged, never rewritten as an error. */
+  private async closeModerationAudit(auditId: number, error: unknown): Promise<void> {
+    const outcome = error ? this.errorCode(error) : 'ok';
+    const details = (error as { canonicalDetails?: Record<string, any> })?.canonicalDetails;
+    const telegramError = typeof details?.code === 'string' ? details.code : null;
+    try {
+      await this.dbClient.query(
+        `UPDATE moderation_audit SET outcome = $2, telegram_error = $3 WHERE id = $1`,
+        [auditId, outcome, telegramError]
+      );
+    } catch (updateError) {
+      this.logger.error(
+        { tool: 'social_moderate_members', auditId, error: safeError(updateError) },
+        'moderation_audit outcome update failed (mutation already sent)'
+      );
+    }
+  }
+
   private async canonicalManageChat(args: Record<string, any>): Promise<any> {
     this.requireChannel(args, 'telegram');
     const action = this.string(args, 'action');
@@ -2127,6 +3719,9 @@ export class MCPServer {
           videoUrl: this.string(args, 'videoUrl'),
           caption: args.caption,
           shareToFeed: args.shareToFeed,
+          coverUrl: args.coverUrl,
+          thumbOffset: args.thumbOffset,
+          collaborators: args.collaborators,
         });
       case 'story':
         if (!args.imageUrl && !args.videoUrl) {
@@ -2140,6 +3735,15 @@ export class MCPServer {
       default:
         throw this.canonicalError('invalid_request', `Unsupported content kind '${args.kind}'`);
     }
+  }
+
+  private async canonicalUpdateContent(args: Record<string, any>): Promise<any> {
+    this.requireChannel(args, 'instagram');
+    return this.handleInstagramUpdateCaption({
+      account: this.account(args),
+      mediaId: this.target(args),
+      caption: this.string(args, 'caption'),
+    });
   }
 
   private async canonicalManageComment(args: Record<string, any>): Promise<any> {
@@ -2184,41 +3788,60 @@ export class MCPServer {
     sender?: string;
     limit?: number;
     account?: Account;
-    platform?: 'whatsapp' | 'telegram';
+    platform?: 'whatsapp' | 'telegram' | 'instagram';
+    rawIds?: boolean;
+    mediaType?: MediaType;
   }) {
-    const results = await this.searchService.search(args.query, {
-      chatId: args.chatId,
-      from: args.from ? new Date(args.from) : undefined,
-      to: args.to ? new Date(args.to) : undefined,
-      sender: args.sender,
-      limit: args.limit || 20,
-      account: args.account,
-      platform: args.platform,
-    });
+    const { results, mode, fallbackReason, partialErrors } =
+      await this.searchService.searchDetailed(args.query, {
+        chatId: args.chatId,
+        from: args.from ? new Date(args.from) : undefined,
+        to: args.to ? new Date(args.to) : undefined,
+        sender: args.sender,
+        limit: args.limit || 20,
+        account: args.account,
+        platform: args.platform,
+        rawIds: args.rawIds,
+        mediaType: args.mediaType,
+      });
 
     return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              results: results.map(r => ({
-                messageId: r.messageId,
-                conversationId: r.conversationId,
-                content: r.content,
-                sender: r.senderWaId,
-                timestamp: r.waTimestamp.toISOString(),
-                channel: r.platform,
-                accountId: r.account,
-                similarity: r.similarity,
-                rank: r.rank,
-              })),
-            },
-            null,
-            2
-          ),
+      __canonicalResult: {
+        data: {
+          results: results.map(r => ({
+            messageId: r.messageId,
+            conversationId: r.conversationId,
+            content: r.content,
+            sender: r.senderWaId,
+            timestamp: r.waTimestamp.toISOString(),
+            channel: r.platform,
+            accountId: r.account,
+            messageType: r.messageType ?? null,
+            similarity: r.similarity,
+            rank: r.rank,
+          })),
+          // Which branch answered: `semantic` = the brain (INFRA-486),
+          // `text` = Postgres full-text, with why the brain did not.
+          mode,
+          ...(fallbackReason ? { fallbackReason } : {}),
         },
-      ],
+        // An instance that did not answer is a partial read, not a text fallback;
+        // `source` goes whole because executeCanonicalTool merges meta shallowly.
+        meta: partialErrors?.length
+          ? {
+              source: {
+                kind: 'localIndex',
+                asOf: new Date().toISOString(),
+                completeness: 'partial',
+              },
+              partialErrors: partialErrors.map(e => ({
+                accountId: e.accountId,
+                code: 'provider_error',
+                message: e.message,
+              })),
+            }
+          : {},
+      },
     };
   }
 
@@ -2229,8 +3852,12 @@ export class MCPServer {
   }
 
   private async handleGetChat(args: { chatId: string; account?: string }) {
-    const account = normalizeAccount(args.account);
-    const row = await this.conversations().resolve('whatsapp', account, args.chatId);
+    const account = normalizeAccount(args.account, 'whatsapp');
+    const parsed = stripAccount(args.chatId);
+    if (parsed.id !== args.chatId && parsed.account !== account) {
+      throw this.canonicalError('invalid_request', 'Conversation belongs to another account');
+    }
+    const row = await this.conversations().resolve('whatsapp', account, parsed.id);
 
     if (!row || !ConversationResolver.belongsTo(row, 'whatsapp', account)) {
       throw this.canonicalError(
@@ -2241,17 +3868,17 @@ export class MCPServer {
     const chatId = row.id;
     const conversation = {
       id: row.id,
-      waChatId: row.external_id,
+      waChatId: row.external_id || stripAccount(row.id).id,
       type: row.type || (row.is_group ? 'GROUP' : 'INDIVIDUAL'),
       name: row.name,
     };
 
     const messages = await this.dbClient.query(
       `SELECT * FROM messages
-       WHERE conversation_id = $1
+       WHERE conversation_id = $1 AND account = $2 AND platform = 'whatsapp'
        ORDER BY wa_timestamp DESC
        LIMIT 50`,
-      [chatId]
+      [chatId, account]
     );
 
     return {
@@ -2301,8 +3928,54 @@ export class MCPServer {
     return { timestamp: result.rows[0].wa_timestamp, id: String(result.rows[0].id) };
   }
 
+  private async resolveCurrentChatReadScope(
+    account: string,
+    chat: string
+  ): Promise<{ chatId: string; conversationIds: string[] }> {
+    const accountId = normalizeAccount(account, 'whatsapp');
+    let chatId = accountKey(accountId, chat);
+    const found = await this.dbClient.query(
+      `SELECT id, wa_chat_id, COALESCE(is_group, false) AS is_group
+       FROM conversations WHERE account=$1 AND id=$2`,
+      [accountId, chatId]
+    );
+    if (!found.rows.length) throw new McpError(ErrorCode.InvalidRequest, 'Current chat not found');
+    let conversation = found.rows[0];
+    if (!conversation.is_group && /(?:^|:)\d+@(c\.us|s\.whatsapp\.net)$/.test(chatId)) {
+      const linked = await this.dbClient.query(
+        `SELECT lid.id, lid.wa_chat_id FROM conversations lid
+         WHERE lid.account=$1 AND COALESCE(lid.is_group, false)=false AND lid.id ~ '@lid$'
+           AND regexp_replace(lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net') =
+               regexp_replace($2::text, '@c\\.us$', '@s.whatsapp.net')`,
+        [accountId, chatId]
+      );
+      if (linked.rows.length === 1) {
+        conversation = linked.rows[0];
+        chatId = conversation.id;
+      }
+    }
+    if (conversation.is_group || !/@lid$/.test(chatId) || !conversation.wa_chat_id) {
+      return { chatId, conversationIds: [chatId] };
+    }
+    const aliases = await this.dbClient.query(
+      `SELECT pn.id FROM conversations pn
+       WHERE pn.account=$1 AND COALESCE(pn.is_group, false)=false
+         AND pn.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
+         AND regexp_replace(pn.id, '@c\\.us$', '@s.whatsapp.net') =
+             regexp_replace($2::text, '@c\\.us$', '@s.whatsapp.net')
+         AND (SELECT COUNT(*) FROM conversations lid
+              WHERE lid.account=$1 AND COALESCE(lid.is_group, false)=false
+                AND lid.id ~ '@lid$'
+                AND regexp_replace(lid.wa_chat_id, '@c\\.us$', '@s.whatsapp.net') =
+                    regexp_replace($2::text, '@c\\.us$', '@s.whatsapp.net')) = 1`,
+      [accountId, conversation.wa_chat_id]
+    );
+    return { chatId, conversationIds: [chatId, ...aliases.rows.map(row => row.id)] };
+  }
+
   private async handleWhatsAppGetMessages(args: {
     chatId: string;
+    conversationIds?: string[];
     limit?: number;
     before?: string;
     after?: string;
@@ -2317,15 +3990,22 @@ export class MCPServer {
     const before = await this.resolveWhatsAppCursor(chatId, args.before);
     const after = await this.resolveWhatsAppCursor(chatId, args.after);
 
-    const where = [`conversation_id = $1`, `platform = 'whatsapp'`];
-    const params: any[] = [chatId];
+    const where = [
+      args.conversationIds ? `conversation_id = ANY($1::text[])` : `conversation_id = $1`,
+      `platform = 'whatsapp'`,
+      `account = $2`,
+    ];
+    const params: any[] = [
+      args.conversationIds || chatId,
+      normalizeAccount(args.account, 'whatsapp'),
+    ];
 
     if (before) {
       params.push(before.timestamp);
       const tsParam = `$${params.length}`;
       if (before.id) {
         params.push(before.id);
-        where.push(`(wa_timestamp, id) < (${tsParam}, $${params.length}::bigint)`);
+        where.push(`(wa_timestamp, id) < (${tsParam}, $${params.length})`);
       } else {
         where.push(`wa_timestamp < ${tsParam}`);
       }
@@ -2335,7 +4015,7 @@ export class MCPServer {
       const tsParam = `$${params.length}`;
       if (after.id) {
         params.push(after.id);
-        where.push(`(wa_timestamp, id) > (${tsParam}, $${params.length}::bigint)`);
+        where.push(`(wa_timestamp, id) > (${tsParam}, $${params.length})`);
       } else {
         where.push(`wa_timestamp > ${tsParam}`);
       }
@@ -2359,7 +4039,7 @@ export class MCPServer {
       const attachments = await this.dbClient.query(
         `SELECT message_id, file_type, mime_type, file_name, file_size, file_url, caption
          FROM attachments
-         WHERE message_id = ANY($1::bigint[])
+         WHERE message_id = ANY($1)
          ORDER BY id ASC`,
         [ids]
       );
@@ -2774,7 +4454,7 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, t('errors.INVALID_SEND_TOKEN'));
     }
     const draftId = tokenMatch[1];
-    const expectedAccount = normalizeAccount(args.account);
+    const expectedAccount = normalizeAccount(args.account, 'whatsapp');
     await this.requireDraftAccount(draftId, expectedAccount);
 
     const draft = await this.draftService.getDraftById(draftId);
@@ -2788,32 +4468,28 @@ export class MCPServer {
 
     // Draft ownership uses the account-namespaced DB key. The provider must
     // receive the bare WhatsApp JID, never `professional:<jid>`.
-    const conversationId = bareWhatsAppJid(draft.conversationId);
+    const providerChatId = this.whatsAppProviderJid(
+      draft.conversationId,
+      expectedAccount,
+      'conversationId'
+    );
+    const conversationId = isGroupJid(providerChatId)
+      ? providerChatId
+      : requireAccount('whatsapp', expectedAccount).requireInboundBeforeSend
+        ? await this.requireProfessionalInboundChat(providerChatId, {}, expectedAccount)
+        : providerChatId;
 
     // Call connector API to send message
     const connectorUrl = this.waUrl(expectedAccount);
-    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
-    const timestamp = Math.floor(Date.now() / 1000);
+    const sharedSecret = this.secretForUrl(connectorUrl);
     const body = {
       sendToken: args.sendToken,
       conversationId,
       content: draft.content,
     };
 
-    const signature = generateHMACSignature(body, timestamp, sharedSecret);
-
     try {
-      const response = await fetch(`${connectorUrl}/api/v1/messages/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Connector-Signature': signature,
-          'X-Connector-Timestamp': timestamp.toString(),
-          // SC-705: forward the verified caller identity to the connector.
-          ...actorRequestHeaders(),
-        },
-        body: JSON.stringify(body),
-      });
+      const response = await this.postWhatsAppMessage(connectorUrl, body, sharedSecret);
 
       if (!response.ok) {
         throw new Error(`Failed to send message: ${response.statusText}`);
@@ -2821,88 +4497,82 @@ export class MCPServer {
 
       await this.draftService.markAsSent(draftId);
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                message: t('messages.draft_sent'),
-                sentAt: new Date().toISOString(),
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
+      return this.jsonResponse({
+        message: t('messages.draft_sent'),
+        sentAt: new Date().toISOString(),
+      });
     } catch (error) {
       this.logger.error(`Error sending message: ${error}`);
       throw new McpError(ErrorCode.InternalError, `Failed to send message: ${error}`);
     }
   }
 
-  private async handleSendMessage(args: {
-    chatId: string;
-    text: string;
-    account?: string;
-    replyTo?: string;
-    phone?: string;
-    phoneE164?: string;
-    manualOpenUrl?: string;
-  }) {
-    if (process.env.ENABLE_SENDING !== 'true') {
+  private async handleSendMessage(
+    args: {
+      chatId: string;
+      text: string;
+      account?: string;
+      replyTo?: string;
+      phone?: string;
+      phoneE164?: string;
+      manualOpenUrl?: string;
+      scopedSendToken?: string;
+    },
+    // Set only by canonicalSendMessage, never from tool arguments.
+    options?: { idempotencyKey?: string }
+  ) {
+    if (!args.scopedSendToken && process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending is disabled (ENABLE_SENDING != true)');
     }
     if (process.env.EMERGENCY_DISABLE_SENDING === 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending is emergency disabled');
     }
 
-    const account = normalizeAccount(args.account);
-    // The connector expects the BARE jid: a legacy `professional:` prefix
-    // reaches Baileys verbatim (groups: sock.groupMetadata() times out).
-    const conversationId = bareWhatsAppJid(args.chatId);
+    const account = normalizeAccount(args.account, 'whatsapp');
+    const providerChatId = this.whatsAppProviderJid(args.chatId, account, 'chatId');
+    // Group sends bypass the professional cold-send gate: membership in a group
+    // already implies established context (no unsolicited first-contact), and the
+    // gate only ever supported 1:1 targets. Both accounts must hand the connector
+    // the BARE `@g.us` jid — a `professional:`/`personal:` prefix reaches
+    // `sock.groupMetadata()` verbatim and times out. Non-group professional sends
+    // keep the inbound gate untouched.
+    const conversationId = isGroupJid(providerChatId)
+      ? providerChatId
+      : requireAccount('whatsapp', account).requireInboundBeforeSend
+        ? await this.requireProfessionalInboundChat(
+            providerChatId,
+            {
+              phone: args.phone,
+              phoneE164: args.phoneE164,
+              manualOpenUrl: args.manualOpenUrl,
+            },
+            account
+          )
+        : providerChatId;
     const connectorUrl = this.waUrl(account);
-    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
-    const timestamp = Math.floor(Date.now() / 1000);
+    const sharedSecret = connectorSecretFor(requireAccount('whatsapp', account));
     const body = {
-      sendToken: `direct-${Date.now()}`,
+      sendToken: args.scopedSendToken || `direct-${Date.now()}`,
       conversationId,
       content: args.text,
       ...(args.replyTo ? { replyToMessageId: args.replyTo } : {}),
     };
 
-    const signature = generateHMACSignature(body, timestamp, sharedSecret);
-
     try {
-      const response = await fetch(`${connectorUrl}/api/v1/messages/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Connector-Signature': signature,
-          'X-Connector-Timestamp': timestamp.toString(),
-          // SC-705: forward the verified caller identity to the connector.
-          ...actorRequestHeaders(),
-        },
-        body: JSON.stringify(body),
-      });
+      const response = await this.postWhatsAppMessage(
+        connectorUrl,
+        body,
+        sharedSecret,
+        options?.idempotencyKey
+      );
 
       if (!response.ok) {
         const errorPayload = await this.readConnectorError(response);
         const failure = errorPayload.failureClass ? ` (${errorPayload.failureClass})` : '';
         const actionable = errorPayload.actionable ? ` - ${errorPayload.actionable}` : '';
-        const phoneEvidence = trustedPhoneEvidence({
-          phone: args.phone,
-          phoneE164: args.phoneE164,
-          manualOpenUrl: args.manualOpenUrl,
-        });
-        const fallbackUrl =
-          errorPayload.fallback?.manualOpenUrl ||
-          phoneEvidence?.manualOpenUrl ||
-          (phoneEvidence
-            ? manualWhatsAppOpenUrlFromPhone(phoneEvidence.phoneE164, args.text)
-            : undefined) ||
-          manualWhatsAppOpenUrl(args.chatId, args.text);
+        const fallbackUrl = !isLidJid(conversationId)
+          ? manualWhatsAppOpenUrl(conversationId, args.text)
+          : undefined;
         const fallback =
           errorPayload.failureClass === 'account_restricted' && fallbackUrl
             ? ` Manual fallback: open ${fallbackUrl} in the official WhatsApp app/Web session and press send manually. Automated first-contact sends require an existing inbound chat/trusted-contact token or an official WhatsApp Business Platform template.`
@@ -2913,27 +4583,81 @@ export class MCPServer {
       }
 
       const result = (await response.json()) as Record<string, unknown>;
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                message: 'Message sent',
-                messageId: result.messageId || null,
-                sentAt: result.sentAt || new Date().toISOString(),
-                chatId: conversationId,
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
+      return this.jsonResponse({
+        message: 'Message sent',
+        messageId: result.messageId || null,
+        sentAt: result.sentAt || new Date().toISOString(),
+        chatId: conversationId,
+      });
     } catch (error) {
       this.logger.error(`Error sending message: ${error}`);
       throw new McpError(ErrorCode.InternalError, `Failed to send message: ${error}`);
     }
+  }
+
+  private async professionalInboundDestination(
+    sendJid: string,
+    account: Account
+  ): Promise<string | null> {
+    const lid = isLidJid(sendJid);
+    const conversationIds = lid
+      ? [accountKey(account, sendJid)]
+      : [accountKey(account, sendJid), accountKey(account, phoneWaJidFromSendJid(sendJid))];
+    const result = await this.dbClient.query(
+      `SELECT c.id, max(m.wa_timestamp) AS last_inbound_at
+         FROM conversations c
+         JOIN messages m ON m.conversation_id = c.id
+        WHERE (c.id = ANY($1::text[])
+               OR ($3::text IS NOT NULL
+                   AND (c.id LIKE '%@lid' OR c.id LIKE '%@hosted.lid')
+                   AND m.metadata->>'senderPnE164' = $3))
+          AND c.account = $2
+          AND COALESCE(c.is_group, false) = false
+          AND m.account = $2
+          AND m.platform = 'whatsapp'
+          AND m.direction = 'INBOUND'
+        GROUP BY c.id
+        ORDER BY CASE WHEN c.id = ANY($1::text[]) THEN 0 ELSE 1 END`,
+      [conversationIds, account, lid ? null : phoneE164FromSendJid(sendJid)]
+    );
+    if (result.rows.some(row => conversationIds.includes(row.id))) return sendJid;
+    const mappedLids = result.rows.map(row => stripAccount(row.id).id).filter(isLidJid);
+    return mappedLids.length === 1 ? mappedLids[0] : null;
+  }
+
+  /**
+   * Gate professional WhatsApp direct sends behind an existing inbound message
+   * (no cold first-contact sends) and return the jid that must actually be sent.
+   *
+   * LID chats require inbound for that exact LID. Phone chats require their
+   * own inbound, or a LID inbound carrying provider-derived senderPnE164.
+   */
+  private async requireProfessionalInboundChat(
+    chatId: string,
+    _evidence: { phone?: unknown; phoneE164?: unknown; manualOpenUrl?: unknown } = {},
+    account: Account = 'personal'
+  ): Promise<string> {
+    const target = resolveProfessionalSendTarget(chatId, {}, account);
+    if (!target) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        'Professional WhatsApp direct sends require a valid individual phone or WhatsApp chat ID'
+      );
+    }
+
+    const destination = await this.professionalInboundDestination(target.sendJid, account);
+    if (!destination) {
+      const fallbackUrl = isLidJid(target.sendJid)
+        ? undefined
+        : manualWhatsAppOpenUrl(target.sendJid, '');
+      const fallback = fallbackUrl ? ` Manual fallback: ${fallbackUrl}` : '';
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Professional WhatsApp direct sends are only allowed after the customer has sent an inbound message.${fallback}`
+      );
+    }
+
+    return destination;
   }
 
   private async handleSendTemplate(args: {
@@ -2950,13 +4674,11 @@ export class MCPServer {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending is emergency disabled');
     }
 
-    const account = normalizeAccount(args.account || 'professional');
-    if (account !== 'professional') {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        'WhatsApp templates are only supported on the professional Cloud API account'
-      );
-    }
+    const account = normalizeAccount(args.account);
+    throw this.canonicalError(
+      'unsupported_capability',
+      'Templates require a configured Cloud API transport'
+    );
     if (!args.chatId || !args.templateName) {
       throw new McpError(ErrorCode.InvalidRequest, 'chatId and templateName are required');
     }
@@ -3007,24 +4729,18 @@ export class MCPServer {
     }
 
     const connectorUrl = this.waUrl(args.account);
-    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET || '';
+    const sharedSecret = this.secretForUrl(connectorUrl);
 
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const body = { action: 'logout' };
-      const signature = generateHMACSignature(body, timestamp, sharedSecret);
-
-      const response = await fetch(`${connectorUrl}/api/v1/auth/logout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Connector-Signature': signature,
-          'X-Connector-Timestamp': timestamp.toString(),
-          // SC-705: forward the verified caller identity to the connector.
-          ...actorRequestHeaders(),
-        },
-        body: JSON.stringify(body),
-      });
+      const response = await this.signedConnectorPost(
+        connectorUrl,
+        '/api/v1/auth/logout',
+        body,
+        timestamp,
+        sharedSecret
+      );
 
       if (!response.ok) {
         throw new Error(`Failed to logout: ${response.statusText}`);
@@ -3038,7 +4754,7 @@ export class MCPServer {
               {
                 message:
                   'WhatsApp disconnected successfully. New QR code will be generated shortly.',
-                instructions: `Visit https://whatsapp.e-dani.com/ to scan the new QR code.`,
+                instructions: `Visit ${requireAccount('whatsapp', normalizeAccount(args?.account)).qrUrl || 'configured pairing page'} to scan the new QR code.`,
               },
               null,
               2
@@ -3059,7 +4775,9 @@ export class MCPServer {
     const connectorUrl = this.waUrl(args?.account);
 
     try {
-      const response = await fetch(`${connectorUrl}/api/v1/health`);
+      const response = await fetch(`${connectorUrl}/api/v1/health`, {
+        headers: this.authHeaders(connectorUrl),
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to get status: ${response.statusText}`);
@@ -3085,7 +4803,7 @@ export class MCPServer {
                   : data.qrAvailable
                     ? 'QR code is available for scanning'
                     : 'WhatsApp is disconnected. Use social_manage_session with action=renewQr.',
-                qrUrl: 'https://whatsapp.e-dani.com/',
+                qrUrl: requireAccount('whatsapp', normalizeAccount(args?.account)).qrUrl || null,
               },
               null,
               2
@@ -3676,59 +5394,13 @@ export class MCPServer {
       'message' | 'message-ambiguous' | 'conversation' | 'conversation-ambiguous' | 'fallback';
     candidates: string[];
   }> {
+    normalizeAccount(requested, 'telegram');
     const bare = this.bareTelegramTgId(chatId);
-    let candidates: string[];
-    if (bare) {
-      candidates = [...new Set(accountList().map(a => accountKey(a, bare)))];
-    } else {
-      const resolved = await Promise.all(
-        accountList().map(a => this.resolveTelegramChatId(chatId, a))
-      );
-      candidates = [...new Set(resolved.filter((c): c is string => !!c))];
-    }
-    if (!candidates.length) return { account: requested, source: 'fallback', candidates };
-
-    const accountsFrom = (rows: Array<{ account_id?: string | null }>) => {
-      const set = new Set<Account>();
-      for (const row of rows) {
-        if (row.account_id?.startsWith('telegram:'))
-          set.add(row.account_id.slice('telegram:'.length));
-      }
-      return set;
+    return {
+      account: requested,
+      source: 'message',
+      candidates: bare ? [accountKey(requested, bare)] : [],
     };
-    const pick = (set: Set<Account>): Account =>
-      set.size === 1 ? [...set][0] : set.has(requested) ? requested : 'personal';
-
-    const msg = await this.dbClient.query(
-      `SELECT DISTINCT account_id
-         FROM messages
-        WHERE conversation_id = ANY($1::text[])
-          AND (wa_message_id = $2 OR metadata->>'telegram_message_id' = $2)`,
-      [candidates, String(messageId)]
-    );
-    const msgAccounts = accountsFrom(msg.rows);
-    if (msgAccounts.size) {
-      return {
-        account: pick(msgAccounts),
-        source: msgAccounts.size > 1 ? 'message-ambiguous' : 'message',
-        candidates,
-      };
-    }
-
-    const conv = await this.dbClient.query(
-      `SELECT id, account_id FROM conversations WHERE id = ANY($1::text[])`,
-      [candidates]
-    );
-    const convAccounts = accountsFrom(conv.rows);
-    if (convAccounts.size) {
-      return {
-        account: pick(convAccounts),
-        source: convAccounts.size > 1 ? 'conversation-ambiguous' : 'conversation',
-        candidates,
-      };
-    }
-
-    return { account: requested, source: 'fallback', candidates };
   }
 
   private async handleTelegramGetMessages(args: {
@@ -3817,7 +5489,7 @@ export class MCPServer {
     account?: string;
   }) {
     const account = normalizeAccount(args.account);
-    const data = await this.connectorCall(
+    const data = await this.classifiedConnectorCall(
       this.tgUrl(args.account),
       'DELETE',
       `/api/v1/messages/${args.chatId}/${args.messageId}`
@@ -3838,6 +5510,104 @@ export class MCPServer {
       );
     }
     return this.jsonResponse(data);
+  }
+
+  /**
+   * Edit one of our own Telegram text messages through the connector's POST
+   * /messages/edit. The connector checks the message (ours, text), applies
+   * its sending gate and publishes telegram.MessageEdited; telegram-sync
+   * writes the row (replaced text kept in metadata.edit_history), so the MCP
+   * writes nothing itself. Telegram's own limits come back as 422
+   * rejected_by_telegram.
+   */
+  // CONTRACT: http.telegram-connector.messages-edit.v1
+  private async handleTelegramEditMessage(args: {
+    chatId: string;
+    messageId: string;
+    content: string;
+    account?: string;
+  }) {
+    const account = normalizeAccount(args.account);
+    const target = stripAccount(String(args.chatId).trim());
+    if (target.account !== 'personal' && target.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `target belongs to the ${target.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const { chatId } = this.telegramTopicTarget(args.chatId);
+    const data = await this.classifiedConnectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      '/api/v1/messages/edit',
+      {
+        chatId,
+        messageId: this.telegramMessageNumber(args.messageId, chatId, account),
+        content: args.content,
+        ...this.connectorActor(),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /** Set or clear ('' → null) our reaction through the Telegram connector's POST /messages/react. */
+  private async handleTelegramReactMessage(args: {
+    chatId: string;
+    messageId: string;
+    emoji: string;
+    account?: string;
+  }) {
+    const account = normalizeAccount(args.account);
+    const target = stripAccount(String(args.chatId).trim());
+    if (target.account !== 'personal' && target.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `target belongs to the ${target.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const { chatId } = this.telegramTopicTarget(args.chatId);
+    const data = await this.connectorCall(
+      this.tgUrl(args.account),
+      'POST',
+      '/api/v1/messages/react',
+      {
+        chatId,
+        messageId: this.telegramMessageNumber(args.messageId, chatId, account),
+        emoji: args.emoji || null,
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /**
+   * Telegram message id (per chat) from what a caller holds: the bare number
+   * or the stored id `[<account>:]tg_<chat>_<msg>`, whose chat and account
+   * must be the ones addressed.
+   */
+  private telegramMessageNumber(messageId: string, chatId: string, account: Account): number {
+    const parsed = stripAccount(String(messageId).trim());
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId belongs to the ${parsed.account} Telegram namespace but accountId is '${account}'`
+      );
+    }
+    const stored = parsed.id.match(/^tg_(-?\d+)_(\d+)$/);
+    if (stored && stored[1] !== chatId) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId ${messageId} belongs to Telegram chat ${stored[1]}, not ${chatId}`
+      );
+    }
+    const raw = stored ? stored[2] : parsed.id;
+    const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(n) || n <= 0) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId must be a Telegram message number or tg_<chat>_<message>, got '${messageId}'`
+      );
+    }
+    return n;
   }
 
   private async handleTelegramMarkAsRead(args: { chatId: string; account?: string }) {
@@ -3947,26 +5717,87 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
+  private secretForUrl(baseUrl: string): string {
+    const entries = getAccounts().filter(a => a.connectorUrl === baseUrl);
+    if (!entries.length) throw new Error('Connector URL is not registered');
+    const secrets = [...new Set(entries.map(a => connectorSecretFor(a)))];
+    if (secrets.length !== 1) throw new Error('Conflicting secrets for shared connector');
+    return secrets[0];
+  }
+
+  private authHeaders(baseUrl: string): Record<string, string> {
+    const secret = this.secretForUrl(baseUrl);
+    const timestamp = Math.floor(Date.now() / 1000);
+    return {
+      Authorization: `Bearer ${secret}`,
+      'X-Connector-Timestamp': String(timestamp),
+      'X-Connector-Signature': generateHMACSignature({}, timestamp, secret),
+    };
+  }
+
+  private signedConnectorHeaders(connectorUrl: string, timestamp: number, signature: string) {
+    return {
+      'Content-Type': 'application/json',
+      ...this.authHeaders(connectorUrl),
+      'X-Connector-Signature': signature,
+      'X-Connector-Timestamp': timestamp.toString(),
+      // SC-705: forward the verified caller identity to the connector.
+      ...actorRequestHeaders(),
+    };
+  }
+
+  /** Posts a WhatsApp message with a fresh timestamp and the selected account's secret. */
+  private postWhatsAppMessage(
+    connectorUrl: string,
+    body: Record<string, unknown>,
+    sharedSecret: string,
+    idempotencyKey?: string
+  ): Promise<Response> {
+    return this.signedConnectorPost(
+      connectorUrl,
+      '/api/v1/messages/send',
+      body,
+      Math.floor(Date.now() / 1000),
+      sharedSecret,
+      idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}
+    );
+  }
+
+  /** Sends a signed POST; each handler retains its status and result processing. */
+  private signedConnectorPost(
+    connectorUrl: string,
+    path: string,
+    body: Record<string, unknown>,
+    timestamp: number,
+    sharedSecret: string,
+    extraHeaders: Record<string, string> = {}
+  ): Promise<Response> {
+    const signature = generateHMACSignature(body, timestamp, sharedSecret);
+    return fetch(`${connectorUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        ...this.signedConnectorHeaders(connectorUrl, timestamp, signature),
+        ...extraHeaders,
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
   private async connectorCall(
     baseUrl: string,
     method: string,
     path: string,
     body?: any,
-    timeoutMs = 15000
+    timeoutMs = 15000,
+    extraHeaders: Record<string, string> = {}
   ): Promise<any> {
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = body || {};
-    const signature = generateHMACSignature(payload, timestamp, this.connectorSecret);
+    const signature = generateHMACSignature(payload, timestamp, this.secretForUrl(baseUrl));
 
     const response = await fetch(`${baseUrl}${path}`, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Connector-Signature': signature,
-        'X-Connector-Timestamp': timestamp.toString(),
-        // SC-705: forward the verified caller identity to the connector.
-        ...actorRequestHeaders(),
-      },
+      headers: { ...this.signedConnectorHeaders(baseUrl, timestamp, signature), ...extraHeaders },
       ...(method !== 'GET' && method !== 'DELETE' ? { body: JSON.stringify(payload) } : {}),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -3992,24 +5823,56 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
-  private async handleSendFile(args: {
-    conversationId: string;
-    fileUrl: string;
-    caption?: string;
-    replyTo?: string;
-    account?: string;
-  }) {
-    if (process.env.ENABLE_SENDING !== 'true') {
+  private async handleSendFile(
+    args: {
+      conversationId: string;
+      fileUrl: string;
+      caption?: string;
+      replyTo?: string;
+      account?: string;
+      fileName?: string;
+      viewOnce?: boolean;
+      quality?: 'hd';
+      scopedSendToken?: string;
+    },
+    options?: { idempotencyKey?: string }
+  ) {
+    if (
+      (!args.scopedSendToken && process.env.ENABLE_SENDING !== 'true') ||
+      process.env.EMERGENCY_DISABLE_SENDING === 'true'
+    ) {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
-    const { account, ...body } = args;
-    body.conversationId = bareWhatsAppJid(body.conversationId);
-    const data = await this.connectorCall(
-      this.waUrl(account),
-      'POST',
-      '/api/v1/messages/media/send',
-      body
-    );
+    const { account: requestedAccount, scopedSendToken, ...rest } = args;
+    const body = { ...rest, ...(scopedSendToken ? { sendToken: scopedSendToken } : {}) };
+    const account = normalizeAccount(requestedAccount, 'whatsapp');
+    body.conversationId = this.whatsAppProviderJid(body.conversationId, account, 'conversationId');
+    if (isGroupJid(body.conversationId)) {
+      // Group sends bypass the professional cold-send gate — parity with
+      // handleSendMessage: group membership already implies established
+      // context (no unsolicited first-contact), and the connector needs the
+      // BARE `@g.us` jid on both accounts (an account prefix reaches
+      // sock.groupMetadata() verbatim and times out).
+    } else if (requireAccount('whatsapp', normalizeAccount(account)).requireInboundBeforeSend) {
+      // Same cold-send guard as text sends: block first-contact media to a
+      // professional chat with no prior inbound (Baileys account_restricted /
+      // ban risk) and resolve the @lid-aware send jid. Mirrors handleSendMessage.
+      body.conversationId = await this.requireProfessionalInboundChat(
+        body.conversationId,
+        {},
+        normalizeAccount(account)
+      );
+    }
+    const data = options?.idempotencyKey
+      ? await this.connectorCall(
+          this.waUrl(account),
+          'POST',
+          '/api/v1/messages/media/send',
+          body,
+          undefined,
+          { 'Idempotency-Key': options.idempotencyKey }
+        )
+      : await this.connectorCall(this.waUrl(account), 'POST', '/api/v1/messages/media/send', body);
     return this.jsonResponse(data);
   }
 
@@ -4022,8 +5885,23 @@ export class MCPServer {
     if (process.env.ENABLE_SENDING !== 'true') {
       throw new McpError(ErrorCode.InvalidRequest, 'Sending disabled');
     }
-    const { account, ...body } = args;
-    body.toChatId = bareWhatsAppJid(body.toChatId);
+    const { account: requestedAccount, ...body } = args;
+    const account = normalizeAccount(requestedAccount, 'whatsapp');
+    body.toChatId = this.whatsAppProviderJid(body.toChatId, account, 'toChatId');
+    if (isGroupJid(body.toChatId)) {
+      // Forwarding INTO a group bypasses the cold-send gate — same parity as
+      // handleSendMessage/handleSendFile: membership implies established
+      // context, and the connector needs the bare `@g.us` jid.
+    } else if (requireAccount('whatsapp', normalizeAccount(account)).requireInboundBeforeSend) {
+      // Gate the forward DESTINATION (toChatId) through the same inbound guard
+      // as text/media sends — chatId is only the source we read from, so it
+      // does not initiate contact. Resolves the @lid-aware send jid too.
+      body.toChatId = await this.requireProfessionalInboundChat(
+        body.toChatId,
+        {},
+        normalizeAccount(account)
+      );
+    }
     const data = await this.connectorCall(
       this.waUrl(account),
       'POST',
@@ -4033,15 +5911,79 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
-  private async handleDeleteMessage(args: { chatId: string; messageId: string; account?: string }) {
-    const data = await this.connectorCall(
+  /**
+   * Delete for everyone (revoke) or, with forMe, only for this account through
+   * the connector's POST /messages/delete (fase 3 / PR-3): ids travel inside
+   * the HMAC-signed body, the connector
+   * rebuilds the real key from its durable copies, applies ENABLE_SENDING and
+   * flags the row (content kept). messageId may be bare or namespaced to this
+   * account; another account's id is refused like a foreign target.
+   */
+  private async handleDeleteMessage(args: {
+    chatId: string;
+    messageId: string;
+    account?: string;
+    forMe?: boolean;
+  }) {
+    const data = await this.classifiedConnectorCall(
       this.waUrl(args.account),
-      'DELETE',
-      `/api/v1/messages/${encodeURIComponent(
-        bareWhatsAppJid(args.chatId)
-      )}/${encodeURIComponent(args.messageId)}`
+      'POST',
+      '/api/v1/messages/delete',
+      {
+        chatId: bareWhatsAppJid(args.chatId),
+        messageId: this.bareWhatsAppMessageId(args.messageId, args.account),
+        // forMe: only this account (WhatsApp app-state deleteForMe); absent = for everyone.
+        ...(args.forMe ? { forMe: true } : {}),
+        ...this.connectorActor(),
+      }
     );
     return this.jsonResponse(data);
+  }
+
+  /**
+   * Edit one of our own text messages through the connector's POST
+   * /messages/edit (fase 3 / PR-3). Same id rules as handleDeleteMessage; the
+   * connector applies ENABLE_SENDING, rebuilds the key and keeps the replaced
+   * text in metadata.edit_history. WhatsApp's own limits (its edit window)
+   * come back as 422 rejected_by_whatsapp.
+   */
+  private async handleEditMessage(args: {
+    chatId: string;
+    messageId: string;
+    content: string;
+    account?: string;
+  }) {
+    const data = await this.classifiedConnectorCall(
+      this.waUrl(args.account),
+      'POST',
+      '/api/v1/messages/edit',
+      {
+        chatId: bareWhatsAppJid(args.chatId),
+        messageId: this.bareWhatsAppMessageId(args.messageId, args.account),
+        content: args.content,
+        ...this.connectorActor(),
+      }
+    );
+    return this.jsonResponse(data);
+  }
+
+  /** messageId bare or namespaced to `account`; another account's id is refused like a foreign target. */
+  private bareWhatsAppMessageId(messageId: string, accountArg?: string): string {
+    const account = normalizeAccount(accountArg);
+    const parsed = stripAccount(messageId);
+    if (parsed.account !== 'personal' && parsed.account !== account) {
+      throw this.canonicalError(
+        'invalid_request',
+        `messageId belongs to the ${parsed.account} WhatsApp namespace but accountId is '${account}'`
+      );
+    }
+    return parsed.id;
+  }
+
+  /** The caller recorded by the connector (never used for auth). */
+  private connectorActor(): { actor?: string } {
+    const actor = getRequestActor();
+    return actor.name || actor.sub ? { actor: actor.name || actor.sub } : {};
   }
 
   private async handleGetMe(args?: { account?: string }) {
@@ -4067,6 +6009,19 @@ export class MCPServer {
         WHERE c.account_id = $1
           AND c.merged_into IS NULL
           AND COALESCE(c.unread_count, 0) > 0
+          AND regexp_replace(c.id, '^[a-z][a-z0-9_-]*:', '') NOT LIKE 'tg_%'
+          AND (
+            regexp_replace(c.id, '^[a-z][a-z0-9_-]*:', '') LIKE '%@%'
+            OR regexp_replace(COALESCE(c.wa_chat_id, ''), '^[a-z][a-z0-9_-]*:', '') LIKE '%@%'
+            OR EXISTS (
+              SELECT 1
+                FROM messages m
+               WHERE m.conversation_id = c.id
+                 AND m.account = $1
+                 AND m.platform = 'whatsapp'
+               LIMIT 1
+            )
+          )
         ORDER BY c.unread_count DESC, c.last_message_at DESC NULLS LAST
         LIMIT 200`,
       [socialAccountId('whatsapp', account)]
@@ -4303,24 +6258,30 @@ export class MCPServer {
   }
 
   private async handleMessagingStatus() {
-    const targets: Array<readonly [string, string, string, string]> = [
-      ...getAccounts('whatsapp').map(
-        a => ['whatsapp', a.accountId, a.connectorUrl as string, '/api/v1/health'] as const
-      ),
-      ...getAccounts('telegram').map(
-        a => ['telegram', a.accountId, a.connectorUrl as string, '/health'] as const
-      ),
-      [
-        'instagram',
-        'default',
-        process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003',
-        '/health',
-      ],
-    ];
+    const targets = getAccounts().map(
+      a =>
+        [
+          a.channel,
+          a.accountId,
+          a.connectorUrl || (a.channel === 'instagram' ? this.instagramBaseUrl() : undefined),
+          a.channel === 'whatsapp' ? '/api/v1/health' : '/health',
+        ] as const
+    );
     const checks = await Promise.all(
       targets.map(async ([kind, account, url, endpoint]) => {
         try {
-          const resp = await fetch(`${url}${endpoint}`, { signal: AbortSignal.timeout(3000) });
+          if (!url) throw new Error('Connector URL is not configured');
+          const resp = await fetch(`${url}${endpoint}`, {
+            headers:
+              kind === 'instagram'
+                ? {
+                    Authorization: `Bearer ${connectorSecretFor(requireAccount('instagram', account))}`,
+                    ...actorRequestHeaders(),
+                  }
+                : this.authHeaders(url),
+            signal: AbortSignal.timeout(3000),
+          });
+          if (!resp.ok) throw new Error(`Health HTTP ${resp.status}`);
           const body = await resp.json();
           return [kind, account, body] as const;
         } catch (e: any) {
@@ -4331,6 +6292,20 @@ export class MCPServer {
     );
     const results: any = {};
     for (const [kind, account, body] of checks) {
+      if (kind === 'instagram') {
+        results.instagram = results.instagram || { accounts: {} };
+        const statusBody = asObject(body);
+        // /health resolves credentials for the verified actor. Keep only this
+        // configured account when several accounts share one connector.
+        results.instagram.accounts[account] = isObject(statusBody.accounts)
+          ? statusBody.accounts[account] || {
+              status: 'no_credential',
+              error: 'no_instagram_credential',
+              message: 'No Instagram credential for this user',
+            }
+          : body;
+        continue;
+      }
       if (account === 'default') {
         results[kind] = body;
       } else {
@@ -4347,11 +6322,17 @@ export class MCPServer {
     topicId?: number | string;
     limit?: number;
     account?: string;
+    mediaType?: MediaType;
   }) {
     const account = normalizeAccount(args.account);
     const limit = Math.min(args.limit ?? 20, 200);
     const params: any[] = [`%${args.query}%`, limit, account];
     let where = `platform = 'telegram' AND account = $3 AND content ILIKE $1`;
+    const messageTypes = messageTypesFor(args.mediaType);
+    if (messageTypes) {
+      params.push(messageTypes);
+      where += mediaTypePredicate('', params.length);
+    }
     let topicId: number | undefined;
     if (args.chatId) {
       const target = this.telegramTopicTarget(args.chatId, args.topicId);
@@ -4363,13 +6344,14 @@ export class MCPServer {
           `Could not resolve Telegram chatId '${args.chatId}'`
         );
       params.push(id);
-      where += ` AND conversation_id = $4`;
-      where = this.appendTelegramTopicWhere(where, params, 4, topicId);
+      const conversationParam = params.length;
+      where += ` AND conversation_id = $${conversationParam}`;
+      where = this.appendTelegramTopicWhere(where, params, conversationParam, topicId);
     } else if (args.topicId !== undefined) {
       throw new McpError(ErrorCode.InvalidParams, 'topicId requires chatId');
     }
     const result = await this.dbClient.query(
-      `SELECT id, conversation_id, sender_wa_id, direction, content, wa_timestamp,
+      `SELECT id, conversation_id, sender_wa_id, direction, content, message_type, wa_timestamp,
               reply_to_message_id, metadata
          FROM messages WHERE ${where}
         ORDER BY wa_timestamp DESC LIMIT $2`,
@@ -4386,6 +6368,7 @@ export class MCPServer {
         senderId: m.sender_wa_id,
         direction: m.direction,
         content: m.content,
+        messageType: m.message_type ?? null,
         timestamp: m.wa_timestamp,
         replyTo: m.reply_to_message_id,
         topicId:
@@ -4465,15 +6448,28 @@ export class MCPServer {
 
   // === Instagram handlers ===
 
+  private instagramBaseUrl(): string {
+    return (
+      this.instagramUrl || process.env.INSTAGRAM_CONNECTOR_URL || 'http://instagram-connector:3003'
+    );
+  }
+
   private async instagramCall(method: string, path: string, body?: any, timeoutMs = 30000) {
-    const url = `${this.instagramUrl}${path}`;
+    // Pairing precedes an account credential; its route uses the shared connector.
+    const account = path.startsWith('/api/v1/oauth/')
+      ? undefined
+      : requireAccount('instagram', decodeURIComponent(path.split('/')[3] || ''));
+    const secret = account ? connectorSecretFor(account) : process.env.CONNECTOR_SHARED_SECRET;
+    if (!secret) throw new Error('Missing connector secret for Instagram pairing');
+    const url = `${account?.connectorUrl || this.instagramBaseUrl()}${path}`;
+    const timestamp = Math.floor(Date.now() / 1000);
     const options: RequestInit = {
       method,
       headers: {
         'Content-Type': 'application/json',
-        // SC-1194 P1 (criterion 3): forward the gateway-verified actor exactly
-        // like the WhatsApp/Telegram routes (SC-705). With no actor the
-        // headers are empty and the connector keeps its legacy env path.
+        'X-Connector-Signature': generateHMACSignature(body || {}, timestamp, secret),
+        'X-Connector-Timestamp': timestamp.toString(),
+        Authorization: `Bearer ${secret}`,
         ...actorRequestHeaders(),
       },
       signal: AbortSignal.timeout(timeoutMs),
@@ -4482,6 +6478,72 @@ export class MCPServer {
     const resp = await fetch(url, options);
     if (!resp.ok) throw new Error(`Instagram API error (${resp.status}): ${await resp.text()}`);
     return resp.json();
+  }
+
+  private async handleTelegramGetReactions(args: {
+    chatId: string;
+    account?: string;
+    messageId?: string;
+    topicId?: number | string;
+    limit?: number;
+  }) {
+    const account = normalizeAccount(args.account);
+    const target = this.telegramTopicTarget(args.chatId, args.topicId);
+    const { chatId } = target;
+    const tgUrl = this.tgUrl(account);
+    const chatPath = encodeURIComponent(chatId);
+    const count = async (msgId: number) => {
+      const rx = await this.connectorCall(
+        tgUrl,
+        'GET',
+        `/api/v1/messages/reactors/${chatPath}/${msgId}?limit=5000`,
+        undefined,
+        60000
+      );
+      const byEmoji: Record<string, number> = {};
+      for (const reactor of rx?.reactors || []) {
+        byEmoji[reactor.emoji] = (byEmoji[reactor.emoji] || 0) + 1;
+      }
+      return { total: Number(rx?.total) || 0, byEmoji };
+    };
+    const describe = async (msgId: number) => {
+      const single = await this.connectorCall(
+        tgUrl,
+        'GET',
+        `/api/v1/messages/single/${chatPath}/${msgId}`
+      );
+      const message = single?.message || {};
+      return {
+        messageId: String(msgId),
+        date: message.telegramTimestamp ?? message.date ?? null,
+        from: message.senderFirstName || message.senderUsername || null,
+        senderId: message.senderTelegramId ?? null,
+        type: message.messageType ?? null,
+        text: typeof message.content === 'string' ? message.content.slice(0, 200) : null,
+        ...(await count(msgId)),
+      };
+    };
+    if (args.messageId !== undefined && args.messageId !== null && args.messageId !== '') {
+      return this.jsonResponse(
+        await describe(this.telegramMessageNumber(String(args.messageId), chatId, account))
+      );
+    }
+    if (!target.topicId) {
+      throw this.canonicalError(
+        'invalid_request',
+        'messageId or a forum topic (topicId, or target <chat>_<topic>) is required'
+      );
+    }
+    const { results } = await this.connectorCall(tgUrl, 'POST', '/api/v1/messages/search', {
+      query: '',
+      chatId,
+      threadId: target.topicId,
+      limit: clampInteger(args.limit, 100, 1, 200),
+    });
+    const messages = [];
+    for (const message of results || []) messages.push(await describe(Number(message.id)));
+    messages.sort((a, b) => b.total - a.total);
+    return this.jsonResponse({ chatId, topicId: target.topicId, count: messages.length, messages });
   }
 
   private async handleInstagramGetProfile(args: { account: string }) {
@@ -4557,6 +6619,19 @@ export class MCPServer {
     return this.jsonResponse(data);
   }
 
+  private async handleInstagramUpdateCaption(args: {
+    account: string;
+    mediaId: string;
+    caption: string;
+  }) {
+    const data = await this.instagramCall(
+      'POST',
+      `/api/v1/${args.account}/media/${args.mediaId}/caption`,
+      { caption: args.caption }
+    );
+    return this.jsonResponse(data);
+  }
+
   private async handleInstagramMediaInsights(args: { account: string; mediaId: string }) {
     const data = await this.instagramCall(
       'GET',
@@ -4584,11 +6659,21 @@ export class MCPServer {
     videoUrl: string;
     caption?: string;
     shareToFeed?: boolean;
+    coverUrl?: string;
+    thumbOffset?: number;
+    collaborators?: string[];
   }) {
     const data = await this.instagramCall(
       'POST',
       `/api/v1/${args.account}/publish/reel`,
-      { video_url: args.videoUrl, caption: args.caption, share_to_feed: args.shareToFeed ?? true },
+      {
+        video_url: args.videoUrl,
+        caption: args.caption,
+        share_to_feed: args.shareToFeed ?? true,
+        cover_url: args.coverUrl,
+        thumb_offset: args.thumbOffset,
+        collaborators: args.collaborators,
+      },
       120000
     );
     return this.jsonResponse(data);

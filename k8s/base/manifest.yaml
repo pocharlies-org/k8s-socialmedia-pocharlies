@@ -32,6 +32,41 @@ spec:
     deletionPolicy: Retain
   dataFrom:
     - extract: { key: whatsapp-mcp }
+  # INFRA-364 (01-10-2026): LLM_API_KEY = virtual key `brain` de LiteLLM (prioridad minima,
+  # bot, sin fallback). La lee SOLO el LLM de las ventanas del brain (CronJob brain-windows);
+  # vive en su propio item.
+  # OPENAI_API_KEY (02-10-2026, Dani): virtual key `socialmedia` de LiteLLM, la UNICA de todo
+  # socialmedia (mcp-sse / mcp-server: summarize, search, drafts, digest; y la consola
+  # dgx-messages). Antes salia del item whatsapp-mcp (la key `auto-reply-worker`, prestada).
+  # `data` gana a `dataFrom` en la misma clave (medido con un ExternalSecret de prueba).
+  # Item `litellm`, campo SOCIALMEDIA_KEY: la convencion de keys de servicio
+  # (SKIRMSHOP_RAG_KEY, HERMES_BATCH_KEY).
+  data:
+    - secretKey: LLM_API_KEY
+      remoteRef: { key: brain-litellm/api_key }
+    - secretKey: OPENAI_API_KEY
+      remoteRef: { key: litellm/SOCIALMEDIA_KEY }
+
+---
+# INFRA-364: URL AMQP del usuario RabbitMQ whatsapp_mcp_brain_windows (vhost
+# /synapse; configure ^$, write ^events$, read ^$). El CronJob brain-windows
+# publica con el los eventos brain_window.* en Synapse. Item propio: un campo
+# nuevo en el item whatsapp-mcp tardaria hasta 96 h en salir de la cache de ESO.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: whatsapp-mcp-synapse-rabbitmq
+  namespace: whatsapp-mcp
+spec:
+  refreshInterval: 24h
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: whatsapp-mcp-synapse-rabbitmq
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: url
+      remoteRef: { key: whatsapp-mcp-synapse-rabbitmq/url }
 
 ---
 apiVersion: v1
@@ -128,11 +163,18 @@ spec:
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
       containers:
         - name: minio
-          image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-          # Digest-pinned: declare the policy explicitly. Git never set it, so
-          # ArgoCD never owned the field and a stale `Always` (inherited from an
-          # old tag-based deploy) survived forever, re-pulling docker.io on every
-          # reschedule -> anonymous Docker Hub rate-limit on the OVH egress.
+          # SC-2842 (22-10): el pin a docker.io (minio/minio@sha256:14cea493…) quedó
+          # sin poder tirar: docker.io ya no sirve pull anónimo y MinIO pasó a
+          # distribución solo-fuente (no hay imágenes públicas tras la última release
+          # community, RELEASE.2025-04-22T22-12-26Z — ver .github/workflows/ci.yml,
+          # s3-tests). El PVC whatsapp-mcp-minio-data (los ~15.308 adjuntos legacy del
+          # bucket socialmedia-media) NO se toca: mismo PVC, servidor espejado en
+          # Harbor. RELEASE.2025-04-22 es la última imagen community publicada, así
+          # que es >= al release que escribió los datos (la regla de SC-2842); un
+          # servidor más nuevo lee el formato de los anteriores, y si no, MinIO se
+          # niega a arrancar sin corromper (guarda de formato). Digest comprobado con
+          # crane en Harbor (23-10).
+          image: harbor.e-dani.com/homelab/minio:RELEASE.2025-04-22T22-12-26Z@sha256:ac59a61ad2ae6ec82be02baedbf37916425877c3ac422caf9d237f629ca723d8
           imagePullPolicy: IfNotPresent
           args: [server, /data, --console-address, ":9001"]
           ports:
@@ -179,96 +221,136 @@ spec:
 # GENERATED from the account registry: see k8s/base/generated/connectors.yaml
 # (scripts/render-connectors.py). Edit k8s/base/social-accounts.json, not here.
 ---
-# ── WhatsApp professional Cloud API connector ─────────────────────────────────
-# Brain ingestion: push WhatsApp/Telegram messages into SkirmBrain RAG, one
-# instance per account (personal -> personal, professional -> skirmshop).
-# Runs the mcp-server image (has pg + tsx + the messages schema). Idempotent:
-# brain dedups by source_id; keyset cursor in `brain_ingest_cursor`.
+# ── Brain windows (INFRA-364, ADR 0002): conversation windows into SkirmBrain ─
+# Replaces the per-message `brain-ingest` CronJob (retired here on 30-09-2026,
+# #144 had already suspended it: Dani's ADR 0002 indexes WhatsApp/Telegram by
+# 1-hour-silence windows, parent + 200-400-token children, LLM summaries on
+# closed non-bot windows). The old per-message points are purged by the brain
+# repo (ADR 0002 §9 fase 1) and the code stays for brain-replay (recovery).
+#
+# Each pass (mcp-server image: pg + tsx + the jobs):
+#   1. reads messages changed after `brain_windows_cursor` (updated_at keyset —
+#      edits, deletions, late history syncs and voice notes transcribed hours
+#      later all move updated_at, migration 015);
+#   2. recomputes the windows of the affected chats and diffs them against
+#      `brain_windows`: gone -> brain_window.<tenant>.deleted, new/changed ->
+#      brain_window.<tenant>.upserted (Synapse ingests both);
+#   3. runs the LLM (LiteLLM alias `tooling`, 2 in parallel by default, closed
+#      windows only, capped per pass) and re-pushes the parents with summary.
+#
+# ON since 02-10-2026 (INFRA-364): the reindex push (ADR 0002 §9 fase 2) and
+# the per-message purge are done; the LLM phase of the reindex runs as a
+# separate job. Pass output goes through Synapse (brain_window.<tenant>.*,
+# ADR §7.1), not straight to push-ingest.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: brain-ingest
+  name: brain-windows
   namespace: whatsapp-mcp
 spec:
-  schedule: "*/5 * * * *"
+  schedule: "*/30 * * * *"
   timeZone: Europe/Madrid
-  # 29-08-2026: reactivado. Estuvo 74 dias suspendido por 502 repetidos contra
-  # skirmshop-brain-ingest, y la causa no era ese servicio (esta sano, 1/1): es que
-  # BGE depende del perfil de computo de los Sparks. Hay un deployment por perfil
-  # (`bge-m3-embedding` para llm-tp, `bge-m3-embedding-creative` para creative) y el
-  # arbitro los intercambia, asi que en REGIMEN hay embeddings en los dos perfiles.
-  # La ventana ciega es la TRANSICION: medido el 29-08 a las 07:2x con
-  # `phase: switching`, los tres deployments estaban a la vez a cero
-  # (bge-m3-embedding 0/0, -cpu 0/0, -creative 0/1) y /health daba primary y
-  # fallback down. Este cron disparaba cada 5 min sin mirar nada, asi que cada
-  # transicion le costaba una tanda de 502.
-  #
-  # Coste medido: `personal_documents` no recibia nada desde junio (telegram y
-  # gmail) y mayo (whatsapp).
-  #
-  # El arreglo es la guarda de abajo: la pasada comprueba /health y se salta sola
-  # cuando no hay embeddings, en vez de convertirse en una tormenta de 502.
-  # Saltarse pasadas no pierde datos: la ingesta es incremental (cursor keyset en
-  # `brain_ingest_cursor`) e idempotente (el Brain deduplica por source_id).
   suspend: false
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 2
-  failedJobsHistoryLimit: 1
+  # SC-3002 (30-10): con TTL 3600 el job fallido y su pod se borraban a la hora
+  # del fallo y el RCA quedaba pendiente (6 fallos en 5 días sin evidencia: el
+  # collector de logs ya no alcanzaba al contenedor). 3 fallos se ven enteros.
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 0
-      activeDeadlineSeconds: 360
-      ttlSecondsAfterFinished: 3600
+      # 30-min schedule. The job stops starting work at MAX_RUNTIME_MS (18 min)
+      # and exits 0 before this deadline: an LLM call already in flight can
+      # still take LLM_TIMEOUT_MS x (LLM_RETRIES+1) = 2 x 180 s = 6 min. At 24
+      # min with 240 s x 3 attempts, 6 of ~20 passes overran on 02-10-2026 while
+      # the reindex LLM phase shared the resident model.
+      activeDeadlineSeconds: 1500
+      # SC-3002: 1 h no daba tiempo a capturar el pod fallido (ver arriba).
+      # 24 h: el job fallido y su pod sobreviven a la jornada de guardia.
+      ttlSecondsAfterFinished: 86400
       template:
         spec:
           restartPolicy: Never
           enableServiceLinks: false
           nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
           containers:
-            - name: brain-ingest
+            - name: brain-windows
               image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
               command:
                 - sh
                 - -c
                 - |
                   cd mcp-server
-                  # Guarda de embebido. Sale 0 (no falla el Job) cuando el Brain no
-                  # tiene ni primary ni fallback de TEI: sin embeddings la ingesta
-                  # solo produce 502. Se reintenta en la pasada siguiente.
-                  node -e '
-                    const url = process.env.BRAIN_URL + "/health";
-                    fetch(url, { signal: AbortSignal.timeout(10000) })
-                      .then((r) => r.json())
-                      .then((d) => {
-                        const t = (d && d.tei) || {};
-                        if (t.primary_status !== "ok" && t.fallback_status !== "ok") {
-                          console.log("brain-ingest: sin embeddings (primary=" + t.primary_status + " fallback=" + t.fallback_status + "); se salta esta pasada");
-                          process.exit(3);
-                        }
-                        console.log("brain-ingest: embeddings via " + t.active_tei);
-                      })
-                      .catch((e) => {
-                        console.log("brain-ingest: /health inalcanzable (" + e.message + "); se salta esta pasada");
-                        process.exit(3);
-                      });
-                  ' || exit 0
-                  node --import tsx src/jobs/brain-ingest.ts
+                  # SC-4304: sin guarda de /health del Brain. Con BRAIN_WINDOWS_SINK=synapse
+                  # la pasada no llama al Brain (lee Postgres y publica brain_window.*);
+                  # saltarla con el Brain caido dejaba a Hindsight sin mensajes.
+                  node --import tsx src/jobs/brain-windows.ts
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
                 - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
-                - { name: BRAIN_INGEST_BATCH, value: "2" }
-                - { name: BRAIN_INGEST_MAX_ROWS, value: "60" }
-                - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
-                - { name: BRAIN_PUSH_RETRIES, value: "3" }
+                # Ventana de reintento del push (pushToBrain, heredada de
+                # brain-ingest; la fija brain-ingest-lib.spec). Manda el
+                # PRESUPUESTO BRAIN_PUSH_BUDGET_MS (240 s); BRAIN_PUSH_RETRIES
+                # es solo techo de seguridad y debe cubrir la ventana: con
+                # backoff capped en RETRY_MAX_DELAY (30 s), 20 intentos cubren
+                # >240 s. BRAIN_INGEST_MAX_RUNTIME_MS recorta el presupuesto si
+                # fuera menor (240 < 300-30: no recorta aqui).
+                - { name: BRAIN_PUSH_RETRIES, value: "20" }
                 - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
-                - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "10000" }
+                - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "30000" }
+                - { name: BRAIN_PUSH_BUDGET_MS, value: "240000" }
                 - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
-                # BRAIN_API_KEY comes from the whatsapp-mcp-secrets (1Password) via envFrom.
+                - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
+                # LLM local (ADR 0002 §5): LiteLLM -> residente de los Sparks,
+                # alias de capacidad `tooling`. La clave debe ser una virtual de
+                # BAJA PRIORIDAD (tipo hermes-batch) via LLM_API_KEY en
+                # whatsapp-mcp-secrets (la `brain`); si faltara, el codigo cae a
+                # OPENAI_API_KEY (la `socialmedia`, la de mcp-sse contra LiteLLM).
+                - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+                - { name: LLM_CHAT_MODEL, value: "tooling" }
+                # Ventanas y topes por pasada (ADR 0002 §7).
+                - { name: BRAIN_WINDOWS_SCAN_ROWS, value: "5000" }
+                - { name: BRAIN_WINDOWS_MAX_CHATS, value: "100" }
+                - { name: BRAIN_WINDOWS_MAX_LLM, value: "5" }
+                - { name: BRAIN_WINDOWS_COLDSTART_LOOKBACK_HOURS, value: "168" }
+                - { name: BRAIN_WINDOWS_MAX_RUNTIME_MS, value: "1080000" }
+                # Bound an in-flight LLM window so it always fits before the
+                # deadline (see activeDeadlineSeconds); a failed window is
+                # retried by the next pass.
+                - { name: LLM_TIMEOUT_MS, value: "180000" }
+                - { name: LLM_RETRIES, value: "1" }
+                # Métricas de la pasada (borrados rechazados por el tope, fin de
+                # pasada) a VictoriaMetrics; alerta BrainWindowsMassDeleteRefused.
+                - { name: BRAIN_WINDOWS_METRICS_URL, value: "http://vmsingle-vm-victoria-metrics-k8s-stack.monitoring.svc:8428/api/v1/import/prometheus?extra_label=job=brain_windows" }
+                - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
+                # INFRA-364: el incremental publica en Synapse
+                # (brain_window.<tenant>.upserted|deleted) y Synapse lo ingiere con
+                # reintentos (workflows */brain/conversation-window-*.v1.yaml).
+                # BRAIN_WINDOWS_SINK=http vuelve al push-ingest directo sin tocar codigo.
+                - { name: BRAIN_WINDOWS_SINK, value: "synapse" }
+                - name: SYNAPSE_RABBITMQ_URL
+                  valueFrom: { secretKeyRef: { name: whatsapp-mcp-synapse-rabbitmq, key: url } }
+                # Chats de bot/monitorizacion y canales (se indexan, no pasan
+                # por el LLM): ConfigMap brain-windows.
+                - { name: BRAIN_WINDOWS_CONFIG_FILE, value: "/brain-config/brain-windows-config.yaml" }
+                # Namespaces e instancia del brain por cuenta: registro de cuentas.
+                - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
+                # BRAIN_API_KEY / OPENAI_API_KEY / LLM_API_KEY salen del
+                # secret whatsapp-mcp-secrets (1Password) via envFrom.
               envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+              volumeMounts:
+                - { name: accounts, mountPath: /accounts, readOnly: true }
+                - { name: brain-config, mountPath: /brain-config, readOnly: true }
               resources:
                 requests: { cpu: 50m, memory: 128Mi }
-                limits:   { memory: 512Mi }
+                limits:   { memory: 1Gi }
+          volumes:
+            - name: accounts
+              configMap: { name: social-accounts }
+            - name: brain-config
+              configMap: { name: brain-windows }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -301,6 +383,16 @@ spec:
             - { name: CREDENTIAL_STORE_ENABLED, value: "false" }
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: INSTAGRAM_OAUTH_REDIRECT_URI, value: "https://whatsapp.e-dani.com/oauth/instagram/callback" }
+            # Instagram Login (graph.instagram.com) authorize exige el **Instagram App ID**
+            # (1869504556900523, alias de la app de Meta 1431837657952463); con el id de
+            # Facebook www.instagram.com/oauth/authorize corta con «Invalid platform app»
+            # (medido 06-10-2026, pairing @skirmshopES). No es un secreto: va en git, no en
+            # el Secret, que se re-renderiza desde 1Password (external-secrets force-sync
+            # 05-10-2026 23:14Z borró las dos claves que estaban añadidas a mano y el conector
+            # cayó al fallback de Facebook con el reinicio del pin). El secreto de intercambio
+            # sigue siendo FACEBOOK_APP_SECRET — la caída de `ig_exchange_token` con el id de
+            # Instagram es lo que diría que hace falta INSTAGRAM_LOGIN_APP_SECRET aparte.
+            - { name: INSTAGRAM_LOGIN_APP_ID, value: "1869504556900523" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 30m, memory: 64Mi }
@@ -326,7 +418,9 @@ spec:
     metadata:
       labels: { app: mcp-server }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:29d060fab08e52ad05edf0e82204f5879aa8f550c809f6e88c5e52b580b845b4"
+        # Sin reloader: cambiar la key de LiteLLM exige rodar el pod (envFrom).
+        litellm.e-dani.com/key-alias: "socialmedia"
+        contracts.e-dani.com/socialmedia-digest: "sha256:ce8814b6b469a3779580668c8818eabc4c02cf3b6f2f522c4912c1c17c5cc8dc"
     spec:
       enableServiceLinks: false
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
@@ -400,7 +494,9 @@ spec:
     metadata:
       labels: { app: mcp-sse }
       annotations:
-        contracts.e-dani.com/socialmedia-digest: "sha256:29d060fab08e52ad05edf0e82204f5879aa8f550c809f6e88c5e52b580b845b4"
+        # Sin reloader: cambiar la key de LiteLLM exige rodar el pod (envFrom).
+        litellm.e-dani.com/key-alias: "socialmedia"
+        contracts.e-dani.com/socialmedia-digest: "sha256:ce8814b6b469a3779580668c8818eabc4c02cf3b6f2f522c4912c1c17c5cc8dc"
     spec:
       enableServiceLinks: false
       nodeSelector:
@@ -426,14 +522,19 @@ spec:
             - { name: CONNECTOR_URL, value: "http://whatsapp-connector.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_LEILA_URL, value: "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001" }
-            # SC-1144 fase 2: vinculos sub->cuentas (k8s/base/social-identity-bindings.yaml
-            # -> ConfigMap social-identity-bindings, montado en /identity). La bandera
-            # sale OFF del repo: con OFF el enrutado es byte-identico al de hoy (cero
-            # lecturas del fichero). Volcarla a "on" es decision del operador, y exige
-            # que el llamante traiga el x-user-sub que estampa el AgentGateway — por la
-            # LAN con el bearer compartido no hay sub => fail-closed. Ver el riesgo
-            # residual documentado en CLAUDE.md (lo cierra SC-1146, parte 5).
-            - { name: SOCIAL_IDENTITY_BINDING, value: "off" }
+            # SC-1144 (SC-705 P1): vinculos sub->cuentas (k8s/base/social-identity-bindings.yaml
+            # -> ConfigMap social-identity-bindings, montado en /identity). ON desde el
+            # flip de P1 (10-plan v3.2, APROBADO por el architect): cada llamante de
+            # /social trae el x-user-sub que estampa el AgentGateway (JWT verificado de
+            # Keycloak edani) y solo obtiene las cuentas ligadas a su sub — fail-closed
+            # por ausencia. Los tres subs vigentes estan reconciliados y ligados (CM):
+            # maquina 2379d025 (casa, via auth-proxy), Daniel e51253a7 y Leila 66ec6f4f
+            # (ambos con el rol de realm agentgateway-read:social concedido el 30-10,
+            # prerrequisito de la puerta INFRA-142). Un llamante sin sub verificado
+            # (bearer compartido por LAN) queda fuera => fail-closed; la retirada del
+            # bearer es SC-1146 (parte 5). Rollback = revert de este commit (el CM se
+            # relee en caliente; el flag es env del Deployment: rueda mcp-sse).
+            - { name: SOCIAL_IDENTITY_BINDING, value: "on" }
             - { name: SOCIAL_IDENTITY_BINDINGS_FILE, value: "/identity/social-identity-bindings.yaml" }
             # Registro de cuentas: catalogo, enrutado a conectores, health y
             # politica de envio en frio salen de aqui (account-registry.ts).
@@ -453,8 +554,20 @@ spec:
             - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
             - { name: LEGACY_MINIO_USE_SSL, value: "false" }
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
-            - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
-            - { name: EMBEDDING_MODEL, value: "bge-m3" }
+            # Busqueda semantica (SC-4304 S8): en Hindsight, banco `personal`, por la ruta de maquina
+            # /hindsight-personal de AgentGateway con el principal `socialmedia-hindsight` (solo lectura).
+            # Las cuentas sin banco (profesional, leila, cloudblue) caen a texto y lo dicen en
+            # `fallbackReason`. Vuelta atras: SEMANTIC_PROVIDER=brain (el brain sigue arriba hasta S8).
+            - { name: SEMANTIC_PROVIDER, value: "hindsight" }
+            # recall (rerank incluido) sobre el banco `personal` pasa de los 10 s por defecto del cliente.
+            - { name: HINDSIGHT_TIMEOUT_MS, value: "40000" }
+            # Corte de `scores.final` de Hindsight, medido el 05-11 con el principal lector: consultas sin sentido
+            # 0.0008-0.0019; consultas reales, su mejor acierto entre 0.13 y 0.77. 0.02 deja pasar el acierto mas flojo
+            # medido (0.13) y corta el ruido. Pocas consultas: se reajusta si aparecen aciertos reales por debajo.
+            - { name: HINDSIGHT_MIN_SCORE, value: "0.02" }
+            - { name: BRAIN_SEARCH_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
+            - name: HINDSIGHT_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: socialmedia-hindsight-reader, key: HINDSIGHT_CLIENT_SECRET } }
             - name: MCP_SSE_AUTH_TOKEN
               valueFrom: { secretKeyRef: { name: whatsapp-mcp-sse-secrets, key: MCP_SSE_AUTH_TOKEN } }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
@@ -569,14 +682,57 @@ spec:
           port: 3010
   tls:
     store: { name: default, namespace: traefik-lan }
-# ── SC-705 phase 1.5 — DB-migration PreSync Job: intentionally NOT in this PR ─
-# (architect verdict SC-1144, 21-09, bloqueante). The prod/stg images pinned
-# today (mcp-server socialmedia-v3-f0f219bd) predate the credential store and
-# do not even contain migrations/007_user_channel_credentials.sql, so any
-# command of this Job against those images is a no-op or an explosion — and a
-# failing PreSync blocks the whole `socialmedia` ArgoCD sync.
-# migrate.ts now keeps a `_migrations` ledger (skip applied, baseline a
-# pre-ledger schema, per-file transaction), but that code only takes effect
-# once the image carries it. The Job returns in PR2 TOGETHER WITH the image
-# re-pin (PR2 = pin new image + CREDENTIAL_STORE_ENABLED=true + Job), as
-# documented in k8s/overlays/prod/patch-credential-store.yaml.
+---
+# ── SC-705 / SC-1214: GitOps application of the DB migrations (idempotent) ───
+# migrate.ts keeps a `_migrations` ledger: recorded files are skipped, a
+# pre-ledger schema is BASELINED (recorded without executing), and each new
+# file runs in its own transaction — so this Job is safe on every sync
+# (architect verdict SC-1144, 21-09). It returns together with the image
+# re-pin that carries migrations/007_user_channel_credentials.sql, the
+# precondition that made the original deferral necessary (a failing PreSync
+# blocks the whole `socialmedia` sync).
+# ArgoCD PreSync hook: executes BEFORE the workloads sync (the credential
+# store must find table 007 once PR-2 turns CREDENTIAL_STORE_ENABLED on).
+# Fixed metadata.name: the Job is removed before each new sync and again on
+# success — hook-delete-policy BeforeHookCreation,HookSucceeded, the company
+# pattern (only HookSucceeded/HookFailed/BeforeHookCreation are valid values;
+# anything else ArgoCD drops falls back to BeforeHookCreation, so a completed
+# Job would linger and mark the app OutOfSync). ttlSecondsAfterFinished: 3600
+# as backstop.
+# Image = mcp-server (ships src + tsx); the prod overlay `images:` pin
+# rewrites its tag+digest exactly as for the mcp-server Deployment. The
+# $(DB_USER)/$(DB_PASSWORD) expansion in DATABASE_URL is done by the kubelet
+# from the envFrom secret (measured in a live pod, SC-1214 pasada 2).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: whatsapp-mcp-migrate
+  namespace: whatsapp-mcp
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 3
+  # SKIRM-261, medido en prod el 23-10 (13:47Z): las 022-041 sobre 950k mensajes,
+  # del arranque del pod al Completed, 19 s (la transacción, ~15 s; la más larga,
+  # la 030, 6 s). 300 s es más de 15 veces eso: el plazo no se toca. Lo que lo
+  # agotó dos veces fue la espera de locks, y esa la corta el runner con
+  # lock_timeout (MIGRATE_LOCK_TIMEOUT, 10 s): falla rápido y el Job reintenta.
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: migrate
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          command: ["sh", "-c", "cd mcp-server && tsx src/infrastructure/database/migrate.ts"]
+          env:
+            - { name: EMBEDDING_DIMENSION, value: "1024" }
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { memory: 256Mi }

@@ -5,9 +5,10 @@
  * Progress is scoped by RUN_ID/account/platform in `brain_ingest_replay_cursor`.
  */
 import { Pool } from 'pg';
+import { semanticProviderFromEnv } from '../infrastructure/hindsight-client';
 import pino from 'pino';
 import {
-  ACCOUNTS,
+  ingestNamespaces,
   Account,
   Platform,
   Cursor,
@@ -37,8 +38,8 @@ export interface ReplayOptions {
 }
 
 function parseAccount(value: string | undefined): Account[] {
-  if (!value) return [...ACCOUNTS];
-  if ((ACCOUNTS as readonly string[]).includes(value ?? '')) return [value as Account];
+  if (!value) return ingestNamespaces();
+  if (ingestNamespaces().includes(value)) return [value];
   throw new Error(`invalid ACCOUNT: ${value}`);
 }
 
@@ -48,11 +49,20 @@ function parsePlatform(value: string | undefined): Platform | undefined {
   throw new Error(`invalid PLATFORM: ${value}`);
 }
 
+/** SC-1239 C2: no hardcoded fallback — name the missing variable, don't dial a default. */
+function requireDatabaseUrl(env: NodeJS.ProcessEnv): string {
+  if (!env.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL is unset: refusing to run brain-replay without an explicit database connection'
+    );
+  }
+  return env.DATABASE_URL;
+}
+
 export function replayOptionsFromEnv(env: NodeJS.ProcessEnv): ReplayOptions {
   return {
-    databaseUrl:
-      env.DATABASE_URL || 'postgresql://whatsappmcp:whatsappmcp_dev@localhost:5438/whatsappmcp',
-    brainUrl: env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local',
+    databaseUrl: requireDatabaseUrl(env),
+    brainUrl: env.BRAIN_URL || '',
     apiKey: env.BRAIN_API_KEY || '',
     batch: parseInt(env.BATCH || env.BRAIN_INGEST_BATCH || '500', 10),
     limit: parseInt(env.LIMIT || env.BRAIN_INGEST_MAX_ROWS || '0', 10),
@@ -143,6 +153,12 @@ async function replayAccount(pool: Pool, opts: ReplayOptions, account: Account):
 }
 
 export async function runReplay(opts: ReplayOptions): Promise<void> {
+  if (semanticProviderFromEnv() === 'hindsight') {
+    throw new Error('Brain replay refused: SEMANTIC_PROVIDER=hindsight');
+  }
+  if (process.env.BRAIN_ENABLED === 'false' || !opts.brainUrl) {
+    throw new Error('Brain replay requires BRAIN_URL and BRAIN_ENABLED must not be false');
+  }
   if (!opts.apiKey && !opts.dryRun) {
     logger.warn('BRAIN_API_KEY not set — pushes will be unauthenticated (brain may reject)');
   }
