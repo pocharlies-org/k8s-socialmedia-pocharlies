@@ -1,0 +1,22 @@
+# DGX-1235: correo-bridge encendido en prod. La entrada se probó en vivo el
+# 24-10 (WhatsApp → caso 42, Telegram → caso 43, lectura del hilo 200). La
+# salida (ENABLE_OUTBOUND) va encendida aquí y solo aquí: POST /envios solo
+# lo llama el núcleo, con la firma del conector, después de que Dani apruebe
+# la respuesta en Postia (dos toques).
+# Rollback = revert de este fichero y de su línea en el `patches:`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: correo-bridge
+  namespace: whatsapp-mcp
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: correo-bridge
+          env:
+            - { name: ENABLE_OUTBOUND, value: "true" }
+            # DGX-1533: despierto de la secretaria (entrada; la salida al cliente sigue
+            # siendo de la sesión de caso tras el OK de Dani). Rollback: quitar esta línea.
+            - { name: HERMES_WAKE_ENABLED, value: "true" }

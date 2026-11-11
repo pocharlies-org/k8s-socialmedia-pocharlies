@@ -9,6 +9,7 @@
  */
 import { Pool } from 'pg';
 import pino from 'pino';
+import { generateHMACSignature, requireConnectorSecret } from '@mcp-socialmedia/shared';
 import {
   InstagramEvent,
   InstagramIngestionService,
@@ -17,6 +18,10 @@ import {
 const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
+
+// SKIRM-112: /api/v1 of the connector needs its signature. Resolved at load: a missing key stops the
+// run here instead of becoming a failed probe or an empty backfill (the fetches below swallow errors).
+const CONNECTOR_SECRET = requireConnectorSecret();
 
 type BackfillConfig = {
   connectorUrl: string;
@@ -109,7 +114,14 @@ function configFromEnv(): BackfillConfig {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  // A GET has no body, so it signs "{}".
+  const timestamp = Math.floor(Date.now() / 1000);
+  const response = await fetch(url, {
+    headers: {
+      'X-Connector-Signature': generateHMACSignature({}, timestamp, CONNECTOR_SECRET),
+      'X-Connector-Timestamp': String(timestamp),
+    },
+  });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${url}: ${text.slice(0, 400)}`);

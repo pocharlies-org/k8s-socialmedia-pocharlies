@@ -9,3 +9,6 @@
  * real connection — the pools are stubbed or never queried.
  */
 process.env.DATABASE_URL ??= 'postgresql://test:test@localhost:5432/test';
+// SKIRM-103: the dashboard notifier signs with CONNECTOR_SHARED_SECRET and sends nothing without a
+// usable one (it no longer falls back to the placeholder), so tests that exercise it need a key.
+process.env.CONNECTOR_SHARED_SECRET ??= 'test-connector-secret';

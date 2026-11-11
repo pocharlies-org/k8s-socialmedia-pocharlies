@@ -11,7 +11,9 @@ describe('brain replay options', () => {
     expect(opts.dryRun).toBe(true);
     expect(opts.runId).toBe('audit-20260609');
     expect(opts.since).toBe('2026-01-01T00:00:00Z');
-    expect(opts.accounts).toEqual(['personal', 'professional', 'leila']);
+    // Ingestion scopes are DB namespaces. Instagram account ids share the
+    // namespaces declared by the legacy test registry instead of adding one.
+    expect(opts.accounts).toEqual(['personal', 'professional']);
   });
 
   it('can target one account and platform for windowed replay', () => {

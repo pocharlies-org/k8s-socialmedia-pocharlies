@@ -1,0 +1,19 @@
+# SC-4304 S8: credencial del lector semántico de mensajes. Principal `socialmedia-hindsight` de Keycloak
+# (solo agentgateway-read:hindsight-personal, k8s-infra-pocharlies#449); su secret lo copia security a
+# `agentgateway-prod`. Nada lo monta hasta el corte (SEMANTIC_PROVIDER=hindsight), pero sincronizarlo antes
+# comprueba que la referencia resuelve.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: socialmedia-hindsight-reader
+  namespace: whatsapp-mcp
+spec:
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword-connect, kind: ClusterSecretStore }
+  target:
+    name: socialmedia-hindsight-reader
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: HINDSIGHT_CLIENT_SECRET
+      remoteRef: { key: agentgateway-prod, property: socialmedia_hindsight_client_secret }

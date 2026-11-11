@@ -153,6 +153,86 @@ test('accountKey is idempotent and never double-prefixes', async () => {
   assert.equal(w.accountKey('abc'), 'abc', 'switching account env flips namespacing at call time');
 });
 
+test('PN aliases resolve only to one LID in the connector account', async () => {
+  const original = pg.Pool.prototype.query;
+  const calls: CapturedQuery[] = [];
+  let matches: { id: string }[] = [{ id: 'professional:12345@lid' }];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (pg.Pool.prototype as any).query = async (sql: string, params: unknown[] = []) => {
+    calls.push({ sql, params });
+    return { rows: matches };
+  };
+  try {
+    const writer = await loadWriter('professional');
+    assert.equal(await writer.canonicalConversationId('34600@c.us'), '12345@lid');
+    assert.deepEqual(calls[0].params, ['professional', ['professional:34600@c.us', 'professional:34600@s.whatsapp.net']]);
+    assert.match(calls[0].sql, /account = \$1/);
+    assert.match(calls[0].sql, /LIMIT 2/);
+    matches = [];
+    assert.equal(await writer.canonicalConversationId('34600@s.whatsapp.net'), '34600@s.whatsapp.net');
+    matches = [{ id: 'professional:12345@lid' }, { id: 'professional:67890@lid' }];
+    assert.equal(await writer.canonicalConversationId('34600@c.us'), '34600@c.us');
+    assert.equal(await writer.canonicalConversationId('12345@lid'), '12345@lid');
+    assert.equal(calls.length, 3, 'LID does not need an alias lookup');
+  } finally {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pg.Pool.prototype as any).query = original;
+  }
+});
+
+test('name writers preserve useful contact/group names over JID placeholders', async () => {
+  const { calls, restore } = stubPoolQuery();
+  try {
+    const w = await loadWriter('professional');
+    await w.ensureConversation({
+      id: '123456789012345@lid',
+      name: '123456789012345@lid',
+      isGroup: false,
+      participantCount: 2,
+    });
+    await w.ensureParticipant({
+      id: '123456789012345@lid',
+      name: 'Perfil',
+      pushName: 'Perfil',
+    });
+    await w.setConversationName('123456789012345@lid', 'Agenda');
+    await w.setParticipantName('123456789012345@lid', 'Agenda', 'Perfil');
+
+    const conversation = find(calls, 'conversations');
+    const participant = find(calls, 'participants');
+    assert.match(conversation.sql, /name = CASE/i);
+    assert.match(conversation.sql, /LIKE '%@lid'/i);
+    assert.match(participant.sql, /participants\.name = participants\.push_name/i);
+    const updates = calls.filter(call => /^\s*UPDATE/i.test(call.sql));
+    assert.equal(updates.length, 2);
+    assert.match(updates[0].sql, /SET name = CASE/i);
+    assert.deepEqual(updates[0].params[0], ['professional:123456789012345@lid']);
+    assert.deepEqual(updates[0].params[1], ['123456789012345@lid']);
+    assert.equal(updates[0].params[2], 'Agenda');
+    assert.deepEqual(updates[1].params[0], ['professional:123456789012345@lid']);
+    assert.equal(updates[0].params[3], 'professional');
+    assert.equal(updates[0].params[4], true);
+    assert.equal(updates[1].params[3], 'professional');
+  } finally {
+    restore();
+  }
+});
+
+test('push fallback name writer is explicitly non-authoritative', async () => {
+  const { calls, restore } = stubPoolQuery();
+  try {
+    const w = await loadWriter('professional');
+    await w.setConversationName('123456789012345@lid', 'Perfil', { authoritative: false });
+    const update = calls.find(call => /^\s*UPDATE conversations/i.test(call.sql))!;
+    assert.equal(update.params[2], 'Perfil');
+    assert.equal(update.params[4], false);
+    assert.match(update.sql, /WHEN \$5::boolean/i);
+    assert.match(update.sql, /ELSE conversations\.name/i);
+  } finally {
+    restore();
+  }
+});
+
 test('linkParticipantToConversation surfaces FK failures with full context', async () => {
   const original = pg.Pool.prototype.query;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -178,5 +258,67 @@ test('linkParticipantToConversation surfaces FK failures with full context', asy
   } finally {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (pg.Pool.prototype as any).query = original;
+  }
+});
+
+// --- INFRA-364 fase 0: voice-note transcription marking -----------------------
+
+test('withVoiceTranscriptionMetadata marks AUDIO/PTT pending, leaves others alone', async () => {
+  const w = await loadWriter('personal');
+  // AUDIO and PTT get the Telegram-shaped queue keys.
+  const audio = w.withVoiceTranscriptionMetadata('AUDIO', { source: 'live' });
+  assert.equal(audio.needs_transcription, true);
+  assert.equal(audio.transcription_status, 'pending');
+  assert.equal(audio.transcription_attempts, 0);
+  assert.equal(audio.source, 'live');
+  assert.equal(w.withVoiceTranscriptionMetadata('PTT', {}).transcription_status, 'pending');
+  // Other types are untouched (same object identity).
+  const text = { source: 'live' };
+  assert.equal(w.withVoiceTranscriptionMetadata('TEXT', text), text);
+  assert.equal(w.withVoiceTranscriptionMetadata('VOICE', text), text);
+  // An existing status (replay after relink) is never reset.
+  const done = w.withVoiceTranscriptionMetadata('AUDIO', { transcription_status: 'done' });
+  assert.equal(done.transcription_status, 'done');
+  assert.equal(done.needs_transcription, undefined);
+});
+
+test('storeMessage persists pending transcription metadata for voice rows only', async () => {
+  const { calls, restore } = stubPoolQuery();
+  try {
+    const w = await loadWriter('personal');
+    await w.storeMessage({
+      waMessageId: 'VOICE1',
+      conversationId: '34600111222@s.whatsapp.net',
+      senderWaId: '34600111222@s.whatsapp.net',
+      waTimestamp: new Date(),
+      direction: 'INBOUND',
+      content: null,
+      messageType: 'AUDIO',
+      isForwarded: false,
+      metadata: { source: 'live' },
+    });
+    await w.storeMessage({
+      waMessageId: 'TXT1',
+      conversationId: '34600111222@s.whatsapp.net',
+      senderWaId: '34600111222@s.whatsapp.net',
+      waTimestamp: new Date(),
+      direction: 'INBOUND',
+      content: 'hola',
+      messageType: 'TEXT',
+      isForwarded: false,
+      metadata: { source: 'live' },
+    });
+    const inserts = calls.filter(c => tableOf(c.sql) === 'messages');
+    assert.equal(inserts.length, 2);
+    // metadata is the 11th bound param ($11)
+    const voiceMeta = JSON.parse(inserts[0].params[10] as string);
+    assert.equal(voiceMeta.transcription_status, 'pending');
+    assert.equal(voiceMeta.needs_transcription, true);
+    assert.equal(voiceMeta.transcription_attempts, 0);
+    const textMeta = JSON.parse(inserts[1].params[10] as string);
+    assert.equal(textMeta.transcription_status, undefined);
+    assert.equal(textMeta.needs_transcription, undefined);
+  } finally {
+    restore();
   }
 });

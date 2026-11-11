@@ -1,0 +1,29 @@
+{
+ "descripcion": "DGX-1234 (rev. 2, h12): la forma canónica de una identidad de mensajería, a cada lado de `correo.connector.v1`. El mismo fichero vive en los tests del núcleo y en los del puente: cada `entrada` da su `canonica`, o null si no es una identidad de ese canal. WhatsApp: `<dígitos>@c.us` o `<dígitos>@lid`; Telegram: entero positivo en decimal, sin ceros a la izquierda. Valores inventados.",
+ "vectores": [
+  {"canal": "whatsapp", "entrada": "34600111222@c.us", "canonica": "34600111222@c.us"},
+  {"canal": "whatsapp", "entrada": "34600111222@s.whatsapp.net", "canonica": "34600111222@c.us"},
+  {"canal": "whatsapp", "entrada": "34600111222:7@c.us", "canonica": "34600111222@c.us"},
+  {"canal": "whatsapp", "entrada": "34600111222:12@s.whatsapp.net", "canonica": "34600111222@c.us"},
+  {"canal": "whatsapp", "entrada": "34600111222@C.US", "canonica": "34600111222@c.us"},
+  {"canal": "whatsapp", "entrada": " 34600111222@c.us ", "canonica": "34600111222@c.us"},
+  {"canal": "whatsapp", "entrada": "123456789012345@lid", "canonica": "123456789012345@lid"},
+  {"canal": "whatsapp", "entrada": "123456789012345:3@LID", "canonica": "123456789012345@lid"},
+  {"canal": "whatsapp", "entrada": "+34600111222@c.us", "canonica": null},
+  {"canal": "whatsapp", "entrada": "34600111222", "canonica": null},
+  {"canal": "whatsapp", "entrada": "120363000000000001@g.us", "canonica": null},
+  {"canal": "whatsapp", "entrada": "status@broadcast", "canonica": null},
+  {"canal": "whatsapp", "entrada": "1234@c.us", "canonica": null},
+  {"canal": "whatsapp", "entrada": "34600111222@c.us.evil", "canonica": null},
+  {"canal": "whatsapp", "entrada": "", "canonica": null},
+  {"canal": "telegram", "entrada": "777000111", "canonica": "777000111"},
+  {"canal": "telegram", "entrada": " 777000111 ", "canonica": "777000111"},
+  {"canal": "telegram", "entrada": "0777000111", "canonica": null},
+  {"canal": "telegram", "entrada": "-100123456789", "canonica": null},
+  {"canal": "telegram", "entrada": "0", "canonica": null},
+  {"canal": "telegram", "entrada": "tg:777000111", "canonica": null},
+  {"canal": "telegram", "entrada": "77700a111", "canonica": null},
+  {"canal": "email", "entrada": " Cliente@Example.ORG ", "canonica": "cliente@example.org"},
+  {"canal": "email", "entrada": "Cliente <cliente@example.org>", "canonica": null}
+ ]
+}

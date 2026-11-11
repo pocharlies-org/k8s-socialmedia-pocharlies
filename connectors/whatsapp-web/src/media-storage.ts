@@ -141,7 +141,7 @@ export interface UploadedMedia {
 }
 
 export async function uploadMedia(
-  messageId: bigint | number,
+  messageId: string,
   data: Buffer,
   mimeType: string | undefined,
   fileName: string | undefined
@@ -151,7 +151,8 @@ export async function uploadMedia(
   const storageKey = withPrefix(`attachments/${messageId}/${ts}.${ext}`);
   const meta: Record<string, string> = {};
   if (mimeType) meta['Content-Type'] = mimeType;
-  if (fileName) meta['x-amz-meta-filename'] = fileName;
+  // The original filename lives in attachments.file_name. Raw Unicode in
+  // signed S3 metadata can cause SignatureDoesNotMatch in the MinIO SDK.
   await client.putObject(BUCKET, storageKey, data, data.length, meta);
   return { storageKey: s3Uri(storageKey), fileSize: data.length };
 }

@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import pino from 'pino';
 import { randomUUID } from 'crypto';
 import { type Account } from '../domain/account';
+import { NO_THINKING } from './llm-request';
 
 export type MessagingPlatform = 'whatsapp' | 'telegram';
 export type DigestLanguage = 'es' | 'en';
@@ -372,6 +373,7 @@ export class UnreadDigestService {
           ],
           temperature: 0.2,
           max_tokens: options.maxTokens,
+          ...NO_THINKING,
         },
         { timeout: options.timeoutMs }
       );

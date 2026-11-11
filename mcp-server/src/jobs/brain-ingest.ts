@@ -5,6 +5,7 @@
  */
 import { Pool } from 'pg';
 import pino from 'pino';
+import { semanticProviderFromEnv } from '../infrastructure/hindsight-client';
 import {
   ingestNamespaces,
   Account,
@@ -22,13 +23,12 @@ const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: t
 
 // SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
+if (!DATABASE_URL && semanticProviderFromEnv() === 'brain') {
   throw new Error(
     'DATABASE_URL is unset: refusing to start the brain-ingest job without an explicit database connection'
   );
 }
-const BRAIN_URL =
-  process.env.BRAIN_URL || 'http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local';
+const BRAIN_URL = process.env.BRAIN_URL || '';
 const BRAIN_API_KEY = process.env.BRAIN_API_KEY || '';
 const BATCH = parseInt(process.env.BRAIN_INGEST_BATCH || '500', 10);
 const MAX_ROWS = parseInt(process.env.BRAIN_INGEST_MAX_ROWS || '0', 10);
@@ -98,6 +98,12 @@ async function ingestAccount(pool: Pool, account: Account): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (semanticProviderFromEnv() === 'hindsight') {
+    logger.info('brain-ingest skipped: SEMANTIC_PROVIDER=hindsight');
+    return;
+  }
+  if (process.env.BRAIN_ENABLED === 'false' || !process.env.BRAIN_URL)
+    throw new Error('Brain job requires BRAIN_URL and BRAIN_ENABLED must not be false');
   if (!BRAIN_API_KEY && !DRY_RUN) {
     logger.warn('BRAIN_API_KEY not set — pushes will be unauthenticated (brain may reject)');
   }

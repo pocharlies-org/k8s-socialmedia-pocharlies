@@ -17,10 +17,10 @@
 import './test-env';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
-import pg from 'pg';
 import { BaileysClient, BaileysClientOptions } from './baileys-client';
 import {
   GroupActionError,
@@ -29,44 +29,18 @@ import {
   parseGroupParticipants,
   parseGroupUpdate,
   participantOutcome,
+  participantsIncludeOwn,
   toParticipantJid,
 } from './group-management';
 import { resetChatStateForTests } from './chat-state';
 import { resetDurableStoreStateForTests } from './durable-message-store';
 import { createRouter } from './api/controller';
 import { generateHMACSignature } from './api/auth';
+import { stubPool } from './test-support/pool-stub';
 
-interface QueryCall {
-  sql: string;
-  params: unknown[];
-}
-
-type Rows = Record<string, unknown>[];
-
-function stubPool(route: (sql: string, params: unknown[]) => Rows = () => []): {
-  calls: QueryCall[];
-  restore: () => void;
-} {
-  const calls: QueryCall[] = [];
-  const original = pg.Pool.prototype.query;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (pg.Pool.prototype as any).query = function (sql: string, params: unknown[] = []) {
-    calls.push({ sql, params });
-    try {
-      const rows = route(sql, params);
-      return Promise.resolve({ rows, rowCount: rows.length });
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  };
-  return {
-    calls,
-    restore: () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (pg.Pool.prototype as any).query = original;
-    },
-  };
-}
+process.env.SOCIAL_ACCOUNTS_FILE = fileURLToPath(
+  new URL('./group-accounts.fixture.json', import.meta.url)
+);
 
 function useAccount(account: string): void {
   process.env.CONNECTOR_ACCOUNT = account;
@@ -130,6 +104,7 @@ interface SockCalls {
   description: Array<[string, string | undefined]>;
   settings: Array<[string, string]>;
   participants: Array<{ jid: string; participants: string[]; action: string }>;
+  photos: Array<[string, Buffer]>;
 }
 
 interface Behaviour {
@@ -154,6 +129,7 @@ function makeClient(
     description: [],
     settings: [],
     participants: [],
+    photos: [],
   };
   const handlers: Record<string, (u: any) => unknown> = {};
   const lid = behaviour.lid || {};
@@ -205,6 +181,14 @@ function makeClient(
         ? behaviour.participantsAnswer(participants, action)
         : participants.map(p => ({ status: '200', jid: p }));
     },
+    updateProfilePicture: async (jid: string, image: Buffer) => {
+      calls.photos.push([jid, image]);
+    },
+    // The stored picture changes identity after a successful write.
+    profilePictureUrl: async () => {
+      const urls = ['https://cdn.example/a', 'https://cdn.example/b'];
+      return urls[Math.min(calls.photos.length, urls.length - 1)];
+    },
     end: () => {},
   };
   const internals = client as unknown as { sock: unknown; ready: boolean };
@@ -231,7 +215,8 @@ function sockCallsToWhatsApp(calls: SockCalls): number {
     calls.subject.length +
     calls.description.length +
     calls.settings.length +
-    calls.participants.length
+    calls.participants.length +
+    calls.photos.length
   );
 }
 
@@ -396,7 +381,7 @@ test('group state: our row found by LID or PN, participants with phone / lid, fr
     {},
     { meta: () => groupMeta({ selfAdmin: 'admin', restrict: false, announce: true }) }
   );
-  priv(client).contactNames.set('222@lid', 'Bea');
+  priv(client).contactNames.set('222@lid', { name: 'Bea', source: 'saved' });
   const state = await client.getGroupState(`professional:${GROUP}`);
   await client.getGroupState(GROUP);
   assert.deepEqual(calls.metadata, [GROUP, GROUP], 'forced, never the cache');
@@ -901,6 +886,15 @@ test('participants: nobody done → 422 with the results; answers under other id
           ],
           succeeded: 0,
           failed: 1,
+          // No <add_request> in the answer: the invite will use the group link.
+          inviteRequired: [
+            {
+              participant: '+34677777777',
+              jid: '34677777777@c.us',
+              privateInvite: false,
+              inviteExpiresAt: null,
+            },
+          ],
         });
         return true;
       }
@@ -1045,6 +1039,128 @@ test('a failing group persist never throws out of the handler', async () => {
   }
 });
 
+test('participantsIncludeOwn: our PN (any device) or LID, as a jid or a participant object', () => {
+  const own = [ME_PN, ME_LID];
+  assert.equal(participantsIncludeOwn(['34600111222:7@s.whatsapp.net'], own), true);
+  assert.equal(participantsIncludeOwn([{ id: ME_LID }], own), true);
+  assert.equal(participantsIncludeOwn([{ id: '5@lid', phoneNumber: ME_PN }], own), true);
+  assert.equal(
+    participantsIncludeOwn([{ id: ME_PN.replace('600', '699'), lid: ME_LID }], own),
+    true
+  );
+  assert.equal(participantsIncludeOwn(['111@lid', { id: '222@lid' }, null], own), false);
+  assert.equal(participantsIncludeOwn([ME_PN], []), false);
+});
+
+test('added by someone to an existing group: fresh metadata, conversation row active as of now', async () => {
+  useAccount('leila');
+  const { calls: db, restore } = stubPool(sql => (isInsert(sql) ? [{ id: `leila:${GROUP}` }] : []));
+  try {
+    const { client, calls, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    priv(client).groupMetaCache.set(GROUP, { ...groupMeta(), subject: 'Viejo' });
+    const before = Date.now();
+    // What Baileys emits from the w:gp2 <add> stub: participant objects, LID first.
+    await handlers['group-participants.update']({
+      id: GROUP,
+      author: '111@lid',
+      participants: [{ id: ME_LID, phoneNumber: ME_PN, admin: null }],
+      action: 'add',
+    });
+    await settle();
+    assert.deepEqual(calls.metadata, [GROUP], 'fresh from WhatsApp, not the stale cache');
+    const inserts = db.filter(c => isInsert(c.sql));
+    assert.equal(inserts.length, 1);
+    assert.deepEqual(inserts[0].params.slice(0, 3), [`leila:${GROUP}`, 'Equipo', 4]);
+    const activity = inserts[0].params[3] as Date;
+    assert.ok(
+      activity instanceof Date && activity.getTime() >= before,
+      'joined now, not at creation'
+    );
+    assert.deepEqual(inserts[0].params.slice(4), ['leila', 'whatsapp:leila', GROUP]);
+    assert.match(inserts[0].sql, /WHERE conversations\.merged_into IS NULL/);
+    assert.equal(priv(client).chatStore.get(GROUP)?.name, 'Equipo');
+    assert.equal(sockCallsToWhatsApp(calls), 0, 'ingest only: nothing goes to WhatsApp');
+
+    // By PN jid (with device) too.
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: ['34600111222:5@s.whatsapp.net'],
+      action: 'add',
+    });
+    await settle();
+    assert.equal(db.filter(c => isInsert(c.sql)).length, 2);
+  } finally {
+    restore();
+  }
+});
+
+test('someone else added, or us removed / promoted: no metadata fetch, no row', async () => {
+  useAccount('leila');
+  const { calls: db, restore } = stubPool(() => []);
+  try {
+    const { client, calls, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: [{ id: '222@lid', phoneNumber: '34622222222@s.whatsapp.net' }],
+      action: 'add',
+    });
+    for (const action of ['remove', 'promote', 'demote']) {
+      await handlers['group-participants.update']({
+        id: GROUP,
+        participants: [{ id: ME_LID }],
+        action,
+      });
+    }
+    await settle();
+    assert.deepEqual(calls.metadata, []);
+    assert.equal(db.filter(c => isInsert(c.sql)).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('joined group: metadata refused still records the row; a DB failure never escapes', async () => {
+  useAccount('leila');
+  let pool = stubPool(sql => (isInsert(sql) ? [{ id: `leila:${GROUP}` }] : []));
+  const warn = console.warn;
+  try {
+    const { client, handlers } = makeClient({}, { metadataError: boom(403) });
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: [ME_LID],
+      action: 'add',
+    });
+    await settle();
+    const inserts = pool.calls.filter(c => isInsert(c.sql));
+    assert.equal(inserts.length, 1);
+    assert.equal(inserts[0].params[0], `leila:${GROUP}`);
+    assert.equal(inserts[0].params[1], null, 'no subject known yet');
+  } finally {
+    pool.restore();
+  }
+  pool = stubPool(() => {
+    throw Object.assign(new Error('db down'), { code: '57P01' });
+  });
+  try {
+    console.warn = () => {};
+    const { client, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['group-participants.update']({
+      id: GROUP,
+      participants: [ME_LID],
+      action: 'add',
+    });
+    await settle();
+    assert.equal(pool.calls.filter(c => isInsert(c.sql)).length, 1);
+  } finally {
+    console.warn = warn;
+    pool.restore();
+  }
+});
+
 test('ingest off binds no group handlers at all (the pairing pool never writes)', () => {
   useAccount('personal');
   const { client, handlers } = makeClient({ ingest: false });
@@ -1134,6 +1250,19 @@ function recordingClient(): { client: Partial<BaileysClient>; seen: unknown[] } 
     ) => {
       seen.push({ participants: groupId, action, list: participants, ...request });
       return { groupId, action, succeeded: 1 } as never;
+    },
+    setGroupPhoto: async (
+      groupId: string,
+      input: { imageBase64?: unknown; mimeType?: unknown },
+      request?: { actor?: string }
+    ) => {
+      seen.push({ photo: groupId, input, ...request });
+      return {
+        groupId,
+        photo: { available: true, accepted: true, confirmed: true, reason: 'IDENTITY_CHANGED' },
+        mimeType: 'image/png',
+        bytes: 67,
+      } as never;
     },
   };
   return { client: client as unknown as Partial<BaileysClient>, seen };
@@ -1410,4 +1539,94 @@ test('HTTP: the existing group reads are untouched', async () => {
     });
   });
   assert.deepEqual(seen, [`info ${GROUP}`, `participants ${GROUP}`]);
+});
+
+// ---------------------------------------------------------------------------
+// Group photo (SC-3681)
+// ---------------------------------------------------------------------------
+
+const PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('photo: admin sets the icon and the identity confirms; member and community never touch WhatsApp', async () => {
+  useAccount('professional');
+  const input = { imageBase64: PNG_B64, mimeType: 'image/png' };
+  const admin = makeClient({}, { meta: () => groupMeta({ selfAdmin: 'admin' }) });
+  const res = await admin.client.setGroupPhoto(GROUP, input, { actor: 'dani' });
+  assert.equal(res.groupId, GROUP);
+  assert.equal(res.photo.confirmed, true);
+  assert.equal(res.bytes, Buffer.from(PNG_B64, 'base64').length);
+  assert.deepEqual(admin.calls.photos, [[GROUP, Buffer.from(PNG_B64, 'base64')]]);
+
+  const member = makeClient({}, { meta: () => groupMeta({ selfAdmin: null }) });
+  await assert.rejects(
+    member.client.setGroupPhoto(GROUP, input),
+    (e: any) => e.status === 403 && e.failureClass === 'not_group_admin'
+  );
+  assert.equal(sockCallsToWhatsApp(member.calls), 0);
+
+  const community = makeClient(
+    {},
+    { meta: () => groupMeta({ selfAdmin: 'admin', community: true }) }
+  );
+  await assert.rejects(
+    community.client.setGroupPhoto(GROUP, input),
+    (e: any) => e.status === 422 && e.failureClass === 'community_unsupported'
+  );
+  assert.equal(sockCallsToWhatsApp(community.calls), 0);
+});
+
+test('photo HTTP: validated before the gate; 200 carries the identity confirmation', async () => {
+  useAccount('professional');
+  const valid = { groupId: GROUP, imageBase64: PNG_B64, mimeType: 'image/png', confirm: true };
+  const { client, seen } = recordingClient();
+  await withRouter(
+    client,
+    { ENABLE_SENDING: 'false', EMERGENCY_DISABLE_SENDING: undefined },
+    async call => {
+      // A bad request answers 400 even with the gate closed: validation comes first.
+      for (const bad of [
+        { groupId: GROUP, imageBase64: PNG_B64, mimeType: 'image/png' },
+        { groupId: '34600@s.whatsapp.net', imageBase64: PNG_B64, mimeType: 'image/png', confirm: true },
+        {
+          groupId: GROUP,
+          imageBase64: PNG_B64,
+          mimeType: 'image/png',
+          confirm: true,
+          fileUrl: 'https://cdn.example/x.png',
+        },
+        { groupId: GROUP, confirm: true },
+      ]) {
+        const res = await call('POST', '/groups/photo', bad);
+        assert.equal(res.status, 400, JSON.stringify(bad));
+      }
+      assert.deepEqual(seen, []);
+      const gated = await call('POST', '/groups/photo', valid);
+      assert.equal(gated.status, 403);
+      assert.equal(
+        ((await gated.json()) as { failureClass: string }).failureClass,
+        'disabled_sending'
+      );
+    }
+  );
+  await withRouter(client, ON, async call => {
+    const ok = await call('POST', '/groups/photo', { ...valid, actor: 'dani' });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), {
+      updated: true,
+      groupId: GROUP,
+      photo: { available: true, accepted: true, confirmed: true, reason: 'IDENTITY_CHANGED' },
+      mimeType: 'image/png',
+      bytes: 67,
+    });
+    assert.deepEqual(seen, [
+      { photo: GROUP, input: { imageBase64: PNG_B64, mimeType: 'image/png' }, actor: 'dani' },
+    ]);
+  });
+  const offline = recordingClient();
+  (offline.client as any).isConnected = () => false;
+  await withRouter(offline.client, ON, async call => {
+    const res = await call('POST', '/groups/photo', valid);
+    assert.equal(res.status, 503);
+  });
 });

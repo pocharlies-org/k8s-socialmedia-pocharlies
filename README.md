@@ -1,5 +1,19 @@
 # mcp-socialmedia
 
+## Local NAS deployment
+
+The active source checkout is `/home/staticduo/git/socialmedia`. Start with
+[deploy/README.md](deploy/README.md) for the Docker Compose workflow and
+[.env.example](.env.example) for the full configuration template. On this NAS,
+`.env` links to the private `/volume2/docker/social-media/.env`; editing it changes
+the deployment configuration source. Never commit that file.
+
+Public domains, connector URLs, storage, database, queue, cache and model endpoints
+are configurable. Regenerate the account registry/gateway with `--env-file` after
+changing domains, then apply Compose using that same file. Accounts remain defined
+in `deploy/accounts.json`. No Kubernetes deployment is needed. The sections below
+describe upstream components, including optional connectors not deployed here.
+
 Personal-use MCP (Model Context Protocol) server that bridges WhatsApp, Telegram and Instagram to Claude / LLMs. Stores messages in PostgreSQL + pgvector, caches in Redis, files in MinIO, events in NATS. LLM access via LiteLLM proxy.
 
 Repo: `git@github.com:pocharlies/whatsappmcp.git` (the directory is `mcp-socialmedia`; the GitHub name is legacy).
@@ -101,6 +115,8 @@ done
 
 # 5. WhatsApp — pair phone (first time)
 curl http://localhost:3001/api/v1/auth/qr   # scan with WhatsApp mobile
+# In k8s: QR page at https://whatsapp.e-dani.com/qr/page (Keycloak SSO login first).
+# LAN: https://whatsapp-pro.lan.e-dani.com/qr/page and https://whatsapp-leila.lan.e-dani.com/qr/page
 
 # 6. Telegram — generate session string (first time)
 docker compose exec telegram-connector npx tsx src/generate-session.ts
@@ -195,9 +211,11 @@ Flow (Instagram API with Instagram Login — Meta's standard OAuth, per the CTO 
    `whatsapp.e-dani.com` at the edge, mirrored for LAN/tailnet by
    `lan-instagram-callback` in k8s-infra, 5bcfb28 — SC-1254; the netpol
    `whatsapp-mcp-allow-traefik-instagram` admits the traefik-edge hostNetwork sources as a per-node /32
-   allowlist, 8bfa7d1). Code → short-lived token → 60-day long-lived exchange
+   allowlist, 8bfa7d1). Code → short-lived token → ~60-day long-lived exchange
    (`graph.instagram.com/v21.0/access_token?grant_type=ig_exchange_token`) runs
-   server-side; tokens under 5.184.000 s of `expires_in` are refused.
+   server-side; tokens under 604.800 s (7 days) of `expires_in` are refused — a
+   tripwire against storing a short-lived token as long-lived, not a promise about
+   Meta's TTL (nominal ~60 days, measured drifting; INFRA-611).
 3. The credential lands via `store.put` under `session_key = <sub>` (or
    `<sub>:<account>` for a second account). A caller with no row gets an explicit
    `no instagram credential for this user` — house tokens are never adopted, another

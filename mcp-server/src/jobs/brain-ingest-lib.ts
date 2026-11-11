@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { accountNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
+import { activeNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
 
 /** A DB namespace of the account registry (the legacy `account` column). */
 export type Account = string;
@@ -10,8 +10,11 @@ export type Account = string;
  * change. Each namespace carries its WhatsApp, Telegram and Instagram rows.
  */
 export function ingestNamespaces(): Account[] {
-  return accountNamespaces();
+  return activeNamespaces();
 }
+
+/** Backwards-compatible name; jobs now enumerate storage namespaces. */
+export const accounts = ingestNamespaces;
 export type Platform = 'whatsapp' | 'telegram' | 'instagram';
 
 export interface Cursor {
@@ -89,22 +92,11 @@ export function adapterForPlatform(platform: string): string {
 }
 
 export async function ensureLiveCursorTable(pool: Pool): Promise<void> {
-  await pool.query(`
-    DO $$
-    DECLARE col_type text;
-    BEGIN
-      SELECT data_type INTO col_type FROM information_schema.columns
-        WHERE table_name = 'brain_ingest_cursor' AND column_name = 'last_id';
-      IF col_type IS NOT NULL AND col_type <> 'bigint' THEN
-        DROP TABLE brain_ingest_cursor;
-      END IF;
-    END $$;
-  `);
   await pool.query(
     `CREATE TABLE IF NOT EXISTS brain_ingest_cursor (
        account          text PRIMARY KEY,
        last_created_at  timestamptz NOT NULL,
-       last_id          bigint,
+       last_id          text,
        updated_at       timestamptz NOT NULL DEFAULT now()
      )`
   );
@@ -117,7 +109,7 @@ export async function ensureReplayCursorTable(pool: Pool): Promise<void> {
        account          text NOT NULL,
        platform         text NOT NULL,
        last_created_at  timestamptz NOT NULL,
-       last_id          bigint,
+       last_id          text,
        updated_at       timestamptz NOT NULL DEFAULT now(),
        PRIMARY KEY (run_id, account, platform)
      )`
@@ -201,7 +193,9 @@ export async function fetchBatch(
     `m.account = $1`,
     `m.is_deleted = false`,
     `m.content IS NOT NULL AND btrim(m.content) <> ''`,
-    `(m.created_at, m.id) > ($2::timestamptz, COALESCE($3::bigint, 0::bigint))`,
+    // PostgreSQL infers $3 from m.id, preserving UUID and legacy BIGINT ordering.
+    `(m.created_at > $2::timestamptz OR
+      (m.created_at = $2::timestamptz AND (m.id > $3 OR $3 IS NULL)))`,
   ];
   if (opts.platform) {
     params.push(opts.platform);

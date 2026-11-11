@@ -17,8 +17,10 @@
  *                       redirect_uri, code            → short-lived (1 h) token
  *   3. long-lived GET graph.instagram.com/v21.0/access_token
  *                 ?grant_type=ig_exchange_token&client_secret&access_token
- *                 → 60 days; we REJECT anything under 5.184.000 s (criterion 3
- *                 of the epic: never store a token that will die in an hour).
+ *                 → ~60 days (Meta's TTL drifts); we REJECT anything under
+ *                 604.800 s — a tripwire against a short-lived token stored
+ *                 as long-lived (criterion 3 of the epic: never store a
+ *                 token that will die in an hour).
  *   4. identity   GET graph.instagram.com/v21.0/me?fields=id,user_id,username
  *   5. store.put  envelope-encrypted payload (credential-store does the crypto)
  *
@@ -53,8 +55,22 @@ export const IG_PAIRING_SCOPES = [
   'instagram_business_content_publish',
 ] as const;
 
-/** 60 days — the long-lived token the epic's criterion 3 demands. */
-export const IG_MIN_LONG_LIVED_EXPIRES_IN = 5_184_000;
+/**
+ * Floor for accepting a long-lived token: 7 days (604.800 s), INFRA-611.
+ * This is a tripwire against a short-lived token (1 h = 3600 s) being stored
+ * as if it lasted 60 days — NOT a promise about Meta's TTL. Meta counts the
+ * 60 days down from the moment it issues the token and has moved the value
+ * twice in 24 h: measured pairing @skirmshopES answered `ig_exchange_token`
+ * with 5183999 and 5183932 (05-10-2026) and 5124806 (06-10-2026, 59,31 d),
+ * and a floor pinned next to the 60-day nominal refused all three genuine
+ * tokens. 7 days sits 168× above the worst real short-lived value and 8,4×
+ * below the worst real long-lived one, and no documented Instagram Login
+ * flow issues a long-lived token under 7 days — so criterion 3 of the epic
+ * (never store a 1 h token) holds for whatever `expires_in` Meta returns.
+ * The same constant guards both the exchange and the refresh; nothing else
+ * consumes it (IG_REFRESH_* work on the token's real expiresAt, not here).
+ */
+export const IG_MIN_LONG_LIVED_EXPIRES_IN = 604_800;
 
 /** Meta: only tokens at least 24 h old may be refreshed. */
 export const IG_REFRESH_MIN_AGE_MS = 24 * 60 * 60 * 1000;
@@ -274,7 +290,7 @@ export async function exchangeForLongLivedToken(
   }
   if (typeof data.expires_in !== 'number' || data.expires_in < IG_MIN_LONG_LIVED_EXPIRES_IN) {
     throw new Error(
-      `instagram long-lived exchange returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_LONG_LIVED_EXPIRES_IN}s (60 days)`
+      `instagram long-lived exchange returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_LONG_LIVED_EXPIRES_IN}s (7 days) — looks like a short-lived token: check the app secret and the ig_exchange_token grant`
     );
   }
   const now = Date.now();
@@ -335,7 +351,7 @@ export async function refreshInstagramToken(
   }
   if (typeof data.expires_in !== 'number' || data.expires_in < IG_MIN_LONG_LIVED_EXPIRES_IN) {
     throw new Error(
-      `instagram token refresh returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_LONG_LIVED_EXPIRES_IN}s`
+      `instagram token refresh returned expires_in=${data.expires_in}; refusing tokens under ${IG_MIN_LONG_LIVED_EXPIRES_IN}s (7 days) — looks like a short-lived token: the ig_refresh_token grant should renew for ~60 days`
     );
   }
   return {

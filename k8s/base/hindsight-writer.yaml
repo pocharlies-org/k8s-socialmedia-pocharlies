@@ -1,0 +1,41 @@
+# SC-4304 S8: acceso de escritura al banco `personal` para el Job de backfill del historial.
+# Solo el Job lo monta (identidad `socialmedia-mensajes`: client socialmedia, bank personal; la sembró security).
+---
+# CA pública del escritor del boundary (Secret hindsight-writer-ca-tls del ns hindsight, clave ca.crt;
+# CN hindsight-boundary-ca, válida hasta 2036, sha256
+# C4:C0:01:92:7A:DA:0A:C7:14:F4:1F:B2:1F:1A:84:9D:00:42:38:0F:09:DA:B3:4A:DB:D3:18:3F:52:34:EF:D3).
+# Es un certificado público, no un secreto; es la misma raíz que monta synapse-adapter-hindsight.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hindsight-writer-ca
+  namespace: whatsapp-mcp
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBhDCCASqgAwIBAgIUIie0zNGWj/49hwAAVp9hWzVERSEwCgYIKoZIzj0EAwIw
+    IDEeMBwGA1UEAxMVaGluZHNpZ2h0LWJvdW5kYXJ5LWNhMB4XDTI2MTEwMjE3Mzcy
+    M1oXDTM2MTAzMDE3MzcyM1owIDEeMBwGA1UEAxMVaGluZHNpZ2h0LWJvdW5kYXJ5
+    LWNhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfE4UWvmwBFSVz/WJeueWPm4f
+    5ndEluiblAjbIIZBYr+gSfBUHgu0GJ52Odj3tYdKDz2JO06ssUfefEmJPQr6OqNC
+    MEAwDgYDVR0PAQH/BAQDAgKkMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFEvH
+    IMdDDDWttrZz5gc89B+bIwZtMAoGCCqGSM49BAMCA0gAMEUCIQDPCZum9muSiBP2
+    QJUFn1mB/qbvhscZj3Mr6kXHD1dNmgIgXQjomzn0VdhRnBezMl14n8t09W6v3XZc
+    K4No6tZfQH4=
+    -----END CERTIFICATE-----
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: hindsight-writer-socialmedia-mensajes
+  namespace: whatsapp-mcp
+spec:
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword-connect, kind: ClusterSecretStore }
+  target:
+    name: hindsight-writer-socialmedia-mensajes
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: HINDSIGHT_WRITER_TOKEN
+      remoteRef: { key: hindsight-writer-socialmedia-mensajes, property: HINDSIGHT_WRITER_TOKEN }

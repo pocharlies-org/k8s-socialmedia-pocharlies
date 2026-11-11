@@ -9,9 +9,10 @@
       "name": "whatsapp-connector",
       "sessionPvc": "whatsapp-session-data",
       "connectorAccountEnv": false,
+      "connectorMemoryLimit": "1536Mi",
       "lanIngress": "whatsapp-lan",
       "lanHost": "whatsapp.lan.e-dani.com",
-      "qrPublicUrl": "https://whatsapp.e-dani.com/qr/page",
+      "qrPublicUrl": "https://whatsapp-qr.e-dani.com/qr/page",
       "env": [
         {
           "name": "WA_RECONNECT_BACKFILL_WINDOW_HOURS",
@@ -70,7 +71,7 @@
         }
       ]
     },
-    "brainInstance": "personal"
+    "brainInstance": "leila"
   },
   {
     "channel": "telegram",
@@ -97,6 +98,19 @@
     "bridgeUrl": "http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080",
     "deploy": {},
     "brainInstance": "skirmshop"
+  },
+  {
+    "channel": "telegram",
+    "accountId": "leila",
+    "label": "Telegram leila",
+    "profile": "leila",
+    "connectorUrl": "http://telegram-connector-leila.whatsapp-mcp.svc.cluster.local:3002",
+    "bridgeUrl": "http://telegram-sync-leila.whatsapp-mcp.svc.cluster.local:3080",
+    "deploy": {
+      "sessionSecretKey": null
+    },
+    "brainInstance": "leila",
+    "enabled": false
   },
   {
     "channel": "instagram",

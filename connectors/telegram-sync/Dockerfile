@@ -1,4 +1,4 @@
-FROM harbor.lan.e-dani.com/cache/library/python:3.12-slim
+FROM python:3.12-slim
 
 # Debian security updates. The release pipeline refuses any image that still
 # carries a fixable HIGH/CRITICAL finding.

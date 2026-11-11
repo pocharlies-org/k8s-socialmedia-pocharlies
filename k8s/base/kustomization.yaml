@@ -2,14 +2,28 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - manifest.yaml
+  # SC-4304 S8: credencial del lector de Hindsight (inerte hasta el corte).
+  - hindsight-reader.yaml
+  # SC-4304 S8: CA pública y token de escritura del backfill (solo los monta el Job, aún sin cablear).
+  - hindsight-writer.yaml
   # Per-account connector workloads, rendered from social-accounts.json by
   # scripts/render-connectors.py (CI fails if stale: --check).
   - generated/connectors.yaml
   - whatsapp-synapse-bridge.yaml
+  # DGX-1235 B1: puente de correo.connector.v1 (inerte, replicas 0).
+  - correo-bridge.yaml
+  # INFRA-364 fase 0: transcripción de notas de voz de WhatsApp (ruta viva +
+  # backfill suspendido).
+  - whatsapp-voice.yaml
+  # SC-2760: la app de WhatsApp del fork de Jordi (apps/whatsapp verbatim) en
+  # whatsapp.e-dani.com, a prueba.
+  - whatsapp-app.yaml
   - networkpolicy.yaml
   # SC-1197 P3 (SC-1226): API de emparejamientos por sub, inerte (replicas 0, flag off).
   - social-pairing.yaml
   - networkpolicy-social-pairing.yaml
+  # INFRA-745: CronJob diario de verificacion facial del grupo Sauvage (A).
+  - sauvage-verificacion.yaml
 
 # SC-1144 fase 2: la tabla de vinculos sub->cuentas vive en
 # social-identity-bindings.yaml (el fichero checked-in es el trace GitOps: cada
@@ -32,6 +46,24 @@ configMapGenerator:
   - name: social-accounts
     files:
       - social-accounts.json=generated/social-accounts.json
+  # INFRA-364 (ADR 0002 §5): bot/monitoring/channel lists and window knobs for
+  # the brain-windows jobs. Mismo criterio de nombre estatico que arriba: son
+  # listas de datos que los jobs releen en cada pasada.
+  - name: brain-windows
+    files:
+      - brain-windows-config.yaml
+  # INFRA-745: prompt de la pasada, criterio de vision y opencode.json del bot
+  # Sauvage. Mismo criterio de nombre estatico: cambiar el criterio es un git
+  # diff que la proxima pasada lee sin rebuild (patrón brain-windows).
+  - name: sauvage-verificacion-prompt
+    options:
+      labels:
+        app: sauvage-verificacion
+    files:
+      - prompt-pasada.md=sauvage-verificacion/prompt-pasada.md
+      - prompt-vision.md=sauvage-verificacion/prompt-vision.md
+      - guia-dm.md=sauvage-verificacion/guia-dm.md
+      - opencode.json=sauvage-verificacion/opencode.json
 
 generatorOptions:
   disableNameSuffixHash: true

@@ -80,10 +80,11 @@ export function isTextMessage(message: Pick<EditableMessage, 'isService' | 'medi
 }
 
 /**
- * The connector's sending gate. The Telegram connectors never had an
- * ENABLE_SENDING switch (their sends are not gated), so unset means on; an
- * explicit ENABLE_SENDING other than "true", or EMERGENCY_DISABLE_SENDING=true
- * (the same kill switch as WhatsApp), turns edits off. Null = allowed.
+ * The connector's sending gate, for every outward route (requireSending in
+ * api/controller.ts). Unset ENABLE_SENDING means on (the Telegram connectors
+ * started without that switch); an explicit ENABLE_SENDING other than "true",
+ * or EMERGENCY_DISABLE_SENDING=true (the same kill switch as WhatsApp), turns
+ * sending off. Null = allowed.
  */
 export function sendingDisabledReason(env: NodeJS.ProcessEnv = process.env): string | null {
   if (env.EMERGENCY_DISABLE_SENDING === 'true') return 'Sending is emergency disabled';

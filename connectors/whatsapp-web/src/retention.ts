@@ -7,6 +7,9 @@
  *  - whatsapp_message_payloads (migration 009, PR-1 shipped it without a purge):
  *    rows older than DURABLE_PAYLOAD_RETENTION_DAYS (default 90) by created_at.
  *    Quoting/forwarding a message older than that falls back to process memory.
+ *  - whatsapp_statuses (migration 019): status index rows posted more than
+ *    WA_STATUS_RETENTION_DAYS (default 30) ago, by posted_at. Only the index:
+ *    the statuses' messages rows are kept like any message.
  *
  * Opportunistic: `maybeRunRetention()` is called from the ingest path and runs
  * at most once per hour per process (the first one 5 minutes after start), in
@@ -25,10 +28,18 @@ export const RETENTION_BATCH_SIZE = 5000;
 const MAX_BATCHES_PER_TABLE = 20;
 const DEFAULT_SEND_ATTEMPT_DAYS = 7;
 const DEFAULT_PAYLOAD_DAYS = 90;
+const DEFAULT_STATUS_DAYS = 30;
 const UNDEFINED_TABLE = '42P01';
 
 /** Tables purged here; the name is interpolated, so it is never caller input. */
-type RetentionTable = 'whatsapp_send_attempts' | 'whatsapp_message_payloads';
+type RetentionTable = 'whatsapp_send_attempts' | 'whatsapp_message_payloads' | 'whatsapp_statuses';
+
+/** The column a table's age is measured by (interpolated, never caller input). */
+const AGE_COLUMN: Record<RetentionTable, string> = {
+  whatsapp_send_attempts: 'created_at',
+  whatsapp_message_payloads: 'created_at',
+  whatsapp_statuses: 'posted_at',
+};
 
 let lastRunAt = Date.now() - RETENTION_INTERVAL_MS + FIRST_RUN_DELAY_MS;
 let running: Promise<void> | null = null;
@@ -54,11 +65,15 @@ export function payloadRetentionDays(): number {
   return envDays('DURABLE_PAYLOAD_RETENTION_DAYS', DEFAULT_PAYLOAD_DAYS);
 }
 
+export function statusRetentionDays(): number {
+  return envDays('WA_STATUS_RETENTION_DAYS', DEFAULT_STATUS_DAYS);
+}
+
 export function purgeSql(table: RetentionTable): string {
   return `DELETE FROM ${table}
      WHERE ctid IN (
        SELECT ctid FROM ${table}
-        WHERE account = $1 AND created_at < NOW() - make_interval(days => $2)
+        WHERE account = $1 AND ${AGE_COLUMN[table]} < NOW() - make_interval(days => $2)
         LIMIT ${RETENTION_BATCH_SIZE})`;
 }
 
@@ -90,6 +105,7 @@ async function purgeQuietly(table: RetentionTable, days: number): Promise<void> 
 export async function runRetention(): Promise<void> {
   await purgeQuietly('whatsapp_send_attempts', sendAttemptRetentionDays());
   await purgeQuietly('whatsapp_message_payloads', payloadRetentionDays());
+  await purgeQuietly('whatsapp_statuses', statusRetentionDays());
 }
 
 /**

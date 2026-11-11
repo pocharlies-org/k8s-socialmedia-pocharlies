@@ -16,7 +16,7 @@ import {
   resolveHealthForActor,
   resolveInstagramEntry,
 } from './credential-resolution';
-import { IG_MIN_LONG_LIVED_EXPIRES_IN, PairingFetch } from './oauth-pairing';
+import { PairingFetch } from './oauth-pairing';
 
 class FakeStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();
@@ -185,7 +185,10 @@ test('near-expiry token is refreshed and written back under the same key', async
       json: async () => ({
         access_token: 'EAAL-refreshed',
         token_type: 'bearer',
-        expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+        // Long-lived real medido a Meta el 06-10-2026 (59,31 días), no un
+        // literal derivado del suelo: la aserción de ~59 días de abajo
+        // comprueba el expiresAt contra este valor (INFRA-611).
+        expires_in: 5124806,
       }),
     };
   };
@@ -225,7 +228,7 @@ test('scoped row keeps its own key on write-back', async () => {
       status: 200,
       json: async () => ({
         access_token: 'EAAL-scoped-refreshed',
-        expires_in: IG_MIN_LONG_LIVED_EXPIRES_IN,
+        expires_in: 5124806,
       }),
     }),
     now,

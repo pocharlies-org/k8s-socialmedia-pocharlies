@@ -19,7 +19,7 @@
  *  - only a client with `ingest` on calls in here: the per-sub pairing pool
  *    never writes.
  */
-import { accountKey, getPool, stripAccountKey } from './db-writer';
+import { accountKey, getPool, setConversationState, stripAccountKey } from './db-writer';
 import { whatsappAccountId } from './message-mutations';
 
 const UNDEFINED_TABLE = '42P01';
@@ -162,6 +162,60 @@ export async function resolveCanonicalConversation(
   }
 }
 
+/**
+ * What counts as history, by direction. The SQL interpolates this closed map
+ * (never input), so the literals stay greppable. An OUTBOUND row with status
+ * 'failed' (WhatsApp rejected the send, ack 463) is no history: a refused chat
+ * must not vouch for itself.
+ */
+const HISTORY_FILTER = {
+  INBOUND: "m.direction = 'INBOUND'",
+  OUTBOUND: "m.direction = 'OUTBOUND' AND m.status IS DISTINCT FROM 'failed'",
+} as const;
+
+/**
+ * Whether the canonical conversation of any of `chatIds` (a 1:1's PN and its
+ * LID), or a twin merged into it, holds a message of this `kind`. False when
+ * there is no such conversation.
+ */
+async function hasHistory(chatIds: string[], kind: keyof typeof HISTORY_FILTER): Promise<boolean> {
+  const canonical = new Set<string>();
+  for (const chatId of chatIds) {
+    const conversation = await resolveCanonicalConversation(chatId);
+    if (conversation) canonical.add(conversation.id);
+  }
+  if (!canonical.size) return false;
+  const result = await getPool().query(
+    `WITH RECURSIVE twin(id, depth) AS (
+       SELECT unnest($1::text[]), 0
+       UNION ALL
+       SELECT c.id, t.depth + 1
+         FROM twin t JOIN conversations c ON c.merged_into = t.id
+        WHERE t.depth < $2
+     )
+     SELECT EXISTS (
+       SELECT 1 FROM messages m
+        WHERE m.conversation_id IN (SELECT id FROM twin) AND ${HISTORY_FILTER[kind]}
+     ) AS hit`,
+    [[...canonical], MAX_MERGE_HOPS]
+  );
+  return result.rows[0]?.hit === true;
+}
+
+/** Whether the person behind a 1:1 chat ever wrote to this account (an INBOUND message). */
+export async function hasInboundHistory(chatIds: string[]): Promise<boolean> {
+  return hasHistory(chatIds, 'INBOUND');
+}
+
+/**
+ * Whether this account ever wrote to the person behind a 1:1 chat: typed by
+ * the owner on the main phone (fromMe, ingested as OUTBOUND) or sent by the
+ * connector. A message WhatsApp rejected (status 'failed') does not count.
+ */
+export async function hasOutboundHistory(chatIds: string[]): Promise<boolean> {
+  return hasHistory(chatIds, 'OUTBOUND');
+}
+
 /** Bare id of the newest message of a conversation of this account (for lastMessages). */
 export async function latestMessageId(conversationId: string): Promise<string | undefined> {
   const result = await getPool().query(
@@ -253,21 +307,31 @@ export async function writeChatState(
   }
 }
 
+/** What one chat event or read says; an absent field is left as it is. */
+export interface CanonicalChatState extends Pick<ChatStatePatch, 'archived' | 'pinnedAt' | 'mute'> {
+  /** Absolute badge; negative = WhatsApp's "marked as unread" (at least 1). */
+  unreadCount?: number;
+}
+
 /**
- * A pin / mute the phone did (chats.update / chats.upsert / history): resolve
- * the canonical conversation of `jid` and record it there. Never throws;
- * returns whether a row was written.
+ * Archive, unread, pin and mute of a chat — reported by the phone (chats.update /
+ * chats.upsert / history) or caused by the owner reading it — recorded on the
+ * canonical conversation of `jid`, resolved once: an UPDATE on the jid's own id
+ * would land on a tombstone, which no listing shows. A chat with no conversation
+ * writes nothing. Pin and mute wait while migration 012 is missing. Never throws.
  */
-export async function recordInboundChatState(jid: string, patch: ChatStatePatch): Promise<boolean> {
-  // Archive / unread of inbound events keep going through setConversationState.
-  if (!touchesNewColumns(patch) || chatStateColumnsKnownMissing()) return false;
+export async function setCanonicalChatState(jid: string, state: CanonicalChatState): Promise<void> {
+  const { unreadCount, archived, ...pinMute } = state;
+  const legacy = unreadCount !== undefined || archived !== undefined;
+  const pinOrMute = touchesNewColumns(pinMute) && !chatStateColumnsKnownMissing();
+  if (!legacy && !pinOrMute) return;
   try {
     const conversation = await resolveCanonicalConversation(jid);
-    if (!conversation) return false;
-    return !!(await writeChatState(conversation.id, patch));
+    if (!conversation) return;
+    if (legacy) await setConversationState(conversation.id, unreadCount, archived);
+    if (pinOrMute) await writeChatState(conversation.id, pinMute);
   } catch (error) {
     console.warn(`chat state persist failed for ${jid}: ${describeError(error)}`);
-    return false;
   }
 }
 

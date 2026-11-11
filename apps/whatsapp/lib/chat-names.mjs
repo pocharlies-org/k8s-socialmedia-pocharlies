@@ -1,0 +1,436 @@
+import { WHATSAPP_CONVERSATION_SQL } from './conversation-scope.mjs';
+
+const JID_SUFFIX = /@(lid|c\.us|s\.whatsapp\.net|g\.us|broadcast|newsletter)$/;
+export const MESSAGE_VISIBLE_SQL = "m.message_type NOT IN ('SENDERKEYDISTRIBUTIONMESSAGE', 'MESSAGECONTEXTINFO', 'POLL_VOTE', 'POLL_RESULT', 'POLLUPDATEMESSAGE', 'ENCEVENTRESPONSEMESSAGE', 'ENCREACTIONMESSAGE', 'REACTION', 'MESSAGEHISTORYNOTICE', 'MESSAGEHISTORYBUNDLE', 'KEEPINCHATMESSAGE', 'ALBUMMESSAGE', 'PROTOCOLMESSAGE') AND m.conversation_id !~ '@newsletter$' AND m.conversation_id !~ '(^|:)status@broadcast$'";
+// Remote revocation keeps captured content; only an explicit local deletion hides it.
+export const MESSAGE_RETAINED_SQL = "(m.metadata->>'deleted_for_me') IS DISTINCT FROM 'true'";
+
+export const MESSAGE_REPLY_SELECT_SQL = `
+       reply.message_type AS "replyType",
+       reply.content AS "replyText",
+       CASE WHEN reply.direction = 'OUTBOUND' THEN 'Tú'
+            ELSE COALESCE(
+              CASE WHEN reply_sender.name IS NOT NULL AND BTRIM(reply_sender.name) <> ''
+                AND reply_sender.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us)$'
+                AND reply_sender.name <> reply_sender.id THEN BTRIM(reply_sender.name) END,
+              CASE WHEN reply_sender.push_name IS NOT NULL AND BTRIM(reply_sender.push_name) <> ''
+                AND reply_sender.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us)$'
+                AND reply_sender.push_name <> reply_sender.id THEN BTRIM(reply_sender.push_name) END,
+              CASE WHEN reply.sender_wa_id ~ '(?:^|:)\\d{6,15}@(c\\.us|s\\.whatsapp\\.net)$'
+                THEN '+' || substring(reply.sender_wa_id FROM '(?:^|:)(\\d{6,15})@')
+                ELSE regexp_replace(reply.sender_wa_id, '^[^:]+:', '') END
+            ) END AS "replySenderName",
+       reply.id IS NOT NULL AS "replyAvailable",
+       EXISTS (
+         SELECT 1 FROM messages hidden_reply
+          WHERE hidden_reply.account=m.account AND hidden_reply.conversation_id=ANY($2::text[])
+            AND hidden_reply.platform='whatsapp' AND hidden_reply.metadata->>'deleted_for_me' = 'true'
+            AND hidden_reply.wa_message_id IN (m.reply_to_message_id, m.account || ':' || m.reply_to_message_id,
+              regexp_replace(m.reply_to_message_id, '^[^:]+:', ''))
+       ) AS "replyLocallyDeleted"`;
+
+export const MESSAGE_REPLY_JOIN_SQL = `
+LEFT JOIN LATERAL (
+  SELECT target.id, target.content, target.message_type, target.direction, target.sender_wa_id
+  FROM messages target
+  WHERE target.account = m.account
+    AND target.conversation_id = ANY($2::text[])
+    AND target.platform = 'whatsapp'
+    AND ${MESSAGE_RETAINED_SQL.replaceAll('m.', 'target.')}
+    AND ${MESSAGE_VISIBLE_SQL.replaceAll('m.', 'target.')}
+    AND target.wa_message_id IN (
+      m.reply_to_message_id,
+      m.account || ':' || m.reply_to_message_id,
+      regexp_replace(m.reply_to_message_id, '^[^:]+:', '')
+    )
+  ORDER BY (target.conversation_id = m.conversation_id) DESC, target.wa_timestamp DESC
+  LIMIT 1
+) reply ON m.reply_to_message_id IS NOT NULL
+LEFT JOIN participants reply_sender
+  ON reply_sender.id = reply.sender_wa_id AND reply_sender.account = m.account`;
+
+/** A database value is a placeholder when it is just a provider identifier. */
+export function isJidPlaceholder(value, id = '') {
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (!name) return true;
+  const identifier = typeof id === 'string' ? id.trim() : '';
+  const bareIdentifier = identifier.replace(/^[^:]+:/, '');
+  return name === identifier || name === bareIdentifier || JID_SUFFIX.test(name);
+}
+
+function useful(value, id) {
+  return typeof value === 'string' && value.trim() && !isJidPlaceholder(value, id)
+    ? value.trim()
+    : null;
+}
+
+/**
+ * Resolve a chat title from stored values. Participant names are only a
+ * fallback for direct chats; a group must keep its own subject.
+ */
+export function resolveChatName({
+  id,
+  isGroup = false,
+  conversationName,
+  contactName,
+  pushName,
+}) {
+  const identifier = typeof id === 'string' ? id : '';
+  const fallbackId = identifier.replace(/^[^:]+:/, '');
+  const candidates = isGroup
+    ? [conversationName, fallbackId]
+    : [conversationName, contactName, pushName, fallbackId];
+  return candidates.map(value => useful(value, identifier)).find(Boolean) || fallbackId;
+}
+
+/** Pick the sender label used for an inbound message row. */
+export function resolveMessageSenderName({ fromMe = false, senderName, senderPushName, senderId }) {
+  if (fromMe) return null;
+  return useful(senderName, senderId) || useful(senderPushName, senderId) || senderId || null;
+}
+
+export function readableChatName(chat) {
+  if (chat.isGroup || !isJidPlaceholder(chat.name, chat.id)) return chat.name;
+  for (const id of [chat.waChatId, chat.id]) {
+    const bare = String(id || '').replace(/^[^:]+:/, '');
+    const match = bare.match(/^(\d{6,15})@(?:c\.us|s\.whatsapp\.net)$/);
+    if (match) return `+${match[1]}`;
+  }
+  return chat.name;
+}
+
+/**
+ * The app's chat list query. `$1` is always the selected account. The
+ * inbound sender fallback repairs old direct chats whose stored title is a
+ * JID, while the group branch never promotes a participant to group title.
+ */
+export const CHAT_LIST_BASE_SQL = `
+-- Teléfonos con exactamente una conversación @lid, una sola vez: los dos COUNT(*)
+-- correlacionados por fila escaneaban conversations 1038 veces (~3,2 s con 2,3k
+-- chats de la cuenta, medido 20-10; era la causa del statement_timeout).
+WITH lid_phones AS MATERIALIZED (
+  SELECT regexp_replace(wa_chat_id, '@c\\.us$', '@s.whatsapp.net') AS phone
+  FROM conversations
+  WHERE account = $1
+    AND COALESCE(is_group, false) = false
+    AND id ~ '@lid$'
+  GROUP BY 1
+  HAVING COUNT(*) = 1
+),
+-- #265: el alias PN↔LID se agrega una sola vez por teléfono. El LATERAL que había
+-- escaneaba conversations por cada una de las 1033 filas con un regexp sin índice
+-- (~2,1 s de los 3,6 s del listado, medido 23-10 sobre NVMe: 29 539 hits vs 87
+-- lecturas — CPU, no disco). Mismas columnas que el LATERAL; los lectores no cambian.
+pn_alias AS MATERIALIZED (
+  SELECT lp.phone,
+         array_agg(pn.id ORDER BY pn.id) AS ids,
+         (array_agg(pn.name ORDER BY
+           (pn.name IS NULL OR BTRIM(pn.name) = ''
+             OR pn.name ~ '@(lid|c\\.us|s\\.whatsapp\\.net)$'), pn.id))[1] AS name,
+         (array_agg(pn.avatar_url ORDER BY (pn.avatar_url IS NULL), pn.id))[1] AS avatar_url,
+         COALESCE(SUM(COALESCE(pn.unread_count, 0)), 0)::integer AS unread_count,
+         BOOL_OR(COALESCE(pn.archived, false)) AS archived
+  FROM lid_phones lp
+  JOIN conversations pn
+    ON pn.account = $1
+   AND COALESCE(pn.is_group, false) = false
+   AND pn.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
+   AND regexp_replace(pn.id, '@c\\.us$', '@s.whatsapp.net') = lp.phone
+  GROUP BY lp.phone
+)
+-- El nombre NO se resuelve aquí: los laterals de nombre (saved_contact, inbound)
+-- corrían por las ~1000 filas candidatas y en frío pasaban de los 10 s del
+-- statement_timeout (medido 20-10: 126 s sin caché). El interior solo deja las
+-- columnas crudas; chatListDecorated() aplica los laterals sobre la página.
+SELECT c.id,
+       c.wa_chat_id AS "waChatId",
+       c.name AS raw_name,
+       pn_alias.name AS alias_name,
+       pn_alias.ids AS alias_ids,
+       COALESCE(last_message.content, '') AS preview,
+       last_message.message_type AS "previewType",
+       COALESCE(c.unread_count, 0) + COALESCE(pn_alias.unread_count, 0) AS unread,
+       COALESCE(c.is_group, false) AS "isGroup",
+       (COALESCE(c.archived, false) OR COALESCE(pn_alias.archived, false)) AS archived,
+       COALESCE(c.avatar_url, pn_alias.avatar_url) AS "avatarUrl",
+       last_message.wa_timestamp AS timestamp,
+       COALESCE(last_message.wa_timestamp, c.last_message_at)::text AS "_sortTimestamp",
+       last_message.direction = 'OUTBOUND' AS "fromMe"
+FROM conversations c
+LEFT JOIN pn_alias
+  ON c.id ~ '@lid$'
+ AND COALESCE(c.is_group, false) = false
+ AND pn_alias.phone = regexp_replace(c.wa_chat_id, '@c\\.us$', '@s.whatsapp.net')
+LEFT JOIN lid_phones one_lid_self
+  ON one_lid_self.phone = regexp_replace(c.id, '@c\\.us$', '@s.whatsapp.net')
+-- UNION ALL con LIMIT 1 por brazo: con ANY(array_prepend(...)) el planner
+-- no usa el índice por conversación y escanea messages por timestamp global
+-- (medido 19-10: 4 s/conversación con 449k mensajes; así, 0,2 s).
+LEFT JOIN LATERAL (
+  SELECT u.content, u.wa_timestamp, u.direction, u.message_type
+  FROM (
+    (SELECT m.content, m.wa_timestamp, m.direction, m.message_type, m.id
+     FROM messages m
+     WHERE m.conversation_id = c.id
+       AND m.account = $1
+       AND m.platform = 'whatsapp'
+       AND ${MESSAGE_RETAINED_SQL}
+       AND ${MESSAGE_VISIBLE_SQL}
+     ORDER BY m.wa_timestamp DESC, m.id DESC
+     LIMIT 1)
+    UNION ALL
+    -- unnest + LATERAL por id: con ANY(array) no constante el planner estima
+    -- miles de filas y prefiere el escaneo global por timestamp; con ids vacío
+    -- este brazo ni toca messages (medido 19-10: el ANY, minutos por listado).
+    (SELECT lm.content, lm.wa_timestamp, lm.direction, lm.message_type, lm.id
+     FROM unnest(COALESCE(pn_alias.ids, ARRAY[]::text[])) AS aid(id)
+     JOIN LATERAL (
+       SELECT m.content, m.wa_timestamp, m.direction, m.message_type, m.id
+       FROM messages m
+       WHERE m.conversation_id = aid.id
+         AND m.account = $1
+         AND m.platform = 'whatsapp'
+         AND ${MESSAGE_RETAINED_SQL}
+         AND ${MESSAGE_VISIBLE_SQL}
+       ORDER BY m.wa_timestamp DESC, m.id DESC
+       LIMIT 1
+     ) lm ON true
+     ORDER BY lm.wa_timestamp DESC, lm.id DESC
+     LIMIT 1)
+  ) u
+  ORDER BY u.wa_timestamp DESC, u.id DESC
+  LIMIT 1
+) last_message ON true
+WHERE c.account = $1
+  AND ${WHATSAPP_CONVERSATION_SQL}
+  AND c.id !~ '@newsletter$'
+  AND c.id !~ '(^|:)status@broadcast$'
+  AND NOT (
+    COALESCE(c.is_group, false) = false
+    AND c.id ~ '[0-9]+@(c\\.us|s\\.whatsapp\\.net)$'
+    AND one_lid_self.phone IS NOT NULL
+  )`;
+
+
+/**
+ * Resuelve el nombre sobre la página ya recortada. Los laterals de nombre
+ * (contacto guardado, entrante) corrían por las ~1000 filas candidatas y en
+ * frío pasaban de los 10 s del statement_timeout (medido 20-10: 126 s sin
+ * caché de personal); sobre la página de 100 cuestan centésimas.
+ */
+export function chatListDecorated(inner) {
+  return `SELECT b.id, b."waChatId",
+     CASE
+       WHEN b."isGroup" THEN COALESCE(
+         CASE
+           WHEN b.raw_name IS NULL OR BTRIM(b.raw_name) = '' OR b.raw_name = b.id
+             OR b.raw_name = regexp_replace(b.id, '^[^:]+:', '')
+             OR b.raw_name ~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+           THEN NULL
+           ELSE b.raw_name
+         END,
+         regexp_replace(b.id, '^[^:]+:', '')
+       )
+       WHEN sc.name IS NOT NULL THEN sc.name
+       WHEN b.raw_name IS NOT NULL
+        AND BTRIM(b.raw_name) <> ''
+        AND b.raw_name <> b.id
+        AND b.raw_name <> regexp_replace(b.id, '^[^:]+:', '')
+        AND b.raw_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+         THEN b.raw_name
+      ELSE COALESCE(
+         CASE
+           WHEN b.alias_name IS NULL OR BTRIM(b.alias_name) = ''
+             OR b.alias_name = ANY(b.alias_ids)
+             OR b.alias_name ~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+           THEN NULL
+           ELSE BTRIM(b.alias_name)
+         END,
+         CASE
+           WHEN inbound.sender_name IS NULL
+             OR BTRIM(inbound.sender_name) = ''
+             OR inbound.sender_name = inbound.sender_id
+             OR inbound.sender_name = regexp_replace(inbound.sender_id, '^[^:]+:', '')
+             OR inbound.sender_name ~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+           THEN NULL
+           ELSE BTRIM(inbound.sender_name)
+         END,
+         CASE
+           WHEN inbound.push_name IS NULL
+             OR BTRIM(inbound.push_name) = ''
+             OR inbound.push_name = inbound.sender_id
+             OR inbound.push_name = regexp_replace(inbound.sender_id, '^[^:]+:', '')
+             OR inbound.push_name ~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+           THEN NULL
+           ELSE BTRIM(inbound.push_name)
+         END,
+         CASE
+           WHEN b.raw_name IS NULL OR BTRIM(b.raw_name) = '' OR b.raw_name = b.id
+             OR b.raw_name = regexp_replace(b.id, '^[^:]+:', '')
+             OR b.raw_name ~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+           THEN NULL
+           ELSE BTRIM(b.raw_name)
+         END,
+         regexp_replace(b.id, '^[^:]+:', '')
+       )
+     END AS name,
+     b.preview, b."previewType", b.unread, b."isGroup", b.archived,
+     b."avatarUrl", b.timestamp, b."_sortTimestamp", b."fromMe"
+   FROM (${inner}) b
+LEFT JOIN LATERAL (
+  SELECT BTRIM(wc.name) AS name
+  FROM whatsapp_contacts wc
+  WHERE wc.account = $1
+    AND wc.jid = ANY(ARRAY[
+      regexp_replace(b.id, '^[^:]+:', ''),
+      regexp_replace(regexp_replace(b.id, '^[^:]+:', ''), '@c\\.us$', '@s.whatsapp.net'),
+      regexp_replace(regexp_replace(b.id, '^[^:]+:', ''), '@s\\.whatsapp\\.net$', '@c.us'),
+      regexp_replace(b."waChatId", '^[^:]+:', ''),
+      regexp_replace(regexp_replace(b."waChatId", '^[^:]+:', ''), '@c\\.us$', '@s.whatsapp.net'),
+      regexp_replace(regexp_replace(b."waChatId", '^[^:]+:', ''), '@s\\.whatsapp\\.net$', '@c.us')
+    ])
+    AND wc.name IS NOT NULL AND BTRIM(wc.name) <> ''
+    AND BTRIM(wc.name) !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us)$'
+  ORDER BY wc.updated_at DESC NULLS LAST,
+           (wc.jid = regexp_replace(b.id, '^[^:]+:', '')) DESC
+  LIMIT 1
+) sc ON b."isGroup" = false
+-- Mismo UNION ALL que last_message: con el array no constante de b.alias_ids
+-- en un solo brazo, el planner abandona el índice por conversación y escanea
+-- messages por timestamp global.
+LEFT JOIN LATERAL (
+  SELECT v.sender_id, v.sender_name, v.push_name
+  FROM (
+    -- shortcut: el nombre sale de los 10 entrantes más recientes (orden del índice),
+    -- no de todo el histórico: ORDER BY name_quality no usa el índice y, con 885k
+    -- mensajes de personal, escaneaba todos los entrantes de cada conversación
+    -- (medido 20-10: 9,7 s por listado → statement_timeout 57014).
+    (SELECT recent.sender_wa_id AS sender_id, p.name AS sender_name, p.push_name,
+            ((p.name IS NOT NULL AND BTRIM(p.name) <> ''
+              AND p.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
+            OR (p.push_name IS NOT NULL AND BTRIM(p.push_name) <> ''
+              AND p.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')) AS name_quality,
+            recent.wa_timestamp
+     FROM (
+       SELECT m.sender_wa_id, m.account, m.wa_timestamp
+       FROM messages m
+       WHERE m.conversation_id = b.id
+         AND m.account = $1
+         AND m.platform = 'whatsapp'
+         AND ${MESSAGE_RETAINED_SQL}
+         AND ${MESSAGE_VISIBLE_SQL}
+         AND m.direction = 'INBOUND'
+       ORDER BY m.wa_timestamp DESC, m.id DESC
+       LIMIT 10
+     ) recent
+     LEFT JOIN participants p
+       ON p.id = recent.sender_wa_id
+      AND p.account = recent.account
+     ORDER BY name_quality DESC, recent.wa_timestamp DESC
+     LIMIT 1)
+    UNION ALL
+    (SELECT recent.sender_wa_id AS sender_id, p.name AS sender_name, p.push_name,
+            ((p.name IS NOT NULL AND BTRIM(p.name) <> ''
+              AND p.name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')
+            OR (p.push_name IS NOT NULL AND BTRIM(p.push_name) <> ''
+              AND p.push_name !~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$')) AS name_quality,
+            recent.wa_timestamp
+     FROM unnest(COALESCE(b.alias_ids, ARRAY[]::text[])) AS aid(id)
+     JOIN LATERAL (
+       SELECT m.sender_wa_id, m.account, m.wa_timestamp
+       FROM messages m
+       WHERE m.conversation_id = aid.id
+         AND m.account = $1
+         AND m.platform = 'whatsapp'
+         AND ${MESSAGE_RETAINED_SQL}
+         AND ${MESSAGE_VISIBLE_SQL}
+         AND m.direction = 'INBOUND'
+       ORDER BY m.wa_timestamp DESC, m.id DESC
+       LIMIT 10
+     ) recent ON true
+     LEFT JOIN participants p
+       ON p.id = recent.sender_wa_id
+      AND p.account = recent.account
+     ORDER BY name_quality DESC, recent.wa_timestamp DESC
+     LIMIT 1)
+  ) v
+  ORDER BY v.name_quality DESC, v.wa_timestamp DESC
+  LIMIT 1
+) inbound ON true
+  ORDER BY b."_sortTimestamp"::timestamptz DESC NULLS LAST, b.id DESC`;
+}
+
+const CHAT_LIST_ORDER_SQL = 'ORDER BY COALESCE(last_message.wa_timestamp, c.last_message_at) DESC NULLS LAST, c.id DESC';
+export const CHAT_LIST_SQL = chatListDecorated(`${CHAT_LIST_BASE_SQL}\n${CHAT_LIST_ORDER_SQL}\nLIMIT 500`);
+export const CHAT_LIST_ACTIVE_SQL = chatListDecorated(`${CHAT_LIST_BASE_SQL}
+AND (COALESCE(c.archived, false) OR COALESCE(pn_alias.archived, false)) = false
+${CHAT_LIST_ORDER_SQL}
+LIMIT 500`);
+export const CHAT_LIST_ARCHIVED_SQL = chatListDecorated(`${CHAT_LIST_BASE_SQL}
+AND (COALESCE(c.archived, false) OR COALESCE(pn_alias.archived, false)) = true
+${CHAT_LIST_ORDER_SQL}`);
+
+// Metadata preserves the first revocation. The optional NAS column is read via
+// JSON so schemas without it still parse; unzoned legacy dates represent UTC.
+export const DELETED_AT_SQL = `(SELECT normalized
+  FROM (VALUES (m.metadata->>'deleted_at', 0), (to_jsonb(m)->>'deleted_at', 1)) candidate(value, priority)
+  CROSS JOIN LATERAL (
+    SELECT CASE
+      WHEN value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?$'
+        AND pg_input_is_valid(value, 'timestamp with time zone')
+      THEN to_char(
+        (CASE WHEN value ~ '(Z|[+-][0-9]{2}(:?[0-9]{2})?)$' THEN value ELSE value || 'Z' END)::timestamptz
+          AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'
+    END AS normalized
+  ) valid
+  WHERE normalized IS NOT NULL
+  ORDER BY priority
+  LIMIT 1)`;
+
+/** Query used by the app server before it maps attachment rows. */
+export const MESSAGE_LIST_BASE_SQL = `
+SELECT m.id,
+       m.wa_timestamp::text AS cursor_timestamp,
+       m.wa_message_id AS "waMessageId",
+       m.content AS text,
+       m.message_type AS type,
+       m.metadata,
+       m.reply_to_message_id AS "replyToMessageId",
+       COALESCE(m.is_edited, false) AS "isEdited",
+       COALESCE(m.is_deleted, false) AS "isDeleted",
+       ${DELETED_AT_SQL} AS "deletedAt",
+       m.status AS "deliveryStatus",
+       m.direction = 'OUTBOUND' AS "fromMe",
+       m.wa_timestamp AS timestamp,
+       ${MESSAGE_REPLY_SELECT_SQL},
+       CASE WHEN m.direction = 'OUTBOUND' THEN NULL
+            ELSE COALESCE(
+              CASE
+                WHEN p.name IS NULL OR BTRIM(p.name) = '' OR p.name = p.id
+                  OR p.name = regexp_replace(p.id, '^[^:]+:', '')
+                  OR p.name ~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+                THEN NULL
+                ELSE BTRIM(p.name)
+              END,
+              CASE
+                WHEN p.push_name IS NULL OR BTRIM(p.push_name) = '' OR p.push_name = p.id
+                  OR p.push_name = regexp_replace(p.id, '^[^:]+:', '')
+                  OR p.push_name ~ '@(lid|c\\.us|s\\.whatsapp\\.net|g\\.us|broadcast|newsletter)$'
+                THEN NULL
+                ELSE BTRIM(p.push_name)
+              END
+            )
+       END AS "senderName"
+FROM messages m
+LEFT JOIN participants p
+  ON p.id = m.sender_wa_id
+ AND p.account = m.account
+${MESSAGE_REPLY_JOIN_SQL}
+WHERE m.account = $1
+  AND m.conversation_id = ANY($2::text[])
+  AND m.platform = 'whatsapp'
+  AND ${MESSAGE_RETAINED_SQL}
+  AND ${MESSAGE_VISIBLE_SQL}`;
+export const MESSAGE_LIST_SQL = `${MESSAGE_LIST_BASE_SQL}
+ORDER BY m.wa_timestamp DESC, m.id DESC
+LIMIT 200`;

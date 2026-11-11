@@ -9,15 +9,27 @@ import {
   InputMedia,
   Message,
   Peer,
-  User,
   Chat,
+  MtArgumentError,
+  MtUnsupportedError,
+  MtTimeoutError,
+  tl,
 } from '@mtcute/node';
+import type { Long } from '@mtcute/node';
 import type { ITelegramStorageProvider } from '@mtcute/node';
 import type { CommonSendParams } from '@mtcute/node/methods.js';
 import { EventEmitter } from 'events';
 import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
 import { isSessionInvalidatedError } from './credential-session';
+import {
+  ADMIN_RIGHT_NAMES,
+  ModerationError,
+  RESTRICTIONS,
+  classifyModerationError,
+  requireNumericTarget,
+  type Restriction,
+} from './moderation';
 import {
   EditDeduper,
   EditResult,
@@ -27,6 +39,86 @@ import {
   editOwnTextMessage,
   inboundTextEdit,
 } from './message-edit';
+
+const AVATAR_DEADLINE_MS = 20_000;
+
+function mediaDeadlineMs(): number {
+  const seconds = Number(process.env.TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS ?? 120);
+  return (Number.isFinite(seconds) && seconds >= 1 && seconds <= 600 ? seconds : 120) * 1000;
+}
+
+export function telegramRetryAfter(error: unknown): number | null {
+  if (error && tl.RpcError.is(error, 'FLOOD_WAIT_%d')) return Math.max(1, Math.ceil(error.seconds));
+  return null;
+}
+
+export function telegramDownloadRetryAfter(error: unknown): number | null {
+  if (error instanceof MtTimeoutError || (tl.RpcError.is(error) && Math.abs(error.code) >= 500))
+    return 60;
+  return null;
+}
+
+export class TelegramDownloadTimeoutError extends Error {
+  constructor(deadlineMs: number) {
+    super(`Telegram download exceeded its ${deadlineMs / 1000} second deadline`);
+    this.name = 'TelegramDownloadTimeoutError';
+  }
+}
+
+export function isTelegramDownloadTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TelegramDownloadTimeoutError';
+}
+
+async function withDownloadDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  deadlineMs = AVATAR_DEADLINE_MS
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new TelegramDownloadTimeoutError(deadlineMs);
+      // Cancels mtcute's RPC retries and download workers, even after HTTP clients leave.
+      controller.abort(error);
+      reject(error);
+    }, deadlineMs);
+  });
+  try {
+    return await Promise.race([operation(controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function telegramReadClient<T extends object>(client: T, signal: AbortSignal): T {
+  const wrapped = new WeakMap<object, object>();
+  const wrap = (target: any): any => {
+    if (wrapped.has(target)) return wrapped.get(target);
+    const proxy = new Proxy(target, {
+      get(object, property, receiver) {
+        if (property === 'call') {
+          // Download workers override client defaults with infinite retries.
+          // Let the durable queue schedule server outages instead of spinning.
+          return (request: unknown, options: object = {}) =>
+            object.call(request, {
+              ...options,
+              abortSignal: signal,
+              floodSleepThreshold: 0,
+              maxRetryCount: 2,
+              throw503: true,
+            });
+        }
+        const value = Reflect.get(object, property, receiver);
+        return value && typeof value === 'object' && 'storage' in value && 'call' in value
+          ? wrap(value)
+          : value;
+      },
+    });
+    wrapped.set(target, proxy);
+    return proxy;
+  };
+  return wrap(client);
+}
 
 /**
  * SC-1145: in-memory storage driver with a save() hook.
@@ -192,10 +284,8 @@ function mapChatType(peer: Peer | undefined | null): TelegramMessage['chatType']
  * caller can never click a lossy string by accident; `dataB64` always carries
  * the exact bytes.
  */
-function inlineButtonsOf(
-  markup: unknown
-): InlineKeyboardButton[][] | undefined {
-  const rows = (markup as { type?: string; buttons?: unknown[][] } | null);
+function inlineButtonsOf(markup: unknown): InlineKeyboardButton[][] | undefined {
+  const rows = markup as { type?: string; buttons?: unknown[][] } | null;
   if (!rows || rows.type !== 'inline' || !Array.isArray(rows.buttons)) return undefined;
 
   const out: InlineKeyboardButton[][] = [];
@@ -507,7 +597,8 @@ export class TelegramClientWrapper extends EventEmitter {
     chatId: string,
     text: string,
     topicId?: number,
-    replyTo?: number
+    replyTo?: number,
+    randomId?: Long
   ): Promise<string | null> {
     if (!this.connected) throw new Error('Not connected to Telegram');
     try {
@@ -522,6 +613,8 @@ export class TelegramClientWrapper extends EventEmitter {
       } else if (topicId) {
         opts.replyTo = topicId;
       }
+      // DGX-1235 B2: a keyed send fixes its random_id (send-idempotency.ts).
+      if (randomId) opts.randomId = randomId;
       const sent = await this.client.sendText(
         toMtcutePeer(chatId),
         text,
@@ -595,37 +688,106 @@ export class TelegramClientWrapper extends EventEmitter {
       type: TelegramMessage['chatType'];
       unreadCount: number;
     }> = [];
-    for await (const dialog of this.client.iterDialogs({})) {
-      const peer = dialog.peer;
-      result.push({
-        id: peer.id.toString(),
-        name: chatTitleOf(peer) || 'Unknown',
-        type: mapChatType(peer),
-        unreadCount: dialog.unreadCount,
-      });
+    // SC-1500: one unresolvable peer (PEER_ID_INVALID / missing from the input
+    // cache) must not abort the enumeration — telegram-sync's backfill cycle
+    // then imports ZERO chats (get_dialogs 500s) and the conversation autopilot
+    // starves. Skip + log the bad dialog; on a mid-enumeration API error return
+    // what was read so the cycle still processes the good chats (nothing read
+    // at all keeps failing, so the caller retries).
+    try {
+      for await (const dialog of this.client.iterDialogs({})) {
+        try {
+          const peer = dialog.peer;
+          result.push({
+            id: peer.id.toString(),
+            name: chatTitleOf(peer) || 'Unknown',
+            type: mapChatType(peer),
+            unreadCount: dialog.unreadCount,
+          });
+        } catch (e) {
+          this.logger.warn(`getDialogs: skipping unresolvable peer: ${String(e)}`);
+        }
+      }
+    } catch (e) {
+      if (result.length === 0) throw e;
+      this.logger.warn(
+        `getDialogs: enumeration stopped early (${String(e)}); returning ${result.length} dialogs`
+      );
     }
     return result;
   }
 
   /**
-   * Get message history for a chat
+   * Get message history for a chat.
+   *
+   * `offsetId` pages backwards (messages with id < offsetId, newest first);
+   * `afterId` pages forwards (id > afterId, oldest first) and wins when both
+   * are set. `iterHistory` chunks `messages.getHistory` at 100 per API call
+   * and follows its pagination cursor, so `limit` above 100 returns more than
+   * 100 (INFRA-1008). The boundary id itself is dropped on both sides so the
+   * caller can feed any returned id back as the next cursor without overlap.
    */
   async getMessages(
     chatId: string,
     limit: number = 100,
-    offsetId?: number
+    offsetId?: number,
+    afterId?: number
   ): Promise<TelegramMessage[]> {
     if (!this.connected) throw new Error('Not connected to Telegram');
-    const params: { limit: number; offset?: { id: number; date: number } } = { limit };
-    if (offsetId) params.offset = { id: offsetId, date: 0 };
+    const forward = afterId !== undefined && afterId > 0;
+    const params: {
+      limit: number;
+      offset?: { id: number; date: number };
+      reverse?: boolean;
+    } = { limit };
+    if (forward) {
+      params.offset = { id: afterId, date: 0 };
+      params.reverse = true;
+    } else if (offsetId) {
+      params.offset = { id: offsetId, date: 0 };
+    }
 
-    const messages = await this.client.getHistory(toMtcutePeer(chatId), params);
     const out: TelegramMessage[] = [];
-    for (const m of messages) {
-      const p = await this.parseMessage(m);
-      if (p) out.push(p);
+    const readHistory = async (signal: AbortSignal): Promise<void> => {
+      const client = telegramReadClient(
+        this.client.withParams({ abortSignal: signal }),
+        signal
+      );
+      for await (const m of client.iterHistory(toMtcutePeer(chatId), params)) {
+        if (forward && m.id <= (afterId ?? 0)) continue;
+        if (!forward && offsetId && m.id >= offsetId) continue;
+        const p = await this.parseMessage(m);
+        if (p) out.push(p);
+      }
+    };
+    try {
+      await withDownloadDeadline(readHistory, mediaDeadlineMs());
+    } catch (e) {
+      // SC-1500: peer missing from mtcute's input cache (MtPeerNotFoundError,
+      // "Peer <id> is not found in local cache") — resolve it through the API
+      // (getPeer reindexes the cache) and retry once. A peer Telegram itself
+      // rejects (PEER_ID_INVALID) still propagates: the caller skips that chat
+      // and logs it, which is correct.
+      if (!String(e).includes('is not found in local cache')) throw e;
+      this.logger.warn(`getMessages: reindexing input cache for peer ${chatId} via API`);
+      await this.client.getPeer(toMtcutePeer(chatId));
+      out.length = 0;
+      await withDownloadDeadline(readHistory, mediaDeadlineMs());
     }
     return out;
+  }
+
+  async getMessage(chatId: string, messageId: number): Promise<TelegramMessage | null> {
+    if (!this.connected) throw new Error('Not connected to Telegram');
+    return withDownloadDeadline(async signal => {
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
+      const messages = await client.getMessages(toMtcutePeer(chatId), [messageId]);
+      signal.throwIfAborted();
+      if (!messages[0]) return null;
+      const parsed = await this.parseMessage(messages[0]);
+      if (!parsed) throw new Error('Failed to parse existing Telegram message');
+      return parsed;
+    }, mediaDeadlineMs());
   }
 
   /**
@@ -961,11 +1123,9 @@ export class TelegramClientWrapper extends EventEmitter {
     forwardCount: number = 0
   ): Promise<any> {
     if (!this.connected) throw new Error('Not connected');
-    const missing = await this.client.addChatMembers(
-      toMtcutePeer(chatId),
-      members,
-      { forwardCount }
-    );
+    const missing = await this.client.addChatMembers(toMtcutePeer(chatId), members, {
+      forwardCount,
+    });
     return { chatId, membersRequested: members.length, missing };
   }
 
@@ -984,6 +1144,219 @@ export class TelegramClientWrapper extends EventEmitter {
       ...(rank !== undefined ? { rank } : {}),
     });
     return { chatId, userId, rights, rank: rank || null };
+  }
+
+  /**
+   * Ban a member from a group, supergroup or channel (INFRA-746, bot Sauvage).
+   * mtcute 0.29.7 takes an OBJECT {chatId, participantId} (positional args
+   * fail with "Invalid marked peer id: undefined" — measured in the PoC).
+   */
+  async banManagedChatMember(chatId: string, userId: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.banChatMember({
+      chatId: toMtcutePeer(chatId),
+      participantId: toMtcutePeer(userId),
+    });
+    return { chatId, userId, banned: true };
+  }
+
+  /** Lift a ban. Does NOT re-add the member: the add is a separate call. */
+  async unbanManagedChatMember(chatId: string, userId: string): Promise<any> {
+    if (!this.connected) throw new Error('Not connected');
+    await this.client.unbanChatMember({
+      chatId: toMtcutePeer(chatId),
+      participantId: toMtcutePeer(userId),
+    });
+    return { chatId, userId, unbanned: true };
+  }
+
+  /**
+   * Export the primary invite link of a channel/supergroup (fallback when the
+   * add is silently refused by the target's privacy: addChatMembers answers
+   * with `missing`). mtcute's raw `messages.exportChatInvite` needs the REAL
+   * tl peer object (resolvePeer), not a plain serialized one — measured in the
+   * PoC. The old primary link is rotated by Telegram on every export.
+   */
+  async exportManagedChatInvite(chatId: string): Promise<{ chatId: string; link: string }> {
+    if (!this.connected) throw new Error('Not connected');
+    const peer = await this.client.resolvePeer(toMtcutePeer(chatId));
+    if (peer._ !== 'inputPeerChannel') {
+      throw new Error(`exportChatInvite requires a channel or supergroup (peer=${peer._})`);
+    }
+    const invite = await this.client.call({
+      _: 'messages.exportChatInvite',
+      peer,
+    });
+    if (invite._ === 'chatInviteExported') return { chatId, link: invite.link };
+    throw new Error(`exportChatInvite returned ${invite._} (no usable link)`);
+  }
+
+  /**
+   * Member moderation (INFRA-218 / INFRA-344). Every call answers a canonical
+   * ModerationError on failure (moderation.ts), never a raw mtcute error.
+   */
+  private async moderate<T>(action: string, run: () => Promise<T>): Promise<T> {
+    try {
+      if (!this.connected) throw new Error('Not connected');
+      return await run();
+    } catch (e) {
+      throw classifyModerationError(e, action);
+    }
+  }
+
+  /** Basic group (`inputPeerChat`) or supergroup/channel; anything else is no chat. */
+  private async moderationChatKind(chatId: string): Promise<'basic' | 'super'> {
+    const peer = await this.client.resolvePeer(toMtcutePeer(chatId));
+    if (peer._ === 'inputPeerChannel' || peer._ === 'inputPeerChannelFromMessage') return 'super';
+    if (peer._ === 'inputPeerChat') return 'basic';
+    throw new ModerationError('unsupported_chat_type', 'chat_id debe ser un grupo o supergrupo');
+  }
+
+  private async requireSupergroup(action: string, chatId: string): Promise<void> {
+    if ((await this.moderationChatKind(chatId)) !== 'super') {
+      throw new ModerationError(
+        'unsupported_chat_type',
+        `${action} solo existe en supergrupos; este chat es un grupo básico`
+      );
+    }
+  }
+
+  /** Ban a member (until: never when omitted). Supergroups only. */
+  async banChatMember(chatId: string, userId: string, until?: Date): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('ban', async () => {
+      await this.requireSupergroup('ban', chat);
+      await this.client.banChatMember({
+        chatId: toMtcutePeer(chat),
+        participantId: toMtcutePeer(user),
+        ...(until ? { untilDate: until } : {}),
+      });
+      return { chatId: chat, userId: user, action: 'ban', until: until?.toISOString() ?? null };
+    });
+  }
+
+  /** Lift a ban (also lets the user rejoin). Supergroups only. */
+  async unbanChatMember(chatId: string, userId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('unban', async () => {
+      await this.requireSupergroup('unban', chat);
+      await this.client.unbanChatMember({
+        chatId: toMtcutePeer(chat),
+        participantId: toMtcutePeer(user),
+      });
+      return { chatId: chat, userId: user, action: 'unban' };
+    });
+  }
+
+  /**
+   * Remove a member without keeping them out. Supergroup: ban then an immediate
+   * unban (MTProto has no kick without a ban in channels). Basic group:
+   * mtcute's kickChatMember (messages.deleteChatUser).
+   */
+  async kickChatMember(chatId: string, userId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('kick', async () => {
+      const kind = await this.moderationChatKind(chat);
+      if (kind === 'basic') {
+        await this.client.kickChatMember({
+          chatId: toMtcutePeer(chat),
+          userId: toMtcutePeer(user),
+        });
+      } else {
+        await this.client.banChatMember({
+          chatId: toMtcutePeer(chat),
+          participantId: toMtcutePeer(user),
+        });
+        try {
+          await this.client.unbanChatMember({
+            chatId: toMtcutePeer(chat),
+            participantId: toMtcutePeer(user),
+          });
+        } catch (e) {
+          const cause = classifyModerationError(e, 'unban tras el kick');
+          throw new ModerationError(
+            cause.failureClass,
+            `El usuario fue baneado pero el unban posterior falló: sigue baneado (${cause.message})`,
+            cause.code,
+            cause.retryAfterSeconds,
+            cause.missingRight
+          );
+        }
+      }
+      return { chatId: chat, userId: user, action: 'kick' };
+    });
+  }
+
+  /** Restrict a member with one of the closed `restriction` values. Supergroups only. */
+  async restrictChatMember(
+    chatId: string,
+    userId: string,
+    restriction: Restriction,
+    until?: Date
+  ): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('restrict', async () => {
+      await this.requireSupergroup('restrict', chat);
+      await this.client.restrictChatMember({
+        chatId: toMtcutePeer(chat),
+        userId: toMtcutePeer(user),
+        restrictions: RESTRICTIONS[restriction],
+        ...(until ? { until } : {}),
+      });
+      return {
+        chatId: chat,
+        userId: user,
+        action: 'restrict',
+        restriction,
+        until: until?.toISOString() ?? null,
+      };
+    });
+  }
+
+  /** Clear every restriction of a member. Supergroups only. */
+  async unrestrictChatMember(chatId: string, userId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    const user = requireNumericTarget('user_id', userId);
+    return this.moderate('unrestrict', async () => {
+      await this.requireSupergroup('unrestrict', chat);
+      await this.client.unrestrictChatMember({
+        chatId: toMtcutePeer(chat),
+        participantId: toMtcutePeer(user),
+      });
+      return { chatId: chat, userId: user, action: 'unrestrict' };
+    });
+  }
+
+  /** This account's own rights in a chat, read from its real participant record. */
+  async getOwnChatAdminRights(chatId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    return this.moderate('get_admin_rights', async () => {
+      const member = await this.client.getChatMember({
+        chatId: toMtcutePeer(chat),
+        userId: 'me',
+      });
+      if (!member) {
+        throw new ModerationError(
+          'user_not_participant',
+          'Esta cuenta no es miembro del chat',
+          'USER_NOT_PARTICIPANT'
+        );
+      }
+      const raw = (member.permissions ?? {}) as Record<string, unknown>;
+      const rights: Record<string, boolean> = {};
+      for (const name of ADMIN_RIGHT_NAMES) rights[name] = raw[name] === true;
+      return {
+        chatId: chat,
+        is_admin: member.status === 'admin' || member.status === 'creator',
+        is_creator: member.status === 'creator',
+        status: member.status,
+        rights,
+      };
+    });
   }
 
   /**
@@ -1214,7 +1587,11 @@ export class TelegramClientWrapper extends EventEmitter {
           const userId: number | undefined = peerObj?.id ?? peerObj?.userId;
           if (typeof userId !== 'number') continue;
           const displayName: string | null =
-            peerObj?.displayName || peerObj?.firstName || peerObj?.username || peerObj?.title || null;
+            peerObj?.displayName ||
+            peerObj?.firstName ||
+            peerObj?.username ||
+            peerObj?.title ||
+            null;
           out.push({ emoji, userId, displayName, mine: meId !== null && userId === meId });
         }
         offset = result?.next;
@@ -1235,13 +1612,17 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async downloadMedia(chatId: string, messageId: number): Promise<Buffer | null> {
     if (!this.connected) throw new Error('Not connected');
-    const messages = await this.client.getMessages(toMtcutePeer(chatId), [messageId]);
-    const msg = messages[0];
-    if (!msg || !msg.media) return null;
-    const media: any = msg.media;
-    if (typeof media.fileId !== 'string') return null;
-    const u8 = await this.client.downloadAsBuffer(media.fileId);
-    return Buffer.from(u8);
+    return withDownloadDeadline(async signal => {
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
+      const messages = await client.getMessages(toMtcutePeer(chatId), [messageId]);
+      signal.throwIfAborted();
+      const msg = messages[0];
+      if (!msg || !msg.media) return null;
+      const media: any = msg.media;
+      if (typeof media.fileId !== 'string') return null;
+      const u8 = await client.downloadAsBuffer(media.fileId, { abortSignal: signal });
+      return Buffer.from(u8);
+    }, mediaDeadlineMs());
   }
 
   /**
@@ -1250,27 +1631,31 @@ export class TelegramClientWrapper extends EventEmitter {
    */
   async downloadPeerPhoto(peerId: string): Promise<Buffer | null> {
     if (!this.connected) throw new Error('Not connected');
-    let peer: any;
-    try {
-      peer = await this.client.getPeer(toMtcutePeer(peerId));
-    } catch (e) {
-      return null;
-    }
-    const photo: any = peer.photo;
-    if (!photo) return null;
-    // mtcute exposes a downloadable file id under photo.big (full) or photo.small (thumb).
-    // Different mtcute builds use slightly different shapes — try a few.
-    const candidates: any[] = [photo.big, photo.small, photo, photo.fileId];
-    for (const c of candidates) {
-      if (!c) continue;
-      try {
-        const u8 = await this.client.downloadAsBuffer(c);
-        if (u8 && u8.length > 0) return Buffer.from(u8);
-      } catch (e) {
-        // try next candidate
+    return withDownloadDeadline(async signal => {
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
+      const peer: any = await client.getPeer(toMtcutePeer(peerId));
+      signal.throwIfAborted();
+      const photo: any = peer.photo;
+      if (!photo) return null;
+      // All candidate shapes share the operation's deadline.
+      const candidates: any[] = [photo.big, photo.small, photo, photo.fileId];
+      let shapeError: unknown;
+      for (const c of candidates) {
+        if (!c) continue;
+        signal.throwIfAborted();
+        try {
+          const u8 = await client.downloadAsBuffer(c, { abortSignal: signal });
+          if (u8 && u8.length > 0) return Buffer.from(u8);
+        } catch (e) {
+          signal.throwIfAborted();
+          // Unsupported shapes can still fall back to the next candidate.
+          if (!(e instanceof MtArgumentError) && !(e instanceof MtUnsupportedError)) throw e;
+          shapeError = e;
+        }
       }
-    }
-    return null;
+      if (shapeError) throw shapeError;
+      return null;
+    });
   }
 
   /**
@@ -1365,11 +1750,7 @@ export class TelegramClientWrapper extends EventEmitter {
     const effectiveReplyTo = options?.replyTo ?? options?.threadId;
     const sendParams: CommonSendParams | undefined =
       effectiveReplyTo !== undefined ? { replyTo: effectiveReplyTo } : undefined;
-    const messages = await this.client.sendMediaGroup(
-      toMtcutePeer(chatId),
-      medias,
-      sendParams
-    );
+    const messages = await this.client.sendMediaGroup(toMtcutePeer(chatId), medias, sendParams);
     return messages.map(message => message.id);
   }
 

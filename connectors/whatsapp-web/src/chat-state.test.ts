@@ -1,3 +1,4 @@
+import { durableMessageFixture } from './test-support/durable-fixture';
 /**
  * Chat state (fase 3 / PR-5): archive / pin / mute / read-unread through
  * POST /chats/modify, what it writes on the canonical conversation, what the
@@ -15,19 +16,13 @@ import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
-import pg from 'pg';
 import {
   BaileysClient,
   BaileysClientOptions,
   buildChatModification,
   normalizeChatModifyAction,
 } from './baileys-client';
-import {
-  MessageUnavailableError,
-  resetDurableStoreStateForTests,
-  serializeDurableValue,
-  toDurablePayload,
-} from './durable-message-store';
+import { MessageUnavailableError, resetDurableStoreStateForTests } from './durable-message-store';
 import { MessageMutationError } from './message-mutations';
 import {
   muteEndTimestamp,
@@ -37,39 +32,7 @@ import {
 } from './chat-state';
 import { createRouter } from './api/controller';
 import { generateHMACSignature } from './api/auth';
-
-interface QueryCall {
-  sql: string;
-  params: unknown[];
-}
-
-type Rows = Record<string, unknown>[];
-
-/** Stub pg.Pool#query; `route` returns rows or throws (an error with `code`). */
-function stubPool(route: (sql: string, params: unknown[]) => Rows = () => []): {
-  calls: QueryCall[];
-  restore: () => void;
-} {
-  const calls: QueryCall[] = [];
-  const original = pg.Pool.prototype.query;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (pg.Pool.prototype as any).query = function (sql: string, params: unknown[] = []) {
-    calls.push({ sql, params });
-    try {
-      const rows = route(sql, params);
-      return Promise.resolve({ rows, rowCount: rows.length });
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  };
-  return {
-    calls,
-    restore: () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (pg.Pool.prototype as any).query = original;
-    },
-  };
-}
+import { stubPool, type QueryCall, type Rows } from './test-support/pool-stub';
 
 function useAccount(account: string): void {
   process.env.CONNECTOR_ACCOUNT = account;
@@ -249,7 +212,10 @@ test('pin / mute of Baileys chat objects: sync actions vs snapshots', () => {
   assert.equal(pinFromBaileys({ pinned: null }), null);
   assert.equal(pinFromBaileys({ pinned: 0 }), null);
   assert.equal(pinFromBaileys({ pinned: 1727510400 })?.toISOString(), '2024-09-28T08:00:00.000Z');
-  assert.equal(pinFromBaileys({ pinned: 1727510400000 })?.toISOString(), '2024-09-28T08:00:00.000Z');
+  assert.equal(
+    pinFromBaileys({ pinned: 1727510400000 })?.toISOString(),
+    '2024-09-28T08:00:00.000Z'
+  );
   assert.equal(pinFromBaileys({ pinned: -1 }), undefined);
 
   assert.equal(muteFromBaileys({ id: 'x' }, 'sync-action'), undefined);
@@ -324,19 +290,11 @@ test('the durable payload key wins (group message of a contact keeps its partici
       if (isStoredSelect(sql)) return [];
       if (isPayloadSelect(sql) && params[0] === 'G1')
         return [
-          {
-            message_key: JSON.parse(
-              serializeDurableValue({
-                remoteJid: '120363000@g.us',
-                id: 'G1',
-                fromMe: false,
-                participant: '4455@lid',
-              })
-            ),
-            message_payload: JSON.parse(serializeDurableValue(toDurablePayload({ conversation: 'x' }))),
-            wa_timestamp: new Date(1_700_000_500_000),
-            push_name: null,
-          },
+          durableMessageFixture(
+            { remoteJid: '120363000@g.us', id: 'G1', fromMe: false, participant: '4455@lid' },
+            { conversation: 'x' },
+            new Date(1_700_000_500_000)
+          ),
         ];
       return undefined;
     })
@@ -373,7 +331,12 @@ test('each action writes its own columns on the canonical row', async () => {
   }> = [
     { action: 'unarchive', sets: [/archived = \$3/], params: [false], mod: { archive: false } },
     { action: 'pin', sets: [/pinned_at = \$3::timestamptz/], params: ['date'], mod: { pin: true } },
-    { action: 'unpin', sets: [/pinned_at = \$3::timestamptz/], params: [null], mod: { pin: false } },
+    {
+      action: 'unpin',
+      sets: [/pinned_at = \$3::timestamptz/],
+      params: [null],
+      mod: { pin: false },
+    },
     {
       action: 'mute',
       mute: { until },
@@ -446,7 +409,9 @@ test('markRead sends the read receipts, then the app-state mark, and clears the 
   try {
     const { client, calls: sock } = makeClient();
     await client.modifyChat('34600@c.us', 'markRead');
-    assert.deepEqual(sock.read, [[{ id: 'LAST1', remoteJid: '111@lid', fromMe: false, participant: undefined }]]);
+    assert.deepEqual(sock.read, [
+      [{ id: 'LAST1', remoteJid: '111@lid', fromMe: false, participant: undefined }],
+    ]);
     assert.equal(sock.modified[0].mod.markRead, true);
     const [write] = chatStateWrites(calls);
     assert.match(write.sql, /unread_count = 0, unread_mentions = 0/);
@@ -491,12 +456,14 @@ test('an unknown conversation is 404 conversation_unavailable; archive without a
     const { client, calls: sock } = makeClient();
     await assert.rejects(
       client.modifyChat('34600@c.us', 'pin'),
-      (e: unknown) => e instanceof MessageMutationError && e.failureClass === 'conversation_unavailable'
+      (e: unknown) =>
+        e instanceof MessageMutationError && e.failureClass === 'conversation_unavailable'
     );
     known = true;
     await assert.rejects(
       client.modifyChat('34600@c.us', 'archive'),
-      (e: unknown) => e instanceof MessageUnavailableError && e.failureClass === 'message_unavailable'
+      (e: unknown) =>
+        e instanceof MessageUnavailableError && e.failureClass === 'message_unavailable'
     );
     assert.equal(sock.modified.length, 0);
     assert.equal(chatStateWrites(calls).length, 0);
@@ -514,7 +481,9 @@ test('a WhatsApp refusal of the patch is 422 rejected_by_whatsapp and writes not
     await assert.rejects(
       client.modifyChat('34600@c.us', 'pin'),
       (e: unknown) =>
-        e instanceof MessageMutationError && e.failureClass === 'rejected_by_whatsapp' && e.code === '409'
+        e instanceof MessageMutationError &&
+        e.failureClass === 'rejected_by_whatsapp' &&
+        e.code === '409'
     );
     assert.equal(chatStateWrites(calls).length, 0);
   } finally {
@@ -613,14 +582,17 @@ test('chats.update from the phone: pin / mute on the canonical row, marked-unrea
     assert.deepEqual(writes[0].params.slice(2), [new Date(1727510400000)]);
     assert.deepEqual(writes[1].params.slice(2), [true, null]); // muted, forever
     assert.deepEqual(writes[2].params.slice(2), [false, null]); // unmuted
-    // archived / unread stay on setConversationState (the /chats/resync-state path).
+    // archived / unread go through setConversationState, on the canonical row like the pin
+    // above: 34600@c.us is a tombstone, its state would never be listed.
     const legacy = legacyStateWrites(calls);
     assert.equal(legacy.length, 2);
-    assert.match(legacy[0].sql, /unread_count = GREATEST\(unread_count, 1\)/);
+    assert.match(legacy[0].sql, /WHEN id = \$1 THEN CASE WHEN \$2 < 0 THEN GREATEST\(unread_count, 1\) ELSE \$2 END/);
+    assert.equal(legacy[0].params[0], 'professional:111@lid');
     // An archive-only delta of a chat not cached here leaves the badge alone.
-    assert.doesNotMatch(legacy[1].sql, /unread_count/);
-    assert.deepEqual(legacy[1].params, ['professional:34600@c.us', true]);
-    assert.match(legacy[1].sql, /^UPDATE conversations SET archived = \$2, updated_at = now\(\) WHERE id = \$1$/);
+    assert.match(legacy[1].sql, /WHEN \$2::integer IS NULL THEN unread_count/);
+    assert.deepEqual(legacy[1].params, ['professional:111@lid', null, true, 'professional', []]);
+    assert.match(legacy[1].sql, /WHERE account = \$4 AND \(id = \$1 OR id = ANY/);
+
   } finally {
     restore();
   }
@@ -629,7 +601,9 @@ test('chats.update from the phone: pin / mute on the canonical row, marked-unrea
 test('history / chats.upsert snapshots record only the pins and mutes they carry', async () => {
   useAccount('personal');
   const { calls, restore } = stubPool(
-    canonicalDb(sql => (isResolve(sql) ? [{ id: '34600@c.us', external_id: '34600@c.us' }] : undefined))
+    canonicalDb(sql =>
+      isResolve(sql) ? [{ id: '34600@c.us', external_id: '34600@c.us' }] : undefined
+    )
   );
   try {
     const { client, handlers } = makeClient();
@@ -652,6 +626,120 @@ test('history / chats.upsert snapshots record only the pins and mutes they carry
   } finally {
     restore();
   }
+});
+
+test('chats.upsert archive / unread: canonical row; a chat with no conversation writes nothing', async () => {
+  useAccount('professional');
+  const known = stubPool(canonicalDb());
+  try {
+    const { client, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['chats.upsert']([
+      { id: '34600@s.whatsapp.net', archived: true, unreadCount: 2 },
+    ]);
+    await settle();
+    const writes = legacyStateWrites(known.calls);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].params, ['professional:111@lid', 2, true, 'professional', []]);
+  } finally {
+    known.restore();
+  }
+  // No conversation for this chat in the account yet: nothing to write, not even on its own id
+  // (which could be a tombstone the resolution missed).
+  const unknown = stubPool();
+  try {
+    const { client, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['chats.upsert']([{ id: '34611@s.whatsapp.net', archived: true }]);
+    await settle();
+    assert.deepEqual(legacyStateWrites(unknown.calls), []);
+  } finally {
+    unknown.restore();
+  }
+});
+
+test('one chat event resolves the canonical conversation once and writes archive, unread, pin and mute there', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool(canonicalDb());
+  try {
+    const { client, handlers } = makeClient();
+    priv(client).bindSocketEvents(async () => {});
+    await handlers['chats.update']([
+      {
+        id: '34600@s.whatsapp.net',
+        archived: true,
+        unreadCount: 3,
+        pinned: 1727510400000,
+        muteEndTime: 0,
+      },
+    ]);
+    await settle();
+    assert.equal(calls.filter(c => isResolve(c.sql)).length, 1);
+    const [legacy] = legacyStateWrites(calls);
+    assert.deepEqual(legacy.params, ['professional:111@lid', 3, true, 'professional', []]);
+    const [write] = chatStateWrites(calls);
+    assert.equal(write.params[0], 'professional:111@lid');
+    assert.match(write.sql, /pinned_at = \$3::timestamptz, muted = \$4, mute_until = \$5/);
+  } finally {
+    restore();
+  }
+});
+
+test('markAsRead clears the badge on the canonical conversation, never on the jid’s own tombstone', async () => {
+  useAccount('professional');
+  const unreadKey = (sql: string): Rows | undefined =>
+    /WITH conv AS/.test(sql)
+      ? [{ wa_message_id: 'professional:LAST1', remote_jid: '111@lid', from_me: false, participant_jid: null }]
+      : undefined;
+  const known = stubPool(canonicalDb(unreadKey));
+  try {
+    const { client, calls: sock } = makeClient();
+    await client.markAsRead('34600@c.us');
+    assert.equal(sock.read.length, 1);
+    const writes = legacyStateWrites(known.calls);
+    assert.equal(writes.length, 1);
+    assert.match(writes[0].sql, /WHEN id = \$1 THEN CASE WHEN \$2 < 0 THEN GREATEST\(unread_count, 1\) ELSE \$2 END/);
+    assert.deepEqual(writes[0].params, ['professional:111@lid', 0, null, 'professional', []]);
+    assert.equal(known.calls.filter(c => isResolve(c.sql)).length, 1);
+  } finally {
+    known.restore();
+  }
+  // A chat the account has no conversation for: receipts go out, no row is touched.
+  const unknown = stubPool(sql => unreadKey(sql) ?? []);
+  try {
+    const { client, calls: sock } = makeClient();
+    await client.markAsRead('34611@c.us');
+    assert.equal(sock.read.length, 1);
+    assert.deepEqual(legacyStateWrites(unknown.calls), []);
+  } finally {
+    unknown.restore();
+  }
+});
+
+test('archive / unread of one account never reach the row of the other (same jid, shared DB)', async () => {
+  // Both accounts hold a conversation for the same chat; each resolves only its own.
+  const sharedDb = (sql: string, params: unknown[]): Rows => {
+    if (!isResolve(sql)) return [];
+    const account = String(params[0]).replace(/^whatsapp:/, '');
+    const id = account === 'personal' ? '111@lid' : `${account}:111@lid`;
+    return [{ id, external_id: '111@lid' }];
+  };
+  const written: Record<string, unknown[]> = {};
+  for (const account of ['personal', 'professional']) {
+    useAccount(account);
+    const { calls, restore } = stubPool(sharedDb);
+    try {
+      const { client, handlers } = makeClient();
+      priv(client).bindSocketEvents(async () => {});
+      await handlers['chats.update']([{ id: '34600@s.whatsapp.net', archived: true }]);
+      await settle();
+      written[account] = legacyStateWrites(calls).map(c => c.params[0]);
+      assert.ok(calls.filter(c => isResolve(c.sql)).every(c => c.params[0] === `whatsapp:${account}`));
+    } finally {
+      restore();
+    }
+  }
+  assert.deepEqual(written, { personal: ['111@lid'], professional: ['professional:111@lid'] });
 });
 
 test('ingest off binds no chat handlers at all', () => {
@@ -716,7 +804,11 @@ function recordingClient(): { client: Partial<BaileysClient>; seen: unknown[] } 
   const client = {
     isConnected: () => true,
     getCachedState: () => 'CONNECTED',
-    modifyChat: async (chatId: string, action: string, request?: { mute?: unknown; actor?: string }) => {
+    modifyChat: async (
+      chatId: string,
+      action: string,
+      request?: { mute?: unknown; actor?: string }
+    ) => {
       seen.push({ chatId, action, ...request });
       return {
         action,
@@ -742,7 +834,10 @@ test('HTTP: the sending gate blocks every chat action before WhatsApp', async ()
       for (const action of ['archive', 'pin', 'mute', 'markRead', 'markUnread']) {
         const res = await call('POST', '/chats/modify', { conversationId: '34600@c.us', action });
         assert.equal(res.status, 403);
-        assert.equal(((await res.json()) as { failureClass: string }).failureClass, 'disabled_sending');
+        assert.equal(
+          ((await res.json()) as { failureClass: string }).failureClass,
+          'disabled_sending'
+        );
       }
     });
   }
@@ -767,13 +862,21 @@ test('HTTP: 200 shape, mute parameters and the actor', async () => {
       state: { archived: true, unreadCount: 0, pinnedAt: null, muted: false, muteUntil: null },
     });
     const before = Date.now();
-    await call('POST', '/chats/modify', { chatId: '34600@c.us', action: 'mute', durationMs: 3_600_000 });
+    await call('POST', '/chats/modify', {
+      chatId: '34600@c.us',
+      action: 'mute',
+      durationMs: 3_600_000,
+    });
     const after = Date.now();
     await call('POST', '/chats/modify', { chatId: '34600@c.us', action: 'mute' });
     const until = new Date(Date.now() + 86_400_000).toISOString();
     await call('POST', '/chats/modify', { chatId: '34600@c.us', action: 'mute', muteUntil: until });
     // Mute parameters are ignored by the other actions.
-    await call('POST', '/chats/modify', { chatId: '34600@c.us', action: 'mark-unread', durationMs: 5 });
+    await call('POST', '/chats/modify', {
+      chatId: '34600@c.us',
+      action: 'mark-unread',
+      durationMs: 5,
+    });
     const timed = (seen[1] as { mute: { until: Date } }).mute.until.getTime();
     assert.ok(timed >= before + 3_600_000 && timed <= after + 3_600_000);
     assert.deepEqual((seen[2] as { mute: unknown }).mute, { until: null });
@@ -810,7 +913,10 @@ test('HTTP: 400 on bad input, 503 when disconnected, errors mapped with failureC
     const bad = async (body: unknown): Promise<void> => {
       const res = await call('POST', '/chats/modify', body);
       assert.equal(res.status, 400, JSON.stringify(body));
-      assert.equal(((await res.json()) as { failureClass: string }).failureClass, 'invalid_request');
+      assert.equal(
+        ((await res.json()) as { failureClass: string }).failureClass,
+        'invalid_request'
+      );
     };
     await bad({ action: 'archive' });
     await bad({ conversationId: '34600@c.us' });
@@ -820,19 +926,39 @@ test('HTTP: 400 on bad input, 503 when disconnected, errors mapped with failureC
     await bad({ conversationId: '34600@c.us', action: 'mute', durationMs: 'x' });
     await bad({ conversationId: '34600@c.us', action: 'mute', muteUntil: '2001-01-01T00:00:00Z' });
     await bad({ conversationId: '34600@c.us', action: 'mute', muteUntil: '2099-01-01T00:00:00Z' });
-    await bad({ conversationId: '34600@c.us', action: 'mute', durationMs: 60_000, muteUntil: Date.now() + 60_000 });
+    await bad({
+      conversationId: '34600@c.us',
+      action: 'mute',
+      durationMs: 60_000,
+      muteUntil: Date.now() + 60_000,
+    });
 
     failure = new MessageMutationError('who?', 404, 'conversation_unavailable');
-    const unknown = await call('POST', '/chats/modify', { conversationId: 'x@c.us', action: 'pin' });
+    const unknown = await call('POST', '/chats/modify', {
+      conversationId: 'x@c.us',
+      action: 'pin',
+    });
     assert.equal(unknown.status, 404);
-    assert.equal(((await unknown.json()) as { failureClass: string }).failureClass, 'conversation_unavailable');
+    assert.equal(
+      ((await unknown.json()) as { failureClass: string }).failureClass,
+      'conversation_unavailable'
+    );
 
     failure = new MessageUnavailableError('no key', 404, 'message_unavailable');
-    const noKey = await call('POST', '/chats/modify', { conversationId: 'x@c.us', action: 'archive' });
-    assert.equal(((await noKey.json()) as { failureClass: string }).failureClass, 'message_unavailable');
+    const noKey = await call('POST', '/chats/modify', {
+      conversationId: 'x@c.us',
+      action: 'archive',
+    });
+    assert.equal(
+      ((await noKey.json()) as { failureClass: string }).failureClass,
+      'message_unavailable'
+    );
 
     failure = new MessageMutationError('nope', 422, 'rejected_by_whatsapp', '409');
-    const rejected = await call('POST', '/chats/modify', { conversationId: 'x@c.us', action: 'pin' });
+    const rejected = await call('POST', '/chats/modify', {
+      conversationId: 'x@c.us',
+      action: 'pin',
+    });
     assert.equal(rejected.status, 422);
     assert.deepEqual(await rejected.json(), {
       error: 'nope',
@@ -841,7 +967,10 @@ test('HTTP: 400 on bad input, 503 when disconnected, errors mapped with failureC
     });
 
     connected = false;
-    const offline = await call('POST', '/chats/modify', { conversationId: 'x@c.us', action: 'pin' });
+    const offline = await call('POST', '/chats/modify', {
+      conversationId: 'x@c.us',
+      action: 'pin',
+    });
     assert.equal(offline.status, 503);
     assert.equal(((await offline.json()) as { failureClass: string }).failureClass, 'disconnected');
   });

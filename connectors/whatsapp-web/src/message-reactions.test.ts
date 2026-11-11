@@ -325,6 +325,148 @@ test('an inbound reaction is still ingested as a REACTION message AND recorded',
   }
 });
 
+test('a REACTION stores no whatsapp_message_keys row (its messages row never exists); a text does', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool();
+  const warn = console.warn;
+  const warnings: unknown[] = [];
+  try {
+    const { client } = makeClient();
+    priv(client).logger = { ...priv(client).logger, warn: (m: unknown) => warnings.push(m) };
+    await priv(client).ingestMessage(
+      reaction({ id: 'R1', target: 'T1', emoji: '👍', fromMe: false }),
+      { source: 'live', publishEvent: false }
+    );
+    const keyInserts = () => calls.filter(c => /INSERT INTO whatsapp_message_keys/i.test(c.sql));
+    assert.equal(keyInserts().length, 0);
+    assert.equal(reactionInserts(calls).length, 1, 'the reaction itself is still recorded');
+    await priv(client).ingestMessage(
+      {
+        key: { remoteJid: '34600@s.whatsapp.net', id: 'TXT1', fromMe: false },
+        message: { conversation: 'hola' },
+        messageTimestamp: 1_790_000_000,
+      },
+      { source: 'live', publishEvent: false }
+    );
+    assert.equal(keyInserts().length, 1);
+    assert.equal(keyInserts()[0].params[0], 'professional:TXT1');
+    assert.deepEqual(warnings, []);
+  } finally {
+    console.warn = warn;
+    restore();
+  }
+});
+
+/** A history-sync message carrying its current reactions (WebMessageInfo.reactions). */
+function withReactions(
+  target: { id: string; remoteJid: string; participant?: string },
+  reactions: Array<{
+    id?: string;
+    fromMe?: boolean;
+    participant?: string;
+    text: string;
+    ms: number;
+  }>
+): WAMessage {
+  return {
+    key: {
+      remoteJid: target.remoteJid,
+      id: target.id,
+      fromMe: false,
+      participant: target.participant,
+    },
+    message: { conversation: 'la cena' },
+    messageTimestamp: 1_780_000_000,
+    reactions: reactions.map(r => ({
+      key: {
+        remoteJid: target.remoteJid,
+        id: r.id,
+        fromMe: r.fromMe ?? false,
+        ...(r.participant ? { participant: r.participant } : {}),
+      },
+      text: r.text,
+      senderTimestampMs: r.ms,
+    })),
+  } as unknown as WAMessage;
+}
+
+test('history sync: reactions carried on a 1:1 message land like live ones (ours and theirs)', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool();
+  try {
+    const { client } = makeClient();
+    await priv(client).ingestMessage(
+      withReactions({ id: 'H1', remoteJid: '34600@s.whatsapp.net' }, [
+        { id: 'RX1', fromMe: false, text: '❤️', ms: 1_780_000_100_000 },
+        { id: 'RX2', fromMe: true, text: '👍', ms: 1_780_000_200_000 },
+      ]),
+      { source: 'baileys_history_sync', publishEvent: false }
+    );
+    const rows = reactionInserts(calls);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows[0].params, [
+      'professional',
+      'professional:H1',
+      'professional:34600@c.us',
+      'professional:34600@c.us',
+      'professional:RX1',
+      '❤️',
+      false,
+      false,
+      new Date(1_780_000_100_000),
+    ]);
+    assert.equal(rows[1].params[2], 'professional:34999@c.us', 'ours: our own jid');
+    assert.equal(rows[1].params[7], true);
+    // The same guard as live reactions: an older reacted_at never overwrites a newer one.
+    assert.match(rows[0].sql, /EXCLUDED\.reacted_at >= whatsapp_message_reactions\.reacted_at/);
+  } finally {
+    restore();
+  }
+});
+
+test('history sync in a group: the participant reacts; no participant → skipped; empty = removal', async () => {
+  useAccount('personal');
+  const { calls, restore } = stubPool();
+  try {
+    const { client } = makeClient();
+    await priv(client).ingestMessage(
+      withReactions({ id: 'G9', remoteJid: '120363000@g.us', participant: '111@lid' }, [
+        { id: 'GR1', participant: '4455@lid', text: '😂', ms: 1_780_000_300_000 },
+        { id: 'GR2', text: '🔥', ms: 1_780_000_400_000 },
+        { id: 'GR3', participant: '34611111111@s.whatsapp.net', text: '', ms: 1_780_000_500_000 },
+      ]),
+      { source: 'baileys_history_sync', publishEvent: false }
+    );
+    const rows = reactionInserts(calls);
+    assert.deepEqual(
+      rows.map(r => [r.params[1], r.params[2], r.params[3], r.params[5], r.params[6]]),
+      [
+        ['G9', '4455@lid', '120363000@g.us', '😂', false],
+        ['G9', '34611111111@c.us', '120363000@g.us', null, true],
+      ]
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('history sync with ingest off: carried reactions are never written', async () => {
+  useAccount('personal');
+  const { calls, restore } = stubPool();
+  try {
+    const { client } = makeClient({ ingest: false });
+    await priv(client).persistCarriedReactions(
+      withReactions({ id: 'H2', remoteJid: '34600@s.whatsapp.net' }, [
+        { id: 'RX9', text: '❤️', ms: 1_780_000_100_000 },
+      ]),
+      { waMessageId: 'H2', conversationId: '34600@c.us' }
+    );
+    assert.equal(calls.length, 0);
+  } finally {
+    restore();
+  }
+});
+
 test('a reaction from our phone is ours; a removal from a group LID participant is a removal', async () => {
   useAccount('personal');
   const { calls, restore } = stubPool();

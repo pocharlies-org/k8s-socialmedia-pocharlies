@@ -1,0 +1,44 @@
+/* Cajón "Nuevo chat": panel lateral izquierdo como el del cliente oficial. */
+.contact-directory-overlay { position: fixed; inset: 0; z-index: 46; display: flex; background: rgb(11 20 18 / .42); }
+.contact-directory-overlay[hidden] { display: none; }
+.contact-directory-panel { display: flex; flex-direction: column; overflow: hidden; width: min(392px, 100vw); height: 100%; background: var(--surface); color: var(--text); box-shadow: 14px 0 44px rgb(0 0 0 / .34); }
+.contact-directory-header { flex: none; padding: 12px 14px 8px; background: var(--surface-raised); }
+.contact-directory-heading-row { display: flex; align-items: center; gap: 10px; }
+.contact-directory-title { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+.contact-directory-close { display: grid; flex: none; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: transparent; color: var(--muted-strong); font-size: 20px; line-height: 1; }
+.contact-directory-close:hover { background: var(--surface); color: var(--text); }
+.contact-directory-search { position: relative; display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 0 10px; height: 40px; border-radius: 20px; background: var(--surface); }
+.contact-directory-search-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.contact-directory-search input { width: 100%; height: 100%; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; outline: 0; }
+.contact-directory-search input::placeholder { color: var(--muted); }
+.contact-directory-actions { flex: none; padding: 8px 0 6px; border-bottom: 1px solid var(--line); }
+.contact-directory-action { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 48px; padding: 0 16px; background: transparent; color: var(--text); font: inherit; font-size: 14.5px; text-align: left; }
+.contact-directory-action:hover { background: var(--surface-raised); }
+.contact-directory-action-icon { display: grid; flex: none; width: 22px; height: 22px; place-items: center; border: 1.6px solid var(--accent-strong); border-radius: 50%; color: var(--accent-strong); }
+.contact-directory-action-icon::before { content: "+"; font-size: 14px; line-height: 1; }
+.contact-directory-status { flex: none; margin: 0; padding: 10px 16px 2px; color: var(--muted); font-size: 12.5px; }
+.contact-directory-status[data-kind="error"] { color: var(--danger); }
+.contact-directory-retry { display: block; flex: none; align-self: flex-start; margin: 2px 16px 4px; min-height: 30px; padding: 0 12px; border-radius: 8px; background: var(--surface-raised); color: var(--danger); font-size: 12.5px; font-weight: 600; }
+.contact-directory-retry[hidden] { display: none; }
+.contact-directory-notices { flex: none; margin: 6px 16px 4px; padding: 8px 10px 8px 26px; border-radius: 8px; background: var(--surface-raised); color: var(--muted-strong); font-size: 12px; }
+.contact-directory-notices[hidden] { display: none; }
+.contact-directory-notices li + li { margin-top: 4px; }
+.contact-directory-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 0 12px; scrollbar-color: var(--surface-raised) transparent; }
+.contact-directory-entry { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 16px; background: transparent; color: var(--text); text-align: left; }
+.contact-directory-entry:hover:not(:disabled) { background: var(--surface-raised); }
+.contact-directory-entry:disabled { color: var(--muted-strong); cursor: default; }
+.contact-directory-entry.is-busy { opacity: .6; }
+.contact-directory-avatar { position: relative; display: grid; flex: none; width: 40px; height: 40px; place-items: center; overflow: hidden; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised)); color: var(--muted-strong); }
+.contact-directory-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.contact-directory-initial { font-size: 15px; font-weight: 600; }
+.contact-directory-copy { display: grid; min-width: 0; gap: 2px; }
+.contact-directory-copy strong { overflow: hidden; font-size: 14.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.contact-directory-detail { overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.contact-directory-empty { margin: 12px 16px; color: var(--muted); font-size: 13px; }
+.contact-directory-more { display: block; flex: none; margin: 0 16px 14px; min-height: 38px; border-radius: 10px; background: var(--surface-raised); color: var(--accent-strong); font-size: 13px; font-weight: 600; }
+.contact-directory-more[hidden] { display: none; }
+.contact-directory-more:disabled { opacity: .55; cursor: default; }
+body[data-theme="light"] .contact-directory-panel { box-shadow: 14px 0 44px rgb(11 20 18 / .18); }
+@media (max-width: 720px) {
+  .contact-directory-panel { width: 100vw; }
+}

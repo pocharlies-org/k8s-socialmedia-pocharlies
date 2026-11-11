@@ -331,9 +331,9 @@ describe('Socialmedia canonical v2 adapter', () => {
       expect(data.accounts[0].status.status).toBe('ok');
     });
 
-    test('handleMessagingStatus forwards actor headers only to the instagram connector', async () => {
+    test('handleMessagingStatus authenticates provider probes and forwards actor headers to Instagram', async () => {
       const server = createServer();
-      const fetchMock = jest.fn(async () => ({ json: async () => ({ status: 'ok' }) }));
+      const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ status: 'ok' }) }));
       const original = global.fetch;
       global.fetch = fetchMock as any;
       try {
@@ -343,7 +343,7 @@ describe('Socialmedia canonical v2 adapter', () => {
         expect(ig).toBeDefined();
         expect(ig![1]).toHaveProperty('headers');
         for (const [url, init] of calls) {
-          if (!url.includes('instagram')) expect(init.headers).toBeUndefined();
+          expect(init.headers.Authorization).toBeTruthy();
         }
       } finally {
         global.fetch = original;

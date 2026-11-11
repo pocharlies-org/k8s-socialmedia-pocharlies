@@ -7,9 +7,9 @@ import {
 
 describe('SC-552 request actor context', () => {
   test('extracts sub and name from gateway headers', () => {
-    expect(
-      actorFromHeaders({ 'x-user-sub': 'keycloak-sub-1', 'x-user-name': ' Daniel ' })
-    ).toEqual({ sub: 'keycloak-sub-1', name: 'Daniel' });
+    expect(actorFromHeaders({ 'x-user-sub': 'keycloak-sub-1', 'x-user-name': ' Daniel ' })).toEqual(
+      { sub: 'keycloak-sub-1', name: 'Daniel' }
+    );
   });
 
   test('missing or blank headers → empty actor', () => {

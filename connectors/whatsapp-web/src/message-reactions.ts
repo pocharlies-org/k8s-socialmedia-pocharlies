@@ -1,3 +1,5 @@
+import { MissingTableBackoff } from './missing-table-backoff';
+import { describeError } from './error-text';
 /**
  * WhatsApp message reactions (fase 3 / PR-4, ported from the NAS fork's
  * storeMessageReaction and adapted to the multiaccount model) — the DB side.
@@ -51,41 +53,16 @@ export interface MessageReactionInput {
   reactedAt?: Date;
 }
 
-let tableMissingUntil = 0;
-let missingTableLogged = false;
+const tableBackoff = new MissingTableBackoff(
+  MISSING_TABLE_RECHECK_MS,
+  'whatsapp_message_reactions does not exist yet (mcp-server migration 011 not applied): ' +
+    'reactions only reach messages.reactions, as before',
+  'whatsapp_message_reactions is available: reactions are recorded'
+);
 
 /** Test hook: forget the "table missing" state between cases. */
 export function resetReactionStoreStateForTests(): void {
-  tableMissingUntil = 0;
-  missingTableLogged = false;
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/** true → skip the DB entirely (table known missing, re-probe not due yet). */
-function tableKnownMissing(): boolean {
-  return tableMissingUntil > Date.now();
-}
-
-function noteTableMissing(): void {
-  tableMissingUntil = Date.now() + MISSING_TABLE_RECHECK_MS;
-  if (!missingTableLogged) {
-    missingTableLogged = true;
-    console.warn(
-      'whatsapp_message_reactions does not exist yet (mcp-server migration 011 not applied): ' +
-        'reactions only reach messages.reactions, as before'
-    );
-  }
-}
-
-function noteTablePresent(): void {
-  if (missingTableLogged) {
-    missingTableLogged = false;
-    console.info('whatsapp_message_reactions is available: reactions are recorded');
-  }
-  tableMissingUntil = 0;
+  tableBackoff.reset();
 }
 
 /**
@@ -127,7 +104,7 @@ export async function storeMessageReaction(input: MessageReactionInput): Promise
   const reactor = String(input.reactorJid || '').trim();
   const conversation = String(input.conversationId || '').trim();
   if (!target || !reactor || !conversation) return false;
-  if (tableKnownMissing()) return false;
+  if (tableBackoff.isMissing()) return false;
   const emoji = typeof input.emoji === 'string' ? input.emoji.trim() : '';
   try {
     // On the right-hand side of SET the table name is the row already stored.
@@ -160,11 +137,11 @@ export async function storeMessageReaction(input: MessageReactionInput): Promise
         input.reactedAt || null,
       ]
     );
-    noteTablePresent();
+    tableBackoff.markPresent();
     return true;
   } catch (error) {
     if ((error as { code?: string } | null)?.code === UNDEFINED_TABLE) {
-      noteTableMissing();
+      tableBackoff.markMissing();
       return false;
     }
     console.warn(`reaction store failed for ${target}: ${describeError(error)}`);

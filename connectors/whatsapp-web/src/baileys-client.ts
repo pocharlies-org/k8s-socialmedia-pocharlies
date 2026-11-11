@@ -1,3 +1,29 @@
+import { readContactBlocked } from './contact-block';
+import { directReceiptStatus } from './receipt-status';
+import { chatPinState } from './chat-pin-state';
+import {
+  AppStateKeyRequestSocket,
+  extractMissingKeyIds,
+  requestMissingAppStateKeys,
+} from './app-state-key-request';
+import { qrPageUrl, whatsappSocketOptions } from './url-config';
+import { CommunityService, CommunityError } from './novedades-communities';
+import {
+  ingestNovedadesMessage,
+  ingestNovedadesUpdate,
+  type NovedadesIngestStore,
+} from './novedades-ingest';
+import {
+  ensureNovedadesTables,
+  novedadesKind,
+  novedadesStatusAuthor,
+  getNovedadesMessage,
+  storeNovedadesMessage,
+  storeNovedadesStatus,
+  markNovedadesMessageDeleted,
+  markNovedadesStatusDeleted,
+} from './novedades-store';
+import { SendAlreadyClaimedError } from './send-idempotency';
 /**
  * WhatsApp connector client backed by @whiskeysockets/baileys.
  *
@@ -27,13 +53,23 @@ import {
   makeCacheableSignalKeyStore,
   AnyMessageContent,
   CacheStore,
+  MiscMessageGenerationOptions,
+  Chat,
   ChatModification,
+  WAPatchCreate,
   GroupMetadata,
+  GroupParticipant,
   Browsers,
   generateMessageIDV2,
   generateWAMessageFromContent,
-  normalizeMessageContent,
 } from '@whiskeysockets/baileys';
+import { normalizeMessageContent } from '@whiskeysockets/baileys/lib/Utils/messages.js';
+import {
+  hasUserMessageContent,
+  isViewOnceContent,
+  UNAVAILABLE_MESSAGE_TYPES,
+  RECOVERABLE_MESSAGE_TYPES,
+} from './message-preservation';
 import {
   isTcTokenExpired,
   resolveIssuanceJid,
@@ -42,6 +78,19 @@ import {
 } from '@whiskeysockets/baileys/lib/Utils/tc-token-utils.js';
 import { Boom } from '@hapi/boom';
 import { EventEmitter } from 'events';
+import {
+  ensureMessageReceiptTables,
+  getMessageReceiptInfo,
+  receiptRecoveryTarget,
+  receiptRecoveryAnchor,
+  recordAggregateStatus,
+  recordMessageReceipt,
+  recordRecipientSnapshot,
+  receiptJid,
+  receiptTime,
+  type ReceiptIdentity,
+} from './message-receipts';
+import { ReceiptHistoryRecovery } from './receipt-history-recovery';
 import { promises as fsp } from 'fs';
 import { join } from 'path';
 import QRCode from 'qrcode';
@@ -49,13 +98,14 @@ import qrcodeTerminal from 'qrcode-terminal';
 import pino from 'pino';
 import {
   accountKey,
+  canonicalConversationId,
   stripAccountKey,
   connectorAccount,
   storeMessage,
   ensureConversation,
+  ensureEmptyConversation,
   ensureParticipant,
   linkParticipantToConversation,
-  storeAttachment,
   getPool,
   MessageData,
   ensureHistoryTables,
@@ -67,28 +117,88 @@ import {
   getParticipantAvatar,
   setConversationAvatar,
   setParticipantAvatar,
-  setConversationState,
-  setMessageStatus,
+  applyArchiveSnapshot,
   setConversationWaChatId,
+  setConversationName,
+  setParticipantName,
   getUnreadMessageKeysForChat,
   markMessagesRead,
+  participantDisplayName,
 } from './db-writer';
 import {
+  appendMediaEligible,
+  documentFileName,
+  isOfficialWhatsAppJid,
+  linksSenderToChat,
+  OFFICIAL_WHATSAPP_NAME,
+  messageContextInfo,
+  quotedReply,
+} from './ingest-extras';
+import { businessMessageText } from './business-message-text';
+import {
   DurablePayloadSource,
+  ensureDurableTables,
+  adoptPayloadTimestampShape,
+  applyPinnedChatSnapshot,
+  getMessageKeysForChat,
   getRawWAMessage,
-  MessageUnavailableError,
+  getRawWAMessagesByIds,
+  listCapturedPollUpdates,
+  listStoredContacts,
+  markMessageDeletedForMe as markCapabilityMessageDeletedForMe,
+  storeContact,
   storeRawWAMessage,
   unixSeconds,
 } from './durable-message-store';
 import {
+  loadEditedContent,
   loadStoredMessage,
   markMessageDeletedForMe,
   markMessageEdited,
   markMessageRevoked,
   MessageMutationError,
   StoredMessage,
+  withEditedText,
 } from './message-mutations';
 import { reactionTime, storeMessageReaction } from './message-reactions';
+import {
+  isPinAction,
+  listPinnedMessages,
+  listStarredMessages,
+  MAX_PINS_PER_CHAT,
+  pinActionOf,
+  pinContent,
+  PinnedMessage,
+  PinRequest,
+  recordMessagePin,
+  recordMessageStar,
+  StarredList,
+  StarredQuery,
+  starPatch,
+} from './message-stars-pins';
+import {
+  channelPostMessageId,
+  contactAuthorIds,
+  ChannelPostList,
+  ChannelPostsQuery,
+  isChannelJid,
+  isStatusJid,
+  listChannelPosts,
+  listStatuses,
+  noteRevokeBeforePost,
+  recordStatus,
+  STATUS_IMAGE_MAX_BYTES,
+  STATUS_IMAGE_MIME_TYPES,
+  STATUS_JID,
+  STATUS_MESSAGE_TYPES,
+  StatusList,
+  StatusListQuery,
+  statusPublishEnabled,
+  StatusPublishRequest,
+  statusRecipientJid,
+  STATUS_TTL_MS,
+  takeRevokeBeforePost,
+} from './statuses';
 import {
   buildPollContent,
   buildPollVoteContent,
@@ -126,15 +236,19 @@ import {
   storePollVote,
 } from './poll-event-store';
 import {
+  CanonicalConversation,
   ChatState,
   ChatStatePatch,
+  externalIdCandidates,
   latestMessageId,
   muteEndTimestamp,
   muteFromBaileys,
   MuteState,
+  hasInboundHistory,
+  hasOutboundHistory,
   pinFromBaileys,
-  recordInboundChatState,
   resolveCanonicalConversation,
+  setCanonicalChatState,
   writeChatState,
 } from './chat-state';
 import {
@@ -148,7 +262,9 @@ import {
   groupStateView,
   GroupStateView,
   GroupUpdate,
+  isAdminRole,
   isCommunityGroup,
+  normalizeGroupJid,
   normalizeGroupParticipantAction,
   ownParticipant,
   parseGroupJid,
@@ -158,11 +274,50 @@ import {
   participantApiJid,
   participantIds,
   participantOutcome,
+  participantsIncludeOwn,
+  addRequestOf,
+  AddRequest,
+  GroupInviteResult,
+  InviteRequiredEntry,
+  LINK_INVITE_TTL_SECONDS,
+  parseGroupInviteParticipants,
+  parseGroupInviteText,
   recordGroupChange,
   recordGroupConversation,
   recordInboundGroup,
   toParticipantJid,
 } from './group-management';
+import {
+  CommunityActionError,
+  communityCapabilities,
+  CommunityGroupAction,
+  communityView,
+  CommunityView,
+  isCommunityParent,
+  isLinkedTo,
+  LinkedGroupEntry,
+  parseCommunityDescription,
+  parseCommunityGroupRequest,
+  parseCommunityJid,
+  parseCommunitySubject,
+} from './communities';
+import {
+  ChannelActionError,
+  CHANNELS_LIST_MAX,
+  channelStateMatches,
+  ChannelSubscriptionAction,
+  channelView,
+  ChannelView,
+  forgetChannel,
+  KeyedSerializer,
+  knownChannelConversations,
+  normalizeChannelJid,
+  parseChannelJid,
+  parseChannelQuery,
+  parseChannelSubscriptionAction,
+  rememberChannel,
+  rememberedChannels,
+} from './channels';
 import { maybeRunRetention } from './retention';
 import {
   availablePresenceAllowed,
@@ -173,6 +328,28 @@ import {
   PresenceSendThrottle,
   PresenceView,
 } from './presence';
+import { createHash } from 'crypto';
+import {
+  audioMessagePayload,
+  checkMediaOptions,
+  MediaQuality,
+  parseMediaQuality,
+  parseViewOnce,
+  prepareImageQuality,
+} from './media-quality';
+import {
+  applyProfileUpdates,
+  OwnProfilePhotoProvider,
+  ProfileIo,
+  ProfilePhotoOutcome,
+  ProfileUpdateInput,
+  ProfileUpdateResult,
+  readOwnProfile,
+  readOwnProfilePhotoBytes,
+  removeOwnProfilePhoto,
+  setOwnProfilePhoto,
+  setPhotoForJid,
+} from './profile-service';
 import {
   buildPrivacyUpdate,
   currentPrivacyValue,
@@ -186,11 +363,84 @@ import {
   parseDisappearingExpiration,
   readConversationEphemeral,
   recordInboundEphemeral,
+  withEphemeralExpiration,
   writeConversationEphemeral,
 } from './disappearing';
 import {
+  buildContactShareContent,
+  ContactCard,
+  ContactListEntry,
+  conversationName,
+  CreatedContact,
+  insertStartedConversation,
+  listAccountContacts,
+  recordContactName,
+  sharedContactsFromMessage,
+  StartedChat,
+} from './contacts';
+import {
+  fetchLimited,
+  GIF_MAX_BYTES,
+  STICKER_MAX_BYTES,
+  stickerGifContent,
+  StickerGifKind,
+  StickerGifRequest,
+} from './sticker-gif';
+import {
+  ContactBlockError,
+  ContactBlockOutcome,
+  ContactBlockRequest,
+  readBlocklist,
+  setContactBlocked,
+  signalAlias,
+} from './contact-block';
+import {
+  accountAliasPairs,
+  BlockedContactEntry,
+  BlocklistCache,
+  describeBlockedPeople,
+  groupBlockedPeople,
+  personId,
+  phoneOfJid,
+} from './blocked-contacts';
+import { upsertChatState, MessageUnavailableError } from './durable-message-store';
+import {
+  buildChatModification as buildCapabilityChatModification,
+  buildContactMessage,
+  buildEventMessage,
+  buildPollMessage,
+  buildPresenceSnapshot,
+  buildPrivacyUpdate as buildCapabilityPrivacyUpdate,
+  CapabilityError,
+} from './whatsapp-capabilities';
+import {
+  aggregateCapturedPollVotes,
+  buildPollVoteContent as buildCapturedPollVoteContent,
+  decryptCapturedPollVotes,
+  parsePollCreationContent,
+  pollEncKeyFromStoredMessage,
+  validatePollVoteSelection,
+  type PollResultsEntry,
+  type StoredPollUpdate,
+} from './poll-votes';
+import { readEventResults } from './event-results';
+import { readPinnedMessages } from './pinned-store';
+import { pinMessageContent } from './pinned-messages';
+import { PinSendError, type PinSendInput } from './pinned-send';
+import { generateWAMessageContent } from '@whiskeysockets/baileys';
+import { buildEventResponse } from './event-responses';
+import { EventSendError, type EventSendInput } from './event-send';
+import {
+  NOVEDADES_MEDIA_MAX_BYTES,
+  NovedadesReaderError,
+  readNovedadesMediaStream,
+} from './novedades-reader';
+import type { ChannelSocketLike } from './novedades-channels';
+import { PreparedEvent, PreparedPoll, StructuredSendError } from './structured-send';
+import {
   appendCompanyToDisplayName,
   displayNameOrPhone,
+  NormalizedWhatsAppPhone,
   normalizePhoneForWhatsApp,
   WhatsAppContactSeedInput,
   WhatsAppContactSeedResult,
@@ -205,7 +455,10 @@ import {
   presignExpirySeconds,
 } from './media-storage';
 import { buildAudioAttachmentsBeforeEmit, StoredMediaInfo } from './audio-attachments';
-import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
+import { notifyDashboard as dashboardNotify } from '@mcp-socialmedia/shared';
+
+import { readArchiveSnapshot, readCurrentArchiveSnapshot } from './archive-snapshot';
+import { enrichArchiveGroupNames } from './archive-group-names';
 
 // WhatsApp Web message status enum → human/dashboard strings.
 // proto.WebMessageInfo.Status: ERROR=0, PENDING=1, SERVER_ACK=2, DELIVERY_ACK=3, READ=4, PLAYED=5
@@ -253,6 +506,8 @@ export interface WhatsAppMessage {
    * `{event}`, merged into messages.metadata. Never key material.
    */
   structured?: Record<string, unknown>;
+  /** Structured provider data for polls, events, and received reactions. */
+  metadata?: Record<string, unknown>;
   attachments?: Array<{
     type: string;
     url: string;
@@ -267,6 +522,10 @@ interface CachedChat {
   isGroup: boolean;
   unreadCount: number;
   timestamp: number;
+  archived?: boolean;
+  pinned?: boolean;
+  muteUntil?: number | null;
+  starred?: boolean;
 }
 
 type IngestSource = 'live' | 'baileys_history_sync';
@@ -274,6 +533,13 @@ type IngestSource = 'live' | 'baileys_history_sync';
 interface IngestOptions {
   source?: IngestSource;
   publishEvent?: boolean;
+  /**
+   * Download the media to MinIO + `attachments`. Default: only `live`. A recent
+   * `append` (our own send echoed by Baileys, or a message delivered while
+   * offline) is new too — before 02-10 its media was never stored.
+   */
+  storeMedia?: boolean;
+  skipMediaDownload?: boolean;
   syncType?: string;
   isLatest?: boolean;
 }
@@ -281,6 +547,15 @@ interface IngestOptions {
 interface IngestResult {
   inserted: boolean;
   waMessage?: WhatsAppMessage;
+}
+
+export interface ChatHistoryRecoveryResult {
+  chatId: string;
+  status: 'requested' | 'recovered' | 'no_anchor' | 'cooldown';
+  requested: number;
+  placeholderRequests: number;
+  recovered: number;
+  retryAfterMs?: number;
 }
 
 export type WhatsAppSendFailureClass =
@@ -466,6 +741,46 @@ function actionableForFailure(failureClass: WhatsAppSendFailureClass, isGroup: b
     : 'The direct send failed. Check connector logs for the raw Baileys error.';
 }
 
+function numericProviderValue(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (
+    value &&
+    typeof value === 'object' &&
+    typeof (value as { toNumber?: unknown }).toNumber === 'function'
+  ) {
+    const numberValue = Number((value as { toNumber: () => number }).toNumber());
+    return Number.isFinite(numberValue) ? numberValue : undefined;
+  }
+  return undefined;
+}
+
+function unescapeVCardValue(value: string): string {
+  return value
+    .replace(/\\n/gi, '\n')
+    .replace(/\\([\\;,])/g, '$1')
+    .trim();
+}
+
+function parseVCardFields(vcard: unknown): {
+  phone?: string;
+  organization?: string;
+  email?: string;
+} {
+  if (typeof vcard !== 'string') return {};
+  const fields: { phone?: string; organization?: string; email?: string } = {};
+  for (const line of vcard.replace(/\\n/gi, '\n').split(/\r?\n/)) {
+    const separator = line.indexOf(':');
+    if (separator < 0) continue;
+    const property = line.slice(0, separator).toUpperCase();
+    const value = unescapeVCardValue(line.slice(separator + 1));
+    if (!value) continue;
+    if (property.startsWith('TEL')) fields.phone ||= value;
+    else if (property === 'ORG') fields.organization ||= value;
+    else if (property.startsWith('EMAIL')) fields.email ||= value;
+  }
+  return fields;
+}
+
 // LRU-ish cache mapping our exported waMessageId → full WAMessageKey (+ owning
 // chat) so we can react/forward/delete/download without keeping every message
 // in memory.
@@ -482,6 +797,39 @@ const OWN_MUTATION_ECHO_MS = 30_000;
 export interface MessageMutationRequest {
   /** Who asked (dgx-messages user, MCP caller); recorded in metadata. */
   actor?: string;
+}
+
+/** POST /messages/star. */
+export interface StarResult {
+  starred: boolean;
+  messageId: string;
+  conversationId: string;
+  starredAt: string;
+  /** Recorded in whatsapp_message_stars (ingest on, migration 018 applied). */
+  persisted: boolean;
+}
+
+/** POST /messages/pin. */
+export interface PinResult {
+  pinned: boolean;
+  /** Id of the pin / unpin message (what an Idempotency-Key replays). */
+  messageId: string;
+  pinnedMessageId: string;
+  conversationId: string;
+  /** A pin: when, until when and for how long. */
+  pinnedAt?: string;
+  expiresAt?: string;
+  durationSeconds?: number;
+  persisted: boolean;
+}
+
+/** POST /messages/pins. */
+export interface PinnedList {
+  conversationId: string;
+  pinned: PinnedMessage[];
+  /** WhatsApp shows at most this many per chat, the newest. */
+  limit: number;
+  persisted: boolean;
 }
 
 /** POST /groups/create (fase 3 / PR-6). */
@@ -519,6 +867,63 @@ export interface GroupParticipantsResult {
   partial: boolean;
   persisted: boolean;
   group: GroupStateView | null;
+  /** add only: the people WhatsApp refused with 403 (privacy: invite only). */
+  inviteRequired?: InviteRequiredEntry[];
+}
+
+/** POST /groups/invite. */
+export interface GroupInvitesResult {
+  groupId: string;
+  results: GroupInviteResult[];
+  succeeded: number;
+  failed: number;
+  partial: boolean;
+}
+
+/** POST /communities/groups. */
+export interface CommunityGroupResult {
+  action: CommunityGroupAction;
+  communityId: string;
+  groupId: string;
+  /** false = it already was so: nothing went to WhatsApp. */
+  changed: boolean;
+  /** A fresh read shows the asked state. */
+  confirmed: true;
+  community: CommunityView | null;
+}
+
+/** POST /communities/leave. */
+export interface CommunityLeaveResult {
+  communityId: string;
+  changed: true;
+  confirmed: true;
+}
+
+/** GET /channels. */
+export interface ChannelListResult {
+  channels: ChannelView[];
+  coverage: {
+    /** Always false: rc13 cannot ask WhatsApp for the followed list. */
+    complete: false;
+    source: 'known-channels';
+    /** Channels this connector has seen (chats, ingested posts, lookups, follows). */
+    candidates: number;
+    /** Of those, read now (at most CHANNELS_LIST_MAX). */
+    checked: number;
+    /** Read but not answered (left out). */
+    unreadable: number;
+  };
+}
+
+/** POST /channels/subscription. */
+export interface ChannelSubscriptionResult {
+  action: ChannelSubscriptionAction;
+  channelId: string;
+  /** false = it already was so: nothing went to WhatsApp. */
+  changed: boolean;
+  /** The channel's own metadata (viewer role / mute) shows the asked state. */
+  confirmed: true;
+  channel: ChannelView;
 }
 
 /**
@@ -852,6 +1257,83 @@ export type EventResultsView = EventResults & {
 // ---------------------------------------------------------------------------
 
 /** A `@lid` jid is the privacy id; anything else is already phone-addressable. */
+export class ProfilePictureTimeoutError extends Error {
+  constructor() {
+    super('WhatsApp profile picture lookup timed out');
+    this.name = 'ProfilePictureTimeoutError';
+  }
+}
+
+export class ProfilePictureDownloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProfilePictureDownloadError';
+  }
+}
+
+const PROFILE_PICTURE_LOOKUP_TIMEOUT_MS = 8_000;
+
+/**
+ * Baileys' profile-picture iq can go unanswered (it waits its whole query
+ * timeout); cap it so /chats/:jid/photo answers 504 instead of hanging, and
+ * keep a provider 408 as the same timeout rather than a "no photo".
+ */
+async function boundedProfilePictureUrl(
+  lookup: (timeoutMs: number) => Promise<string | undefined>
+): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      lookup(PROFILE_PICTURE_LOOKUP_TIMEOUT_MS),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ProfilePictureTimeoutError()),
+          PROFILE_PICTURE_LOOKUP_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } catch (error) {
+    if (
+      error instanceof ProfilePictureTimeoutError ||
+      (error instanceof Boom && error.output.statusCode === 408)
+    ) {
+      throw new ProfilePictureTimeoutError();
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 403 (private) and 404 (none) are WhatsApp's answers for "no visible picture". */
+/**
+ * WhatsApp answers "no visible picture": none (404 item-not-found) or hidden by
+ * the contact's privacy (403, or 401 not-authorized — Baileys raises that one
+ * as a Boom 500 with `data: 401`, which used to leak as a 500 and blanked half
+ * of the professional avatars in the console, QA 02-10).
+ */
+export function isUnavailableProfilePicture(error: unknown): boolean {
+  if (!(error instanceof Boom)) return false;
+  const codes = [error.output.statusCode, Number(error.data)];
+  return (
+    codes.some(code => [401, 403, 404].includes(code)) ||
+    /^(not-authorized|item-not-found|forbidden)$/.test(error.message)
+  );
+}
+
+/**
+ * Whether the patched Baileys will attach a <cstoken> to a 1:1 send that has
+ * no tctoken: same guard as its messages-send (own account LID-addressed, NCT
+ * salt provisioned, recipient resolved to a LID). WA Web genCsTokenBody,
+ * whatsmeow cstoken.go.
+ */
+export function canAttachCsToken(
+  creds: { me?: { lid?: string | null } | null; nctSalt?: Uint8Array | null } | undefined,
+  storageJid: string
+): boolean {
+  return Boolean(creds?.me?.lid && creds?.nctSalt?.length && storageJid.endsWith('@lid'));
+}
+
 function isLidJid(jid: string | null | undefined): boolean {
   return typeof jid === 'string' && jid.endsWith('@lid');
 }
@@ -879,6 +1361,97 @@ export interface LidPnInfo {
   pnJid: string;
   /** E.164 with '+', e.g. `+34659695630`. */
   e164: string;
+}
+
+/** Return true when a value is an identifier fallback rather than a name. */
+export function isWhatsAppJidLikeName(
+  value: string | null | undefined,
+  id?: string | null
+): boolean {
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (!name) return true;
+  const bareId = typeof id === 'string' ? id.replace(/^[^:]+:/, '') : '';
+  return (
+    name === id ||
+    (!!bareId && name === bareId) ||
+    /@(lid|c\.us|s\.whatsapp\.net|g\.us|broadcast|newsletter)$/.test(name)
+  );
+}
+
+export interface WhatsAppContactIdentity {
+  ids: string[];
+  /** Address-book/business name when Baileys provides one. */
+  name?: string;
+  /** Remote user's profile/push name (`notify` in Baileys contacts). */
+  pushName?: string;
+}
+
+export type WhatsAppContactNameSource = 'saved' | 'push';
+
+export interface WhatsAppContactNameRecord {
+  name: string;
+  source: WhatsAppContactNameSource;
+}
+
+/** Saved/address-book names outrank the remote profile name. */
+export function preferWhatsAppContactName(
+  current: WhatsAppContactNameRecord | undefined,
+  incoming: WhatsAppContactNameRecord
+): WhatsAppContactNameRecord {
+  if (current?.source === 'saved' && incoming.source === 'push') return current;
+  return incoming;
+}
+
+/** Extract contact aliases and names without logging or exposing their values. */
+export function whatsappContactIdentity(contact: unknown): WhatsAppContactIdentity {
+  const value = (contact && typeof contact === 'object' ? contact : {}) as Record<string, unknown>;
+  const ids = Array.from(
+    new Set(
+      ['id', 'jid', 'lid', 'phoneNumber']
+        .filter(key => typeof value[key] === 'string')
+        .map(key => String(value[key]).trim())
+        .filter(Boolean)
+    )
+  );
+  const id = ids[0];
+  const candidate = (...keys: string[]): string | undefined => {
+    for (const key of keys) {
+      const candidate = value[key];
+      if (typeof candidate !== 'string') continue;
+      const clean = candidate.trim();
+      if (clean && !isWhatsAppJidLikeName(clean, id)) return clean;
+    }
+    return undefined;
+  };
+  const pushCandidate = (...keys: string[]): string | undefined => {
+    for (const key of keys) {
+      const candidate = value[key];
+      if (typeof candidate !== 'string') continue;
+      const clean = candidate.trim();
+      if (clean && !isWhatsAppJidLikeName(clean, id)) return clean;
+    }
+    return undefined;
+  };
+  return {
+    ids,
+    name: candidate('name'),
+    pushName: pushCandidate('notify', 'pushName', 'push_name', 'verifiedName'),
+  };
+}
+
+/** Pick a chat title while keeping group subjects separate from participant names. */
+export function chooseWhatsAppConversationName(options: {
+  id: string;
+  isGroup: boolean;
+  existingName?: string | null;
+  contactName?: string | null;
+  pushName?: string | null;
+  groupSubject?: string | null;
+}): string {
+  const candidates = options.isGroup
+    ? [options.groupSubject, options.existingName, options.id]
+    : [options.existingName, options.contactName, options.pushName, options.id];
+  return candidates.find(value => !isWhatsAppJidLikeName(value, options.id))?.trim() || options.id;
 }
 
 /**
@@ -921,6 +1494,60 @@ export function pnFromLidMessage(msg: WAMessage | undefined | null): LidPnInfo |
   return undefined;
 }
 
+/** Baileys 7's alternate direct-chat address can identify a PN echo as LID. */
+export function lidFromPnMessage(msg: WAMessage | undefined | null): string | undefined {
+  if (!pnJidToE164(msg?.key?.remoteJid)) return undefined;
+  const alternate = msg?.key?.remoteJidAlt;
+  if (typeof alternate !== 'string' || !/^\d+(?::\d+)?@lid$/.test(alternate)) return undefined;
+  return jidNormalizedUser(alternate);
+}
+
+/** Hard cap for one status media payload once decoded from base64: 10 MiB. */
+export const NOVEDADES_STATUS_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+export const NOVEDADES_STATUS_RECIPIENTS_MAX = 256;
+export const NOVEDADES_STATUS_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+export const NOVEDADES_STATUS_VIDEO_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/3gpp',
+  'video/quicktime',
+]);
+const NOVEDADES_STATUS_TEXT_MAX_CHARS = 4096;
+// WhatsApp offers play-once for these media kinds only; the app proxy enforces
+// the same list in front of the connector, so a direct connector call cannot
+// smuggle a MIME the provider would refuse or, worse, silently downgrade.
+export { MEDIA_VIEW_ONCE_MIME_TYPES } from './media-quality';
+// Media captions are capped at the same width the app composer enforces, so a
+// direct connector call cannot smuggle a caption the UI would never allow.
+export const NOVEDADES_STATUS_CAPTION_MAX_CHARS = 1024;
+// rc13 exposes the font as a bare number; the WhatsApp text-status fonts are 1..5.
+export const NOVEDADES_STATUS_FONT_MIN = 1;
+export const NOVEDADES_STATUS_FONT_MAX = 5;
+
+export type NovedadesStatusType = 'text' | 'image' | 'video';
+
+export interface NovedadesStatusPublishInput {
+  type: NovedadesStatusType;
+  text?: string;
+  data?: Buffer;
+  mimeType?: string;
+  recipients: string[];
+  backgroundColor?: string;
+  font?: number;
+}
+
+/**
+ * WhatsApp answered a status send without a message id. The connector cannot
+ * claim success, and the route must not retry automatically: the original
+ * dispatch may already have reached the audience.
+ */
+export class StatusSendUncertainError extends Error {
+  constructor() {
+    super(
+      'WhatsApp returned no message id for the status send; the outcome is uncertain and will not be retried automatically'
+    );
+    this.name = 'StatusSendUncertainError';
+  }
+}
 /**
  * INFRA-288 (P1 of INFRA-112): limits for the reconnect history backfill.
  *
@@ -976,6 +1603,16 @@ export interface BaileysClientOptions {
 
 export class BaileysClient extends EventEmitter {
   private sock: WASocket | null = null;
+  private archiveSnapshotSync: {
+    socket: WASocket;
+    promise: Promise<{
+      version: number;
+      records: number;
+      chats: number;
+      archived: number;
+      created: number;
+    }>;
+  } | null = null;
   private readonly quietQr: boolean;
   private readonly ingest: boolean;
   private sessionPath: string;
@@ -1032,6 +1669,7 @@ export class BaileysClient extends EventEmitter {
     process.env.WA_AUDIO_PREEMIT_TIMEOUT_MS || '15000',
     10
   );
+  private mediaPersistenceLocks = new Map<string, Promise<void>>();
 
   // me — populated on `connection.update { connection: 'open' }`
   private meJid: string | null = null;
@@ -1042,7 +1680,8 @@ export class BaileysClient extends EventEmitter {
   private chatStore = new Map<string, CachedChat>(); // by normalised JID
   // Display names indexed by raw participant JID — populated when we ingest
   // a message; used by the presence.update handler to label "X is typing…".
-  private contactNames = new Map<string, string>();
+  private contactNames = new Map<string, WhatsAppContactNameRecord>();
+  private contactAliasGroups = new Map<string, Set<string>>();
   // Track which JIDs we've already presenceSubscribed to so we don't spam.
   // Subscriptions belong to a socket: cleared on every open / close.
   private presenceSubscribed = new Set<string>();
@@ -1050,9 +1689,29 @@ export class BaileysClient extends EventEmitter {
   // stored; cleared with the socket so a reader gets `unknown`, not stale.
   private presenceCache = new PresenceCache();
   private presenceThrottle = new PresenceSendThrottle();
+  // The account's blocklist as last read (60 s), patched by blocklist.update;
+  // it belongs to a socket: cleared on every open / close. Never stored.
+  private blocklistCache = new BlocklistCache();
   // Last forced re-subscribe per chat (a read refreshes an expired presence).
   private presenceRefreshedAt = new Map<string, number>();
+  private presenceState = new Map<
+    string,
+    { status: string; lastSeen?: number; participantId?: string; observedAt: number }
+  >();
   private groupMetaCache = new Map<string, GroupMetadata>(); // by raw JID
+  /**
+   * Private invites WhatsApp handed back with a refused add (403), by
+   * `<raw group>|<participant jid>` (every alias of the person): what POST
+   * /groups/invite sends them. In memory only — after a restart the invite
+   * falls back to the group link.
+   */
+  private pendingGroupInvites = new Map<string, AddRequest>();
+  // One community / channel write at a time per id (WhatsApp gives these
+  // mutations no idempotency token: a concurrent twin must see the first).
+  private communityWrites = new KeyedSerializer();
+  private channelWrites = new KeyedSerializer();
+  /** Channels this process looked up or followed: candidates of GET /channels. */
+  private seenChannels = new Set<string>();
   private keyCache = new Map<string, { key: WAMessageKey; chatJid: string }>(); // by waMessageId
   // `<kind>:<bare id>` of our own edits/revokes/deletes-for-me whose echo the
   // inbound handlers must leave alone (see OWN_MUTATION_ECHO_MS).
@@ -1067,6 +1726,28 @@ export class BaileysClient extends EventEmitter {
   private userDevicesCache: CacheStore;
   private placeholderResendCache: CacheStore;
   private historyBackfillRequestedUntil = 0;
+  private readonly historyRecoveryAnchors = new Map<string, WAMessage>();
+  private readonly historyRecoveryRequestedAt = new Map<string, number>();
+  private readonly historyRecoveryInFlight = new Map<string, Promise<ChatHistoryRecoveryResult>>();
+  private readonly receiptHistoryRecovery = new ReceiptHistoryRecovery({
+    anchor: receiptRecoveryAnchor,
+    fetch: (count, key, timestampMs) => {
+      if (!this.sock || !this.isConnected())
+        return Promise.reject(new Error('WhatsApp disconnected'));
+      return this.sock.fetchMessageHistory(count, key, timestampMs);
+    },
+    persist: async (target, message) => {
+      if (!this.ingest || target.account !== connectorAccount())
+        throw new Error('Receipt recovery account changed');
+      // Only captured provider receipt fields are written. This never ingests
+      // the content, discovers today's members, or opens a full backfill window.
+      for (const receipt of message.userReceipt || []) {
+        await this.persistParticipantReceipt(target.chatId, target.messageId, receipt);
+      }
+      const status = typeof message.status === 'number' ? mapWaStatus(message.status) : null;
+      if (status) await recordAggregateStatus(target.chatId, target.messageId, status);
+    },
+  });
 
   constructor(sessionPath: string, encryptionKey: string, options: BaileysClientOptions = {}) {
     super();
@@ -1097,6 +1778,7 @@ export class BaileysClient extends EventEmitter {
     }
 
     this.connecting = true;
+    this.intentionalDisconnect = false;
     this.ready = false;
     this.lastState = 'INITIALIZING';
     this.initializeStartedAt = new Date();
@@ -1119,6 +1801,10 @@ export class BaileysClient extends EventEmitter {
           );
         }
         await ensureHistoryTables();
+        await ensureDurableTables();
+        await ensureMessageReceiptTables();
+        await adoptPayloadTimestampShape();
+        await ensureNovedadesTables();
       }
 
       const authDir = this.authDir();
@@ -1130,17 +1816,36 @@ export class BaileysClient extends EventEmitter {
       }));
       this.logger.info(`Baileys WA version=${version.join('.')} latest=${isLatest}`);
       const baileysLogger = pino({ level: 'warn' }) as any;
+      // Baileys parks an app-state collection on a missing sync key and waits for the phone
+      // to push the key — it never asks for it. Ask once per socket (app-state-key-request.ts);
+      // a skipped ask (no meJid yet) is retried on the next park, ~10 min later.
+      const requestedAppStateKeys = new Set<string>();
+      const rawBaileysWarn = baileysLogger.warn.bind(baileysLogger);
+      baileysLogger.warn = (...args: unknown[]) => {
+        rawBaileysWarn(...args);
+        const keyIds = extractMissingKeyIds(args);
+        if (!keyIds.length || !this.sock || !this.meJid) return;
+        void requestMissingAppStateKeys(
+          this.sock as unknown as AppStateKeyRequestSocket,
+          this.meJid,
+          keyIds,
+          requestedAppStateKeys,
+          line => this.logger.warn(line)
+        );
+      };
 
       this.sock = makeWASocket({
+        ...whatsappSocketOptions(),
         version,
         auth: {
           creds: state.creds,
           keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
         },
         printQRInTerminal: false,
-        browser: this.historySyncOnLogin
-          ? Browsers.macOS('Desktop')
-          : ['mcp-socialmedia', 'Chrome', '1.0.0'],
+        browser:
+          this.historySyncOnLogin && !state.creds.me
+            ? Browsers.macOS('Desktop')
+            : ['mcp-socialmedia', 'Chrome', '1.0.0'],
         // Use a dedicated pino logger silencing inner noise; bumping to info
         // is too chatty.
         logger: baileysLogger,
@@ -1172,7 +1877,10 @@ export class BaileysClient extends EventEmitter {
     this.lastState = 'DISCONNECTED';
     this.lastDisconnectedAt = new Date();
     this.ready = false;
-    this.intentionalDisconnect = false;
+    // SC-1394: stays true until the next connect(). Baileys emits the
+    // socket's `close` after sock.end() returns; lowering the flag here made
+    // that late event look unintentional and revived a client the owner (the
+    // pairing pool) had closed, ~40 sockets/h forever.
   }
 
   async renewQR(): Promise<void> {
@@ -1210,6 +1918,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private async destroyCurrentSocket(reason: string): Promise<void> {
+    this.receiptHistoryRecovery.stop();
     const sock = this.sock;
     this.sock = null;
     if (!sock) return;
@@ -1225,7 +1934,12 @@ export class BaileysClient extends EventEmitter {
     const sock = this.sock;
     if (!sock) return;
 
-    sock.ev.on('creds.update', () => {
+    sock.ev.on('creds.update', update => {
+      // The Baileys logger runs at warn, so the patch's own info line about
+      // the NCT salt never reaches the pod log: say it here.
+      if (update?.nctSalt?.length) {
+        this.logger.info('NCT salt stored in creds: first messages can carry a cstoken');
+      }
       // SC-705: after the on-disk save completes, let the per-sub connector
       // mirror the auth dir into the credential store (no-op for the house).
       void saveCreds()
@@ -1251,6 +1965,7 @@ export class BaileysClient extends EventEmitter {
         // Presence subscriptions and snapshots belong to the old socket: a
         // reconnect resubscribes and never shows a stale "online".
         this.resetPresence();
+        this.blocklistCache.clear();
         this.markConnected('connection.update open');
         // SC-1225: a pairing-only socket (ingest off) touches no DB state.
         if (!this.ingest) return;
@@ -1258,7 +1973,13 @@ export class BaileysClient extends EventEmitter {
         // emits chats.update events whose handler persists unread_count +
         // archived to the DB, so the dashboard shows the real badges without
         // waiting for new traffic. Fire-and-forget; safe if it fails.
-        void this.resyncChatState('connection-open');
+        void this.resyncChatState('connection-open')
+          .then(() => this.syncArchiveSnapshot())
+          .catch(error => {
+            this.logger.warn(
+              `Archive snapshot sync failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
         // Subscribe to presence for the most-recently-active chats so we
         // receive "composing"/"recording" updates and can forward typing
         // indicators to the dashboard. baileys auto-renews subscriptions
@@ -1277,6 +1998,7 @@ export class BaileysClient extends EventEmitter {
       if (connection === 'close') {
         this.ready = false;
         this.resetPresence();
+        this.blocklistCache.clear();
         this.lastDisconnectedAt = new Date();
         const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
         const reason = lastDisconnect?.error?.message || `close (${statusCode || 'unknown'})`;
@@ -1318,11 +2040,17 @@ export class BaileysClient extends EventEmitter {
       if (type !== 'notify' && type !== 'append') return;
       const isLive = type === 'notify';
       for (const msg of responsesLast(messages)) {
-        if (!msg.message) continue;
+        if (
+          !msg.message &&
+          msg.messageStubType !== proto.WebMessageInfo.StubType.CIPHERTEXT &&
+          !novedadesKind(msg.key)
+        )
+          continue;
         try {
           await this.ingestMessage(msg, {
             source: isLive ? 'live' : 'baileys_history_sync',
             publishEvent: isLive,
+            storeMedia: isLive || appendMediaEligible(msg),
           });
         } catch (e: any) {
           this.logger.error(`Error processing message ${msg.key?.id}: ${e?.message || e}`);
@@ -1330,30 +2058,49 @@ export class BaileysClient extends EventEmitter {
       }
     });
 
-    sock.ev.on('messaging-history.set', async ({ chats, messages, isLatest }) => {
+    sock.ev.on('messaging-history.set', async update => {
+      // Own on-demand replies are receipt-only, including when the ordinary
+      // history ingest gate is closed. Their other messages stay untouched.
+      if (await this.receiptHistoryRecovery.consume(update)) return;
+      const { chats, contacts, messages, isLatest, syncType } = update;
+      // The patched Baileys carries HistorySync field 19 (NCT salt) here. It is
+      // logged before the ingest gate: the INITIAL_BOOTSTRAP of a pairing
+      // brings it even when message history is not ingested.
+      const nctSalt = (update as { nctSalt?: Uint8Array }).nctSalt;
+      if (nctSalt?.length) {
+        this.logger.info(`NCT salt received in history sync (syncType=${syncType})`);
+      }
       // chats: Chat[] (Baileys type). Refresh in-memory chat store.
+      const chatNameWrites: Promise<unknown>[] = [];
       for (const c of chats) {
         if (!c.id) continue;
+        if (novedadesKind({ remoteJid: c.id })) continue;
         const isGroup = !!isJidGroup(c.id);
         const norm = this.normalizeJid(c.id);
+        this.rememberHistorySnapshotMessages((c as any).messages);
+        const pinned = chatPinState(c);
         this.chatStore.set(norm, {
           id: norm,
           rawJid: c.id,
-          name: c.name || c.id,
+          name: !isGroup ? this.savedContactNameFor(c.id, norm) || c.name || c.id : c.name || c.id,
           isGroup,
           unreadCount: c.unreadCount || 0,
           timestamp: Number(c.conversationTimestamp || 0),
+          archived: typeof (c as any).archived === 'boolean' ? (c as any).archived : undefined,
+          pinned,
         });
-        // Persist real unread + archived from the history snapshot.
-        void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
-        // Pin / mute (fase 3 / PR-5): only what the snapshot says.
-        void recordInboundChatState(norm, {
-          pinnedAt: pinFromBaileys(c),
-          mute: muteFromBaileys(c, 'snapshot'),
-        });
-        // Disappearing timer (fase 3 / PR-8): never over a newer one.
-        void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
+        if (c.name && !isWhatsAppJidLikeName(c.name, norm)) {
+          chatNameWrites.push(
+            setConversationName(norm, c.name, { authoritative: isGroup }).catch(() => {})
+          );
+        }
+        this.persistChatSnapshotState(norm, c, pinned);
       }
+      // A history snapshot carries saved contact names independently of chat
+      // titles. Persist them before messages can recreate an older title.
+      await Promise.all(chatNameWrites);
+      await this.applyHistoryContacts(contacts || []);
+      for (const message of messages) this.rememberHistoryRecoveryAnchor(message);
       if (!this.historySyncOnLogin && Date.now() > this.historyBackfillRequestedUntil) return;
       this.logger.info(
         `history.set received chats=${chats.length} messages=${messages.length} isLatest=${isLatest}`
@@ -1398,7 +2145,9 @@ export class BaileysClient extends EventEmitter {
     sock.ev.on('chats.update', updates => {
       for (const u of updates) {
         if (!u.id) continue;
+        if (novedadesKind({ remoteJid: u.id })) continue;
         const norm = this.normalizeJid(u.id);
+        const pinned = chatPinState(u);
         const prev = this.chatStore.get(norm);
         if (prev) {
           if (typeof u.unreadCount === 'number') {
@@ -1406,7 +2155,19 @@ export class BaileysClient extends EventEmitter {
             prev.unreadCount = u.unreadCount < 0 ? Math.max(prev.unreadCount, 1) : u.unreadCount;
           }
           if (u.conversationTimestamp) prev.timestamp = Number(u.conversationTimestamp);
-          if ((u as any).name) prev.name = (u as any).name;
+          if (typeof (u as any).archived === 'boolean') prev.archived = (u as any).archived;
+          if (pinned !== undefined) prev.pinned = pinned;
+          if (typeof (u as any).mute === 'number') prev.muteUntil = Number((u as any).mute);
+          if ((u as any).name) {
+            prev.name = !prev.isGroup
+              ? this.savedContactNameFor(u.id, norm) || (u as any).name
+              : (u as any).name;
+            if (!isWhatsAppJidLikeName(prev.name, norm)) {
+              void setConversationName(norm, prev.name, {
+                authoritative: prev.isGroup || !!this.savedContactNameFor(u.id, norm),
+              }).catch(() => {});
+            }
+          }
           this.emit('chat-update', {
             waChatId: prev.id,
             updateType: 'NAME_CHANGED',
@@ -1418,41 +2179,65 @@ export class BaileysClient extends EventEmitter {
         // badge alone instead of zeroing it).
         const uc = typeof u.unreadCount === 'number' ? u.unreadCount : prev?.unreadCount;
         const arch = typeof (u as any).archived === 'boolean' ? (u as any).archived : undefined;
-        void setConversationState(norm, uc, arch).catch(() => {});
         // Pin / mute from app-state sync (the phone, or the echo of our own
-        // POST /chats/modify — same values), on the canonical conversation.
-        void recordInboundChatState(norm, {
+        // POST /chats/modify — same values), with the rest, on the canonical conversation.
+        void setCanonicalChatState(norm, {
+          unreadCount: uc,
+          archived: arch,
           pinnedAt: pinFromBaileys(u),
           mute: muteFromBaileys(u, 'sync-action'),
         });
         // A timer change of either side (EPHEMERAL_SETTING, also the echo of
         // our own POST /chats/disappearing) arrives as this delta.
         void recordInboundEphemeral(norm, ephemeralFromBaileys(u, 'change'));
+        void upsertChatState(norm, {
+          ...(arch === undefined ? {} : { archived: arch }),
+          ...(typeof u.unreadCount === 'number' ? { unreadCount: uc } : {}),
+          ...(pinned === undefined ? {} : { pinned }),
+          ...(typeof (u as any).mute === 'number' ? { muteUntil: Number((u as any).mute) } : {}),
+        }).catch(() => {});
       }
     });
 
     sock.ev.on('chats.upsert', upserts => {
       for (const c of upserts) {
         if (!c.id) continue;
+        if (novedadesKind({ remoteJid: c.id })) continue;
         const norm = this.normalizeJid(c.id);
+        this.rememberHistorySnapshotMessages((c as any).messages);
+        const pinned = chatPinState(c);
         this.chatStore.set(norm, {
           id: norm,
           rawJid: c.id,
-          name: c.name || c.id,
+          name: !isJidGroup(c.id)
+            ? this.savedContactNameFor(c.id, norm) || c.name || c.id
+            : c.name || c.id,
           isGroup: !!isJidGroup(c.id),
           unreadCount: c.unreadCount || 0,
           timestamp: Number(c.conversationTimestamp || 0),
+          archived: typeof (c as any).archived === 'boolean' ? (c as any).archived : undefined,
+          pinned,
         });
-        // Persist real unread badge + archived flag (fire-and-forget).
-        void setConversationState(norm, c.unreadCount || 0, !!(c as any).archived).catch(() => {});
-        void recordInboundChatState(norm, {
-          pinnedAt: pinFromBaileys(c),
-          mute: muteFromBaileys(c, 'snapshot'),
-        });
-        void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
+        if (c.name && !isWhatsAppJidLikeName(c.name, norm)) {
+          void setConversationName(norm, this.savedContactNameFor(c.id, norm) || c.name, {
+            authoritative: !!isJidGroup(c.id) || !!this.savedContactNameFor(c.id, norm),
+          }).catch(() => {});
+        }
+        this.persistChatSnapshotState(norm, c, pinned);
         // Subscribe to presence so we get typing updates for this chat.
         void this.presenceSubscribeSilent(c.id);
       }
+    });
+
+    // Baileys may deliver an address-book name as `name`, but many versions
+    // only provide `notify` (the contact's push name). Keep both aliases so a
+    // LID-addressed message can still resolve a PN contact, and persist the
+    // best name per account without mixing the two connector instances.
+    sock.ev.on('contacts.upsert' as any, (contacts: unknown[]) => {
+      for (const contact of contacts || []) this.applyContactIdentity(contact);
+    });
+    sock.ev.on('contacts.update' as any, (contacts: unknown[]) => {
+      for (const contact of contacts || []) this.applyContactIdentity(contact);
     });
 
     // Presence updates → typing indicator. Payload shape:
@@ -1472,12 +2257,19 @@ export class BaileysClient extends EventEmitter {
             p
           );
           const status = p?.lastKnownPresence;
+          const participantId = this.normalizeJid(participantJid);
+          const presenceKey = `${convId}:${participantId}`;
+          this.presenceState.set(presenceKey, {
+            status: typeof status === 'string' ? status : 'unknown',
+            ...(typeof p?.lastSeen === 'number' ? { lastSeen: p.lastSeen } : {}),
+            participantId,
+            observedAt: Date.now(),
+          });
+          this.emit('presence-update', buildPresenceSnapshot(convId, p, participantId));
           if (status !== 'composing' && status !== 'recording') continue;
           // Lookup display name from the participants we've seen
           const name =
-            this.contactNames.get(participantJid) ||
-            this.contactNames.get(this.normalizeJid(participantJid)) ||
-            null;
+            this.contactNameFor(participantJid, this.normalizeJid(participantJid)) || null;
           void dashboardNotify('/_connector/typing', {
             conversation_id: convId,
             sender_id: participantJid,
@@ -1491,20 +2283,62 @@ export class BaileysClient extends EventEmitter {
       }
     });
 
+    // The blocklist changed on another device (the phone): patch the cache so
+    // a read within its TTL is not stale. rc13 types blocklist.set but never
+    // emits it; handled anyway (a full replacement).
+    sock.ev.on('blocklist.update', evt => {
+      this.blocklistCache.apply(evt);
+      this.logger.info(
+        `Blocklist ${String(evt?.type)} (${Array.isArray(evt?.blocklist) ? evt.blocklist.length : 0}) from WhatsApp`
+      );
+    });
+    sock.ev.on('blocklist.set', evt => {
+      this.blocklistCache.apply(evt, true);
+    });
+
     sock.ev.on('messages.update', updates => {
       for (const u of updates) {
         if (!u.key?.id) continue;
+        if (novedadesKind(u.key)) {
+          void ingestNovedadesUpdate(u.key, u.update, this.novedadesIngestStore()).catch(error =>
+            this.logger.warn(`Novedades update persistence failed: ${error?.message || error}`)
+          );
+          continue;
+        }
         const waMessageId = u.key.id;
         const stubParams = (u.update as any)?.messageStubParameters;
         const ackErrorCode = Array.isArray(stubParams) ? String(stubParams[0] || '') : undefined;
         // Revokes and edits (fase 3 / PR-3).
         void this.handleInboundMutation(u);
+        // A star / unstar from our phone (app-state sync).
+        void this.handleInboundStar(u);
         // Track delivery state from WhatsApp servers (the green ticks).
         const st: number | undefined = (u.update as any)?.status;
         if (typeof st === 'number') {
           const mapped = mapWaStatus(st);
           if (mapped) {
-            void setMessageStatus(waMessageId, mapped).catch(() => {});
+            if (u.key.remoteJid && u.key.fromMe !== false) {
+              void this.recordProviderStatus(u.key.remoteJid, waMessageId, mapped).catch(error =>
+                this.logger.warn(`Message status persistence failed: ${error?.message || error}`)
+              );
+              // rc13 direct receipt updates carry attrs.t in update.messageTimestamp
+              // (messages-recv.js). Groups use their separate participant event.
+              const at = receiptTime(u.update.messageTimestamp);
+              if (
+                !this.isGroupJid(u.key.remoteJid) &&
+                at &&
+                (mapped === 'delivered' || mapped === 'read')
+              ) {
+                void this.persistParticipantReceipt(u.key.remoteJid, waMessageId, {
+                  userJid: u.key.remoteJid,
+                  ...(mapped === 'delivered'
+                    ? { receiptTimestamp: u.update.messageTimestamp }
+                    : { readTimestamp: u.update.messageTimestamp }),
+                }).catch(error =>
+                  this.logger.warn(`Direct receipt persistence failed: ${error?.message || error}`)
+                );
+              }
+            }
             if (mapped === 'failed') {
               const failureClass: WhatsAppSendFailureClass =
                 ackErrorCode === '463' ? 'account_restricted' : 'unknown';
@@ -1529,16 +2363,18 @@ export class BaileysClient extends EventEmitter {
     });
 
     // Receipts from individual recipients (group "✓✓ for everyone" or read).
-    sock.ev.on('message-receipt.update' as any, (updates: any[]) => {
+    sock.ev.on('message-receipt.update', updates => {
       for (const u of updates || []) {
         const waMessageId = u?.key?.id;
-        const t: 'read' | 'delivered' | null = u?.receipt?.readTimestamp
-          ? 'read'
-          : u?.receipt?.receiptTimestamp
-            ? 'delivered'
-            : null;
+        if (waMessageId && u.key.remoteJid && u.key.fromMe !== false && !novedadesKind(u.key)) {
+          void this.persistParticipantReceipt(u.key.remoteJid, waMessageId, u.receipt).catch(
+            error =>
+              this.logger.warn(`Message receipt persistence failed: ${error?.message || error}`)
+          );
+        }
+        const t = directReceiptStatus(u);
         if (waMessageId && t) {
-          void setMessageStatus(waMessageId, t).catch(() => {});
+          void this.recordProviderStatus(u.key.remoteJid!, waMessageId, t).catch(() => {});
         }
       }
     });
@@ -1561,6 +2397,9 @@ export class BaileysClient extends EventEmitter {
         },
       });
       this.groupMetaCache.delete(id);
+      // Added to a group that already existed: WhatsApp sends no groups.upsert
+      // for that, only this "add" naming us.
+      if (action === 'add') void this.recordGroupJoined(id, participants);
     });
 
     // A group created (by us or with us in it): its conversation row, so it
@@ -1584,6 +2423,156 @@ export class BaileysClient extends EventEmitter {
     });
   }
 
+  private persistChatSnapshotState(
+    normalizedId: string,
+    chat: { unreadCount?: number | null; archived?: unknown },
+    pinned: boolean | undefined
+  ): void {
+    const archived = typeof chat.archived === 'boolean' ? chat.archived : undefined;
+    const unreadCount = chat.unreadCount || 0;
+    void upsertChatState(normalizedId, {
+      ...(archived === undefined ? {} : { archived }),
+      ...(pinned === undefined ? {} : { pinned }),
+      unreadCount,
+    }).catch(() => {});
+    void setCanonicalChatState(normalizedId, {
+      unreadCount,
+      archived,
+      pinnedAt: pinFromBaileys(chat),
+      mute: muteFromBaileys(chat, 'snapshot'),
+    });
+    void recordInboundEphemeral(normalizedId, ephemeralFromBaileys(chat, 'snapshot'));
+  }
+
+  private mergeContactAliases(ids: string[]): Set<string> {
+    const aliases = new Set(ids.filter(Boolean));
+    for (const id of Array.from(aliases)) {
+      const existing = this.contactAliasGroups.get(id);
+      if (!existing) continue;
+      for (const alias of existing) aliases.add(alias);
+    }
+    for (const alias of aliases) this.contactAliasGroups.set(alias, aliases);
+    return aliases;
+  }
+
+  private rememberContactName(
+    ids: string[],
+    name: string,
+    source: WhatsAppContactNameSource
+  ): WhatsAppContactNameRecord | undefined {
+    const cleanName = name.trim();
+    if (!cleanName || !ids.length) return undefined;
+    const aliases = this.mergeContactAliases(ids);
+    const incoming = { name: cleanName, source } satisfies WhatsAppContactNameRecord;
+    let effective = incoming;
+    if (source === 'push') {
+      effective =
+        Array.from(aliases)
+          .map(alias => this.contactNames.get(alias))
+          .find(record => record?.source === 'saved') || incoming;
+    }
+    for (const alias of aliases) {
+      const current = this.contactNames.get(alias);
+      this.contactNames.set(alias, preferWhatsAppContactName(current, effective));
+    }
+    const effectiveName = this.contactNameFor(...Array.from(aliases));
+    if (!effectiveName) return undefined;
+    const saved = Array.from(aliases).some(
+      alias => this.contactNames.get(alias)?.source === 'saved'
+    );
+    return { name: effectiveName, source: saved ? 'saved' : 'push' };
+  }
+
+  private contactNameFor(...ids: string[]): string | undefined {
+    const aliases = this.mergeContactAliases(ids);
+    const records = Array.from(aliases)
+      .map(alias => this.contactNames.get(alias))
+      .filter((record): record is WhatsAppContactNameRecord => !!record);
+    return records.find(record => record.source === 'saved')?.name || records[0]?.name;
+  }
+
+  private savedContactNameFor(...ids: string[]): string | undefined {
+    const aliases = this.mergeContactAliases(ids);
+    return Array.from(aliases)
+      .map(alias => this.contactNames.get(alias))
+      .find(record => record?.source === 'saved')?.name;
+  }
+
+  private async applyHistoryContacts(contacts: unknown[]): Promise<void> {
+    await Promise.all(contacts.map(contact => this.applyContactIdentity(contact)));
+  }
+
+  private applyContactIdentity(contact: unknown): Promise<void> {
+    const identity = whatsappContactIdentity(contact);
+    const displayName = identity.name || identity.pushName;
+    if (!displayName || !identity.ids.length) return Promise.resolve();
+
+    const source: WhatsAppContactNameSource = identity.name ? 'saved' : 'push';
+    const prepared = identity.ids.map(originalId =>
+      /^\d{6,15}$/.test(originalId) ? `${originalId}@s.whatsapp.net` : originalId
+    );
+    const normalizedIds = prepared.map(id => this.normalizeJid(id));
+    const effective = this.rememberContactName(
+      [...prepared, ...normalizedIds],
+      displayName,
+      source
+    );
+    if (!effective) return Promise.resolve();
+
+    const writes: Promise<unknown>[] = [];
+
+    for (let index = 0; index < prepared.length; index += 1) {
+      const rawId = prepared[index];
+      const normalizedId = normalizedIds[index];
+      const effectiveName = effective.name;
+
+      const chat = this.chatStore.get(normalizedId);
+      if (!isJidGroup(normalizedId)) {
+        // Contact events can arrive before the chat snapshot after a restart.
+        // Persist the candidate independently so an authoritative rename is
+        // not lost when the in-memory chat store is still empty.
+        writes.push(
+          setConversationName(normalizedId, displayName, {
+            authoritative: source === 'saved',
+          }).catch(() => {})
+        );
+      }
+      if (chat && !chat.isGroup) {
+        if (source === 'saved' || isWhatsAppJidLikeName(chat.name, normalizedId)) {
+          chat.name = effectiveName;
+        }
+      }
+
+      writes.push(
+        ensureParticipant({
+          id: normalizedId,
+          name: effectiveName,
+          pushName: identity.pushName,
+          phone: this.phoneFromJid(rawId),
+        })
+          .then(() =>
+            source === 'saved'
+              ? setParticipantName(normalizedId, effectiveName, identity.pushName)
+              : undefined
+          )
+          .catch(error => {
+            this.logger.debug?.(`contact name persist failed: ${error?.message || error}`);
+          })
+      );
+      writes.push(
+        storeContact({
+          jid: rawId,
+          phone: this.phoneFromJid(rawId),
+          name: identity.name,
+          pushName: identity.pushName,
+        }).catch(error => {
+          this.logger.debug?.(`contact durable persist failed: ${error?.message || error}`);
+        })
+      );
+    }
+    return Promise.all(writes).then(() => undefined);
+  }
+
   private handleQR(qr: string): void {
     this.ready = false;
     this.lastState = 'QR';
@@ -1595,9 +2584,7 @@ export class BaileysClient extends EventEmitter {
     }
     qrcodeTerminal.generate(qr, { small: true });
     QRCode.toFile(join(this.sessionPath, 'qr.png'), qr, { width: 400 }).catch(() => {});
-    this.logger.warn(
-      `WhatsApp requires QR scan at ${process.env.WA_QR_PUBLIC_URL || 'https://whatsapp.e-dani.com/'}`
-    );
+    this.logger.warn(`WhatsApp requires QR scan at ${qrPageUrl()}`);
     this.emit('qr', qr);
   }
 
@@ -1635,7 +2622,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private async runWatchdog(): Promise<void> {
-    if (this.connecting) return;
+    if (this.connecting || this.intentionalDisconnect) return;
     const now = Date.now();
 
     if (this.ready) return;
@@ -1647,9 +2634,7 @@ export class BaileysClient extends EventEmitter {
     ) {
       if (now - this.lastQrReminderAt > 10 * 60 * 1000) {
         this.lastQrReminderAt = now;
-        this.logger.warn(
-          `WhatsApp is waiting for manual QR scan: ${process.env.WA_QR_PUBLIC_URL || 'https://whatsapp.e-dani.com/'}`
-        );
+        this.logger.warn(`WhatsApp is waiting for manual QR scan: ${qrPageUrl()}`);
       }
       return;
     }
@@ -1664,7 +2649,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private scheduleReconnect(reason: string): void {
-    if (this.reconnectTimer || this.connecting) return;
+    if (this.reconnectTimer || this.connecting || this.intentionalDisconnect) return;
     const delayMs = Math.min(60000, 5000 * Math.max(1, this.reconnectAttempts + 1));
     this.logger.warn(`Scheduling WhatsApp reconnect in ${delayMs}ms (${reason})`);
     this.reconnectTimer = setTimeout(() => {
@@ -1677,7 +2662,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private async reconnectNow(reason: string): Promise<void> {
-    if (this.connecting) return;
+    if (this.connecting || this.intentionalDisconnect) return;
     this.reconnectAttempts += 1;
     this.lastReconnectAt = new Date();
     this.ready = false;
@@ -1690,9 +2675,44 @@ export class BaileysClient extends EventEmitter {
   // Message ingest (live events + history-on-login)
   // ---------------------------------------------------------------------------
 
+  private novedadesIngestStore(): NovedadesIngestStore {
+    return {
+      post: storeNovedadesMessage,
+      status: storeNovedadesStatus,
+      deletePost: markNovedadesMessageDeleted,
+      deleteStatus: key =>
+        markNovedadesStatusDeleted({
+          authorJid: novedadesStatusAuthor(key, { ownJid: this.sock?.user?.id }),
+          messageId: key.id!,
+        }),
+    };
+  }
+
   private async ingestMessage(msg: WAMessage, options: IngestOptions = {}): Promise<IngestResult> {
+    if (!this.ingest) return { inserted: false };
+    this.rememberHistoryRecoveryAnchor(msg);
+    const novedades = novedadesKind(msg.key);
+    if (novedades) {
+      try {
+        await ingestNovedadesMessage(msg, this.novedadesIngestStore(), {
+          ownJid: this.sock?.user?.id,
+          source: options.source,
+        });
+      } catch (error: any) {
+        this.logger.warn(`Novedades message persistence failed: ${error?.message || error}`);
+      }
+      if (novedades === 'channel') return { inserted: false };
+    }
     if (msg.key?.id && msg.message) {
       this.rememberMessageForRetry(msg.key, msg.message);
+    }
+
+    // A pin / unpin is state of the pinned message, not a chat message (it
+    // used to land as an empty MESSAGECONTEXTINFO / PININCHATMESSAGE row):
+    // recorded in whatsapp_message_pins, no messages row.
+    if (isPinAction(msg)) {
+      await this.ingestPinAction(msg, options);
+      return { inserted: false };
     }
 
     // Fase 3 / PR-7: a poll vote or an event response is state of the poll /
@@ -1706,18 +2726,56 @@ export class BaileysClient extends EventEmitter {
 
     const waMessage = this.convertMessage(msg);
     if (!waMessage) return { inserted: false };
+    const normalizedChatId = waMessage.conversationId;
+    waMessage.conversationId = await canonicalConversationId(normalizedChatId);
+    // Preserve a trusted PN/LID alias if its DB update races this message.
+    if (waMessage.conversationId === normalizedChatId && pnJidToE164(msg.key.remoteJid)) {
+      let lid = lidFromPnMessage(msg);
+      if (!lid) {
+        try {
+          const mapped = await this.sock?.signalRepository?.lidMapping?.getLIDForPN?.(
+            msg.key.remoteJid || ''
+          );
+          if (typeof mapped === 'string' && /^\d+(?::\d+)?@lid$/.test(mapped))
+            lid = jidNormalizedUser(mapped);
+        } catch {
+          // An unavailable provider mapping leaves the PN unchanged.
+        }
+      }
+      if (lid) waMessage.conversationId = lid;
+    }
+    if (isChannelJid(msg.key.remoteJid)) {
+      waMessage.waMessageId = await channelPostMessageId(
+        waMessage.conversationId,
+        waMessage.waMessageId
+      );
+    }
 
     this.rememberKey(waMessage.waMessageId, msg.key, msg.key.remoteJid || '');
 
     const rawChatJid = msg.key.remoteJid || '';
     const isGroup = !!isJidGroup(rawChatJid);
 
-    const chatName = this.chatStore.get(waMessage.conversationId)?.name || waMessage.conversationId;
+    let groupSubject: string | undefined;
     let participantCount = 2;
     if (isGroup) {
       const meta = await this.fetchGroupMetadata(rawChatJid).catch(() => null);
       participantCount = meta?.participants?.length || 0;
+      groupSubject = meta?.subject || undefined;
     }
+
+    const cachedChat = this.chatStore.get(waMessage.conversationId);
+    const contactName = this.contactNameFor(rawChatJid, waMessage.conversationId);
+    const chatName = isOfficialWhatsAppJid(rawChatJid)
+      ? OFFICIAL_WHATSAPP_NAME
+      : chooseWhatsAppConversationName({
+          id: waMessage.conversationId,
+          isGroup,
+          existingName: cachedChat?.name,
+          contactName,
+          pushName: !msg.key.fromMe ? msg.pushName : undefined,
+          groupSubject,
+        });
 
     await ensureConversation({
       id: waMessage.conversationId,
@@ -1726,13 +2784,14 @@ export class BaileysClient extends EventEmitter {
       participantCount,
     });
 
-    // WhatsApp privacy migration: when the chat/sender is LID-addressed
+    // WhatsApp privacy migration: when a direct chat is LID-addressed
     // (`…@lid`), the LID is NOT a phone number, so neither the conversation id
     // nor `phoneFromJid(senderRaw)` yields the real MSISDN that downstream
     // consumers (skirmshop-labels opt-in poller) require. If Baileys attached
     // the alternate phone-number jid, capture it here ONCE and (a) ride it into
     // the message metadata as `senderPnE164`, (b) backfill the long-empty
-    // `conversations.wa_chat_id` with the PN jid. Both are best-effort and must
+    // `conversations.wa_chat_id` with the PN jid. Group participant PN belongs
+    // to the sender, never to the group conversation. Both are best-effort and must
     // never block or abort the message persist. The conversation PK stays the
     // LID (namespaced) — we do not re-key anything.
     const lidPn = pnFromLidMessage(msg);
@@ -1745,13 +2804,22 @@ export class BaileysClient extends EventEmitter {
     waMessage.fromMe = !!msg.key.fromMe;
     if (lidPn) {
       waMessage.senderPnE164 = lidPn.e164;
-      // (b) wa_chat_id backfill — fire-and-forget; a failure here must never
-      // drop the message (the metadata field is the load-bearing path).
-      void setConversationWaChatId(waMessage.conversationId, lidPn.pnJid).catch(e =>
+      // Establish the PN alias before a subsequent PN-addressed echo arrives.
+      // A mapping failure must not drop the message.
+      if (!isGroup && waMessage.conversationId.endsWith('@lid')) {
+        await setConversationWaChatId(waMessage.conversationId, lidPn.pnJid).catch(e =>
+          this.logger.warn(
+            `wa_chat_id backfill failed for conversation=${waMessage.conversationId}: ${
+              e?.message || e
+            }`
+          )
+        );
+      }
+    }
+    if (!isGroup && pnJidToE164(rawChatJid) && waMessage.conversationId.endsWith('@lid')) {
+      await setConversationWaChatId(waMessage.conversationId, rawChatJid).catch(e =>
         this.logger.warn(
-          `wa_chat_id backfill failed for conversation=${waMessage.conversationId}: ${
-            e?.message || e
-          }`
+          `wa_chat_id backfill failed for conversation=${waMessage.conversationId}: ${e?.message || e}`
         )
       );
     }
@@ -1759,12 +2827,12 @@ export class BaileysClient extends EventEmitter {
     const senderRaw = msg.key.fromMe
       ? this.meJid || waMessage.senderWaId
       : msg.key.participant || rawChatJid;
-    const pushName = msg.pushName || undefined;
+    const pushName =
+      msg.pushName || (isOfficialWhatsAppJid(senderRaw) ? OFFICIAL_WHATSAPP_NAME : undefined);
     // Cache the display name keyed by the raw participant JID so the
     // presence.update handler can label "Manu está escribiendo…".
     if (pushName) {
-      this.contactNames.set(senderRaw, pushName);
-      this.contactNames.set(waMessage.senderWaId, pushName);
+      this.rememberContactName([senderRaw, waMessage.senderWaId], pushName, 'push');
     }
     await ensureParticipant({
       id: waMessage.senderWaId,
@@ -1777,12 +2845,16 @@ export class BaileysClient extends EventEmitter {
     // already upserted above). A link failure must never abort the ingest and
     // drop the message — the opt-in poller reads `messages`, so losing it is the
     // actual outage. Log with full context instead of swallowing silently.
-    await linkParticipantToConversation(waMessage.conversationId, waMessage.senderWaId).catch(e =>
-      this.logger.error(
-        `participant link persist failed for conversation=${waMessage.conversationId} ` +
-          `participant=${waMessage.senderWaId}: ${e?.message || e}`
-      )
-    );
+    // A 1:1 chat links only the other side: our own participant there named
+    // the chat after the account itself in the console (QA 02-10).
+    if (linksSenderToChat({ isGroup, fromMe: !!msg.key.fromMe, chatJid: rawChatJid })) {
+      await linkParticipantToConversation(waMessage.conversationId, waMessage.senderWaId).catch(e =>
+        this.logger.error(
+          `participant link persist failed for conversation=${waMessage.conversationId} ` +
+            `participant=${waMessage.senderWaId}: ${e?.message || e}`
+        )
+      );
+    }
 
     // Lazy avatar pulls. Don't await — fire-and-forget so a slow profile
     // picture fetch never delays the message persist.
@@ -1811,42 +2883,132 @@ export class BaileysClient extends EventEmitter {
         senderPnE164: lidPn?.e164,
         // POLL / EVENT (fase 3 / PR-7): {poll} or {event}, what dgx-messages renders.
         ...waMessage.structured,
+        // The quote of a reply (QA 02-10): what dgx-messages shows above the
+        // bubble, also when the quoted message is not in the DB.
+        ...(await this.replyMetadata(msg)),
+        ...(waMessage.metadata || {}),
       },
     };
+    // Persist once before the searchable row is visible, including replays.
+    // A channel's composed row id is not its provider key: never overwrite another post's payload.
+    if (waMessage.waMessageId === msg.key.id) {
+      await this.persistDurablePayload(
+        msg,
+        waMessage.conversationId,
+        options.source === 'baileys_history_sync' && !waMessage.structured ? 'history' : 'live'
+      );
+    }
     const msgId = await storeMessage(data);
-    await storeMessageKey({
-      waMessageId: waMessage.waMessageId,
-      conversationId: waMessage.conversationId,
-      remoteJid: rawChatJid,
-      fromMe: !!msg.key.fromMe,
-      participantJid: msg.key.participant || undefined,
-      messageTimestampMs: waMessage.waTimestamp.getTime(),
-    }).catch(e =>
-      this.logger.warn(
-        `message key persist failed for ${waMessage.waMessageId}: ${e?.message || e}`
-      )
-    );
-    // Also for an already-stored row (msgId null): a history replay after a
-    // relink backfills the payloads of the recent window. A poll / event is
-    // kept whatever its age: its secret is what decrypts the votes / responses.
-    await this.persistDurablePayload(
-      msg,
-      waMessage.conversationId,
-      options.source === 'baileys_history_sync' && !waMessage.structured ? 'history' : 'live'
-    );
+    if (msg.key.fromMe && !novedadesKind(msg.key)) {
+      // Reapply provider receipts to close the receipt-before-message-row race.
+      const status = typeof msg.status === 'number' ? mapWaStatus(msg.status) : null;
+      await recordAggregateStatus(
+        waMessage.conversationId,
+        waMessage.waMessageId,
+        status || 'sent'
+      );
+      for (const receipt of msg.userReceipt || [])
+        await this.persistParticipantReceipt(
+          waMessage.conversationId,
+          waMessage.waMessageId,
+          receipt
+        );
+    }
+    if (
+      msgId &&
+      msg.key.id &&
+      (isChannelJid(rawChatJid) || isStatusJid(rawChatJid)) &&
+      takeRevokeBeforePost(waMessage.conversationId, msg.key.id)
+    ) {
+      this.logger.info(
+        `Revoke of ${waMessage.conversationId} ${msg.key.id} arrived before its post: applied`
+      );
+      await this.recordInboundRevoke(waMessage.waMessageId);
+    }
+    // Not for a REACTION: prod folds it into the target's messages.reactions
+    // and never writes its row, so the key's FK to messages.wa_message_id can
+    // only fail (a warning per reaction). Nothing reads a reaction's key: it
+    // cannot be quoted, edited nor reacted to.
+    if (waMessage.messageType !== 'REACTION') {
+      await storeMessageKey({
+        waMessageId: waMessage.waMessageId,
+        conversationId: waMessage.conversationId,
+        remoteJid: rawChatJid,
+        fromMe: !!msg.key.fromMe,
+        participantJid: msg.key.participant || undefined,
+        messageTimestampMs: waMessage.waTimestamp.getTime(),
+      }).catch(e =>
+        this.logger.warn(
+          `message key persist failed for ${waMessage.waMessageId}: ${e?.message || e}`
+        )
+      );
+    }
     // Before the msgId check: prod folds REACTION inserts into the target's
     // messages.reactions and skips the row, so msgId is always null for them.
     if (waMessage.messageType === 'REACTION') await this.persistReaction(msg, waMessage);
+    // History sync carries each message's current reactions on the message
+    // itself (no REACTION message of their own): same table, same rules.
+    await this.persistCarriedReactions(msg, waMessage);
+    // A history-sync message says whether it is starred: only fills a message
+    // whose star we never saw (the app-state sync is newer).
+    if (msg.starred === true) {
+      await recordMessageStar({
+        messageId: waMessage.waMessageId,
+        chatId: waMessage.conversationId,
+        fromMe: !!msg.key.fromMe,
+        starred: true,
+        source: 'history',
+      });
+    }
+
+    // A status (a message of status@broadcast) stays in messages like before
+    // and is also indexed in whatsapp_statuses (author, posted / expires at).
+    // Also for an already-stored row: a history replay fills the index. A
+    // status without its WhatsApp time is not indexed (it would never expire).
+    if (
+      isStatusJid(rawChatJid) &&
+      STATUS_MESSAGE_TYPES.has(waMessage.messageType) &&
+      waMessage.waTimestamp.getTime() > 0
+    ) {
+      await recordStatus({
+        messageId: waMessage.waMessageId,
+        authorId: waMessage.senderWaId,
+        fromMe: !!msg.key.fromMe,
+        messageType: waMessage.messageType,
+        postedAt: waMessage.waTimestamp,
+        source: options.source === 'baileys_history_sync' ? 'history' : 'live',
+      });
+    }
 
     if (!msgId) return { inserted: false, waMessage };
 
     this.logger.info(`Stored message ${waMessage.waMessageId} from ${waMessage.senderWaId}`);
 
     const isLiveMedia =
-      (options.source || 'live') === 'live' &&
-      waMessage.messageType !== 'TEXT' &&
-      waMessage.messageType !== 'REACTION';
-    if (isLiveMedia && waMessage.messageType === 'AUDIO' && this.emitAudioAttachments) {
+      !options.skipMediaDownload &&
+      (waMessage.metadata?.viewOnce === true ||
+        Date.now() - (this.historyRecoveryRequestedAt.get(waMessage.conversationId) || 0) <
+          5 * 60 * 1000 ||
+        (options.storeMedia ?? (options.source || 'live') === 'live')) &&
+      ['IMAGE', 'VIDEO', 'AUDIO', 'PTT', 'DOCUMENT', 'STICKER'].includes(waMessage.messageType);
+    if (isLiveMedia && waMessage.metadata?.viewOnce === true) {
+      // Capture while the received payload is still available, before publishing.
+      await this.downloadAndStoreMedia(
+        msg,
+        msgId,
+        waMessage.messageType,
+        waMessage.content || undefined
+      ).catch(error =>
+        this.logger.warn(
+          `View-once media capture failed for ${waMessage.waMessageId}: ${error?.message || error}`
+        )
+      );
+    } else if (
+      isLiveMedia &&
+      waMessage.messageType === 'AUDIO' &&
+      this.emitAudioAttachments &&
+      options.publishEvent !== false
+    ) {
       // F1.7 honest voice: for voice notes the media upload historically ran
       // fire-and-forget AFTER the event emit, so the NATS event never carried
       // attachments and synapse's transcription raised "no downloadable audio
@@ -1880,14 +3042,55 @@ export class BaileysClient extends EventEmitter {
 
     if (options.publishEvent !== false) {
       this.emit('message', waMessage);
+      if (waMessage.messageType === 'REACTION' || waMessage.messageType === 'POLL_VOTE') {
+        this.emit('reaction', waMessage);
+      }
     }
     return { inserted: true, waMessage };
+  }
+
+  /**
+   * `metadata.reply_preview` (the quoted text, or a label of its kind),
+   * `reply_type` (its message type), `reply_from_id` (its author as a
+   * participant id, like messages.sender_wa_id) and `reply_from` (the
+   * author's name when known: "Tú" for ourselves). Nothing for a message
+   * that is not a reply.
+   */
+  // CONTRACT: schema.whatsapp-connector.messages-metadata-reply.v1 — metadata reply_preview, reply_type, reply_from_id, reply_from
+  private async replyMetadata(msg: WAMessage): Promise<Record<string, string>> {
+    const quote = quotedReply(msg.message);
+    if (!quote) return {};
+    const out: Record<string, string> = {};
+    if (quote.preview) {
+      out.reply_preview = quote.preview.text;
+      out.reply_type = quote.preview.type;
+    }
+    if (quote.participant) {
+      const authorId = this.normalizeJid(quote.participant);
+      out.reply_from_id = accountKey(authorId);
+      const own = new Set(
+        [this.meJid, (this.sock?.user as { lid?: string } | undefined)?.lid]
+          .filter((jid): jid is string => !!jid)
+          .map(jid => this.normalizeJid(jidNormalizedUser(jid)))
+      );
+      const name = own.has(authorId)
+        ? 'Tú'
+        : this.contactNames.get(quote.participant)?.name ||
+          this.contactNames.get(authorId)?.name ||
+          (this.ingest ? await participantDisplayName(out.reply_from_id).catch(() => null) : null);
+      if (name) out.reply_from = name;
+    }
+    return out;
   }
 
   private convertMessage(msg: WAMessage): WhatsAppMessage | null {
     if (!msg.key?.id || !msg.key.remoteJid) return null;
 
-    const content = msg.message;
+    const content =
+      normalizeMessageContent(msg.message) ||
+      (msg.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT
+        ? { secretEncryptedMessage: {} }
+        : undefined);
     if (!content) return null;
 
     // Determine type + body
@@ -1898,6 +3101,8 @@ export class BaileysClient extends EventEmitter {
     let poll: ReturnType<typeof parsePollDefinition> = null;
     let event: ReturnType<typeof parseEventDefinition> = null;
     let structured: Record<string, unknown> | undefined;
+    let metadata: Record<string, unknown> | undefined;
+    const business = businessMessageText(content);
 
     const text = content.conversation;
     const ext = content.extendedTextMessage;
@@ -1905,17 +3110,14 @@ export class BaileysClient extends EventEmitter {
       body = text;
     } else if (ext) {
       body = ext.text || null;
-      const ctx = ext.contextInfo;
-      if (ctx) {
-        isForwarded = !!ctx.isForwarded || (ctx.forwardingScore || 0) > 0;
-        if (ctx.stanzaId) replyToWaId = ctx.stanzaId;
-      }
     } else if (content.imageMessage) {
       messageType = 'IMAGE';
       body = content.imageMessage.caption || null;
     } else if (content.videoMessage) {
       messageType = 'VIDEO';
       body = content.videoMessage.caption || null;
+      // A WhatsApp GIF is a looping muted video (fase 3 / PR-9).
+      if (content.videoMessage.gifPlayback) structured = { gifPlayback: true };
     } else if (content.audioMessage) {
       messageType = content.audioMessage.ptt ? 'AUDIO' : 'AUDIO';
       body = null;
@@ -1924,20 +3126,103 @@ export class BaileysClient extends EventEmitter {
       body = content.documentMessage.caption || content.documentMessage.fileName || null;
     } else if (content.stickerMessage) {
       messageType = 'STICKER';
+      metadata = {
+        kind: 'sticker',
+        isAnimated: !!content.stickerMessage.isAnimated,
+        mimetype: content.stickerMessage.mimetype || 'image/webp',
+      };
     } else if (content.reactionMessage) {
       messageType = 'REACTION';
       body = content.reactionMessage.text || null;
       if (content.reactionMessage.key?.id) replyToWaId = content.reactionMessage.key.id;
+      metadata = {
+        kind: 'reaction',
+        emoji: content.reactionMessage.text || '',
+        targetMessageId: content.reactionMessage.key?.id || null,
+      };
+    } else if (
+      content.pollCreationMessage ||
+      (content as any).pollCreationMessageV2 ||
+      (content as any).pollCreationMessageV3 ||
+      (content as any).pollCreationMessageV5
+    ) {
+      const poll =
+        content.pollCreationMessage ||
+        (content as any).pollCreationMessageV2 ||
+        (content as any).pollCreationMessageV3 ||
+        (content as any).pollCreationMessageV5;
+      messageType = 'POLL';
+      body = poll?.name || null;
+      const definition = parsePollDefinition(content);
+      if (definition) structured = { poll: definition };
+      metadata = {
+        kind: 'poll',
+        options: Array.isArray(poll?.options)
+          ? poll.options.map((option: any) => option?.optionName || option?.name).filter(Boolean)
+          : [],
+        selectableCount: poll?.selectableOptionsCount ?? poll?.selectableCount ?? null,
+      };
+    } else if (content.pollUpdateMessage) {
+      messageType = 'POLL_VOTE';
+      metadata = {
+        kind: 'poll_vote',
+        pollMessageId: content.pollUpdateMessage.pollCreationMessageKey?.id || null,
+      };
+    } else if ((content as any).pollResultSnapshotMessage) {
+      messageType = 'POLL_RESULT';
+      metadata = { kind: 'poll_result' };
+    } else if ((content as any).eventMessage) {
+      const event = (content as any).eventMessage;
+      messageType = 'EVENT';
+      body = event?.name || null;
+      const definition = parseEventDefinition(content);
+      if (definition) structured = { event: definition };
+      const startTime = numericProviderValue(event?.startTime);
+      const endTime = numericProviderValue(event?.endTime);
+      const location =
+        event?.location && typeof event.location === 'object'
+          ? {
+              ...(numericProviderValue(event.location.degreesLatitude) === undefined
+                ? {}
+                : { degreesLatitude: numericProviderValue(event.location.degreesLatitude) }),
+              ...(numericProviderValue(event.location.degreesLongitude) === undefined
+                ? {}
+                : { degreesLongitude: numericProviderValue(event.location.degreesLongitude) }),
+              ...(typeof event.location.name === 'string' && event.location.name.trim()
+                ? { name: event.location.name.trim() }
+                : {}),
+            }
+          : undefined;
+      metadata = {
+        kind: 'event',
+        description: event?.description || null,
+        startTime: startTime ?? null,
+        endTime: endTime ?? null,
+        location: location && Object.keys(location).length ? location : null,
+        isCancelled: !!(event?.isCanceled ?? event?.isCancelled),
+        extraGuestsAllowed: event?.extraGuestsAllowed === true,
+      };
     } else if (content.locationMessage) {
       messageType = 'LOCATION';
       const loc = content.locationMessage;
       body = `${loc.degreesLatitude},${loc.degreesLongitude}`;
-    } else if (content.contactMessage) {
+    } else if (content.contactMessage || content.contactsArrayMessage) {
+      // Fase 3 / PR-9: the cards' names and numbers ride as metadata.contact
+      // (what dgx-messages renders as a card with "Abrir chat"), never the raw vCard.
       messageType = 'CONTACT';
-      body = content.contactMessage.displayName || null;
-    } else if (content.contactsArrayMessage) {
-      messageType = 'CONTACT';
-      body = content.contactsArrayMessage.displayName || null;
+      const shared = sharedContactsFromMessage(content);
+      body = shared?.displayName || null;
+      if (shared) structured = { contact: shared };
+      const cards =
+        content.contactsArrayMessage?.contacts ||
+        (content.contactMessage ? [content.contactMessage] : []);
+      metadata = {
+        kind: 'contact',
+        contacts: cards.map(contact => ({
+          displayName: contact.displayName || null,
+          ...parseVCardFields(contact.vcard),
+        })),
+      };
     } else if ((poll = parsePollDefinition(content))) {
       // Fase 3 / PR-7: a proper POLL row (was MESSAGECONTEXTINFO or
       // POLLCREATIONMESSAGEV3 with no content). The secret stays in the payload.
@@ -1948,17 +3233,58 @@ export class BaileysClient extends EventEmitter {
       messageType = 'EVENT';
       body = event.name || null;
       structured = { event };
-    } else if (content.protocolMessage) {
+    } else if (business) {
+      messageType = business.type;
+      body = business.text;
+    } else if (content.placeholderMessage && !hasUserMessageContent(content)) {
+      messageType = 'UNAVAILABLE';
+      metadata = { contentUnavailable: true, unavailableReason: 'provider_placeholder' };
+    } else if ((content as any).secretEncryptedMessage && !hasUserMessageContent(content)) {
+      messageType = 'UNAVAILABLE';
+      metadata = { contentUnavailable: true, unavailableReason: 'encrypted_provider_payload' };
+    } else if (content.protocolMessage || !hasUserMessageContent(content)) {
       // ignore key updates etc.
       return null;
     } else {
-      const k = Object.keys(content).find(k => !!(content as any)[k]);
-      messageType = (k || 'UNKNOWN').toUpperCase();
+      const k = Object.keys(content).find(
+        k =>
+          k !== 'messageContextInfo' &&
+          k !== 'senderKeyDistributionMessage' &&
+          !!(content as any)[k]
+      );
+      if (!k) return null;
+      messageType = k.toUpperCase();
     }
+
+    const context =
+      [
+        ext,
+        content.imageMessage,
+        content.videoMessage,
+        content.audioMessage,
+        content.documentMessage,
+        content.stickerMessage,
+        content.locationMessage,
+        content.contactMessage,
+      ]
+        .map(item => item?.contextInfo)
+        .find(Boolean) || messageContextInfo(content);
+    if (context) {
+      isForwarded = !!context.isForwarded || (context.forwardingScore || 0) > 0;
+      if (!replyToWaId && context.stanzaId) replyToWaId = context.stanzaId;
+    }
+
+    // A reply quoted from a photo, document, sticker… (not only a text) keeps
+    // its quoted id too.
+    if (!replyToWaId) replyToWaId = quotedReply(content)?.stanzaId || undefined;
 
     const senderRaw = msg.key.fromMe
       ? this.meJid || msg.key.remoteJid
       : msg.key.participant || msg.key.remoteJid;
+
+    if (isViewOnceContent(msg.message)) {
+      metadata = { ...metadata, viewOnce: true };
+    }
 
     return {
       waMessageId: msg.key.id,
@@ -1969,6 +3295,7 @@ export class BaileysClient extends EventEmitter {
       messageType,
       isForwarded,
       replyToWaId,
+      metadata,
       // Sender display name (attacker-controlled + PII; do NOT log).
       // Omitted when absent (e.g. history sync).
       pushName: msg.pushName || undefined,
@@ -1982,9 +3309,131 @@ export class BaileysClient extends EventEmitter {
    * it on the NATS event) or null when the download failed/was empty — the
    * historical fire-and-forget callers simply ignore the return value.
    */
+  private async withMediaPersistenceLock<T>(key: string, task: () => Promise<T>): Promise<T> {
+    this.mediaPersistenceLocks ??= new Map();
+    const previous = this.mediaPersistenceLocks.get(key);
+    let release!: () => void;
+    const current = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    this.mediaPersistenceLocks.set(key, current);
+    if (previous) await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this.mediaPersistenceLocks.get(key) === current) this.mediaPersistenceLocks.delete(key);
+    }
+  }
+
+  private async storeMediaBytesOnce(
+    messageId: string,
+    bytes: Buffer,
+    fileType: string,
+    mimeType?: string,
+    fileName?: string,
+    caption?: string,
+    durationSeconds?: number
+  ): Promise<StoredMediaInfo> {
+    const db = await getPool().connect();
+    try {
+      await db.query('BEGIN');
+      const message = await db.query(
+        `SELECT id FROM messages WHERE id=$1 AND account=$2 AND platform='whatsapp' FOR UPDATE`,
+        [messageId, connectorAccount()]
+      );
+      if (!message.rows.length) throw new Error('Sent media message row unavailable');
+      const existing = await db.query(
+        `SELECT file_url, file_size, mime_type, file_name FROM attachments
+          WHERE message_id=$1 ORDER BY id DESC LIMIT 1`,
+        [messageId]
+      );
+      if (existing.rows[0]?.file_url) {
+        await db.query('COMMIT');
+        return {
+          storageKey: existing.rows[0].file_url,
+          fileSize: Number(existing.rows[0].file_size || 0),
+          mimeType: existing.rows[0].mime_type,
+          fileName: existing.rows[0].file_name,
+        };
+      }
+      const stored = await uploadMedia(messageId, bytes, mimeType, fileName);
+      await db.query(
+        `INSERT INTO attachments (message_id, file_type, mime_type, file_name, file_size, file_url, caption, duration_seconds)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          messageId,
+          fileType,
+          mimeType,
+          fileName,
+          stored.fileSize,
+          stored.storageKey,
+          caption,
+          durationSeconds || null,
+        ]
+      );
+      await db.query('COMMIT');
+      // The message hint can precede the upload. Refresh only after its
+      // attachment is committed, using the same account-scoped read path.
+      try {
+        await db.query(
+          `SELECT pg_notify('socialmedia_changes', jsonb_build_object(
+             'kind', 'message', 'account', account,
+             'conversation_id', left(conversation_id::text, 512),
+             'message_id', id::text, 'wa_message_id', left(wa_message_id::text, 512),
+             'reason', 'attachment'
+           )::text)
+           FROM messages WHERE id=$1 AND account=$2 AND platform='whatsapp'`,
+          [messageId, connectorAccount()]
+        );
+      } catch (error: any) {
+        this.logger.warn(`Attachment refresh hint failed: ${error?.code || 'unknown'}`);
+      }
+      return { ...stored, mimeType, fileName };
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    } finally {
+      db.release();
+    }
+  }
+
   private async downloadAndStoreMedia(
     msg: WAMessage,
-    messageId: bigint,
+    messageId: string,
+    messageType: string,
+    caption?: string
+  ): Promise<StoredMediaInfo | null> {
+    return this.withMediaPersistenceLock(msg.key?.id || messageId, async () => {
+      const existing = await getPool().query(
+        `SELECT file_url, file_size, mime_type, file_name FROM attachments
+          WHERE message_id=$1 ORDER BY id DESC LIMIT 1`,
+        [messageId]
+      );
+      if (existing.rows[0]?.file_url) {
+        const rawDuration = Number(
+          msg.message?.videoMessage?.seconds ?? msg.message?.audioMessage?.seconds
+        );
+        if (Number.isSafeInteger(rawDuration) && rawDuration > 0 && rawDuration <= 2147483647) {
+          await getPool().query(
+            'UPDATE attachments SET duration_seconds=COALESCE(duration_seconds, $2) WHERE message_id=$1',
+            [messageId, rawDuration]
+          );
+        }
+        return {
+          storageKey: existing.rows[0].file_url,
+          fileSize: Number(existing.rows[0].file_size || 0),
+          mimeType: existing.rows[0].mime_type,
+          fileName: existing.rows[0].file_name,
+        };
+      }
+      return this.downloadAndStoreMediaUnlocked(msg, messageId, messageType, caption);
+    });
+  }
+
+  private async downloadAndStoreMediaUnlocked(
+    msg: WAMessage,
+    messageId: string,
     messageType: string,
     caption?: string
   ): Promise<StoredMediaInfo | null> {
@@ -2013,24 +3462,31 @@ export class BaileysClient extends EventEmitter {
     }
 
     const { mimeType, fileName } = this.mediaMetaFromMessage(msg);
+    const rawDuration = Number(
+      msg.message?.videoMessage?.seconds ?? msg.message?.audioMessage?.seconds
+    );
+    const durationSeconds =
+      Number.isSafeInteger(rawDuration) && rawDuration > 0 && rawDuration <= 2147483647
+        ? rawDuration
+        : undefined;
 
-    const { storageKey, fileSize } = await uploadMedia(messageId, buffer, mimeType, fileName);
-
-    await storeAttachment(messageId, {
-      fileType: messageType,
+    const stored = await this.storeMediaBytesOnce(
+      messageId,
+      buffer,
+      messageType,
       mimeType,
       fileName,
-      fileSize,
-      fileUrl: storageKey,
       caption,
-    });
-
-    this.logger.info(`Stored media ${storageKey} (${fileSize} bytes) for msg ${messageId}`);
-    return { storageKey, fileSize, mimeType, fileName };
+      durationSeconds
+    );
+    this.logger.info(
+      `Stored media ${stored.storageKey} (${stored.fileSize} bytes) for msg ${messageId}`
+    );
+    return stored;
   }
 
   private mediaMetaFromMessage(msg: WAMessage): { mimeType?: string; fileName?: string } {
-    const c = msg.message;
+    const c = normalizeMessageContent(msg.message);
     if (!c) return {};
     if (c.imageMessage)
       return { mimeType: c.imageMessage.mimetype || 'image/jpeg', fileName: undefined };
@@ -2064,12 +3520,31 @@ export class BaileysClient extends EventEmitter {
   ): Promise<WAMessage | undefined> {
     if (!replyToMessageId) return undefined;
     const id = stripAccountKey(replyToMessageId);
-    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    const original = await this.currentMessage(id);
     if (!original?.message) return undefined;
     return {
       ...original,
       key: { ...original.key, id, remoteJid: chatJid },
     } as WAMessage;
+  }
+
+  /**
+   * A message to quote or forward: memory, else the durable copy — with the
+   * CURRENT text when it was edited since: both copies are the original (an
+   * edit only rewrites the messages row: content, is_edited, edit_history).
+   * The row is read only with ingest; unreadable → the copy as it is.
+   */
+  private async currentMessage(id: string): Promise<WAMessage | undefined> {
+    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    if (!original?.message || !this.ingest) return original;
+    const edited = await loadEditedContent(id).catch((e: any) => {
+      this.logger.warn(
+        `current text of ${id} unreadable, using its stored copy: ${e?.message || e}`
+      );
+      return undefined;
+    });
+    const message = edited === undefined ? undefined : withEditedText(original.message, edited);
+    return message ? ({ ...original, message } as WAMessage) : original;
   }
 
   /** Full WAMessage (key + content) from the in-memory caches. */
@@ -2093,6 +3568,33 @@ export class BaileysClient extends EventEmitter {
   }
 
   /**
+   * Disappearing timer (seconds) an outgoing message to `raw` must carry, when
+   * known and on: a group's cached metadata (what Baileys itself puts on the
+   * stanza), else the canonical conversation row (014) — `conversationId`
+   * when the caller already resolved it. Unknown, off, ingest off or any
+   * failure → undefined: the message goes as before, never blocked by this.
+   */
+  private async outgoingEphemeral(
+    raw: string,
+    conversationId?: string | null
+  ): Promise<number | undefined> {
+    try {
+      if (this.isGroupJid(raw)) {
+        const meta = this.groupMetaCache.get(raw);
+        if (meta) return groupEphemeral(meta) || undefined;
+      }
+      if (!this.ingest) return undefined;
+      const id = conversationId || (await resolveCanonicalConversation(raw))?.id;
+      if (!id) return undefined;
+      const stored = await readConversationEphemeral(id);
+      return stored && stored.expiration > 0 ? stored.expiration : undefined;
+    } catch (e: any) {
+      this.logger.warn(`disappearing timer of ${raw} unreadable, sent without: ${e?.message || e}`);
+      return undefined;
+    }
+  }
+
+  /**
    * Persist the raw message for quote/forward/retry after a restart. SC-1225:
    * a pairing-only socket (ingest off) writes nothing.
    */
@@ -2102,9 +3604,136 @@ export class BaileysClient extends EventEmitter {
     source: DurablePayloadSource
   ): Promise<void> {
     if (!this.ingest || !msg?.key?.id) return;
-    // Hourly, in the background: purge expired payloads and send attempts.
     void maybeRunRetention();
-    await storeRawWAMessage(msg, conversationId, source);
+    try {
+      await storeRawWAMessage(msg, conversationId, source);
+    } catch (error: any) {
+      this.logger.warn(
+        `durable message persistence failed for ${msg.key.id}: ${error?.message || error}`
+      );
+    }
+  }
+
+  async getMessageInfo(chatId: string, messageId: string, options: { refresh?: boolean } = {}) {
+    const info = await getMessageReceiptInfo(chatId, messageId);
+    const target = await receiptRecoveryTarget(chatId, messageId);
+    const evidence = info.receipts.some(
+      receipt => receipt.deliveredAt || receipt.readAt || receipt.playedAt
+    );
+    const current = this.receiptHistoryRecovery.current(target);
+    if (
+      !this.ingest ||
+      !this.sock ||
+      !this.isConnected() ||
+      !/^\d+(?:-\d+)?@(?:lid|c\.us|s\.whatsapp\.net|g\.us)$/.test(target.chatId)
+    ) {
+      const captured =
+        current?.state === 'complete' ? await getMessageReceiptInfo(chatId, messageId) : info;
+      return { ...captured, recovery: current || { state: 'unsupported' as const } };
+    }
+    const recovery =
+      options.refresh === true || !evidence ? this.receiptHistoryRecovery.request(target) : current;
+    // Completion may have raced the first DB read; never report complete with
+    // the stale pre-recovery snapshot or the UI would stop polling too early.
+    const captured =
+      recovery?.state === 'complete' ? await getMessageReceiptInfo(chatId, messageId) : info;
+    return { ...captured, ...(recovery ? { recovery } : {}) };
+  }
+
+  private async receiptIdentity(
+    jid: string,
+    contact?: Partial<GroupParticipant>
+  ): Promise<ReceiptIdentity> {
+    const aliases = [
+      ...new Set(
+        (await this.jidAliases(receiptJid(jid)))
+          .concat(contact?.lid || [], contact?.phoneNumber || [])
+          .map(receiptJid)
+      ),
+    ];
+    return {
+      participantId: aliases.find(id => id.endsWith('@s.whatsapp.net')) || aliases[0],
+      aliases,
+      name:
+        contact?.name ||
+        contact?.notify ||
+        this.contactNameFor(jid, this.normalizeJid(jid)) ||
+        null,
+    };
+  }
+
+  private async persistParticipantReceipt(
+    chatId: string,
+    messageId: string,
+    receipt: proto.IUserReceipt
+  ): Promise<void> {
+    if (!this.ingest || !receipt.userJid) return;
+    const identity = await this.receiptIdentity(receipt.userJid);
+    await recordMessageReceipt(await this.receiptScopeChat(chatId), messageId, {
+      ...identity,
+      deliveredAt: receiptTime(receipt.receiptTimestamp),
+      readAt: receiptTime(receipt.readTimestamp),
+      playedAt: receiptTime(receipt.playedTimestamp),
+    });
+  }
+
+  private async receiptScopeChat(jid: string): Promise<string> {
+    if (!this.isGroupJid(jid) && /@(c\.us|s\.whatsapp\.net)$/.test(jid)) {
+      const aliases = await this.jidAliases(receiptJid(jid));
+      const lid = aliases.find(id => id.endsWith('@lid'));
+      if (lid) return lid;
+    }
+    return this.normalizeJid(jid);
+  }
+
+  private async recordProviderStatus(
+    chatId: string,
+    messageId: string,
+    status: string
+  ): Promise<void> {
+    await recordAggregateStatus(await this.receiptScopeChat(chatId), messageId, status);
+  }
+
+  private async captureSendRecipients(
+    sock: WASocket,
+    jid: string
+  ): Promise<ReceiptIdentity[] | null> {
+    if (!this.ingest || !this.isGroupJid(jid)) return null;
+    try {
+      // Fetch immediately before sending. Cached or current membership on a later read
+      // cannot describe who a historical message was sent to.
+      const meta = await this.race(sock.groupMetadata(jid), 10_000, 'Recipient snapshot timeout');
+      const own = (await this.ownIds()).map(receiptJid);
+      if (!own.length || !Array.isArray(meta.participants)) return null;
+      const participants = await Promise.all(
+        meta.participants.map(p => this.receiptIdentity(p.id, p))
+      );
+      if (!participants.some(p => p.aliases.some(id => own.includes(id)))) return null;
+      return participants.filter(p => !p.aliases.some(id => own.includes(id)));
+    } catch (error: any) {
+      this.logger.warn(`Recipient snapshot unavailable: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  private async sendWithReceiptSnapshot(
+    sock: WASocket,
+    jid: string,
+    content: AnyMessageContent,
+    options?: Parameters<WASocket['sendMessage']>[2]
+  ): Promise<WAMessage | undefined> {
+    const control = content as any;
+    const recipients =
+      control.edit || control.delete || control.react || control.pin
+        ? null
+        : await this.captureSendRecipients(sock, jid);
+    const sent = await sock.sendMessage(jid, content, options);
+    if (sent?.key?.id && recipients !== null) {
+      void recordRecipientSnapshot(this.normalizeJid(jid), sent.key.id, recipients).catch(error =>
+        this.logger.warn(`Recipient snapshot persistence failed: ${error?.message || error}`)
+      );
+    }
+    return sent;
   }
 
   /**
@@ -2126,6 +3755,39 @@ export class BaileysClient extends EventEmitter {
       reactionMessageId: msg.key.id || undefined,
       reactedAt: reactionTime(reaction.senderTimestampMs, unixSeconds(msg.messageTimestamp)),
     });
+  }
+
+  /**
+   * The reactions a message carries (WebMessageInfo.reactions — what a
+   * history sync brings: the current reaction of each person, no REACTION
+   * message) → whatsapp_message_reactions, with the rules of a live one: the
+   * reactor from the reaction's own key (ours when fromMe; a group needs its
+   * participant, else skipped), an empty text a removal, and an older one
+   * never replacing a newer one (reacted_at = its senderTimestampMs).
+   * SC-1225: a pairing-only socket writes nothing.
+   */
+  private async persistCarriedReactions(msg: WAMessage, waMessage: WhatsAppMessage): Promise<void> {
+    const reactions = (msg as { reactions?: proto.IReaction[] | null }).reactions;
+    if (!this.ingest || !Array.isArray(reactions) || !reactions.length) return;
+    const chatRaw = msg.key.remoteJid || '';
+    const isGroup = !!isJidGroup(chatRaw);
+    for (const item of reactions) {
+      const key = item?.key;
+      if (!key) continue;
+      const reactorRaw = key.fromMe
+        ? this.meJid
+        : key.participant || (isGroup ? null : key.remoteJid || chatRaw);
+      if (!reactorRaw || isJidGroup(reactorRaw)) continue;
+      await storeMessageReaction({
+        targetMessageId: waMessage.waMessageId,
+        conversationId: waMessage.conversationId,
+        reactorJid: this.normalizeJid(reactorRaw),
+        emoji: item.text || '',
+        fromMe: key.fromMe ?? null,
+        reactionMessageId: key.id || undefined,
+        reactedAt: reactionTime(item.senderTimestampMs),
+      });
+    }
   }
 
   /**
@@ -2152,7 +3814,17 @@ export class BaileysClient extends EventEmitter {
 
     const timeoutMs = parseInt(process.env.WA_SEND_TIMEOUT_MS || '45000', 10);
     const started = Date.now();
-    const raw = this.toRawJid(chatId);
+    let target = chatId;
+    if (this.ingest) {
+      try {
+        target = await canonicalConversationId(chatId);
+      } catch (error: any) {
+        this.logger.warn(
+          `send conversation lookup failed for ${chatId}: ${error?.message || error}`
+        );
+      }
+    }
+    const raw = this.toRawJid(target);
     const normalized = this.normalizeJid(raw);
     const isGroup = this.isGroupJid(raw);
     let groupRepair: GroupSessionRefreshResult | undefined;
@@ -2174,27 +3846,18 @@ export class BaileysClient extends EventEmitter {
     this.logger.info(
       `Sending WhatsApp message rawJid=${raw} normalizedJid=${normalized} type=${isGroup ? 'group' : 'direct'}${groupRepair?.groupSubject ? ` groupSubject="${groupRepair.groupSubject}" participants=${groupRepair.participantCount}` : ''}`
     );
-    if (!isGroup && this.isDirectUserJid(raw)) {
-      await this.prepareDirectPrivacyToken(raw, normalized, started).catch(e => {
-        throw this.buildSendError(
-          classifyWhatsAppSendFailure(e),
-          raw,
-          normalized,
-          false,
-          started,
-          0,
-          e
-        );
-      });
-    }
+    await this.guardDirectSend(raw, started);
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
-    await options?.beforeSend?.();
+    const ephemeralExpiration = await this.outgoingEphemeral(raw);
+    const ownJid = this.sock?.user?.id;
     try {
       const sent = await this.sendTextWithTimeout(raw, content, timeoutMs, {
         useCachedGroupMetadata: isGroup ? false : undefined,
         useUserDevicesCache: isGroup ? false : undefined,
         quoted,
         messageId: options?.messageId,
+        ephemeralExpiration,
+        beforeSend: options?.beforeSend,
       });
       const messageId = sent?.key?.id;
       this.logger.info(
@@ -2215,6 +3878,7 @@ export class BaileysClient extends EventEmitter {
         );
       }
       if (sent?.key) {
+        if (await this.persistSentNovedades(sent, ownJid)) return messageId || undefined;
         this.rememberKey(messageId || '', sent.key, raw);
         this.rememberMessageForRetry(sent.key, sent.message);
         await this.persistDurablePayload(
@@ -2225,12 +3889,13 @@ export class BaileysClient extends EventEmitter {
       }
       return messageId || undefined;
     } catch (e: any) {
+      if (e instanceof SendAlreadyClaimedError) throw e;
       const failureClass = classifyWhatsAppSendFailure(e);
       this.logger.warn(
         `WhatsApp send attempt failed failureClass=${failureClass} rawJid=${raw} normalizedJid=${normalized} attempt=1 elapsedMs=${Date.now() - started}${groupRepair?.groupSubject ? ` groupSubject="${groupRepair.groupSubject}"` : ''}: ${e?.message || e}`
       );
 
-      if (isGroup && this.shouldRetryGroupSend(failureClass)) {
+      if (isGroup && !options?.messageId && this.shouldRetryGroupSend(failureClass)) {
         let repair: GroupSessionRefreshResult | undefined;
         try {
           repair = await this.refreshGroupSession(raw, {
@@ -2250,6 +3915,7 @@ export class BaileysClient extends EventEmitter {
             useUserDevicesCache: false,
             quoted,
             messageId: options?.messageId,
+            ephemeralExpiration,
           });
           const messageId = retried?.key?.id;
           this.logger.info(
@@ -2329,8 +3995,7 @@ export class BaileysClient extends EventEmitter {
       pnJid: phone.rawJid,
       saveOnPrimaryAddressbook: true,
     } satisfies proto.SyncActionValue.IContactAction);
-    this.contactNames.set(phone.rawJid, displayName);
-    this.contactNames.set(phone.waJid, displayName);
+    this.rememberContactName([phone.rawJid, phone.waJid], displayName, 'saved');
 
     let tokenStatus: WhatsAppCustomerTokenStatus = 'missing_token';
     let actionable: string | undefined;
@@ -2381,14 +4046,25 @@ export class BaileysClient extends EventEmitter {
     caption?: string,
     options?: {
       asSticker?: boolean;
+      asGif?: boolean;
       replyToMessageId?: string;
       /** Same contract as sendMessage's messageId / beforeSend. */
       messageId?: string;
       beforeSend?: () => Promise<void>;
+      /** Play-once photo/video (media-quality.ts); refused for other kinds. */
+      viewOnce?: boolean;
+      /** Re-encode a still image (media-quality.ts); default source = untouched. */
+      quality?: MediaQuality;
+      /** A document's name; default = the URL's last path segment, no query. */
+      fileName?: string;
     }
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
+    const viewOnce = parseViewOnce(options?.viewOnce);
+    const quality = parseMediaQuality(options?.quality);
     const raw = this.toRawJid(chatId);
+    await this.guardDirectSend(raw);
+    const ownJid = this.sock.user?.id;
     // A media reply whose quoted message is unknown is rejected (before the
     // file is fetched) instead of going out as an unrelated, unquoted media.
     const quoted = await this.buildQuotedFromId(options?.replyToMessageId, raw);
@@ -2409,17 +4085,55 @@ export class BaileysClient extends EventEmitter {
     } catch (e: any) {
       throw new Error(`Failed to fetch file from ${fileUrl}: ${e?.message || e}`);
     }
-    const fileName = fileUrl.split('/').pop() || 'attachment';
+    const requestedFileName = options?.fileName?.split(/[\\/]/).pop();
+    let fileName = documentFileName(fileUrl.startsWith('data:') ? '' : fileUrl, requestedFileName);
+    const asSticker = !!options?.asSticker;
+    if (viewOnce && options?.asGif) {
+      throw new MessageMutationError(
+        'viewOnce is not supported for GIF playback',
+        400,
+        'invalid_request',
+        'view_once_unsupported'
+      );
+    }
+    // Refused before anything goes out: play-once only for photos/videos,
+    // a quality only for still images.
+    checkMediaOptions(contentType, { viewOnce, quality, asSticker });
+    const once = viewOnce ? { viewOnce: true } : {};
+    const normalizedContentType = contentType.split(';', 1)[0].trim().toLowerCase();
 
     let payload: AnyMessageContent;
     // Stickers: WhatsApp expects webp; baileys handles conversion when the
     // payload is `{ sticker: buf }` and the bytes are a static webp/animated.
-    if (options?.asSticker || contentType === 'image/webp') {
+    if (options?.asGif || normalizedContentType === 'image/gif') {
+      if (
+        viewOnce ||
+        normalizedContentType !== 'video/mp4' ||
+        buf.length < 12 ||
+        buf.toString('ascii', 4, 8) !== 'ftyp'
+      )
+        throw new MessageMutationError(
+          'Animated GIFs must be transcoded to MP4 before sending; the connector does not transcode GIF files',
+          400,
+          'invalid_request'
+        );
+      payload = { video: buf, mimetype: 'video/mp4', gifPlayback: true, caption };
+    } else if (asSticker) {
       payload = { sticker: buf };
-    } else if (contentType.startsWith('image/')) payload = { image: buf, caption };
-    else if (contentType.startsWith('video/')) payload = { video: buf, caption };
+    } else if (contentType.startsWith('image/')) {
+      if (quality !== 'source') {
+        const prepared = await prepareImageQuality(buf, contentType, quality);
+        buf = prepared.bytes;
+        contentType = prepared.mimeType;
+        fileName =
+          fileName.replace(/\.[^.]+$/, '') + (contentType === 'image/png' ? '.png' : '.jpg');
+        payload = { image: buf, mimetype: contentType, caption, ...once };
+      } else payload = { image: buf, caption, ...once };
+    } else if (contentType.startsWith('video/')) payload = { video: buf, caption, ...once };
     else if (contentType.startsWith('audio/'))
-      payload = { audio: buf, mimetype: contentType, ptt: false };
+      // INFRA-592: OGG/Opus goes out as the native voice note (ptt:true);
+      // sent as a plain audio message WhatsApp never delivers it.
+      payload = audioMessagePayload(contentType, buf);
     else
       payload = {
         document: buf,
@@ -2428,21 +4142,81 @@ export class BaileysClient extends EventEmitter {
         caption,
       };
 
+    const ephemeralExpiration = await this.outgoingEphemeral(raw);
     await options?.beforeSend?.();
-    const sendOptions =
+    const sendOptions = withEphemeralExpiration(
       quoted || options?.messageId
         ? {
             ...(quoted ? { quoted } : {}),
             ...(options?.messageId ? { messageId: options.messageId } : {}),
           }
-        : undefined;
-    const sent = await this.sock.sendMessage(raw, payload, sendOptions);
+        : undefined,
+      ephemeralExpiration
+    );
+    const sent = await this.sendWithReceiptSnapshot(this.sock, raw, payload, sendOptions);
     if (sent?.key?.id) {
-      this.rememberKey(sent.key.id, sent.key, raw);
-      this.rememberMessageForRetry(sent.key, sent.message);
+      if (await this.persistSentNovedades(sent, ownJid)) return sent.key.id;
+      try {
+        this.rememberKey(sent.key.id, sent.key, raw);
+        this.rememberMessageForRetry(sent.key, sent.message);
+      } catch (error: any) {
+        this.logger.warn(`sent media cache failed for ${sent.key.id}: ${error?.code || 'unknown'}`);
+      }
       await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || raw), 'sent');
+      const fileType =
+        'image' in payload
+          ? 'IMAGE'
+          : 'video' in payload
+            ? 'VIDEO'
+            : 'audio' in payload
+              ? 'AUDIO'
+              : 'sticker' in payload
+                ? 'STICKER'
+                : 'DOCUMENT';
+      if (sent.message) {
+        try {
+          await this.persistSentMedia(sent, buf, contentType, fileName, fileType, caption);
+        } catch (error: any) {
+          // WhatsApp already accepted the message. Keep its receipt so a UI retry cannot send it twice.
+          this.logger.error(
+            `MEDIA_PERSIST_PENDING provider_message_id=${sent.key.id} error=${error?.code || error?.name || 'unknown'}`
+          );
+        }
+      } else {
+        this.logger.error(
+          `MEDIA_PERSIST_PENDING provider_message_id=${sent.key.id} error=missing_payload`
+        );
+      }
     }
     return sent?.key?.id || undefined;
+  }
+
+  private async persistSentMedia(
+    sent: WAMessage,
+    bytes: Buffer,
+    mimeType: string,
+    fileName: string,
+    fileType: string,
+    caption?: string
+  ): Promise<void> {
+    const providerId = sent.key?.id;
+    if (!providerId) return;
+    if (novedadesKind(sent.key)) return;
+    await this.ingestMessage(sent, {
+      source: 'live',
+      publishEvent: false,
+      skipMediaDownload: true,
+    });
+    await this.withMediaPersistenceLock(providerId, async () => {
+      const result = await getPool().query(
+        `SELECT m.id
+           FROM messages m WHERE m.wa_message_id=$1 AND m.account=$2 AND m.platform='whatsapp'`,
+        [accountKey(providerId), connectorAccount()]
+      );
+      const row = result.rows[0];
+      if (!row?.id) throw new Error('Sent media could not be persisted');
+      await this.storeMediaBytesOnce(row.id, bytes, fileType, mimeType, fileName, caption);
+    });
   }
 
   /** Send an Ogg/Opus clip as a WhatsApp voice note (PTT). */
@@ -2451,24 +4225,402 @@ export class BaileysClient extends EventEmitter {
     audio: Buffer,
     mimetype = 'audio/ogg; codecs=opus',
     /** Same contract as sendMessage's messageId / beforeSend. */
-    options?: { messageId?: string; beforeSend?: () => Promise<void> }
+    options?: { messageId?: string; beforeSend?: () => Promise<void> } | string,
+    beforeSend?: () => Promise<void>
   ): Promise<string | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
     if (!this.isConnected())
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
     const raw = this.toRawJid(chatId);
+    await this.guardDirectSend(raw);
     const payload: AnyMessageContent = { audio, mimetype, ptt: true };
-    await options?.beforeSend?.();
-    const sent = options?.messageId
-      ? await this.sock.sendMessage(raw, payload, { messageId: options.messageId })
-      : await this.sock.sendMessage(raw, payload);
+    const ownJid = this.sock.user?.id;
+    const sendRequest = typeof options === 'string' ? { messageId: options, beforeSend } : options;
+    const sendOptions = withEphemeralExpiration(
+      sendRequest?.messageId ? { messageId: sendRequest.messageId } : undefined,
+      await this.outgoingEphemeral(raw)
+    );
+    await sendRequest?.beforeSend?.();
+    const sent = sendOptions
+      ? await this.sendWithReceiptSnapshot(this.sock, raw, payload, sendOptions)
+      : await this.sendWithReceiptSnapshot(this.sock, raw, payload);
     const messageId = sent?.key?.id;
     if (sent?.key) {
+      if (await this.persistSentNovedades(sent, ownJid)) return messageId || undefined;
       this.rememberKey(messageId || '', sent.key, raw);
       this.rememberMessageForRetry(sent.key, sent.message);
       await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || raw), 'sent');
     }
     return messageId || undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Start chat, stickers / GIFs, contacts (fase 3 / PR-9; the helpers live in
+  // contacts.ts and sticker-gif.ts)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The chat of a phone number — never a twin. First what this account already
+   * has for it (the phone jid or, through 008's aliases, its LID conversation,
+   * merged tombstones followed): then WhatsApp is not even asked. Otherwise
+   * onWhatsApp (not on WhatsApp → 422 not_on_whatsapp) and the LID WhatsApp
+   * gives for the number, which is looked up again (a LID conversation may
+   * exist without an alias). Only when nothing exists is a row inserted, under
+   * the LID when known (the jid replies arrive on), with the phone in
+   * wa_chat_id so 008 records the alias — and only with ingest on.
+   */
+  private async prodStartChat(
+    phoneInput: NormalizedWhatsAppPhone | string,
+    options: { actor?: string } = {}
+  ): Promise<StartedChat> {
+    const phone =
+      typeof phoneInput === 'string' ? normalizePhoneForWhatsApp(phoneInput) : phoneInput;
+    if (!phone)
+      throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'A valid phone number is required');
+    const sock = this.connectedSocket();
+    const known = this.ingest ? await resolveCanonicalConversation(phone.rawJid) : undefined;
+    if (known) return this.startedChatView(known, phone, { created: false });
+
+    const results = await sock.onWhatsApp(phone.rawJid);
+    const found = (results || []).find(item => item?.exists && typeof item.jid === 'string');
+    if (!found) {
+      throw new MessageMutationError(
+        `${phone.phoneE164} is not on WhatsApp`,
+        422,
+        'not_on_whatsapp'
+      );
+    }
+    const pnJid = jidNormalizedUser(found.jid) || phone.rawJid;
+    const lidFound = await Promise.resolve(
+      sock.signalRepository?.lidMapping?.getLIDForPN?.(pnJid)
+    ).catch(() => null);
+    const lid = lidFound ? jidNormalizedUser(lidFound) : null;
+    if (this.ingest) {
+      const twin =
+        (lid ? await resolveCanonicalConversation(lid) : undefined) ||
+        (pnJid !== phone.rawJid ? await resolveCanonicalConversation(pnJid) : undefined);
+      if (twin) return this.startedChatView(twin, phone, { created: false, lid });
+    }
+
+    const chatJid = lid || this.normalizeJid(pnJid);
+    const name =
+      this.contactNames.get(pnJid)?.name ||
+      (lid ? this.contactNames.get(lid)?.name : undefined) ||
+      this.contactNames.get(this.normalizeJid(pnJid))?.name ||
+      phone.phoneE164;
+    let conversationId: string | null = null;
+    let created = false;
+    if (this.ingest) {
+      const row = await insertStartedConversation({ jid: chatJid, name, pnJid });
+      conversationId = row.id;
+      created = row.created;
+    }
+    this.logger.info(
+      `Chat started with ${chatJid}${created ? ' (new conversation)' : ''}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      conversationId,
+      chatId: chatJid,
+      phone: phone.phoneE164,
+      lid,
+      name,
+      created,
+      existing: false,
+      persisted: !!conversationId,
+    };
+  }
+
+  private async startedChatView(
+    conversation: CanonicalConversation,
+    phone: NormalizedWhatsAppPhone,
+    extra: { created: boolean; lid?: string | null }
+  ): Promise<StartedChat> {
+    const name = await conversationName(conversation.id).catch(() => null);
+    const chatId = stripAccountKey(conversation.externalId);
+    return {
+      conversationId: conversation.id,
+      chatId,
+      phone: phone.phoneE164,
+      lid: chatId.endsWith('@lid') ? chatId : extra.lid || null,
+      name: name || phone.phoneE164,
+      created: extra.created,
+      existing: true,
+      persisted: true,
+    };
+  }
+
+  /**
+   * A sticker (WebP) or a GIF (MP4 with gifPlayback) to a chat's canonical jid.
+   * The file is fetched with its ceiling and checked by its bytes before the
+   * idempotency claim (`beforeSend`): a refused file never burns a key.
+   */
+  async sendStickerOrGif(
+    kind: StickerGifKind,
+    request: StickerGifRequest,
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult & { kind: StickerGifKind; animated?: boolean }> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(
+      request.conversationId,
+      kind === 'sticker' ? 'sendSticker' : 'sendGif'
+    );
+    await this.guardDirectSend(target.raw);
+    const quoted = request.replyToMessageId
+      ? await this.buildQuotedFromId(request.replyToMessageId, target.raw)
+      : undefined;
+    if (request.replyToMessageId && !quoted) {
+      throw new MessageUnavailableError(
+        `Quoted message ${request.replyToMessageId} is unavailable (not in memory nor in the durable store); send without replyTo`,
+        422,
+        'quoted_message_unavailable'
+      );
+    }
+    const file = await fetchLimited(
+      request.fileUrl,
+      kind === 'sticker' ? STICKER_MAX_BYTES : GIF_MAX_BYTES
+    );
+    const content = stickerGifContent(kind, file.bytes, file.contentType, request.caption);
+    const ephemeralExpiration = await this.outgoingEphemeral(target.raw, target.canonicalId);
+    await options.beforeSend?.();
+    const sendOptions = withEphemeralExpiration(
+      quoted || options.messageId
+        ? {
+            ...(quoted ? { quoted } : {}),
+            ...(options.messageId ? { messageId: options.messageId } : {}),
+          }
+        : undefined,
+      ephemeralExpiration
+    );
+    const sent = await this.sendWithReceiptSnapshot(sock, target.raw, content, sendOptions);
+    const messageId = sent?.key?.id;
+    if (!sent || !messageId) throw new Error(`WhatsApp returned no message id for the ${kind}`);
+    this.rememberKey(messageId, sent.key, target.raw);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, target.conversationId, 'sent');
+    this.logger.info(
+      `${kind} ${messageId} sent to ${target.raw}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      messageId,
+      conversationId: target.conversationId,
+      sentAt: new Date().toISOString(),
+      kind,
+      ...('sticker' in content ? { animated: content.isAnimated } : {}),
+    };
+  }
+
+  /** One or several contact cards (vCard) to a chat's canonical jid. */
+  async shareContacts(
+    chatId: string,
+    cards: ContactCard[],
+    options: StructuredSendOptions = {}
+  ): Promise<StructuredSendResult & { contacts: number }> {
+    const sock = this.connectedSocket();
+    const target = await this.structuredSendTarget(chatId, 'shareContact');
+    await this.guardDirectSend(target.raw);
+    const content = buildContactShareContent(cards);
+    const sendOptions = withEphemeralExpiration(
+      options.messageId ? { messageId: options.messageId } : undefined,
+      await this.outgoingEphemeral(target.raw, target.canonicalId)
+    );
+    await options.beforeSend?.();
+    const sent = await this.sendWithReceiptSnapshot(sock, target.raw, content, sendOptions);
+    const messageId = sent?.key?.id;
+    if (!sent || !messageId) throw new Error('WhatsApp returned no message id for the contact');
+    this.rememberKey(messageId, sent.key, target.raw);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, target.conversationId, 'sent');
+    this.logger.info(
+      `Contact card ${messageId} (${cards.length}) sent to ${target.raw}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      messageId,
+      conversationId: target.conversationId,
+      sentAt: new Date().toISOString(),
+      contacts: cards.length,
+    };
+  }
+
+  /**
+   * The people this account knows (read only; one entry per person, PN and
+   * LID collapsed). A pairing-only client keeps no DB state: an empty list.
+   */
+  async listContacts(
+    options: { query?: string; limit?: number } | number = {}
+  ): Promise<ContactListEntry[]> {
+    if (!this.ingest) return [];
+    const own = this.sock ? await this.ownIds().catch(() => [] as string[]) : [];
+    const me = this.meJid ? [jidNormalizedUser(this.meJid)] : [];
+    return listAccountContacts({
+      ...(typeof options === 'number' ? { limit: options } : options),
+      ownJids: [...own, ...me].map(jid => this.normalizeJid(jid)),
+    });
+  }
+
+  /**
+   * Save a contact in the account's address book: WhatsApp's own app-state
+   * mutation (contactAction on the `critical_unblock_low` collection, the one
+   * WhatsApp Web's "New contact" writes and /contacts/seed already uses), keyed
+   * by the phone jid with the LID when WhatsApp gives one and
+   * saveOnPrimaryAddressbook so the phone keeps it too. The number must be on
+   * WhatsApp (422 not_on_whatsapp). With ingest, the name also lands on the
+   * rows that already exist for that person (no row is created).
+   */
+  private async prodCreateContact(
+    input: { phone: NormalizedWhatsAppPhone; name: string; firstName?: string },
+    options: { actor?: string } = {}
+  ): Promise<CreatedContact> {
+    const sock = this.connectedSocket();
+    const results = await sock.onWhatsApp(input.phone.rawJid);
+    const found = (results || []).find(item => item?.exists && typeof item.jid === 'string');
+    if (!found) {
+      throw new MessageMutationError(
+        `${input.phone.phoneE164} is not on WhatsApp`,
+        422,
+        'not_on_whatsapp'
+      );
+    }
+    const pnJid = jidNormalizedUser(found.jid) || input.phone.rawJid;
+    const lidFound = await Promise.resolve(
+      sock.signalRepository?.lidMapping?.getLIDForPN?.(pnJid)
+    ).catch(() => null);
+    const lid = lidFound ? jidNormalizedUser(lidFound) : null;
+    try {
+      await sock.addOrEditContact(pnJid, {
+        fullName: input.name,
+        firstName: input.firstName || input.name,
+        pnJid,
+        ...(lid ? { lidJid: lid } : {}),
+        saveOnPrimaryAddressbook: true,
+      } satisfies proto.SyncActionValue.IContactAction);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      if (e?.isBoom && status >= 400 && status < 500 && ![401, 408, 428, 440].includes(status)) {
+        throw new MessageMutationError(
+          `WhatsApp rejected the contact: ${e?.message || e}`,
+          422,
+          'rejected_by_whatsapp',
+          String(status)
+        );
+      }
+      throw e;
+    }
+    for (const jid of [pnJid, this.normalizeJid(pnJid), ...(lid ? [lid] : [])]) {
+      this.rememberContactName([jid], input.name, 'saved');
+    }
+    let persisted = false;
+    if (this.ingest) {
+      try {
+        persisted = (await recordContactName([pnJid, ...(lid ? [lid] : [])], input.name)) > 0;
+      } catch (error: any) {
+        this.logger.warn(`contact name persist failed: ${error?.message || error}`);
+      }
+    }
+    this.logger.info(
+      `Contact saved for ${lid || pnJid}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      phone: input.phone.phoneE164,
+      jid: this.normalizeJid(pnJid),
+      lid,
+      name: input.name,
+      addressBookSync: true,
+      persisted,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Contact block / blocklist (helpers in contact-block.ts, blocked-contacts.ts)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The direct contact a block request is about, as the jid WhatsApp knows
+   * the chat by: a conversation resolved to its canonical row (merged
+   * tombstones followed; a group is 400), a phone to the conversation this
+   * account already has for it (its LID one through 008's aliases) and only
+   * otherwise its phone jid. Baileys itself maps PN ↔ LID when it writes.
+   */
+  private async blockTarget(
+    request: ContactBlockRequest
+  ): Promise<{ jid: string; conversationId: string | null }> {
+    if (request.conversationId) {
+      const target = await this.chatTarget(request.conversationId, 'block', false);
+      if (target.isGroup) {
+        throw new ContactBlockError(
+          'A group cannot be blocked: block one of its members instead',
+          400,
+          'invalid_request'
+        );
+      }
+      return { jid: target.raw, conversationId: target.conversationId };
+    }
+    const phone = request.phone!;
+    const known = this.ingest ? await resolveCanonicalConversation(phone.rawJid) : undefined;
+    return {
+      jid: known ? this.toRawJid(stripAccountKey(known.externalId)) : phone.rawJid,
+      conversationId: known?.id ?? null,
+    };
+  }
+
+  /**
+   * Block or unblock one contact (WhatsApp's own blocklist IQ via Baileys),
+   * proven by re-reading the provider's blocklist. The caller (POST
+   * /contacts/block) already required confirm: true and the sending gate.
+   */
+  async setContactBlock(
+    request: ContactBlockRequest,
+    options: { actor?: string } = {}
+  ): Promise<
+    Omit<ContactBlockOutcome, 'blocklist'> & {
+      action: ContactBlockRequest['action'];
+      conversationId: string | null;
+    }
+  > {
+    const sock = this.connectedSocket();
+    const target = await this.blockTarget(request);
+    const { blocklist, ...outcome } = await setContactBlocked(
+      sock,
+      target.jid,
+      request.action === 'block'
+    );
+    this.blocklistCache.set(blocklist);
+    this.logger.info(
+      `Contact ${outcome.jid} ${request.action}${outcome.changed ? '' : ' (already)'}${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return { action: request.action, ...outcome, conversationId: target.conversationId };
+  }
+
+  /**
+   * The account's blocked contacts, one entry per person (PN + LID through
+   * Baileys' mapping and 008's aliases), named from participants /
+   * conversations. The provider is read unless the cached list is fresh (or
+   * `fresh` is asked). A pairing-only client (ingest off) never touches the DB.
+   */
+  async listBlockedContacts(
+    options: { fresh?: boolean } = {}
+  ): Promise<{ blocked: BlockedContactEntry[]; readAt: string; cached: boolean }> {
+    const sock = this.connectedSocket();
+    const cached = options.fresh ? null : this.blocklistCache.fresh();
+    const entries = cached || this.blocklistCache.set(await readBlocklist(sock));
+    const readAt = this.blocklistCache.last()?.readAt || new Date().toISOString();
+    const pairs = this.ingest ? await accountAliasPairs(entries) : [];
+    const groups = await groupBlockedPeople(entries, async jid => {
+      const fromDb = pairs.flatMap(([a, b]) => (a === jid ? [b] : b === jid ? [a] : []));
+      const fromSignal = await signalAlias(sock, jid);
+      return [...fromDb, ...(fromSignal ? [fromSignal] : [])];
+    });
+    const blocked = this.ingest
+      ? await describeBlockedPeople(groups)
+      : groups.map(group => ({
+          id: personId(group.jids),
+          jids: group.jids,
+          blockedJids: group.blocked,
+          phone: group.jids.map(phoneOfJid).find((value): value is string => !!value) || null,
+          name: null,
+          pushName: null,
+          conversationId: null,
+        }));
+    return { blocked, readAt, cached: !!cached };
   }
 
   /**
@@ -2486,7 +4638,9 @@ export class BaileysClient extends EventEmitter {
     const sock = this.connectedSocket();
     const text = typeof emoji === 'string' ? emoji.trim() : '';
     const target = await this.resolveMutationTarget(chatId, messageId, 'reactToMessage');
-    const sent = await sock.sendMessage(target.chatJid, { react: { text, key: target.key } });
+    const sent = await this.sendWithReceiptSnapshot(sock, target.chatJid, {
+      react: { text, key: target.key },
+    });
     const reactedAt = reactionTime(sent?.message?.reactionMessage?.senderTimestampMs) || new Date();
     if (this.ingest && this.meJid) {
       await storeMessageReaction({
@@ -2512,12 +4666,12 @@ export class BaileysClient extends EventEmitter {
   // Polls and events (fase 3 / PR-7)
   // ---------------------------------------------------------------------------
 
-  /** Our own user jids for the vote / response crypto (PN from meJid when the socket has no user). */
+  /** Our own user jids for the vote / response crypto (meJid when the socket has no user: a PN or a LID). */
   private async ownIdentity(): Promise<OwnIdentity> {
-    const ids = await this.ownIds();
+    const ids = [...(await this.ownIds()), cryptoUserJid(this.meJid)];
     return {
-      pn: ids.find(id => id.endsWith('@s.whatsapp.net')) || cryptoUserJid(this.meJid),
-      lid: ids.find(id => id.endsWith('@lid')) || null,
+      pn: ids.find(id => id?.endsWith('@s.whatsapp.net')) ?? null,
+      lid: ids.find(id => id?.endsWith('@lid')) ?? null,
     };
   }
 
@@ -2650,7 +4804,7 @@ export class BaileysClient extends EventEmitter {
   private async structuredSendTarget(
     chatId: string,
     what: string
-  ): Promise<{ raw: string; conversationId: string }> {
+  ): Promise<{ raw: string; conversationId: string; canonicalId: string | null }> {
     const requested = stripAccountKey(String(chatId || '').trim());
     if (!STRUCTURED_CHAT_JID.test(requested)) {
       throw new MessageMutationError(
@@ -2661,7 +4815,7 @@ export class BaileysClient extends EventEmitter {
     }
     const conversation = this.ingest ? await resolveCanonicalConversation(requested) : undefined;
     const raw = this.toRawJid(conversation?.externalId || requested);
-    return { raw, conversationId: this.normalizeJid(raw) };
+    return { raw, conversationId: this.normalizeJid(raw), canonicalId: conversation?.id ?? null };
   }
 
   /** The poll / event behind a vote / response, or the precise reason it cannot be used. */
@@ -2731,34 +4885,46 @@ export class BaileysClient extends EventEmitter {
    * send); the payload with the secret is stored now, so votes can be read
    * and cast after a restart.
    */
-  async sendPoll(
+  private async prodSendPoll(
     chatId: string,
     poll: ValidatedPoll,
     options: StructuredSendOptions = {}
   ): Promise<StructuredSendResult> {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'sendPoll');
+    await this.guardDirectSend(target.raw);
+    const sendOptions = withEphemeralExpiration(
+      options.messageId ? { messageId: options.messageId } : undefined,
+      await this.outgoingEphemeral(target.raw, target.canonicalId)
+    );
     await options.beforeSend?.();
-    const sent = await sock.sendMessage(
+    const sent = await this.sendWithReceiptSnapshot(
+      sock,
       target.raw,
       buildPollContent(poll),
-      options.messageId ? { messageId: options.messageId } : undefined
+      sendOptions
     );
     return this.afterStructuredSend(sent, target, 'Poll', options.actor);
   }
 
-  async sendEvent(
+  private async prodSendEvent(
     chatId: string,
     event: ValidatedEvent,
     options: StructuredSendOptions = {}
   ): Promise<StructuredSendResult> {
     const sock = this.connectedSocket();
     const target = await this.structuredSendTarget(chatId, 'sendEvent');
+    await this.guardDirectSend(target.raw);
+    const sendOptions = withEphemeralExpiration(
+      options.messageId ? { messageId: options.messageId } : undefined,
+      await this.outgoingEphemeral(target.raw, target.canonicalId)
+    );
     await options.beforeSend?.();
-    const sent = await sock.sendMessage(
+    const sent = await this.sendWithReceiptSnapshot(
+      sock,
       target.raw,
       buildEventContent(event),
-      options.messageId ? { messageId: options.messageId } : undefined
+      sendOptions
     );
     return this.afterStructuredSend(sent, target, 'Event', options.actor);
   }
@@ -2785,7 +4951,7 @@ export class BaileysClient extends EventEmitter {
    * the identities the chat is addressed with (poll-votes.ts) and recorded
    * as ours once WhatsApp has it.
    */
-  async sendPollVote(
+  private async prodSendPollVote(
     chatId: string,
     messageId: string,
     options: unknown,
@@ -2880,7 +5046,11 @@ export class BaileysClient extends EventEmitter {
       });
     }
     const own = await this.ownIdentity();
-    const ownPn = own.pn;
+    // An event response is signed with phone numbers: ours comes from the LID when that is all we know.
+    const ownPn =
+      (await this.withAliases([own.pn, own.lid].filter((jid): jid is string => !!jid))).find(jid =>
+        jid.endsWith('@s.whatsapp.net')
+      ) ?? null;
     const creator = target.key.fromMe
       ? ownPn
       : (await this.withAliases(keyAuthorCandidates(target.key, own))).find(jid =>
@@ -2980,7 +5150,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   /** Current results of a poll: its definition + the stored votes (read-only). */
-  async getPollResults(chatId: string, messageId: string): Promise<PollResultsView> {
+  private async prodGetPollResults(chatId: string, messageId: string): Promise<PollResultsView> {
     const { id, conversationId, definition } = await this.structuredDefinition(messageId, 'poll');
     const votes = this.ingest ? await readPollVotes(id) : { available: false, votes: [] };
     return {
@@ -2992,7 +5162,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   /** Current responses of an event: its definition + the stored responses (read-only). */
-  async getEventResults(chatId: string, messageId: string): Promise<EventResultsView> {
+  private async prodGetEventResults(chatId: string, messageId: string): Promise<EventResultsView> {
     const { id, conversationId, definition } = await this.structuredDefinition(messageId, 'event');
     const stored = this.ingest ? await readEventResponses(id) : { available: false, responses: [] };
     return {
@@ -3019,7 +5189,7 @@ export class BaileysClient extends EventEmitter {
     if (!this.isConnected())
       throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
     const id = stripAccountKey(messageId);
-    const original = this.memoryMessage(id) || (await this.durableMessage(id));
+    const original = await this.currentMessage(id);
     if (!original?.message) {
       throw new MessageUnavailableError(
         `forwardMessage: message ${id} of ${chatId} is unavailable (not in memory nor in the durable store)`,
@@ -3027,18 +5197,20 @@ export class BaileysClient extends EventEmitter {
         'message_unavailable'
       );
     }
+    const forwardable = { ...original, key: { ...original.key, id } } as WAMessage;
     const rawTarget = this.toRawJid(toChatId);
-    const sent = await this.sock.sendMessage(rawTarget, { forward: original });
+    await this.guardDirectSend(rawTarget);
+    const sendOptions = withEphemeralExpiration(undefined, await this.outgoingEphemeral(rawTarget));
+    const sent = sendOptions
+      ? await this.sendWithReceiptSnapshot(
+          this.sock,
+          rawTarget,
+          { forward: forwardable },
+          sendOptions
+        )
+      : await this.sendWithReceiptSnapshot(this.sock, rawTarget, { forward: forwardable });
+    await this.persistSentMessage(sent, rawTarget);
     const sentId = sent?.key?.id;
-    if (sent?.key) {
-      this.rememberKey(sentId || '', sent.key, rawTarget);
-      this.rememberMessageForRetry(sent.key, sent.message);
-      await this.persistDurablePayload(
-        sent,
-        this.normalizeJid(sent.key.remoteJid || rawTarget),
-        'sent'
-      );
-    }
     this.logger.info(`Forwarded ${id} to ${rawTarget}${sentId ? ` id=${sentId}` : ''}`);
     return sentId || undefined;
   }
@@ -3081,7 +5253,10 @@ export class BaileysClient extends EventEmitter {
       );
     }
     return this.withOwnMutation('edit', target.id, async () => {
-      const sent = await sock.sendMessage(target.chatJid, { text: content, edit: target.key });
+      const sent = await this.sendWithReceiptSnapshot(sock, target.chatJid, {
+        text: content,
+        edit: target.key,
+      });
       await this.throwIfMutationRejected(sent?.key?.id, 'edit', target.id);
       const editedAt = new Date();
       if (this.ingest) {
@@ -3126,7 +5301,7 @@ export class BaileysClient extends EventEmitter {
       );
     }
     return this.withOwnMutation('revoke', target.id, async () => {
-      const sent = await sock.sendMessage(target.chatJid, { delete: target.key });
+      const sent = await this.sendWithReceiptSnapshot(sock, target.chatJid, { delete: target.key });
       await this.throwIfMutationRejected(sent?.key?.id, 'delete', target.id);
       const deletedAt = new Date();
       if (this.ingest) {
@@ -3188,6 +5363,413 @@ export class BaileysClient extends EventEmitter {
       this.logger.info(`Deleted ${target.id} for me in ${target.chatJid}`);
       return { messageId: target.id, deletedAt: deletedAt.toISOString() };
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Starred and pinned messages. Persistence: message-stars-pins.ts.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Star / unstar a message as the phone does: an app-state patch keyed by the
+   * message key (memory, durable payload, whatsapp_message_keys or the messages
+   * row, so it survives restarts). Only this account sees it. Recorded once
+   * WhatsApp accepted it (ingest only); the echo Baileys replays is skipped.
+   */
+  async starMessage(
+    chatId: string | undefined,
+    messageId: string,
+    star: boolean,
+    request: MessageMutationRequest = {}
+  ): Promise<StarResult> {
+    // 01-10-2026: un star/unstar real (Skirmshop) acabó en stream:error 401
+    // conflict device_removed 3 s después — WhatsApp desvinculó el dispositivo.
+    // El parche de app-state propio queda apagado hasta validarlo; solo se activa
+    // a propósito con WA_STAR_ENABLED=true (no está en ningún overlay).
+    if (process.env.WA_STAR_ENABLED !== 'true') {
+      throw new MessageMutationError(
+        'Starring messages is disabled on this connector (WA_STAR_ENABLED): a real star patch got the linked device removed by WhatsApp',
+        403,
+        'star_disabled'
+      );
+    }
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(chatId || '', messageId, 'starMessage');
+    if (isJidGroup(target.chatJid) && !target.key.fromMe && !target.key.participant) {
+      throw new MessageUnavailableError(
+        `starMessage: the author of ${target.id} is unknown (WhatsApp needs it in a group)`,
+        404,
+        'message_unavailable'
+      );
+    }
+    const starredAt = new Date();
+    await this.withOwnMutation('star', target.id, () =>
+      this.applyAppPatch(
+        sock,
+        starPatch(
+          {
+            remoteJid: target.chatJid,
+            id: target.id,
+            fromMe: !!target.key.fromMe,
+            participant: target.key.participant,
+          },
+          star
+        ),
+        star ? 'star' : 'unstar',
+        target.id
+      )
+    );
+    const conversationId = this.normalizeJid(target.chatJid);
+    const persisted = this.ingest
+      ? await recordMessageStar({
+          messageId: target.id,
+          chatId: conversationId,
+          fromMe: !!target.key.fromMe,
+          starred: star,
+          at: starredAt,
+          source: 'connector',
+          actor: request.actor,
+        })
+      : false;
+    this.logger.info(`${star ? 'Starred' : 'Unstarred'} ${target.id} in ${target.chatJid}`);
+    return {
+      starred: star,
+      messageId: target.id,
+      conversationId,
+      starredAt: starredAt.toISOString(),
+      persisted,
+    };
+  }
+
+  /**
+   * Pin / unpin a message for everyone in its chat (24 h, 7 d or 30 d). In a
+   * group whose info only admins may edit, only admins pin (fresh metadata).
+   * The key comes from the durable copies like any mutation; the action is
+   * recorded once WhatsApp has it (ingest only), at the time the pin message
+   * carries, so its echo changes nothing.
+   */
+  async pinMessage(request: PinRequest, options: StructuredSendOptions = {}): Promise<PinResult> {
+    const sock = this.connectedSocket();
+    const target = await this.resolveMutationTarget(
+      request.chatId || '',
+      request.messageId,
+      'pinMessage'
+    );
+    if (isJidGroup(target.chatJid)) {
+      if (!target.key.fromMe && !target.key.participant) {
+        throw new MessageUnavailableError(
+          `pinMessage: the author of ${target.id} is unknown (WhatsApp needs it in a group)`,
+          404,
+          'message_unavailable'
+        );
+      }
+      await this.checkGroupPinAllowed(target.chatJid);
+    }
+    const content = pinContent(target.key, request.pin, request.durationSeconds);
+    // Our own id, so the echo Baileys emits during the send is recognised.
+    const actionId = options.messageId || generateMessageIDV2(sock.user?.id);
+    const sent = await this.withOwnMutation('pin', actionId, async () => {
+      await options.beforeSend?.();
+      return this.sendWithReceiptSnapshot(sock, target.chatJid, content as AnyMessageContent, {
+        messageId: actionId,
+      });
+    });
+    const conversationId = this.normalizeJid(target.chatJid);
+    if (sent?.key?.id && sent.message) {
+      this.rememberMessageForRetry(sent.key, sent.message);
+      await this.persistDurablePayload(sent, conversationId, 'sent');
+    }
+    const at = (sent && pinActionOf(sent)?.at) || new Date();
+    const duration = request.pin ? request.durationSeconds : undefined;
+    const persisted =
+      this.ingest && !!this.meJid
+        ? await recordMessagePin({
+            messageId: target.id,
+            chatId: conversationId,
+            pinned: request.pin,
+            at,
+            durationSeconds: duration,
+            byJid: this.normalizeJid(this.meJid),
+            actionId,
+            source: 'connector',
+            actor: options.actor,
+          })
+        : false;
+    this.logger.info(
+      `${request.pin ? 'Pinned' : 'Unpinned'} ${target.id} in ${target.chatJid}${
+        duration ? ` for ${duration}s` : ''
+      }${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      pinned: request.pin,
+      messageId: actionId,
+      pinnedMessageId: target.id,
+      conversationId,
+      ...(duration
+        ? {
+            pinnedAt: at.toISOString(),
+            expiresAt: new Date(at.getTime() + duration * 1000).toISOString(),
+            durationSeconds: duration,
+          }
+        : {}),
+      persisted,
+    };
+  }
+
+  /** Active pins of a chat (what WhatsApp shows: the newest 3), from the DB. */
+  async listPinnedMessages(chatId: string): Promise<PinnedList> {
+    const { conversationId, ids } = await this.markChat(chatId, 'listPinnedMessages');
+    const found = this.ingest ? await listPinnedMessages(ids) : { pinned: [], persisted: false };
+    return { conversationId, ...found, limit: MAX_PINS_PER_CHAT };
+  }
+
+  /** Starred messages of this account (or of one chat), newest star first, from the DB. */
+  async listStarredMessages(
+    query: StarredQuery
+  ): Promise<StarredList & { conversationId?: string }> {
+    if (!this.ingest) return { starred: [], nextCursor: null, persisted: false };
+    const chat = query.chatId ? await this.markChat(query.chatId, 'listStarredMessages') : null;
+    const found = await listStarredMessages({
+      chatIds: chat?.ids,
+      limit: query.limit,
+      cursor: query.cursor,
+    });
+    return chat ? { conversationId: chat.conversationId, ...found } : found;
+  }
+
+  /**
+   * Statuses of the account's contacts (and our own), newest first: the
+   * whatsapp_statuses index + their messages rows. `contact` (phone or user
+   * jid) narrows to one person, its PN and LID ids together. Reads the DB:
+   * answers while disconnected; a pairing-only client has none.
+   */
+  async listStatuses(query: StatusListQuery): Promise<StatusList & { contact?: string }> {
+    if (!this.ingest) return { statuses: [], nextCursor: null, persisted: false };
+    let contact: string | undefined;
+    let authorIds: string[] | undefined;
+    if (query.contact) {
+      try {
+        contact = this.normalizeJid(statusRecipientJid(query.contact));
+      } catch {
+        throw new MessageMutationError(
+          'contact must be a phone number or a WhatsApp user jid',
+          400,
+          'invalid_request'
+        );
+      }
+      authorIds = await contactAuthorIds(contact);
+    }
+    const found = await listStatuses({
+      authorIds,
+      includeExpired: query.includeExpired,
+      includeOwn: query.includeOwn,
+      limit: query.limit,
+      cursor: query.cursor,
+    });
+    return contact ? { contact, ...found } : found;
+  }
+
+  /** Posts of the channels this account receives (or of one), from messages. */
+  async listChannelPosts(query: ChannelPostsQuery): Promise<ChannelPostList> {
+    if (!this.ingest) return { posts: [], nextCursor: null, channels: 0 };
+    return listChannelPosts(query);
+  }
+
+  /**
+   * Publish a text or image status to an explicit list of contacts
+   * (`statusJidList`: WhatsApp relays it to exactly those people, whatever the
+   * phone's status privacy says). Off unless WA_STATUS_PUBLISH_ENABLED=true;
+   * the route adds the send gate and confirm: true. One socket call, no
+   * retry: a status cannot be taken back from those who saw it.
+   */
+  async publishStatus(
+    request: StatusPublishRequest,
+    options: { messageId?: string; beforeSend?: () => Promise<void>; actor?: string } = {}
+  ): Promise<{
+    published: true;
+    messageId: string;
+    conversationId: typeof STATUS_JID;
+    type: StatusPublishRequest['type'];
+    audienceSize: number;
+    postedAt: string;
+    expiresAt: string;
+    persisted: boolean;
+  }> {
+    if (!statusPublishEnabled()) {
+      throw new MessageMutationError(
+        'Publishing statuses is disabled on this connector (WA_STATUS_PUBLISH_ENABLED)',
+        403,
+        'status_publish_disabled'
+      );
+    }
+    const sock = this.connectedSocket();
+    const own = new Set(await this.ownIds().catch(() => [] as string[]));
+    if (this.meJid) own.add(jidNormalizedUser(this.meJid));
+    const recipients = request.recipients.filter(jid => !own.has(jid));
+    if (!recipients.length) {
+      throw new MessageMutationError(
+        'recipients must name someone other than this account',
+        400,
+        'invalid_request'
+      );
+    }
+    let payload: AnyMessageContent;
+    if (request.type === 'text') {
+      payload = { text: request.text || '' };
+    } else {
+      payload = await this.statusImage(request.url || '', request.text);
+    }
+    const sendOptions = {
+      statusJidList: recipients,
+      broadcast: true,
+      ...(options.messageId ? { messageId: options.messageId } : {}),
+      ...(request.backgroundColor ? { backgroundColor: request.backgroundColor } : {}),
+      ...(request.font ? { font: request.font } : {}),
+    };
+    await options.beforeSend?.();
+    const sent = await this.sendWithReceiptSnapshot(sock, STATUS_JID, payload, sendOptions as any);
+    const messageId = sent?.key?.id;
+    if (!sent?.key || !messageId) {
+      throw new MessageMutationError(
+        'WhatsApp did not answer the status with an id: it may or may not have gone out',
+        502,
+        'send_outcome_uncertain'
+      );
+    }
+    this.rememberKey(messageId, sent.key, STATUS_JID);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, STATUS_JID, 'sent');
+    const seconds = Number(sent.messageTimestamp || 0);
+    const postedAt = seconds > 0 ? new Date(seconds * 1000) : new Date();
+    const self = this.meJid || sock.user?.id || '';
+    const persisted =
+      this.ingest && self
+        ? await recordStatus({
+            messageId,
+            authorId: this.normalizeJid(jidNormalizedUser(self) || self),
+            fromMe: true,
+            messageType: request.type === 'text' ? 'TEXT' : 'IMAGE',
+            postedAt,
+            source: 'connector',
+            audienceSize: recipients.length,
+            actor: options.actor,
+          })
+        : false;
+    this.logger.info(
+      `Status ${messageId} (${request.type}) published to ${recipients.length} contacts${options.actor ? ` by ${options.actor}` : ''}`
+    );
+    return {
+      published: true,
+      messageId,
+      conversationId: STATUS_JID,
+      type: request.type,
+      audienceSize: recipients.length,
+      postedAt: postedAt.toISOString(),
+      expiresAt: new Date(postedAt.getTime() + STATUS_TTL_MS).toISOString(),
+      persisted,
+    };
+  }
+
+  /** The image of a status: fetched server-side, JPEG / PNG up to 10 MB. */
+  private async statusImage(url: string, caption?: string): Promise<AnyMessageContent> {
+    let buffer: Buffer;
+    let mimeType: string;
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      mimeType = (res.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+      buffer = Buffer.from(await res.arrayBuffer());
+    } catch (e: any) {
+      throw new MessageMutationError(
+        `Failed to fetch the status image from ${url}: ${e?.message || e}`,
+        422,
+        'media_unavailable'
+      );
+    }
+    if (!STATUS_IMAGE_MIME_TYPES.has(mimeType)) {
+      throw new MessageMutationError(
+        `The status image must be ${[...STATUS_IMAGE_MIME_TYPES].join(' or ')}, got ${mimeType || 'no content-type'}`,
+        400,
+        'invalid_request'
+      );
+    }
+    if (!buffer.length || buffer.length > STATUS_IMAGE_MAX_BYTES) {
+      throw new MessageMutationError(
+        `The status image must be 1 byte to ${STATUS_IMAGE_MAX_BYTES} bytes`,
+        400,
+        'invalid_request'
+      );
+    }
+    return { image: buffer, mimetype: mimeType, ...(caption ? { caption } : {}) };
+  }
+
+  /**
+   * The ids a chat's stars / pins may be filed under (namespaced): its
+   * canonical conversation (tombstones and contact aliases followed) and the
+   * chat's own external ids, for a message never ingested.
+   */
+  private async markChat(
+    chatId: string,
+    action: string
+  ): Promise<{ conversationId: string; ids: string[] }> {
+    const requested = stripAccountKey(String(chatId || '').trim());
+    if (!requested) {
+      throw new MessageMutationError(
+        `${action}: conversationId is required`,
+        400,
+        'invalid_request'
+      );
+    }
+    const normalized = this.normalizeJid(this.toRawJid(requested));
+    const canonical = this.ingest ? await resolveCanonicalConversation(normalized) : undefined;
+    const ids = new Set<string>(canonical ? [canonical.id] : []);
+    for (const candidate of externalIdCandidates(normalized)) ids.add(accountKey(candidate));
+    return {
+      conversationId: canonical ? stripAccountKey(canonical.id) : normalized,
+      ids: [...ids],
+    };
+  }
+
+  /**
+   * Who may pin in a group: every member, or only admins when the group's
+   * info is admin-only (`restrict`, what WhatsApp calls "Edit group settings").
+   */
+  private async checkGroupPinAllowed(raw: string): Promise<void> {
+    const meta = await this.groupMetadataForAction(raw);
+    const self = ownParticipant(meta, await this.ownIds());
+    if (!self) {
+      throw new GroupActionError(
+        `This account is not a participant of ${raw}`,
+        403,
+        'not_group_member'
+      );
+    }
+    if (meta.restrict === true && !isAdminRole(self.admin)) {
+      throw new GroupActionError(`Only admins can pin messages in ${raw}`, 403, 'not_group_admin');
+    }
+  }
+
+  /** appPatch, with WhatsApp's own refusals as 422 rejected_by_whatsapp. */
+  private async applyAppPatch(
+    sock: WASocket,
+    patch: WAPatchCreate,
+    what: string,
+    id: string
+  ): Promise<void> {
+    try {
+      await sock.appPatch(patch);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.statusCode);
+      const connectionStatus = [401, 408, 428, 440].includes(status);
+      if (e?.isBoom && status >= 400 && status < 500 && !connectionStatus) {
+        throw new MessageMutationError(
+          `WhatsApp rejected the ${what} of ${id}: ${e?.message || e}`,
+          422,
+          'rejected_by_whatsapp',
+          String(status)
+        );
+      }
+      throw e;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -3399,7 +5981,7 @@ export class BaileysClient extends EventEmitter {
    * is in flight and for OWN_MUTATION_ECHO_MS after (Baileys may flush it late).
    */
   private async withOwnMutation<T>(
-    kind: 'edit' | 'revoke' | 'forme',
+    kind: 'edit' | 'revoke' | 'forme' | 'star' | 'pin',
     id: string,
     run: () => Promise<T>
   ): Promise<T> {
@@ -3416,7 +5998,7 @@ export class BaileysClient extends EventEmitter {
     }
   }
 
-  private isOwnMutation(kind: 'edit' | 'revoke' | 'forme', id: string): boolean {
+  private isOwnMutation(kind: 'edit' | 'revoke' | 'forme' | 'star' | 'pin', id: string): boolean {
     return this.ownMutations.has(`${kind}:${id}`);
   }
 
@@ -3459,15 +6041,78 @@ export class BaileysClient extends EventEmitter {
     if (!this.ingest || !waMessageId) return;
     const stub = u.update?.messageStubType;
     const isRevoke = stub === proto.WebMessageInfo.StubType.REVOKE || u.update?.message === null;
-    if (isRevoke && !this.isOwnMutation('revoke', waMessageId)) {
-      await this.recordInboundRevoke(waMessageId);
-    }
     // Baileys unwraps MESSAGE_EDIT protocol messages into this shape.
     const editedPayload = (u.update as any)?.message?.editedMessage?.message as
       proto.IMessage | undefined;
-    if (editedPayload && !this.isOwnMutation('edit', waMessageId)) {
-      await this.recordInboundEdit(u.key, editedPayload);
+    if (!isRevoke && !editedPayload) return;
+    // A channel's ids are only unique inside it: the row is the one of THIS channel's post.
+    const rowId = isChannelJid(u.key.remoteJid)
+      ? await channelPostMessageId(this.normalizeJid(String(u.key.remoteJid)), waMessageId)
+      : waMessageId;
+    if (isRevoke && !this.isOwnMutation('revoke', waMessageId)) {
+      const flagged = await this.recordInboundRevoke(rowId);
+      // No row to flag: for a channel post or a status its post may still be on its way.
+      if (!flagged && (isChannelJid(u.key.remoteJid) || isStatusJid(u.key.remoteJid))) {
+        const chat = this.normalizeJid(String(u.key.remoteJid));
+        noteRevokeBeforePost(chat, waMessageId);
+        this.logger.info(`Revoke of ${chat} ${waMessageId} found no post: remembered`);
+      }
     }
+    if (editedPayload && !this.isOwnMutation('edit', waMessageId)) {
+      await this.recordInboundEdit({ ...u.key, id: rowId }, editedPayload);
+    }
+  }
+
+  /**
+   * messages.update with `starred`: a star / unstar from our phone or another
+   * linked device (Baileys turns the app-state star action into this). The
+   * echo of our own star is left to starMessage.
+   */
+  private async handleInboundStar(u: WAMessageUpdate): Promise<void> {
+    const starred = (u.update as { starred?: unknown } | undefined)?.starred;
+    const id = u.key?.id;
+    if (!this.ingest || !id || !u.key.remoteJid || typeof starred !== 'boolean') return;
+    if (this.isOwnMutation('star', id)) return;
+    await recordMessageStar({
+      messageId: id,
+      chatId: this.normalizeJid(u.key.remoteJid),
+      fromMe: typeof u.key.fromMe === 'boolean' ? u.key.fromMe : null,
+      starred,
+      source: 'whatsapp',
+    });
+  }
+
+  /**
+   * A pin / unpin seen on the socket (anyone in the chat, our phone, the echo
+   * of ours) → whatsapp_message_pins; the raw action is kept as a payload. One
+   * we cannot apply (unknown type or duration) is logged and dropped.
+   */
+  private async ingestPinAction(msg: WAMessage, options: IngestOptions): Promise<void> {
+    if (!this.ingest || !msg.key?.remoteJid) return;
+    // The echo of our own pin: pinMessage records it.
+    if (msg.key.fromMe && msg.key.id && this.isOwnMutation('pin', msg.key.id)) return;
+    const history = options.source === 'baileys_history_sync';
+    await this.persistDurablePayload(
+      msg,
+      this.normalizeJid(msg.key.remoteJid),
+      history ? 'history' : 'live'
+    );
+    const action = pinActionOf(msg);
+    if (!action) {
+      this.logger.warn(`Pin action ${msg.key.id || '?'} not applied: unknown type or duration`);
+      return;
+    }
+    const by = msg.key.fromMe ? this.meJid : msg.key.participant || msg.key.remoteJid;
+    await recordMessagePin({
+      messageId: action.targetId,
+      chatId: this.normalizeJid(action.chatJid),
+      pinned: action.pinned,
+      at: action.at,
+      durationSeconds: action.durationSeconds,
+      byJid: by ? this.normalizeJid(jidNormalizedUser(by)) : undefined,
+      actionId: action.actionId,
+      source: history ? 'history' : 'whatsapp',
+    });
   }
 
   /** messages.delete with keys = "delete for me" synced from our phone. */
@@ -3484,11 +6129,12 @@ export class BaileysClient extends EventEmitter {
   }
 
   /** A contact (or our phone) revoked a message: flag the row, keep its content. */
-  private async recordInboundRevoke(waMessageId: string): Promise<void> {
-    await markMessageRevoked(waMessageId, { source: 'whatsapp' }).catch(e =>
+  private async recordInboundRevoke(waMessageId: string): Promise<boolean> {
+    const flagged = await markMessageRevoked(waMessageId, { source: 'whatsapp' }).catch(e =>
       this.logger.warn(`revoke persist failed for ${waMessageId}: ${e?.message || e}`)
     );
     this.emit('message-update', { waMessageId, updateType: 'DELETED' });
+    return flagged === true;
   }
 
   /** A contact (or our phone) edited a message: new text, the old one to edit_history. */
@@ -3558,7 +6204,8 @@ export class BaileysClient extends EventEmitter {
     const norm = this.normalizeJid(raw);
     const chat = this.chatStore.get(norm);
     if (chat) chat.unreadCount = 0;
-    await setConversationState(norm, 0);
+    await setCanonicalChatState(norm, { unreadCount: 0 });
+    await upsertChatState(norm, { unreadCount: 0 });
   }
 
   // ---------------------------------------------------------------------------
@@ -3573,6 +6220,10 @@ export class BaileysClient extends EventEmitter {
       isGroup: c.isGroup,
       unreadCount: c.unreadCount,
       timestamp: c.timestamp,
+      archived: c.archived,
+      pinned: c.pinned,
+      muteUntil: c.muteUntil,
+      starred: c.starred,
     }));
   }
 
@@ -3587,15 +6238,102 @@ export class BaileysClient extends EventEmitter {
     };
   }
 
+  private async forkStartChat(phone: string): Promise<{ id: string; name: string; phone: string }> {
+    if (!this.sock || !this.isConnected()) throw new Error('Client not connected');
+    const normalized = normalizePhoneForWhatsApp(phone);
+    if (!normalized)
+      throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'A valid phone number is required');
+    const results = await this.sock.onWhatsApp(normalized.rawJid);
+    const found = results?.find(item => item.exists && item.jid);
+    if (!found)
+      throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'Recipient is not on WhatsApp');
+    const id = this.normalizeJid(found.jid);
+    const name = this.contactNameFor(found.jid, id) || normalized.phoneE164;
+    await ensureEmptyConversation(id, name);
+    return { id, name, phone: normalized.phoneE164 };
+  }
+
+  private communities(): CommunityService {
+    if (!this.sock || !this.isConnected()) {
+      throw new CommunityError('COMMUNITY_DISCONNECTED', 'WhatsApp account is not connected', 503);
+    }
+    return new CommunityService(this.sock);
+  }
+
+  async listNovedadesCommunities() {
+    return this.communities().list();
+  }
+  async getCommunity(jid: string) {
+    return this.communities().detail(jid);
+  }
+  async createNovedadesCommunity(input: unknown) {
+    return this.communities().create(input);
+  }
+  async communityAction(jid: string, input: unknown) {
+    return this.communities().action(jid, input);
+  }
+
   async getGroupInfo(groupId: string): Promise<any> {
     const raw = this.toRawJid(groupId);
     const meta = await this.fetchGroupMetadata(raw);
+    const ownPn = this.sock?.user?.id ? jidNormalizedUser(this.sock.user.id) : null;
+    const ownLid =
+      (this.sock?.user as { lid?: string } | undefined)?.lid ||
+      (ownPn ? await this.sock?.signalRepository?.lidMapping?.getLIDForPN?.(ownPn) : null);
+    const ownIds = new Set(
+      [ownPn, ownLid].filter((id): id is string => !!id).map(jidNormalizedUser)
+    );
+    const self = meta.participants.find(p =>
+      [p.id, p.phoneNumber].some(id => !!id && ownIds.has(jidNormalizedUser(id)))
+    );
+    const isAdmin = self?.admin === 'admin' || self?.admin === 'superadmin';
+    const stored = await listStoredContacts(5000);
+    const names = new Map<string, string>();
+    for (const contact of stored) {
+      if (!contact.name) continue;
+      names.set(contact.jid, contact.name);
+      names.set(this.normalizeJid(contact.jid), contact.name);
+      names.set(this.toRawJid(contact.jid), contact.name);
+    }
+    const participants = meta.participants.map(p => ({
+      id: this.normalizeJid(p.id),
+      name:
+        this.contactNameFor(p.id, p.phoneNumber || '') ||
+        names.get(p.id) ||
+        names.get(p.phoneNumber || '') ||
+        p.name ||
+        p.notify ||
+        p.verifiedName ||
+        this.normalizeJid(p.id),
+      pushName: p.notify || null,
+      isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
+      isSuperAdmin: p.admin === 'superadmin',
+      hasPhoto: !!p.imgUrl,
+    }));
+    for (const participant of meta.participants) {
+      void storeContact({
+        jid: participant.id,
+        phone: this.phoneFromJid(participant.phoneNumber || participant.id),
+        name: participant.name || participant.verifiedName,
+        pushName: participant.notify,
+        avatarUrl: participant.imgUrl || null,
+      }).catch(() => {});
+    }
+    const photoUrl = await this.profilePictureUrlIfAvailable(raw).catch(() => null);
     return {
       id: this.normalizeJid(meta.id),
       name: meta.subject,
       description: meta.desc || '',
       participantCount: meta.participants.length,
       createdAt: meta.creation,
+      owner: meta.owner ? this.normalizeJid(meta.owner) : null,
+      participants,
+      capabilities: {
+        manageMembers: isAdmin,
+        editInfo: !!self && (isAdmin || meta.restrict === false),
+      },
+      hasPhoto: photoUrl === null ? null : !!photoUrl,
+      photoLookupStatus: photoUrl === null ? 'unavailable' : 'confirmed',
     };
   }
 
@@ -3604,6 +6342,10 @@ export class BaileysClient extends EventEmitter {
     const meta = await this.fetchGroupMetadata(raw);
     return meta.participants.map(p => ({
       id: this.normalizeJid(p.id),
+      name: p.name || p.notify || p.verifiedName || this.normalizeJid(p.id),
+      pushName: p.notify || null,
+      phone: p.phoneNumber || this.phoneFromJid(p.id) || null,
+      hasPhoto: !!p.imgUrl,
       isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
       isSuperAdmin: p.admin === 'superadmin',
     }));
@@ -3612,6 +6354,31 @@ export class BaileysClient extends EventEmitter {
   // ---------------------------------------------------------------------------
   // Group management (fase 3 / PR-6; the helpers live in group-management.ts)
   // ---------------------------------------------------------------------------
+
+  /**
+   * A group-participants.update "add": when it names this account (PN or
+   * LID), someone added us to a group — fresh metadata, then its conversation
+   * row (recordGroupConversation: namespaced, account_id, external_id, a live
+   * row only refreshed), active as of now. Anyone else's add changes nothing
+   * here. Never throws (a socket handler); ingest only (bound after the gate).
+   */
+  private async recordGroupJoined(
+    groupJid: string,
+    participants: ReadonlyArray<string | Partial<GroupParticipant>>
+  ): Promise<void> {
+    try {
+      if (!this.ingest || !isJidGroup(groupJid)) return;
+      if (!participantsIncludeOwn(participants, await this.ownIds())) return;
+      const meta = await this.fetchGroupMetadata(groupJid, true).catch((e: any) => {
+        this.logger.warn(`metadata of joined group ${groupJid} unavailable: ${e?.message || e}`);
+        return { id: groupJid } as GroupMetadata;
+      });
+      const id = await recordGroupConversation(meta, { activityAt: new Date() });
+      this.logger.info(`Added to group ${groupJid}${id ? ` (conversation ${id})` : ''}`);
+    } catch (e: any) {
+      this.logger.warn(`joined group ${groupJid} not recorded: ${e?.message || e}`);
+    }
+  }
 
   /** Our own ids (PN and LID), to find this account among a group's participants. */
   private async ownIds(): Promise<string[]> {
@@ -3639,9 +6406,18 @@ export class BaileysClient extends EventEmitter {
    * A group call to WhatsApp. Its refusals come back as Boom with the IQ
    * error code: 403 → 403 not_group_admin (WhatsApp says we may not), 404 →
    * 404 group_unavailable, other 4xx → 422 rejected_by_whatsapp; connection
-   * statuses (401, 408, 428, 440) and the rest go on as send failures.
+   * statuses (401, 408, 428, 440) and the rest go on as send failures. A
+   * community call names its own 403 / 404 classes.
    */
-  private async groupCall<T>(what: string, raw: string, call: () => Promise<T>): Promise<T> {
+  private async groupCall<T>(
+    what: string,
+    raw: string,
+    call: () => Promise<T>,
+    classes: { forbidden: string; unavailable: string } = {
+      forbidden: 'not_group_admin',
+      unavailable: 'group_unavailable',
+    }
+  ): Promise<T> {
     try {
       return await call();
     } catch (e: any) {
@@ -3650,10 +6426,10 @@ export class BaileysClient extends EventEmitter {
       if (!e?.isBoom || !(status >= 400 && status < 500) || connectionStatus) throw e;
       const reason = `WhatsApp rejected ${what} of ${raw}: ${e?.message || e}`;
       if (status === 403) {
-        throw new GroupActionError(reason, 403, 'not_group_admin', { code: '403' });
+        throw new GroupActionError(reason, 403, classes.forbidden, { code: '403' });
       }
       if (status === 404) {
-        throw new GroupActionError(reason, 404, 'group_unavailable', { code: '404' });
+        throw new GroupActionError(reason, 404, classes.unavailable, { code: '404' });
       }
       throw new GroupActionError(reason, 422, 'rejected_by_whatsapp', { code: String(status) });
     }
@@ -3684,7 +6460,7 @@ export class BaileysClient extends EventEmitter {
   private groupView(meta: GroupMetadata, ownIds: string[]): GroupStateView {
     const view = groupStateView(meta, ownParticipant(meta, ownIds), p => {
       for (const id of [p.id, p.phoneNumber, p.lid]) {
-        const name = id ? this.contactNames.get(id) : undefined;
+        const name = id ? this.contactNames.get(id)?.name : undefined;
         if (name) return name;
       }
       return null;
@@ -3953,6 +6729,7 @@ export class BaileysClient extends EventEmitter {
     const entries = (answer || []).map(entry => ({
       status: entry?.status === undefined || entry?.status === null ? null : String(entry.status),
       jid: entry?.jid ? jidNormalizedUser(entry.jid) : '',
+      request: verb === 'add' ? addRequestOf((entry as { content?: unknown })?.content) : null,
       used: false,
     }));
     const matched = targets.map(target => {
@@ -3963,9 +6740,9 @@ export class BaileysClient extends EventEmitter {
     // An answer under an id we did not know (a PN WhatsApp maps to a LID):
     // pair the leftovers in order, as WhatsApp answers in request order.
     const leftovers = entries.filter(e => !e.used);
+    const paired = targets.map((target, index) => matched[index] ?? leftovers.shift());
     const results: GroupParticipantResult[] = targets.map((target, index) => {
-      const entry = matched[index] ?? leftovers.shift();
-      const status = entry?.status ?? null;
+      const status = paired[index]?.status ?? null;
       return {
         participant: target.input,
         jid: participantApiJid(target.sent),
@@ -3973,6 +6750,30 @@ export class BaileysClient extends EventEmitter {
         ...participantOutcome(verb, status),
       };
     });
+    // 403 on add: their privacy only allows an invite. WhatsApp's private
+    // code (when it sent one) is kept for POST /groups/invite, never returned.
+    const inviteRequired: InviteRequiredEntry[] | undefined =
+      verb === 'add'
+        ? targets.flatMap((target, index) => {
+            if (results[index].status !== '403') return [];
+            const request = paired[index]?.request || null;
+            if (request) {
+              for (const alias of target.aliases) {
+                this.pendingGroupInvites.set(`${raw}|${alias}`, request);
+              }
+            }
+            return [
+              {
+                participant: target.input,
+                jid: participantApiJid(target.sent),
+                privateInvite: !!request,
+                inviteExpiresAt: request?.expiration
+                  ? new Date(request.expiration * 1000).toISOString()
+                  : null,
+              },
+            ];
+          })
+        : undefined;
     const counts = countResults(results);
     this.logger.info(
       `Group ${raw} ${verb} participants=${targets.length} done=${counts.succeeded}${request.actor ? ` by ${request.actor}` : ''}`
@@ -3982,7 +6783,14 @@ export class BaileysClient extends EventEmitter {
         `WhatsApp did not ${verb} any of the ${targets.length} participant(s) of ${raw}`,
         422,
         'rejected_by_whatsapp',
-        { details: { action: verb, results, ...counts } }
+        {
+          details: {
+            action: verb,
+            results,
+            ...counts,
+            ...(inviteRequired ? { inviteRequired } : {}),
+          },
+        }
       );
     }
     const refreshed = await this.fetchGroupMetadata(raw, true).catch(() => undefined);
@@ -4003,6 +6811,190 @@ export class BaileysClient extends EventEmitter {
       partial: counts.failed > 0,
       persisted,
       group: refreshed ? this.groupView(refreshed, own) : null,
+      ...(inviteRequired ? { inviteRequired } : {}),
+    };
+  }
+
+  /**
+   * Set the group's icon (POST /groups/photo): admins only — the same
+   * capability as the settings, because `restrict` locks the icon too. The
+   * bytes are decoded and sniffed exactly like an own-profile photo and the
+   * write is confirmed by picture identity.
+   */
+  async setGroupPhoto(
+    groupId: string,
+    input: { imageBase64?: unknown; mimeType?: unknown },
+    request: MessageMutationRequest = {}
+  ): Promise<{ groupId: string; photo: ProfilePhotoOutcome; mimeType: string; bytes: number }> {
+    const raw = parseGroupJid(groupId);
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    if (!capabilities.changeSettings) {
+      throw new GroupActionError(
+        `Only admins can change the photo of ${raw}`,
+        403,
+        'not_group_admin'
+      );
+    }
+    const result = await setPhotoForJid(this.ownProfileProvider(), raw, input);
+    this.logger.info(`Group ${raw} photo set${request.actor ? ` by ${request.actor}` : ''}`);
+    return { groupId: this.normalizeJid(raw), ...result };
+  }
+
+  /**
+   * Invite people to a group by private message (the card WhatsApp shows with
+   * "Join group"): for those an add was refused with 403 — their privacy only
+   * lets them be invited. Admins only, against fresh metadata. Each person
+   * gets WhatsApp's private code from that refused add when this process
+   * still has it and it has not expired, else the group's invite link code.
+   * The card goes to the person's canonical chat (a merged phone chat → its
+   * LID), with the chat's disappearing timer. Someone already in the group is
+   * reported, not messaged. Nobody invited → 422 with the results; some → 200
+   * with `partial`.
+   */
+  async sendGroupInvites(
+    groupId: string,
+    participants: unknown,
+    request: MessageMutationRequest & { text?: unknown } = {}
+  ): Promise<GroupInvitesResult> {
+    const raw = parseGroupJid(groupId);
+    const members = parseGroupInviteParticipants(participants);
+    const text = parseGroupInviteText(request.text);
+    const sock = this.connectedSocket();
+    const meta = await this.groupMetadataForAction(raw);
+    const own = await this.ownIds();
+    const capabilities = this.checkGroupAccess(meta, own, raw);
+    if (!capabilities.isAdmin) {
+      throw new GroupActionError(`Only admins can invite people to ${raw}`, 403, 'not_group_admin');
+    }
+    for (const member of members) {
+      if (own.includes(member.jid)) {
+        throw new GroupActionError('This account cannot invite itself', 422, 'self_participant');
+      }
+    }
+    let linkCode: string | null | undefined;
+    const results: GroupInviteResult[] = [];
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    for (const member of members) {
+      const base = { participant: member.input, jid: participantApiJid(member.jid) };
+      if (findParticipant(meta, member.jid)) {
+        results.push({
+          ...base,
+          ok: false,
+          reason: 'already_participant',
+          invite: null,
+          messageId: null,
+        });
+        continue;
+      }
+      const aliases = await this.jidAliases(member.jid);
+      const pending = aliases
+        .map(alias => this.pendingGroupInvites.get(`${raw}|${alias}`))
+        .find(item => !!item && (!item.expiration || item.expiration > nowSeconds + 60));
+      let invite: 'private' | 'link' = 'private';
+      let inviteCode = pending?.code;
+      let inviteExpiration = pending?.expiration || nowSeconds + LINK_INVITE_TTL_SECONDS;
+      if (!inviteCode) {
+        invite = 'link';
+        if (linkCode === undefined) {
+          // A refusal here must not lose the invites already sent above.
+          linkCode =
+            (await this.groupCall('the invite link', raw, () => sock.groupInviteCode(raw)).catch(
+              (e: any) => {
+                this.logger.warn(`invite link of ${raw} unavailable: ${e?.message || e}`);
+                return null;
+              }
+            )) || null;
+        }
+        if (!linkCode) {
+          results.push({
+            ...base,
+            ok: false,
+            reason: 'invite_link_unavailable',
+            invite: null,
+            messageId: null,
+          });
+          continue;
+        }
+        inviteCode = linkCode;
+        inviteExpiration = nowSeconds + LINK_INVITE_TTL_SECONDS;
+      }
+      const conversation = this.ingest
+        ? await resolveCanonicalConversation(member.jid).catch(() => undefined)
+        : undefined;
+      const chatJid = this.toRawJid(conversation?.externalId || member.jid);
+      try {
+        await this.guardDirectSend(chatJid);
+        // Baileys fetches the group's picture for the card's thumbnail and a
+        // group without one answers 404, which would fail the whole send:
+        // no picture → a card without thumbnail.
+        const sendOptions = {
+          ...withEphemeralExpiration({}, await this.outgoingEphemeral(chatJid, conversation?.id)),
+          getProfilePicUrl: (jid: string, type: 'preview' | 'image') =>
+            sock.profilePictureUrl(jid, type).catch(() => undefined),
+        } as MiscMessageGenerationOptions;
+        const content: AnyMessageContent = {
+          groupInvite: {
+            inviteCode,
+            inviteExpiration,
+            text: text || '',
+            jid: raw,
+            subject: meta.subject || '',
+          },
+        };
+        const sent = await this.sendWithReceiptSnapshot(sock, chatJid, content, sendOptions);
+        const messageId = sent?.key?.id || null;
+        if (sent?.key && messageId) {
+          this.rememberKey(messageId, sent.key, chatJid);
+          this.rememberMessageForRetry(sent.key, sent.message);
+          await this.persistDurablePayload(sent, this.normalizeJid(chatJid), 'sent').catch(
+            (e: any) =>
+              this.logger.warn(`invite ${messageId} payload not stored: ${e?.message || e}`)
+          );
+        }
+        if (invite === 'private') {
+          for (const alias of aliases) this.pendingGroupInvites.delete(`${raw}|${alias}`);
+        }
+        results.push({
+          ...base,
+          jid: participantApiJid(chatJid),
+          ok: true,
+          reason: 'invited',
+          invite,
+          messageId,
+        });
+      } catch (e: any) {
+        this.logger.warn(`Invite to ${raw} for ${chatJid} failed: ${e?.message || e}`);
+        results.push({
+          ...base,
+          jid: participantApiJid(chatJid),
+          ok: false,
+          reason: 'send_failed',
+          invite,
+          messageId: null,
+        });
+      }
+    }
+    const succeeded = results.filter(r => r.ok).length;
+    const failed = results.length - succeeded;
+    this.logger.info(
+      `Group ${raw} invites=${results.length} sent=${succeeded}${request.actor ? ` by ${request.actor}` : ''}`
+    );
+    if (!succeeded) {
+      throw new GroupActionError(
+        `No invite to ${raw} was sent (${results.length} requested)`,
+        422,
+        'invite_not_sent',
+        { details: { results, succeeded, failed } }
+      );
+    }
+    return {
+      groupId: this.normalizeJid(raw),
+      results,
+      succeeded,
+      failed,
+      partial: failed > 0,
     };
   }
 
@@ -4010,7 +7002,8 @@ export class BaileysClient extends EventEmitter {
   private checkGroupAccess(meta: GroupMetadata, own: string[], raw: string) {
     if (isCommunityGroup(meta)) {
       throw new GroupActionError(
-        `${raw} is a community (or its announcement group): manage it from WhatsApp`,
+        `${raw} is a community (or its announcement group): its groups are linked, unlinked ` +
+          'and left with /communities/groups and /communities/leave; the rest from WhatsApp',
         422,
         'community_unsupported'
       );
@@ -4027,11 +7020,617 @@ export class BaileysClient extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
+  // Communities (the helpers live in communities.ts)
+  // ---------------------------------------------------------------------------
+
+  private static readonly COMMUNITY_CLASSES = {
+    forbidden: 'not_community_admin',
+    unavailable: 'community_unavailable',
+  };
+
+  /**
+   * A write whose answer proves nothing (community link / unlink / leave,
+   * channel follow / mute…). A refusal WhatsApp spells out (already a
+   * MessageMutationError) is thrown as it is; the success and any other
+   * failure (a timeout, a lost answer — the write may have landed) go to
+   * `confirm`, a fresh read. Not shown there → 409 change_not_confirmed:
+   * never retried here, the caller reads before trying again.
+   */
+  private async confirmedWrite(
+    what: string,
+    write: () => Promise<unknown>,
+    confirm: () => Promise<boolean>
+  ): Promise<void> {
+    let failure: unknown;
+    try {
+      await write();
+    } catch (e) {
+      if (e instanceof MessageMutationError) throw e;
+      failure = e;
+    }
+    const confirmed = await confirm().catch((e: any) => {
+      this.logger.warn(`read-back of ${what} failed: ${e?.message || e}`);
+      return false;
+    });
+    if (confirmed) return;
+    throw new MessageMutationError(
+      failure
+        ? `${what} failed (${errorMessage(failure)}) and a fresh read does not show it done; it may still have reached WhatsApp — read it again before retrying`
+        : `WhatsApp accepted ${what} but a fresh read does not show it; read it again before retrying`,
+      409,
+      'change_not_confirmed'
+    );
+  }
+
+  /** Every group this account is in — communities, their announcement and linked groups too. */
+  private async participatingGroups(): Promise<GroupMetadata[]> {
+    const sock = this.connectedSocket();
+    // rc13's communityFetchAllParticipating parses <communities>, which
+    // WhatsApp never sends: the same IQ read through the group parser.
+    const all = await this.groupCall('reading the groups', '@g.us', () =>
+      sock.groupFetchAllParticipating()
+    );
+    if (!all || typeof all !== 'object' || Array.isArray(all)) {
+      throw new CommunityActionError(
+        'WhatsApp returned an unusable group list',
+        502,
+        'provider_invalid_response'
+      );
+    }
+    return Object.values(all).filter(
+      (meta): meta is GroupMetadata => !!meta && typeof meta.id === 'string'
+    );
+  }
+
+  /**
+   * Fresh metadata of a community (its parent group), read through the group
+   * parser (rc13's communityMetadata expects a <community> node WhatsApp does
+   * not send). Not cached: the parent has no chat. 403 = not a member; a
+   * linked or ordinary group → 422 not_a_community.
+   */
+  private async communityMetadataForAction(raw: string): Promise<GroupMetadata> {
+    const sock = this.connectedSocket();
+    let meta: GroupMetadata;
+    try {
+      meta = await this.groupCall(
+        'reading the community',
+        raw,
+        () => sock.groupMetadata(raw),
+        BaileysClient.COMMUNITY_CLASSES
+      );
+    } catch (e) {
+      if (e instanceof GroupActionError && e.failureClass === 'not_community_admin') {
+        throw new CommunityActionError(
+          `This account is not a member of ${raw}`,
+          403,
+          'not_community_member',
+          { code: e.code }
+        );
+      }
+      throw e;
+    }
+    if (!isCommunityParent(meta)) {
+      throw new CommunityActionError(
+        meta?.linkedParent
+          ? `${raw} is a group of the community ${meta.linkedParent}, not a community`
+          : `${raw} is not a community`,
+        422,
+        'not_a_community',
+        meta?.linkedParent ? { details: { communityId: meta.linkedParent } } : {}
+      );
+    }
+    return meta;
+  }
+
+  /** Every group of a community (`<sub_groups>`); null when WhatsApp did not answer it. */
+  private async linkedGroupsOf(raw: string): Promise<LinkedGroupEntry[] | null> {
+    try {
+      const answer = await this.connectedSocket().communityFetchLinkedGroups(raw);
+      if (!answer || answer.communityJid !== raw || !Array.isArray(answer.linkedGroups)) {
+        return null;
+      }
+      return answer.linkedGroups;
+    } catch (e: any) {
+      this.logger.warn(`linked groups of ${raw} unavailable: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  private async describeCommunity(
+    meta: GroupMetadata,
+    participating: GroupMetadata[],
+    own: string[]
+  ): Promise<CommunityView> {
+    const linked = await this.linkedGroupsOf(meta.id);
+    return communityView(meta, participating, linked, group => ownParticipant(group, own));
+  }
+
+  /**
+   * GET /communities: every community this account is in, with its
+   * announcement group and its groups (WhatsApp's full list, also those this
+   * account is not in; `joined` says which). A community only reached
+   * through one of its groups (its parent not among the participating
+   * groups) is read on its own.
+   */
+  async listCommunities(): Promise<{ communities: CommunityView[] }> {
+    const sock = this.connectedSocket();
+    const participating = await this.participatingGroups();
+    const own = await this.ownIds();
+    const parents = new Map<string, GroupMetadata>();
+    for (const meta of participating) {
+      if (isCommunityParent(meta)) parents.set(meta.id, meta);
+    }
+    for (const meta of participating) {
+      const parent = normalizeGroupJid(meta.linkedParent);
+      if (!parent || parents.has(parent)) continue;
+      const read = await sock.groupMetadata(parent).catch((e: any) => {
+        this.logger.warn(`community ${parent} of ${meta.id} unreadable: ${e?.message || e}`);
+        return null;
+      });
+      if (isCommunityParent(read)) parents.set(parent, read as GroupMetadata);
+    }
+    const communities: CommunityView[] = [];
+    for (const meta of parents.values()) {
+      communities.push(await this.describeCommunity(meta, participating, own));
+    }
+    communities.sort((a, b) => a.subject.localeCompare(b.subject));
+    return { communities };
+  }
+
+  /** POST /communities/state: one community, its groups and what this account may do there. */
+  async getCommunityState(communityId: unknown): Promise<CommunityView> {
+    const raw = parseCommunityJid(communityId);
+    const meta = await this.communityMetadataForAction(raw);
+    const participating = await this.participatingGroups().catch((e: any) => {
+      this.logger.warn(`participating groups unavailable: ${e?.message || e}`);
+      return [] as GroupMetadata[];
+    });
+    return this.describeCommunity(meta, participating, await this.ownIds());
+  }
+
+  /**
+   * POST /communities/create: a new community with this account as its owner
+   * (WhatsApp creates its announcement group with it; members ask to join).
+   * rc13 answers null when its own re-read failed: then the community is
+   * looked for among the participating groups (ours, same subject, created
+   * just now) before saying it is unconfirmed — never created twice here.
+   */
+  async createCommunity(
+    subject: unknown,
+    description: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<{ communityId: string; community: CommunityView }> {
+    const cleanSubject = parseCommunitySubject(subject);
+    const cleanDescription = parseCommunityDescription(description);
+    const sock = this.connectedSocket();
+    const own = await this.ownIds();
+    const startedAt = Math.floor(Date.now() / 1000) - 120;
+    let meta: GroupMetadata | null = null;
+    let failure: unknown;
+    try {
+      meta = await this.groupCall(
+        'the community creation',
+        '@g.us',
+        () => sock.communityCreate(cleanSubject, cleanDescription),
+        BaileysClient.COMMUNITY_CLASSES
+      );
+    } catch (e) {
+      if (e instanceof MessageMutationError) throw e;
+      failure = e;
+    }
+    let participating: GroupMetadata[] | null = null;
+    if (!isCommunityParent(meta)) {
+      participating = await this.participatingGroups().catch(() => [] as GroupMetadata[]);
+      meta =
+        participating
+          .filter(
+            group =>
+              isCommunityParent(group) &&
+              group.subject === cleanSubject &&
+              Number(group.creation) >= startedAt &&
+              (!group.owner || own.includes(jidNormalizedUser(group.owner)))
+          )
+          .sort((a, b) => Number(b.creation) - Number(a.creation))[0] || null;
+    }
+    if (!meta) {
+      throw new CommunityActionError(
+        `The creation of the community ${cleanSubject} was not confirmed${failure ? ` (${errorMessage(failure)})` : ''}; list the communities before retrying`,
+        409,
+        'change_not_confirmed'
+      );
+    }
+    participating ??= await this.participatingGroups().catch(() => [] as GroupMetadata[]);
+    const community = await this.describeCommunity(meta, participating, own);
+    this.logger.info(`Community created ${meta.id}${request.actor ? ` by ${request.actor}` : ''}`);
+    return { communityId: meta.id, community };
+  }
+
+  /**
+   * POST /communities/groups: link a group to a community or unlink it.
+   * Fresh metadata first: community admins only; linking also needs admin of
+   * the group, which must be an ordinary group not linked elsewhere; the
+   * announcement group is never unlinked. Already so → changed: false,
+   * nothing sent. The result is read back (the group's linkedParent, or the
+   * community's list when we are not in the group).
+   */
+  async updateCommunityGroup(
+    communityId: unknown,
+    groupId: unknown,
+    action: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<CommunityGroupResult> {
+    const wanted = parseCommunityGroupRequest({ communityId, groupId, action });
+    const sock = this.connectedSocket();
+    return this.communityWrites.run(wanted.communityId, async () => {
+      const raw = wanted.communityId;
+      const target = wanted.groupId;
+      const meta = await this.communityMetadataForAction(raw);
+      const own = await this.ownIds();
+      const capabilities = communityCapabilities(ownParticipant(meta, own));
+      if (!capabilities.isMember) {
+        throw new CommunityActionError(
+          `This account is not a member of ${raw}`,
+          403,
+          'not_community_member'
+        );
+      }
+      if (!capabilities.isAdmin) {
+        throw new CommunityActionError(
+          `Only community admins can ${wanted.action} groups of ${raw}`,
+          403,
+          'not_community_admin'
+        );
+      }
+      const done = async (changed: boolean): Promise<CommunityGroupResult> => {
+        this.groupMetaCache.delete(target);
+        const participating = await this.participatingGroups().catch(() => [] as GroupMetadata[]);
+        const community = await this.describeCommunity(meta, participating, own).catch(() => null);
+        this.logger.info(
+          `Community ${raw} ${wanted.action} ${target}${changed ? '' : ' (already)'}${request.actor ? ` by ${request.actor}` : ''}`
+        );
+        return {
+          action: wanted.action,
+          communityId: raw,
+          groupId: target,
+          changed,
+          confirmed: true,
+          community,
+        };
+      };
+
+      if (wanted.action === 'link') {
+        const group = await this.groupMetadataForAction(target);
+        if (isCommunityGroup(group)) {
+          throw new CommunityActionError(
+            `${target} is a community or an announcement group: only ordinary groups are linked`,
+            422,
+            'not_linkable_group'
+          );
+        }
+        if (group.linkedParent === raw) return done(false);
+        if (group.linkedParent) {
+          throw new CommunityActionError(
+            `${target} already belongs to the community ${group.linkedParent}: unlink it there first`,
+            409,
+            'linked_elsewhere',
+            { details: { linkedTo: group.linkedParent } }
+          );
+        }
+        if (!isAdminRole(ownParticipant(group, own)?.admin)) {
+          throw new CommunityActionError(
+            `Only admins of ${target} can link it to a community`,
+            403,
+            'not_group_admin'
+          );
+        }
+        await this.confirmedWrite(
+          `the link of ${target} to ${raw}`,
+          () =>
+            this.groupCall(
+              'the group link',
+              raw,
+              () => sock.communityLinkGroup(target, raw),
+              BaileysClient.COMMUNITY_CLASSES
+            ),
+          async () => (await this.fetchGroupMetadata(target, true)).linkedParent === raw
+        );
+        return done(true);
+      }
+
+      // Unlink: we need not be in the group; its metadata when we are, else
+      // the community's own list of groups.
+      const group = await this.fetchGroupMetadata(target, true).catch(() => null);
+      if (group?.isCommunityAnnounce && group.linkedParent === raw) {
+        throw new CommunityActionError(
+          `${target} is the announcement group of ${raw}: it cannot be unlinked`,
+          422,
+          'announcement_group'
+        );
+      }
+      const linked = group ? null : await this.linkedGroupsOf(raw);
+      const before = isLinkedTo(raw, target, { group, linked });
+      if (before === false) return done(false);
+      if (before === null) {
+        throw new CommunityActionError(
+          `Could not read whether ${target} belongs to ${raw}; nothing was sent`,
+          502,
+          'provider_invalid_response'
+        );
+      }
+      await this.confirmedWrite(
+        `the unlink of ${target} from ${raw}`,
+        () =>
+          this.groupCall(
+            'the group unlink',
+            raw,
+            () => sock.communityUnlinkGroup(target, raw),
+            BaileysClient.COMMUNITY_CLASSES
+          ),
+        async () => {
+          const after = group ? await this.fetchGroupMetadata(target, true) : null;
+          const list = group ? null : await this.linkedGroupsOf(raw);
+          return isLinkedTo(raw, target, { group: after, linked: list }) === false;
+        }
+      );
+      return done(true);
+    });
+  }
+
+  /**
+   * POST /communities/leave: this account leaves a community (and, as
+   * WhatsApp does, its announcement group). Members only; proven by the
+   * participating groups no longer listing us in it.
+   */
+  async leaveCommunity(
+    communityId: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<CommunityLeaveResult> {
+    const raw = parseCommunityJid(communityId);
+    const sock = this.connectedSocket();
+    return this.communityWrites.run(raw, async () => {
+      const meta = await this.communityMetadataForAction(raw);
+      const own = await this.ownIds();
+      if (!communityCapabilities(ownParticipant(meta, own)).isMember) {
+        throw new CommunityActionError(
+          `This account is not a member of ${raw}`,
+          403,
+          'not_community_member'
+        );
+      }
+      await this.confirmedWrite(
+        `leaving ${raw}`,
+        () =>
+          this.groupCall(
+            'leaving the community',
+            raw,
+            () => sock.communityLeave(raw),
+            BaileysClient.COMMUNITY_CLASSES
+          ),
+        async () => {
+          const participating = await this.participatingGroups();
+          const still = participating.find(group => group.id === raw);
+          return !still || !ownParticipant(still, own);
+        }
+      );
+      this.groupMetaCache.delete(raw);
+      this.logger.info(`Left community ${raw}${request.actor ? ` by ${request.actor}` : ''}`);
+      return { communityId: raw, changed: true, confirmed: true };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Channels / newsletters (the helpers live in channels.ts)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * A newsletter WMex call. A GraphQL refusal (Boom "GraphQL server error",
+   * with the error's code): 404 → 404 channel_unavailable, 401 / 403 → 403
+   * not_allowed, any other → 422 rejected_by_whatsapp. Anything else (no
+   * answer, a connection status) goes on as it is.
+   */
+  private async channelCall<T>(what: string, key: string, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (e: any) {
+      const message = String(e?.message || e);
+      if (!e?.isBoom || !message.startsWith('GraphQL server error')) throw e;
+      const status = Number(e?.output?.statusCode ?? e?.data?.extensions?.error_code);
+      const code = Number.isFinite(status) ? String(status) : undefined;
+      const reason = `WhatsApp rejected ${what} of ${key}: ${message}`;
+      if (status === 404) throw new ChannelActionError(reason, 404, 'channel_unavailable', code);
+      if (status === 401 || status === 403) {
+        throw new ChannelActionError(reason, 403, 'not_allowed', code);
+      }
+      throw new ChannelActionError(reason, 422, 'rejected_by_whatsapp', code);
+    }
+  }
+
+  /** One channel's metadata by jid, proven to be about that channel (404 when there is none). */
+  private async readChannel(jid: string): Promise<ChannelView> {
+    const sock = this.connectedSocket();
+    const answer = await this.channelCall('reading the channel', jid, () =>
+      sock.newsletterMetadata('jid', jid)
+    );
+    if (!answer) {
+      throw new ChannelActionError(`WhatsApp has no channel ${jid}`, 404, 'channel_unavailable');
+    }
+    const view = channelView(answer);
+    if (view.channelId !== jid) {
+      throw new ChannelActionError(
+        `WhatsApp answered ${view.channelId} for ${jid}`,
+        502,
+        'provider_invalid_response'
+      );
+    }
+    return view;
+  }
+
+  /**
+   * POST /channels/lookup: one channel by its jid, share link or invite code
+   * (rc13 has no channel search or directory). Its public metadata and this
+   * account's relation to it (role, following, muted).
+   */
+  async lookupChannel(channel: unknown): Promise<ChannelView> {
+    const query = parseChannelQuery(channel);
+    if (query.type === 'jid') {
+      const view = await this.readChannel(query.key);
+      if (view.following) await this.noteFollowed(view.channelId);
+      return view;
+    }
+    const sock = this.connectedSocket();
+    const answer = await this.channelCall('the channel lookup', 'an invite', () =>
+      sock.newsletterMetadata('invite', query.key)
+    );
+    if (!answer) {
+      throw new ChannelActionError(
+        'WhatsApp has no channel for that link or invite code',
+        404,
+        'channel_unavailable'
+      );
+    }
+    const view = channelView(answer);
+    if (view.following) await this.noteFollowed(view.channelId);
+    return view;
+  }
+
+  /** A channel confirmed as followed: this process remembers it and, with ingest, so does the directory. */
+  private async noteFollowed(jid: string): Promise<void> {
+    this.seenChannels.add(jid);
+    if (this.ingest) await rememberChannel(jid);
+  }
+
+  /**
+   * GET /channels: the channels this account follows among those this
+   * connector has seen — chats of the history sync, conversations with
+   * ingested posts (ingest only), lookups and follows of this process and the
+   * followed channels it remembered (ingest only) — each confirmed by its own
+   * metadata. rc13 cannot ask WhatsApp for the followed list, so
+   * coverage.complete is always false.
+   */
+  async listChannels(): Promise<ChannelListResult> {
+    this.connectedSocket();
+    const candidates = new Set<string>();
+    for (const chat of this.chatStore.values()) {
+      const jid = normalizeChannelJid(chat.rawJid || chat.id);
+      if (jid) candidates.add(jid);
+    }
+    for (const jid of this.seenChannels) candidates.add(jid);
+    const remembered = new Set<string>();
+    if (this.ingest) {
+      for (const jid of await knownChannelConversations().catch((e: any) => {
+        this.logger.warn(`known channel conversations unavailable: ${e?.message || e}`);
+        return [] as string[];
+      })) {
+        candidates.add(jid);
+      }
+      for (const jid of await rememberedChannels()) {
+        remembered.add(jid);
+        candidates.add(jid);
+      }
+    }
+    const checked = Array.from(candidates).slice(0, CHANNELS_LIST_MAX);
+    const channels: ChannelView[] = [];
+    let unreadable = 0;
+    for (let index = 0; index < checked.length; index += 4) {
+      const batch = await Promise.all(
+        checked.slice(index, index + 4).map(jid =>
+          this.readChannel(jid).catch((e: any) => {
+            this.logger.warn(`channel ${jid} unreadable: ${e?.message || e}`);
+            return null;
+          })
+        )
+      );
+      for (const view of batch) {
+        if (!view) {
+          unreadable += 1;
+        } else if (view.following) {
+          channels.push(view);
+        } else {
+          this.seenChannels.delete(view.channelId);
+          // Only a row that exists is deleted: a channel seen but never followed has none.
+          if (view.following === false && remembered.has(view.channelId)) {
+            await forgetChannel(view.channelId);
+          }
+        }
+      }
+    }
+    channels.sort((a, b) => a.name.localeCompare(b.name));
+    return {
+      channels,
+      coverage: {
+        complete: false,
+        source: 'known-channels',
+        candidates: candidates.size,
+        checked: checked.length,
+        unreadable,
+      },
+    };
+  }
+
+  /**
+   * POST /channels/subscription: follow / unfollow, mute / unmute a channel.
+   * Read first (already so → changed: false, nothing sent; mute needs a
+   * followed channel), then the mutation, then the channel's own viewer
+   * metadata must show it. One write per channel at a time.
+   */
+  async setChannelSubscription(
+    channelId: unknown,
+    action: unknown,
+    request: MessageMutationRequest = {}
+  ): Promise<ChannelSubscriptionResult> {
+    const jid = parseChannelJid(channelId);
+    const verb = parseChannelSubscriptionAction(action);
+    const sock = this.connectedSocket();
+    return this.channelWrites.run(jid, async () => {
+      const before = await this.readChannel(jid);
+      if ((verb === 'mute' || verb === 'unmute') && before.following === false) {
+        throw new ChannelActionError(
+          `This account does not follow ${jid}: follow it before muting or unmuting it`,
+          422,
+          'not_following'
+        );
+      }
+      const result = async (
+        changed: boolean,
+        channel: ChannelView
+      ): Promise<ChannelSubscriptionResult> => {
+        if (channel.following) await this.noteFollowed(jid);
+        else if (channel.following === false) {
+          this.seenChannels.delete(jid);
+          if (this.ingest) await forgetChannel(jid);
+        }
+        this.logger.info(
+          `Channel ${jid} ${verb}${changed ? '' : ' (already)'}${request.actor ? ` by ${request.actor}` : ''}`
+        );
+        return { action: verb, channelId: jid, changed, confirmed: true, channel };
+      };
+      if (channelStateMatches(before, verb) === true) return result(false, before);
+      const mutate: Record<ChannelSubscriptionAction, () => Promise<unknown>> = {
+        follow: () => sock.newsletterFollow(jid),
+        unfollow: () => sock.newsletterUnfollow(jid),
+        mute: () => sock.newsletterMute(jid),
+        unmute: () => sock.newsletterUnmute(jid),
+      };
+      let after: ChannelView = before;
+      await this.confirmedWrite(
+        `the ${verb} of ${jid}`,
+        () => this.channelCall(`the ${verb}`, jid, mutate[verb]),
+        async () => {
+          after = await this.readChannel(jid);
+          return channelStateMatches(after, verb) === true;
+        }
+      );
+      return result(true, after);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Presence, privacy and disappearing messages (fase 3 / PR-8)
   // ---------------------------------------------------------------------------
 
   /** Forget everything presence of the current socket (on open / close). */
   private resetPresence(): void {
+    this.presenceState.clear();
     this.presenceSubscribed.clear();
     this.presenceCache.clear();
     this.presenceThrottle.clear();
@@ -4393,7 +7992,7 @@ export class BaileysClient extends EventEmitter {
       this.groupMetaCache.delete(target.raw);
     } else {
       await this.whatsappCall(`the disappearing timer of ${target.raw}`, () =>
-        sock.sendMessage(target.raw, { disappearingMessagesInChat: seconds })
+        this.sendWithReceiptSnapshot(sock, target.raw, { disappearingMessagesInChat: seconds })
       );
     }
     let persisted = false;
@@ -4410,6 +8009,30 @@ export class BaileysClient extends EventEmitter {
       `Disappearing ${target.raw} ${String(previous)} -> ${seconds}${request.actor ? ` by ${request.actor}` : ''}`
     );
     return { ...base, changed: true, persisted };
+  }
+
+  /**
+   * A chat as WhatsApp reports it whole (history snapshot, chats.upsert): the in-memory store, and
+   * the real unread badge, archive flag, pin / mute (fase 3 / PR-5: only what the snapshot says) and
+   * disappearing timer (PR-8: never over a newer one) on its canonical conversation. Fire-and-forget.
+   */
+  private rememberChatSnapshot(c: Chat): void {
+    const norm = this.normalizeJid(c.id as string);
+    this.chatStore.set(norm, {
+      id: norm,
+      rawJid: c.id as string,
+      name: c.name || (c.id as string),
+      isGroup: !!isJidGroup(c.id as string),
+      unreadCount: c.unreadCount || 0,
+      timestamp: Number(c.conversationTimestamp || 0),
+    });
+    void setCanonicalChatState(norm, {
+      unreadCount: c.unreadCount || 0,
+      archived: !!(c as any).archived,
+      pinnedAt: pinFromBaileys(c),
+      mute: muteFromBaileys(c, 'snapshot'),
+    });
+    void recordInboundEphemeral(norm, ephemeralFromBaileys(c, 'snapshot'));
   }
 
   /**
@@ -4486,27 +8109,203 @@ export class BaileysClient extends EventEmitter {
 
   /**
    * Fetch a contact/group's profile picture as raw JPEG bytes.
-   * Returns null if the JID has no picture or the lookup fails (privacy).
+   * Returns null only when WhatsApp reports no visible picture (403/404);
+   * a timeout or a failed CDN download throws instead of passing for "no photo".
    */
   async getProfilePictureBytes(jid: string): Promise<Buffer | null> {
     if (!this.sock) return null;
     const raw = this.toRawJid(jid);
     let url: string | undefined;
     try {
-      url = await this.sock.profilePictureUrl(raw, 'image');
+      url = await boundedProfilePictureUrl(timeoutMs =>
+        this.sock!.profilePictureUrl(raw, 'image', timeoutMs)
+      );
     } catch (e) {
-      // 'item-not-found' / 'forbidden' — not all JIDs have pics or are visible
-      return null;
+      if (isUnavailableProfilePicture(e)) return null;
+      throw e;
     }
     if (!url) return null;
     try {
-      const r = await fetch(url);
-      if (!r.ok) return null;
-      const ab = await r.arrayBuffer();
-      return Buffer.from(ab);
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:' || !this.isAllowedWhatsAppMediaHost(parsed.hostname)) {
+        throw new ProfilePictureDownloadError('WhatsApp returned an invalid profile picture URL');
+      }
+      const signal = AbortSignal.timeout(10_000);
+      const r = await fetch(url, { redirect: 'manual', signal });
+      if (!r.ok || !r.body)
+        throw new ProfilePictureDownloadError(
+          `WhatsApp profile picture download failed (${r.status})`
+        );
+      const length = Number(r.headers.get('content-length') || 0);
+      const maxBytes = 10 * 1024 * 1024;
+      if (length > maxBytes)
+        throw new ProfilePictureDownloadError('WhatsApp profile picture exceeds 10 MB');
+      const reader = r.body.getReader();
+      const chunks: Buffer[] = [];
+      let size = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxBytes)
+            throw new ProfilePictureDownloadError('WhatsApp profile picture exceeds 10 MB');
+          chunks.push(Buffer.from(value));
+        }
+      } finally {
+        reader.releaseLock();
+        if (size > maxBytes) await r.body.cancel().catch(() => {});
+      }
+      return Buffer.concat(chunks, size);
     } catch (e) {
-      return null;
+      if (e instanceof ProfilePictureDownloadError) throw e;
+      if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+        throw new ProfilePictureTimeoutError();
+      }
+      throw new ProfilePictureDownloadError('WhatsApp profile picture download failed');
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Own profile: name, about, photo (ported from the NAS fork; the rules live
+  // in profile-service.ts, provider-agnostic)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Provider surface for `profile-service`, rebuilt from the live socket on
+   * every call. A writer is advertised only when the installed Baileys really
+   * exposes it, so a provider upgrade degrades to `capability: false` and a
+   * 501 instead of a TypeError on a signature assumed from the `.d.ts` files.
+   */
+  ownProfileProvider(): OwnProfilePhotoProvider {
+    const socket = this.sock as unknown as
+      | (Record<string, unknown> & {
+          user?: { id?: string; name?: string; lid?: string };
+          authState?: { creds?: { me?: { id?: string; name?: string } } };
+        })
+      | null;
+    const method = <A extends unknown[], R>(name: string) => {
+      const candidate = socket?.[name];
+      if (typeof candidate !== 'function') return undefined;
+      return (...args: A): Promise<R> => (candidate as (...a: A) => Promise<R>).apply(socket, args);
+    };
+    const ownRawJid = (): string | null => {
+      // `creds.me.id` carries the paired device suffix; the profile IQs and the
+      // USync lookup both need the bare user JID.
+      const candidate = socket?.user?.id || socket?.authState?.creds?.me?.id;
+      if (!candidate) return null;
+      try {
+        return jidNormalizedUser(candidate);
+      } catch {
+        return null;
+      }
+    };
+    return {
+      isConnected: () => this.isConnected(),
+      ownJid: ownRawJid,
+      accountName: () => {
+        const name = socket?.user?.name || socket?.authState?.creds?.me?.name;
+        return typeof name === 'string' && name.trim() ? name.trim() : null;
+      },
+      updateProfileName: method<[string], unknown>('updateProfileName'),
+      updateProfileStatus: method<[string], unknown>('updateProfileStatus'),
+      updateProfilePicture: method<[string, Buffer], unknown>('updateProfilePicture'),
+      removeProfilePicture: method<[string], unknown>('removeProfilePicture'),
+      fetchStatus: method<[string], unknown>('fetchStatus'),
+      // The CDN path identifies the stored picture; the query string is a
+      // rotating access token, so it must not look like a new picture. Hashed
+      // to keep the provider URL out of the API. Unlike contact avatars, a 403
+      // for our own account is a refused lookup, not a proven absence: only a
+      // 404 says "no picture", so a removal is never "confirmed" by an error.
+      profilePictureIdentity: async (jid: string) => {
+        const sock = this.sock;
+        if (!sock) throw new Error('Client not connected');
+        const raw = this.toRawJid(jid);
+        let url: string | undefined;
+        try {
+          url = await boundedProfilePictureUrl(timeoutMs =>
+            sock.profilePictureUrl(raw, 'preview', timeoutMs)
+          );
+        } catch (error) {
+          if (error instanceof Boom && error.output.statusCode === 404) return null;
+          throw error;
+        }
+        if (!url) throw new ProfilePictureDownloadError('WhatsApp returned no profile picture URL');
+        return createHash('sha256').update(url.split('?')[0]).digest('hex');
+      },
+      downloadProfilePhoto: async (jid: string) => this.getProfilePictureBytes(this.toRawJid(jid)),
+    };
+  }
+
+  /** Own profile with the `@c.us` JID shape the rest of this API returns. */
+  async getOwnProfile(io: ProfileIo = {}) {
+    const profile = await readOwnProfile(this.ownProfileProvider(), io);
+    return { ...profile, jid: this.normalizeJid(profile.jid) };
+  }
+
+  async updateOwnProfile(
+    input: ProfileUpdateInput,
+    io: ProfileIo = {}
+  ): Promise<ProfileUpdateResult> {
+    return applyProfileUpdates(this.ownProfileProvider(), input, io);
+  }
+
+  async setOwnProfilePhoto(
+    input: { imageBase64?: unknown; mimeType?: unknown },
+    io: ProfileIo = {}
+  ) {
+    return setOwnProfilePhoto(this.ownProfileProvider(), input, io);
+  }
+
+  async removeOwnProfilePhoto(io: ProfileIo = {}) {
+    return removeOwnProfilePhoto(this.ownProfileProvider(), io);
+  }
+
+  async getOwnProfilePhotoBytes(io: ProfileIo = {}): Promise<Buffer | null> {
+    return readOwnProfilePhotoBytes(this.ownProfileProvider(), io);
+  }
+
+  private async profilePictureUrlIfAvailable(rawJid: string): Promise<string | undefined> {
+    if (!this.sock) return undefined;
+    try {
+      return await boundedProfilePictureUrl(timeoutMs =>
+        this.sock!.profilePictureUrl(rawJid, 'preview', timeoutMs)
+      );
+    } catch (error) {
+      if (isUnavailableProfilePicture(error)) return undefined;
+      throw error;
+    }
+  }
+
+  private isAllowedWhatsAppMediaHost(hostname: string): boolean {
+    const host = hostname.toLowerCase().replace(/\.$/, '');
+    return (
+      host === 'whatsapp.net' ||
+      host.endsWith('.whatsapp.net') ||
+      host === 'fbcdn.net' ||
+      host.endsWith('.fbcdn.net')
+    );
+  }
+
+  private async persistSentMessage(sent: WAMessage | undefined, rawJid: string): Promise<void> {
+    if (!sent?.key?.id) return;
+    if (await this.persistSentNovedades(sent, this.sock?.user?.id)) return;
+    this.rememberKey(sent.key.id, sent.key, rawJid);
+    this.rememberMessageForRetry(sent.key, sent.message);
+    await this.persistDurablePayload(sent, this.normalizeJid(sent.key.remoteJid || rawJid), 'sent');
+  }
+
+  private async persistSentNovedades(sent: WAMessage, ownJid?: string | null): Promise<boolean> {
+    if (!novedadesKind(sent.key)) return false;
+    try {
+      await ingestNovedadesMessage(sent, this.novedadesIngestStore(), { ownJid, source: 'sent' });
+    } catch (error: any) {
+      // The provider accepted the send; a storage failure must not trigger a duplicate retry.
+      this.logger.error(
+        `NOVEDADES_PERSIST_PENDING provider_message_id=${sent.key.id} error=${error?.code || error?.name || 'unknown'}`
+      );
+    }
+    return true;
   }
 
   async refreshGroupSession(
@@ -4652,6 +8451,10 @@ export class BaileysClient extends EventEmitter {
         unreadCount: c.unreadCount,
         isGroup: c.isGroup,
         timestamp: c.timestamp,
+        archived: c.archived,
+        pinned: c.pinned,
+        muteUntil: c.muteUntil,
+        starred: c.starred,
       }));
   }
 
@@ -4660,9 +8463,32 @@ export class BaileysClient extends EventEmitter {
    * WhatsApp. baileys emits chats.update events for each mutation, which the
    * chats.update handler persists to the DB. Returns once the sync completes.
    */
+  /**
+   * The NCT salt behind cstoken arrives in the `regular_high` app-state
+   * collection (index `nct_salt_sync`). Baileys rc13 could not decode it, so a
+   * session paired before the patch has already applied that mutation and
+   * dropped the salt. Once per session, forget the stored regular_high version
+   * so the next resync asks for a full snapshot and the salt is read again.
+   * The marker in creds keeps an account that has no salt from re-snapshotting
+   * on every reconnect. WA_NCT_SALT_BOOTSTRAP=false turns it off.
+   */
+  private async prepareNctSaltBootstrap(): Promise<void> {
+    if (process.env.WA_NCT_SALT_BOOTSTRAP === 'false') return;
+    const sock = this.sock as any;
+    const creds = sock?.authState?.creds;
+    const keys = sock?.authState?.keys;
+    if (!creds || !keys || creds.nctSalt?.length || creds.nctSaltBootstrapAt) return;
+    // cstoken is only sent from a LID-addressed account: no LID, nothing to fetch.
+    if (!creds.me?.lid) return;
+    sock.ev.emit('creds.update', { nctSaltBootstrapAt: Date.now() });
+    await keys.set({ 'app-state-sync-version': { regular_high: null } });
+    this.logger.info('no NCT salt stored: re-snapshotting regular_high once to read it');
+  }
+
   async resyncChatState(reason = 'manual'): Promise<{ ok: boolean; error?: string }> {
     if (!this.sock) return { ok: false, error: 'not connected' };
     try {
+      if (reason === 'connection-open') await this.prepareNctSaltBootstrap();
       this.logger.info(`resyncAppState (${reason})`);
       await (this.sock as any).resyncAppState(
         ['critical_unblock_low', 'regular_high', 'regular_low', 'regular'],
@@ -4675,7 +8501,106 @@ export class BaileysClient extends EventEmitter {
     }
   }
 
+  async previewArchiveSnapshot(): Promise<{
+    version: number;
+    records: number;
+    chats: number;
+    archived: number;
+    pinned: number;
+  }> {
+    if (!this.sock || !this.isConnected()) throw new Error('Client not connected');
+    const snapshot = await readArchiveSnapshot(this.sock);
+    return {
+      version: snapshot.version,
+      records: snapshot.records,
+      chats: snapshot.states.size,
+      archived: [...snapshot.states.values()].filter(Boolean).length,
+      pinned: [...snapshot.pinnedStates.values()].filter(Boolean).length,
+    };
+  }
+
+  syncArchiveSnapshot(): Promise<{
+    version: number;
+    records: number;
+    chats: number;
+    archived: number;
+    created: number;
+  }> {
+    const socket = this.sock;
+    if (!socket || !this.isConnected()) return Promise.reject(new Error('Client not connected'));
+    if (this.archiveSnapshotSync?.socket === socket) return this.archiveSnapshotSync.promise;
+    if (this.archiveSnapshotSync) {
+      return this.archiveSnapshotSync.promise
+        .catch(() => undefined)
+        .then(() => this.syncArchiveSnapshot());
+    }
+    const run = this.performArchiveSnapshotSync();
+    this.archiveSnapshotSync = { socket, promise: run };
+    void run.then(
+      () => {
+        if (this.archiveSnapshotSync?.promise === run) this.archiveSnapshotSync = null;
+      },
+      () => {
+        if (this.archiveSnapshotSync?.promise === run) this.archiveSnapshotSync = null;
+      }
+    );
+    return run;
+  }
+
+  private async performArchiveSnapshotSync(): Promise<{
+    version: number;
+    records: number;
+    chats: number;
+    archived: number;
+    created: number;
+  }> {
+    const socket = this.sock;
+    if (!socket || !this.isConnected()) throw new Error('Client not connected');
+    const startedAt = new Date();
+    const snapshot = await readCurrentArchiveSnapshot(socket, () => this.sock);
+    if (!this.isConnected()) throw new Error('Client disconnected during archive snapshot');
+    const chats = [...snapshot.states].map(([jid, archived]) => {
+      const normalized = this.normalizeJid(jid);
+      const aliases = [
+        ...(this.contactAliasGroups.get(jid) || this.contactAliasGroups.get(normalized) || []),
+      ];
+      const cached = this.chatStore.get(normalized);
+      const name = this.contactNameFor(jid, normalized) || cached?.name;
+      return { jid: normalized, aliases, name, archived };
+    });
+    await enrichArchiveGroupNames(
+      chats,
+      async jid => {
+        const cached = this.groupMetaCache.get(jid);
+        if (cached?.subject) return cached.subject;
+        const meta = await socket.groupMetadata(jid);
+        if (this.sock === socket) this.cacheGroupMetadata(meta);
+        return meta.subject;
+      },
+      { isCurrent: () => this.sock === socket && this.isConnected() }
+    );
+    if (this.sock !== socket || !this.isConnected()) {
+      throw new Error('WhatsApp socket changed during archive name lookup');
+    }
+    const applied = await applyArchiveSnapshot(chats, startedAt);
+    await applyPinnedChatSnapshot(snapshot.pinnedStates, startedAt);
+    for (const chat of chats) {
+      const cached = this.chatStore.get(chat.jid);
+      if (cached) cached.archived = chat.archived;
+    }
+    return {
+      version: snapshot.version,
+      records: snapshot.records,
+      chats: chats.length,
+      archived: applied.archived,
+      created: applied.created,
+    };
+  }
+
   private async fetchGroupMetadata(rawJid: string, force = false): Promise<GroupMetadata> {
+    if (!this.isGroupJid(rawJid)) {
+      throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'A group JID is required');
+    }
     const cached = this.groupMetaCache.get(rawJid);
     if (cached && !force) return cached;
     if (!this.sock) throw new Error('Client not initialized');
@@ -4687,6 +8612,181 @@ export class BaileysClient extends EventEmitter {
   // ---------------------------------------------------------------------------
   // History endpoints (read-from-BD; live messages are written to BD anyway).
   // ---------------------------------------------------------------------------
+
+  private rememberHistoryRecoveryAnchor(message: WAMessage): void {
+    const key = message?.key;
+    const timestamp = Number(message?.messageTimestamp);
+    if (!key?.id || !key.remoteJid || !Number.isFinite(timestamp) || timestamp <= 0) return;
+    if (novedadesKind(key)) return;
+    const chat = this.normalizeJid(key.remoteJid);
+    const previous = this.historyRecoveryAnchors.get(chat);
+    if (previous && Number(previous.messageTimestamp) < timestamp) return;
+    this.historyRecoveryAnchors.set(chat, message);
+    if (this.historyRecoveryAnchors.size > 10000)
+      this.historyRecoveryAnchors.delete(this.historyRecoveryAnchors.keys().next().value!);
+  }
+
+  private rememberHistorySnapshotMessages(messages: unknown): void {
+    if (!Array.isArray(messages)) return;
+    for (const item of messages) {
+      const message = item?.message;
+      if (message?.key) this.rememberHistoryRecoveryAnchor(message as WAMessage);
+    }
+  }
+
+  /** Recover saved payloads first; phone requests require a real observed cursor. */
+  async recoverChatHistory(chatId: string): Promise<ChatHistoryRecoveryResult> {
+    const bare = stripAccountKey(chatId);
+    if (!/^\d+(?:-\d+)?@(?:lid|c\.us|s\.whatsapp\.net|g\.us)$/.test(bare))
+      throw new MessageMutationError('Invalid chatId', 400, 'invalid_request');
+    if (!this.ingest) throw new MessageMutationError('History ingest disabled', 403, 'forbidden');
+    if (!this.sock || !this.isConnected())
+      throw new MessageMutationError('WhatsApp not connected', 503, 'not_connected');
+    const chat = await canonicalConversationId(this.normalizeJid(bare));
+    const pending = this.historyRecoveryInFlight.get(chat);
+    if (pending) return pending;
+    const lastRequestedAt = this.historyRecoveryRequestedAt.get(chat) || 0;
+    if (Date.now() - lastRequestedAt < 60000) {
+      return {
+        chatId: chat,
+        status: 'cooldown',
+        requested: 0,
+        placeholderRequests: 0,
+        recovered: 0,
+        retryAfterMs: 60000 - (Date.now() - lastRequestedAt),
+      };
+    }
+    this.historyRecoveryRequestedAt.set(chat, Date.now());
+    if (this.historyRecoveryRequestedAt.size > 10000)
+      this.historyRecoveryRequestedAt.delete(this.historyRecoveryRequestedAt.keys().next().value!);
+    const run = this.performChatHistoryRecovery(chat, bare);
+    this.historyRecoveryInFlight.set(chat, run);
+    try {
+      return await run;
+    } catch (error) {
+      this.historyRecoveryRequestedAt.delete(chat);
+      throw error;
+    } finally {
+      this.historyRecoveryInFlight.delete(chat);
+    }
+  }
+
+  private async performChatHistoryRecovery(
+    chat: string,
+    requestedChat: string
+  ): Promise<ChatHistoryRecoveryResult> {
+    await ensureHistoryTables();
+    const ids = [
+      ...new Set([chat, requestedChat, this.normalizeJid(requestedChat), this.toRawJid(chat)]),
+    ].map(accountKey);
+    const pool = getPool();
+    const placeholders = (
+      await pool.query(
+        `SELECT m.wa_message_id, k.remote_jid, k.from_me, k.participant_jid, k.message_timestamp_ms
+         FROM messages m
+         LEFT JOIN whatsapp_message_keys k ON k.wa_message_id = m.wa_message_id
+        WHERE m.account = $1 AND m.platform = 'whatsapp'
+          AND m.conversation_id = ANY($2::text[])
+          AND m.message_type = ANY($3::text[])
+          AND NULLIF(m.content, '') IS NULL
+          AND NOT COALESCE(m.is_deleted, false)
+          AND (m.metadata->>'deleted_for_me') IS DISTINCT FROM 'true'
+        ORDER BY m.wa_timestamp DESC LIMIT 20`,
+        [connectorAccount(), ids, UNAVAILABLE_MESSAGE_TYPES]
+      )
+    ).rows;
+    const payloadIds = (
+      await pool.query(
+        `SELECT p.wa_message_id FROM whatsapp_message_payloads p
+         LEFT JOIN messages m ON m.wa_message_id = p.wa_message_id
+        WHERE p.account = $1 AND p.conversation_id = ANY($2::text[])
+          AND (m.wa_message_id IS NULL OR
+            (m.message_type = ANY($3::text[]) AND NULLIF(m.content, '') IS NULL))
+        ORDER BY p.created_at DESC LIMIT 50`,
+        [connectorAccount(), ids, RECOVERABLE_MESSAGE_TYPES]
+      )
+    ).rows;
+    let recovered = 0;
+    const restored = new Set<string>();
+    for (const id of new Set(
+      [...payloadIds, ...placeholders].map(row => stripAccountKey(row.wa_message_id))
+    )) {
+      // The scoped scans selected the id; older payloads can still be filed under a PN alias.
+      const message = await getRawWAMessage(id);
+      if (!message) continue;
+      this.rememberHistoryRecoveryAnchor(message);
+      if (!hasUserMessageContent(message.message)) continue;
+      const result = await this.ingestMessage(message, {
+        source: 'baileys_history_sync',
+        publishEvent: false,
+        storeMedia: true,
+      });
+      if (result.inserted) recovered += 1;
+      restored.add(id);
+    }
+    const cached =
+      this.historyRecoveryAnchors.get(chat) ||
+      this.historyRecoveryAnchors.get(this.normalizeJid(requestedChat));
+    if (cached && !restored.has(cached.key.id || '') && hasUserMessageContent(cached.message)) {
+      const result = await this.ingestMessage(cached, {
+        source: 'baileys_history_sync',
+        publishEvent: false,
+        storeMedia: true,
+      });
+      if (result.inserted) recovered += 1;
+    }
+    const oldest = (
+      await pool.query(
+        `SELECT k.wa_message_id, k.remote_jid, k.from_me, k.participant_jid, k.message_timestamp_ms
+         FROM whatsapp_message_keys k JOIN messages m ON m.wa_message_id = k.wa_message_id
+        WHERE m.account = $1 AND m.platform = 'whatsapp'
+          AND k.conversation_id = ANY($2::text[])
+        ORDER BY k.message_timestamp_ms ASC LIMIT 1`,
+        [connectorAccount(), ids]
+      )
+    ).rows[0];
+    const result: ChatHistoryRecoveryResult = {
+      chatId: chat,
+      status: recovered ? 'recovered' : 'no_anchor',
+      requested: 0,
+      placeholderRequests: 0,
+      recovered,
+    };
+    // Requests only ask our paired phone for its available data; they send no chat message.
+    for (const row of placeholders.slice(0, 5)) {
+      if (
+        restored.has(stripAccountKey(row.wa_message_id)) ||
+        !row.remote_jid ||
+        !this.sock?.requestPlaceholderResend
+      )
+        continue;
+      await this.sock.requestPlaceholderResend({
+        id: stripAccountKey(row.wa_message_id),
+        remoteJid: row.remote_jid,
+        fromMe: !!row.from_me,
+        participant: row.participant_jid || undefined,
+      });
+      result.placeholderRequests += 1;
+    }
+    const key = oldest
+      ? {
+          id: stripAccountKey(oldest.wa_message_id),
+          remoteJid: oldest.remote_jid,
+          fromMe: !!oldest.from_me,
+          participant: oldest.participant_jid || undefined,
+        }
+      : cached?.key;
+    const timestampMs = oldest
+      ? Number(oldest.message_timestamp_ms)
+      : Number(cached?.messageTimestamp) * 1000;
+    if (key?.id && key.remoteJid && Number.isFinite(timestampMs) && timestampMs > 0) {
+      this.historyBackfillRequestedUntil = Date.now() + 5 * 60 * 1000;
+      await this.sock!.fetchMessageHistory(50, key, timestampMs);
+      result.requested = 1;
+    }
+    if (result.requested || result.placeholderRequests) result.status = 'requested';
+    return result;
+  }
 
   async fetchChatHistory(chatId: string, limit: number = 500): Promise<any[]> {
     const pool = getPool();
@@ -4752,14 +8852,23 @@ export class BaileysClient extends EventEmitter {
     const candidates: Array<{ chatId: string; oldestMessageId: string; oldestTimestamp: string }> =
       [];
     let requested = 0;
+    const requestedCursors = new Set<string>();
+    const cursorKey = (row: { conversation_id: string; wa_message_id: string }) =>
+      JSON.stringify([row.conversation_id, row.wa_message_id]);
 
     const pool = getPool();
     const loadOldest = async () => {
-      const params: any[] = [];
-      const where = options.chatId ? 'WHERE k.conversation_id = $1' : '';
+      const params: any[] = [connectorAccount()];
+      const where = `WHERE m.account = $1 AND m.platform = 'whatsapp'${
+        options.chatId ? ' AND k.conversation_id = $2' : ''
+      }`;
       // whatsapp_message_keys.conversation_id is stored namespaced (see accountKey
       // in storeMessageKey); the caller filters by a bare chatId, so namespace it
       // or professional matches zero rows.
+      // Preserve the caller's stored conversation identity here. Historical
+      // key rows may use the native @s.whatsapp.net form even though newer
+      // ingest rows use @c.us; the account namespace is the only required
+      // transformation for this cursor query.
       if (options.chatId) params.push(accountKey(options.chatId));
       params.push(maxChats);
       const limitParam = `$${params.length}`;
@@ -4768,6 +8877,7 @@ export class BaileysClient extends EventEmitter {
             k.conversation_id, k.wa_message_id, k.remote_jid, k.from_me,
             k.participant_jid, k.message_timestamp_ms
          FROM whatsapp_message_keys k
+         JOIN messages m ON m.wa_message_id = k.wa_message_id
          ${where}
          ORDER BY k.conversation_id, k.message_timestamp_ms ASC
          LIMIT ${limitParam}`,
@@ -4776,7 +8886,17 @@ export class BaileysClient extends EventEmitter {
     };
 
     for (let batch = 0; batch < maxBatchesPerChat; batch++) {
-      const rows = (await loadOldest()).rows;
+      let rows = (await loadOldest()).rows;
+      // History arrives asynchronously. Wait briefly for older keys, and never
+      // spend another request on a cursor already sent during this run.
+      if (batch > 0) {
+        for (let poll = 0; poll < 10; poll++) {
+          if (rows.some(row => !requestedCursors.has(cursorKey(row)))) break;
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          rows = (await loadOldest()).rows;
+        }
+        rows = rows.filter(row => !requestedCursors.has(cursorKey(row)));
+      }
       if (!rows.length) break;
 
       for (const row of rows) {
@@ -4806,9 +8926,10 @@ export class BaileysClient extends EventEmitter {
         await (this.sock as any).fetchMessageHistory(
           batchSize,
           key,
-          Math.floor(Number(row.message_timestamp_ms) / 1000)
+          Number(row.message_timestamp_ms)
         );
         requested += 1;
+        requestedCursors.add(cursorKey(row));
         await recordHistorySyncProgress({
           conversationId: bareConversationId,
           oldestMessageId: bareWaMessageId,
@@ -4819,7 +8940,6 @@ export class BaileysClient extends EventEmitter {
       }
 
       if (options.dryRun || maxBatchesPerChat === 1) break;
-      await new Promise(resolve => setTimeout(resolve, 1500));
     }
 
     return { requested, candidates };
@@ -4896,7 +9016,7 @@ export class BaileysClient extends EventEmitter {
         await (this.sock as any).fetchMessageHistory(
           Math.min(batchSize, remaining),
           key,
-          Math.floor(Number(row.message_timestamp_ms) / 1000)
+          Number(row.message_timestamp_ms)
         );
         requested += Math.min(batchSize, remaining);
         chats += 1;
@@ -4929,24 +9049,74 @@ export class BaileysClient extends EventEmitter {
     chatId: string,
     messageId: string
   ): Promise<{ data: string; mimetype: string; filename: string } | null> {
+    const channel = stripAccountKey(chatId);
+    const isChannel = /^\d+@newsletter$/.test(channel);
     // Incoming media is persisted to MinIO on receipt; map the wa_message_id to
     // its stored object (attachments.file_url) and stream it back as base64.
     try {
+      if (isChannel) {
+        try {
+          const post = await getNovedadesMessage(channel, stripAccountKey(messageId));
+          if (post) {
+            if (
+              post.visibility !== 'visible' ||
+              post.isDeleted ||
+              post.supersededBy ||
+              !post.payload
+            )
+              return null;
+            const media = await this.downloadNovedadesMedia({
+              key: { ...post.key, remoteJid: channel },
+              message: proto.Message.fromObject(post.payload as Record<string, unknown>),
+            });
+            return media
+              ? {
+                  data: media.buffer.toString('base64'),
+                  mimetype: media.mimeType || 'application/octet-stream',
+                  filename: media.fileName || 'media',
+                }
+              : null;
+          }
+          // Archived identities must not resurrect their legacy attachment.
+          if (
+            await getNovedadesMessage(channel, stripAccountKey(messageId), {
+              includeSuperseded: true,
+            })
+          )
+            return null;
+        } catch (error) {
+          if ((error as { code?: string }).code !== '42P01') throw error;
+        }
+      }
       const pool = getPool();
-      // The caller may hand us either the WhatsApp message id or the numeric
+      // The caller may hand us either the WhatsApp message id or the UUID
       // messages.id (social_list_messages exposes both `waMessageId` and `id`).
       // messages.wa_message_id is stored namespaced, so namespace the wa id ($1) or
-      // professional finds no attachment row; messages.id is the global numeric PK
+      // professional finds no attachment row; messages.id is the global UUID PK
       // and is never namespaced, so match it raw ($2). Mirrors the dual lookup the
       // MCP server already does for get_messages (wa_message_id OR id::text).
-      // Scope to this connector's account ($3) so the numeric-id branch cannot
-      // cross the personal/professional boundary in the shared DB.
+      // Scope both lookup branches to this connector's account and channel.
+      // Account names can also exist on Instagram in the shared database.
       const r = await pool.query(
         `SELECT a.file_url, a.mime_type, a.file_name
            FROM attachments a JOIN messages m ON m.id = a.message_id
           WHERE (m.wa_message_id = $1 OR m.id::text = $2) AND m.account = $3
+            AND m.platform = 'whatsapp'
+            ${
+              isChannel
+                ? `AND (m.conversation_id = $4 OR EXISTS (
+              SELECT 1 FROM conversations c WHERE c.id = m.conversation_id
+                AND c.account = $3 AND c.external_id = $5
+            ))`
+                : ''
+            }
           ORDER BY a.id DESC LIMIT 1`,
-        [accountKey(messageId), messageId, connectorAccount()]
+        [
+          accountKey(messageId),
+          messageId,
+          connectorAccount(),
+          ...(isChannel ? [accountKey(channel), channel] : []),
+        ]
       );
       const row = r.rows[0];
       if (!row?.file_url) {
@@ -4962,6 +9132,86 @@ export class BaileysClient extends EventEmitter {
     } catch (e: any) {
       this.logger.error(`downloadMedia failed for ${messageId}: ${e?.message || e}`);
       return null;
+    }
+  }
+
+  /**
+   * Normalized user JID of this session, or null while disconnected. The
+   * Novedades read paths need it to mark which statuses this account itself
+   * posted; no device suffix, no raw JID.
+   */
+  get ownJid(): string | null {
+    return this.meJid;
+  }
+
+  /**
+   * Narrow provider port for the Novedades channel panel: exactly the three
+   * newsletter calls rc13 exposes (metadata by JID/invite, follow, unfollow),
+   * bound to the live socket, or null while no socket exists. The socket
+   * itself stays private, so a channel caller cannot reach session state,
+   * messaging or media through this port. Methods missing from the installed
+   * provider are left absent rather than stubbed, and the caller answers 501.
+   */
+  novedadesChannelSocket(): ChannelSocketLike | null {
+    const sock = this.sock as unknown as ChannelSocketLike | null;
+    if (!sock) return null;
+    const metadata = typeof sock.newsletterMetadata === 'function' ? sock.newsletterMetadata : null;
+    const follow = typeof sock.newsletterFollow === 'function' ? sock.newsletterFollow : null;
+    const unfollow = typeof sock.newsletterUnfollow === 'function' ? sock.newsletterUnfollow : null;
+    return {
+      newsletterMetadata: metadata ? (type, key) => metadata.call(sock, type, key) : undefined,
+      newsletterFollow: follow ? jid => follow.call(sock, jid) : undefined,
+      newsletterUnfollow: unfollow ? jid => unfollow.call(sock, jid) : undefined,
+    };
+  }
+
+  /**
+   * Read stored status/channel media without receipts, re-upload requests or writes.
+   * rc13 does not forward AbortSignal to fetch, nor propagate output destruction
+   * to its private HTTP stream. The deadline bounds caller wait; we destroy the
+   * returned stream (also when late) and retain at most the cap in collected chunks.
+   */
+  async downloadNovedadesMedia(
+    message: WAMessage
+  ): Promise<{ buffer: Buffer; mimeType?: string; fileName?: string } | null> {
+    if (!this.isConnected())
+      throw new NovedadesReaderError(
+        'NOVEDADES_SESSION_DOWN',
+        'WhatsApp session is not connected',
+        503
+      );
+    const rawTimeout = Number.parseInt(process.env.WA_MEDIA_DOWNLOAD_TIMEOUT_MS || '30000', 10);
+    const timeoutMs =
+      Number.isSafeInteger(rawTimeout) && rawTimeout >= 1000 && rawTimeout <= 60000
+        ? rawTimeout
+        : 30000;
+    const content = normalizeMessageContent(
+      message.message ? proto.Message.fromObject(message.message) : undefined
+    );
+    const media =
+      content?.imageMessage ||
+      content?.videoMessage ||
+      content?.audioMessage ||
+      content?.documentMessage ||
+      content?.stickerMessage;
+    const declared = Number(media?.fileLength ?? 0);
+    if (Number.isFinite(declared) && declared > NOVEDADES_MEDIA_MAX_BYTES)
+      throw new NovedadesReaderError(
+        'NOVEDADES_MEDIA_TOO_LARGE',
+        'Media exceeds the download size cap',
+        413
+      );
+    try {
+      // Omitting ctx avoids provider logging of message keys and re-upload writes.
+      const buffer = await readNovedadesMediaStream(
+        () => downloadMediaMessage(message, 'stream', {}),
+        timeoutMs
+      );
+      return buffer.length ? { buffer, ...this.mediaMetaFromMessage(message) } : null;
+    } catch (error) {
+      if (error instanceof NovedadesReaderError) throw error;
+      this.logger.warn('Novedades media download failed');
+      throw new NovedadesReaderError('NOVEDADES_MEDIA_FAILED', 'The media download failed', 502);
     }
   }
 
@@ -4997,7 +9247,7 @@ export class BaileysClient extends EventEmitter {
       watchdogIntervalMs: this.watchdogIntervalMs,
       initializeMaxMs: this.initializeMaxMs,
       historySyncOnLogin: this.historySyncOnLogin,
-      qrUrl: process.env.WA_QR_PUBLIC_URL || 'https://whatsapp.e-dani.com/',
+      qrUrl: qrPageUrl(),
       backend: 'baileys',
     };
   }
@@ -5027,8 +9277,17 @@ export class BaileysClient extends EventEmitter {
   /** Convert our legacy `@c.us` JID back to Baileys' `@s.whatsapp.net`. */
   private toRawJid(jid: string): string {
     if (!jid) return jid;
-    if (jid.endsWith('@c.us')) return jid.replace('@c.us', '@s.whatsapp.net');
-    return jid; // groups stay `@g.us`, broadcasts stay `@broadcast`
+    const bare = stripAccountKey(jid);
+    if (bare.endsWith('@c.us')) return bare.replace('@c.us', '@s.whatsapp.net');
+    return bare; // groups stay `@g.us`, broadcasts stay `@broadcast`
+  }
+
+  private toParticipantJid(value: string): string {
+    const trimmed = value.trim();
+    if (/^\+?\d{6,18}$/.test(trimmed)) {
+      return `${trimmed.replace(/^\+/, '')}@s.whatsapp.net`;
+    }
+    return this.toRawJid(trimmed);
   }
 
   private isGroupJid(jid: string): boolean {
@@ -5087,7 +9346,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private rememberKey(waMessageId: string, key: WAMessageKey, chatJid: string): void {
-    if (!waMessageId) return;
+    if (!waMessageId || novedadesKind(key)) return;
     if (this.keyCache.size >= KEY_CACHE_MAX) {
       const firstKey = this.keyCache.keys().next().value;
       if (firstKey) this.keyCache.delete(firstKey);
@@ -5099,7 +9358,7 @@ export class BaileysClient extends EventEmitter {
     key: WAMessageKey | undefined,
     message: proto.IMessage | null | undefined
   ): void {
-    if (!key?.id || !message) return;
+    if (!key?.id || !message || novedadesKind(key)) return;
     this.retryMessageCache.set(key.id, message);
     if (key.remoteJid) {
       this.retryMessageCache.set(this.retryMessageCacheKey(key.remoteJid, key.id), message);
@@ -5111,6 +9370,7 @@ export class BaileysClient extends EventEmitter {
   }
 
   private async getMessageForRetry(key: proto.IMessageKey): Promise<proto.IMessage | undefined> {
+    if (novedadesKind(key)) return undefined;
     const messageId = key.id || '';
     if (!messageId) return undefined;
 
@@ -5129,10 +9389,13 @@ export class BaileysClient extends EventEmitter {
     }
 
     // Durable copy: the exact content we sent/received, even after a restart.
-    const durable = await this.durableMessage(messageId);
+    const durable = this.ingest
+      ? (await getRawWAMessage(messageId, remoteJid || undefined).catch(() => undefined)) ||
+        (await this.durableMessage(messageId))
+      : undefined;
     if (durable?.message) {
       this.logger.debug(
-        `WhatsApp retry message durable hit remoteJid=${remoteJid || 'unknown'} messageId=${messageId}`
+        `WhatsApp durable retry message hit remoteJid=${remoteJid || 'unknown'} messageId=${messageId}`
       );
       this.retryMessageCache.set(messageId, durable.message);
       if (remoteJid) {
@@ -5225,6 +9488,8 @@ export class BaileysClient extends EventEmitter {
       useUserDevicesCache?: boolean;
       quoted?: WAMessage;
       messageId?: string;
+      ephemeralExpiration?: number;
+      beforeSend?: () => Promise<void>;
     }
   ): Promise<WAMessage | undefined> {
     if (!this.sock) throw new Error('Client not initialized');
@@ -5237,11 +9502,22 @@ export class BaileysClient extends EventEmitter {
     }
     if (options?.quoted) sendOpts.quoted = options.quoted;
     if (options?.messageId) sendOpts.messageId = options.messageId;
-    return this.race(
+    if (options?.ephemeralExpiration) sendOpts.ephemeralExpiration = options.ephemeralExpiration;
+    await options?.beforeSend?.();
+    // The timeout covers only transport. Recipient metadata cannot turn an
+    // accepted provider message into a retry (and a second group message).
+    const recipients = await this.captureSendRecipients(this.sock, rawJid);
+    const sent = await this.race(
       this.sock.sendMessage(rawJid, { text: content }, sendOpts),
       timeoutMs,
       `sendMessage timeout after ${timeoutMs}ms`
     );
+    if (sent?.key?.id && recipients !== null)
+      void recordRecipientSnapshot(this.normalizeJid(rawJid), sent.key.id, recipients).catch(
+        error =>
+          this.logger.warn(`Recipient snapshot persistence failed: ${error?.message || error}`)
+      );
+    return sent;
   }
 
   private async readDirectPrivacyTokenState(
@@ -5266,6 +9542,100 @@ export class BaileysClient extends EventEmitter {
     };
   }
 
+  /**
+   * The one policy for every new 1:1 send (text, file, voice, sticker/GIF,
+   * contact cards, poll, event, forward, group-invite card). Someone who
+   * already talks to this account, or whose chat the owner already opened
+   * (typed from the main phone), always gets it: Baileys attaches their
+   * tctoken when fresh, else a cstoken when the NCT salt exists, else
+   * nothing — as WA Web and whatsmeow, which never hold a send back for a
+   * missing or expired tctoken. Only a true first contact (no token record,
+   * no INBOUND and no non-failed OUTBOUND message) goes through the token
+   * preflight, which refuses (account_restricted) when no token can be
+   * attached: a token-less first message counts as a reach-out.
+   */
+  private async guardDirectSend(rawJid: string, started = Date.now()): Promise<void> {
+    if (this.isGroupJid(rawJid) || !this.isDirectUserJid(rawJid)) return;
+    if (process.env.WA_DIRECT_PRIVACY_PREFLIGHT === 'false') return;
+    if (!(this.sock as any)?.authState?.keys) return;
+    const normalized = this.normalizeJid(rawJid);
+    const evidence = await this.knownDirectContactEvidence(rawJid);
+    if (evidence) {
+      if (evidence !== 'tctoken') {
+        this.logger.info(
+          `WhatsApp direct send to a known contact without a fresh trusted-contact token evidence=${evidence} rawJid=${rawJid} normalizedJid=${normalized}`
+        );
+      }
+      return;
+    }
+    await this.prepareDirectPrivacyToken(rawJid, normalized, started).catch(e => {
+      throw this.buildSendError(
+        classifyWhatsAppSendFailure(e),
+        rawJid,
+        normalized,
+        false,
+        started,
+        0,
+        e
+      );
+    });
+  }
+
+  /**
+   * Why a 1:1 target is not a first contact, or null when it is: a fresh
+   * tctoken; any tctoken record (theirs, expired or emptied by Baileys'
+   * cleanup, or ours issued after an earlier send to them); an INBOUND
+   * message on the canonical conversation of their PN or LID; or an OUTBOUND
+   * one that did not fail — typed by the owner on the main phone, or sent by
+   * the connector after it passed this guard (history is ingest only —
+   * tctokens expire in 4 weekly buckets and Baileys prunes the records).
+   */
+  private async knownDirectContactEvidence(
+    rawJid: string
+  ): Promise<'tctoken' | 'token_record' | 'inbound_history' | 'outbound_history' | null> {
+    const sock = this.sock as any;
+    const keys = sock?.authState?.keys;
+    const lidMapping = sock?.signalRepository?.lidMapping;
+    const getLIDForPN =
+      lidMapping?.getLIDForPN?.bind(lidMapping) || (async () => null as string | null);
+    const getPNForLID =
+      lidMapping?.getPNForLID?.bind(lidMapping) || (async () => null as string | null);
+    if (keys) {
+      const storageJid = await resolveTcTokenJid(rawJid, getLIDForPN);
+      const entry = (await keys.get('tctoken', [storageJid]))?.[storageJid];
+      if (entry) {
+        const tokenLength = typeof entry.token?.length === 'number' ? entry.token.length : 0;
+        if (tokenLength > 0 && !isTcTokenExpired(entry.timestamp)) return 'tctoken';
+        if (tokenLength > 0 || entry.timestamp !== undefined || entry.senderTimestamp !== undefined)
+          return 'token_record';
+      }
+    }
+    if (!this.ingest) return null;
+    try {
+      const twin = isLidJid(rawJid)
+        ? await getPNForLID(rawJid).catch(() => null)
+        : await getLIDForPN(rawJid).catch(() => null);
+      const ids = [rawJid, ...(twin ? [jidNormalizedUser(twin)] : [])];
+      if (await this.directInboundHistory(ids)) return 'inbound_history';
+      return (await this.directOutboundHistory(ids)) ? 'outbound_history' : null;
+    } catch (error) {
+      this.logger.warn(
+        `WhatsApp direct send: history lookup failed rawJid=${rawJid}: ${errorMessage(error)}`
+      );
+      return null;
+    }
+  }
+
+  /** Seam for tests (no DB): see hasInboundHistory. */
+  private directInboundHistory(chatIds: string[]): Promise<boolean> {
+    return hasInboundHistory(chatIds);
+  }
+
+  /** Seam for tests (no DB): see hasOutboundHistory. */
+  private directOutboundHistory(chatIds: string[]): Promise<boolean> {
+    return hasOutboundHistory(chatIds);
+  }
+
   private async prepareDirectPrivacyToken(
     rawJid: string,
     normalizedJid: string,
@@ -5282,17 +9652,8 @@ export class BaileysClient extends EventEmitter {
     const keys = sock.authState?.keys;
     if (!keys) return;
 
-    const hasValidToken = async (): Promise<{ ok: boolean; storageJid: string }> => {
-      const storageJid = await resolveTcTokenJid(rawJid, getLIDForPN);
-      const tokenData = await keys.get('tctoken', [storageJid]);
-      const entry = tokenData?.[storageJid];
-      const token = entry?.token;
-      const tokenLength = typeof token?.length === 'number' ? token.length : 0;
-      return {
-        ok: tokenLength > 0 && !isTcTokenExpired(entry?.timestamp),
-        storageJid,
-      };
-    };
+    // Never null here: the socket and its key store were checked above.
+    const hasValidToken = async () => (await this.readDirectPrivacyTokenState(rawJid))!;
 
     let tokenState = await hasValidToken();
     if (tokenState.ok) return;
@@ -5346,6 +9707,17 @@ export class BaileysClient extends EventEmitter {
       return;
     }
 
+    // A first message never has the recipient's tctoken: they issue it once
+    // they talk to us. WA Web and whatsmeow then send a self-computed
+    // <cstoken>, which the patched Baileys attaches when this holds. Without
+    // it the send would go out token-less and count as a reach-out, so stop.
+    if (canAttachCsToken(sock.authState?.creds, tokenState.storageJid)) {
+      this.logger.info(
+        `WhatsApp direct preflight: no trusted-contact token, sending with cstoken rawJid=${rawJid} normalizedJid=${normalizedJid}`
+      );
+      return;
+    }
+
     if (sock.serverProps?.privacyTokenOn1to1) {
       throw new WhatsAppSendError(
         'WhatsApp direct preflight could not obtain a trusted-contact token for this 1:1 target',
@@ -5356,7 +9728,9 @@ export class BaileysClient extends EventEmitter {
           isGroup: false,
           attempts: 0,
           elapsedMs: Date.now() - started,
-          causeMessage: 'missing trusted-contact token after preflight',
+          causeMessage: sock.authState?.creds?.nctSalt?.length
+            ? 'missing trusted-contact token after preflight (recipient has no LID for a cstoken)'
+            : 'missing trusted-contact token after preflight and no NCT salt for a cstoken',
           actionable: actionableForFailure('account_restricted', false),
         }
       );
@@ -5447,5 +9821,858 @@ export class BaileysClient extends EventEmitter {
         }
       );
     });
+  }
+
+  private async forkSendPoll(
+    input: PreparedPoll,
+    messageId: string,
+    beforeSend: () => Promise<void>
+  ): Promise<string> {
+    if (!this.sock || !this.isConnected())
+      throw new StructuredSendError('POLL_DISCONNECTED', 'WhatsApp is not connected', 503);
+    const raw = this.toRawJid(input.conversationId);
+    await this.guardDirectSend(raw);
+    const sendOptions = withEphemeralExpiration({ messageId }, await this.outgoingEphemeral(raw));
+    const content = buildPollMessage({
+      name: input.name,
+      values: input.values,
+      ...(input.selectableCount === undefined ? {} : { selectableCount: input.selectableCount }),
+    });
+    await beforeSend();
+    const sent = await this.sendWithReceiptSnapshot(this.sock, raw, content, sendOptions);
+    const relayedId = sent?.key?.id;
+    if (!relayedId || relayedId !== messageId)
+      throw new StructuredSendError(
+        'POLL_SEND_OUTCOME_UNCERTAIN',
+        'WhatsApp did not confirm the reserved message ID; check the chat before sending again',
+        409
+      );
+    try {
+      await this.persistSentMessage(sent, raw);
+    } catch {
+      this.logger.warn('Poll relayed; local persistence is pending');
+    }
+    return relayedId;
+  }
+
+  private async forkSendEvent(
+    input: PreparedEvent,
+    messageId: string,
+    beforeSend: () => Promise<void>
+  ): Promise<string> {
+    if (!this.sock || !this.isConnected())
+      throw new StructuredSendError('EVENT_CREATE_DISCONNECTED', 'WhatsApp is not connected', 503);
+    const raw = this.toRawJid(input.conversationId);
+    await this.guardDirectSend(raw);
+    const sendOptions = withEphemeralExpiration({ messageId }, await this.outgoingEphemeral(raw));
+    const content = buildEventMessage({
+      name: input.name,
+      ...(input.description ? { description: input.description } : {}),
+      startDate: new Date(input.startDate),
+      ...(input.endDate ? { endDate: new Date(input.endDate) } : {}),
+      ...(input.location ? { location: input.location } : {}),
+      ...(input.call ? { call: input.call } : {}),
+      ...(input.isCancelled === undefined ? {} : { isCancelled: input.isCancelled }),
+      ...(input.extraGuestsAllowed === undefined
+        ? {}
+        : { extraGuestsAllowed: input.extraGuestsAllowed }),
+    });
+    await beforeSend();
+    const sent = await this.sendWithReceiptSnapshot(this.sock, raw, content, sendOptions);
+    const relayedId = sent?.key?.id;
+    if (!relayedId || relayedId !== messageId)
+      throw new StructuredSendError(
+        'EVENT_CREATE_OUTCOME_UNCERTAIN',
+        'WhatsApp did not confirm the reserved message ID; check the chat before sending again',
+        409
+      );
+    try {
+      await this.persistSentMessage(sent, raw);
+    } catch {
+      this.logger.warn('Event relayed; local persistence is pending');
+    }
+    return relayedId;
+  }
+
+  private async forkSendPollVote(
+    chatId: string,
+    input: { pollMessageId: string; options: unknown },
+    reservedMessageId?: string,
+    beforeSend?: () => Promise<void>
+  ): Promise<string | undefined> {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!this.isConnected()) throw new Error('Client not connected');
+    const pollMessageId = typeof input.pollMessageId === 'string' ? input.pollMessageId.trim() : '';
+    if (!pollMessageId)
+      throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'pollMessageId is required');
+    const stored = await getRawWAMessage(pollMessageId, chatId);
+    if (!stored?.key?.id)
+      throw new CapabilityError(
+        'POLL_NOT_FOUND',
+        'Poll creation message is not in durable storage',
+        {
+          pollMessageId,
+        }
+      );
+    const details = parsePollCreationContent(stored.message);
+    if (!details)
+      throw new CapabilityError('POLL_NOT_FOUND', 'Stored message is not a poll creation message', {
+        pollMessageId,
+      });
+    const pollEncKey = pollEncKeyFromStoredMessage(stored.message);
+    if (!pollEncKey)
+      throw new CapabilityError(
+        'POLL_ENCRYPTION_KEY_UNAVAILABLE',
+        'The poll encKey (messageSecret) was never captured for this poll, so a compatible vote cannot be built',
+        { pollMessageId }
+      );
+    const optionNames = validatePollVoteSelection(details, input.options);
+    const meId = this.meJid || (this.sock.user?.id ? jidNormalizedUser(this.sock.user.id) : null);
+    if (!meId) throw new Error('Client not connected');
+    const content = buildCapturedPollVoteContent({
+      pollCreationKey: stored.key,
+      pollEncKey,
+      optionNames,
+      meJid: meId,
+    });
+    const raw = this.toRawJid(chatId);
+    const messageId = reservedMessageId || generateMessageIDV2(this.sock.user?.id);
+    const fullMsg = generateWAMessageFromContent(raw, content, { messageId, userJid: meId });
+    await beforeSend?.();
+    const relayedId = await this.sock.relayMessage(raw, fullMsg.message as proto.IMessage, {
+      messageId,
+    });
+    try {
+      await this.persistSentMessage(fullMsg, raw);
+    } catch {
+      // The transport has already accepted the send; a retry could cast a duplicate vote.
+      this.logger.warn('Poll vote relayed; local persistence is pending');
+    }
+    return relayedId || undefined;
+  }
+
+  private async forkGetPollResults(
+    chatId: string,
+    pollMessageIds: string[]
+  ): Promise<PollResultsEntry[]> {
+    const unique = Array.from(new Set(pollMessageIds));
+    const [creations, updates] = await Promise.all([
+      getRawWAMessagesByIds(unique, chatId),
+      listCapturedPollUpdates(unique, chatId),
+    ]);
+    const creationById = new Map(creations.map(row => [row.waMessageId, row]));
+    const updatesByPoll = new Map<string, StoredPollUpdate[]>();
+    for (const row of updates) {
+      const normalized = normalizeMessageContent(
+        row.content && typeof row.content === 'object'
+          ? (row.content as Parameters<typeof normalizeMessageContent>[0])
+          : undefined
+      );
+      const pollId = normalized?.pollUpdateMessage?.pollCreationMessageKey?.id;
+      if (!pollId || !unique.includes(pollId)) continue;
+      const list = updatesByPoll.get(pollId) || [];
+      list.push({ key: row.key, content: row.content });
+      updatesByPoll.set(pollId, list);
+    }
+    const meId = this.meJid;
+    const entries: PollResultsEntry[] = [];
+    for (const pollMessageId of unique) {
+      const base: PollResultsEntry = {
+        pollMessageId,
+        question: null,
+        selectableCount: null,
+        available: false,
+        availability: 'unavailable',
+        reason: 'NO_LOCAL_DATA',
+        totalVoters: 0,
+        capturedVotes: 0,
+        decryptionFailures: 0,
+        options: [],
+      };
+      const row = creationById.get(pollMessageId);
+      if (!row) {
+        entries.push(base);
+        continue;
+      }
+      const details = parsePollCreationContent(row.content);
+      if (!details) {
+        entries.push({ ...base, reason: 'NOT_A_POLL' });
+        continue;
+      }
+      base.question = details.question || null;
+      base.selectableCount = details.selectableCount;
+      base.options = details.options.map(name => ({
+        name,
+        count: 0,
+        selectedByMe: false,
+        voters: [],
+      }));
+      const pollEncKey = pollEncKeyFromStoredMessage(row.content);
+      if (!pollEncKey) {
+        entries.push({ ...base, reason: 'ENCRYPTION_KEY_UNAVAILABLE' });
+        continue;
+      }
+      const decrypted = decryptCapturedPollVotes(updatesByPoll.get(pollMessageId) || [], {
+        pollMsgId: pollMessageId,
+        pollEncKey,
+        meJid: meId,
+      });
+      const aggregate = aggregateCapturedPollVotes(details, decrypted.votes);
+      entries.push({
+        ...base,
+        available: true,
+        // Votes can be missed while this connector was offline, so counts are
+        // always a lower bound: never claim a complete ("full") snapshot.
+        availability: 'local_partial',
+        reason: null,
+        totalVoters: aggregate.totalVoters,
+        capturedVotes: aggregate.capturedVotes,
+        decryptionFailures: decrypted.undecryptable,
+        options: aggregate.options,
+      });
+    }
+    return entries;
+  }
+
+  private async forkGetEventResults(chatId: string, eventMessageIds: string[]) {
+    return readEventResults(chatId, eventMessageIds, {
+      ownJid: this.meJid,
+      resolvePhoneJid: async jid =>
+        (await this.sock?.signalRepository?.lidMapping?.getPNForLID?.(jid)) || null,
+    });
+  }
+
+  async publishNovedadesStatus(input: NovedadesStatusPublishInput): Promise<string> {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!this.isConnected())
+      throw new Error(`Client not connected (state=${this.lastState || 'unknown'})`);
+    const sock = this.sock;
+
+    if (input.type !== 'text' && input.type !== 'image' && input.type !== 'video')
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        "type must be one of 'text', 'image' or 'video'"
+      );
+    const recipients = this.validateStatusRecipients(input.recipients);
+    const backgroundColor = this.validateStatusBackgroundColor(input.backgroundColor);
+    const font = this.validateStatusFont(input.font);
+    const caption = typeof input.text === 'string' && input.text.trim() ? input.text : undefined;
+
+    let payload: AnyMessageContent;
+    if (input.type === 'text') {
+      if (input.data !== undefined || input.mimeType !== undefined)
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          'data and mimeType only apply to image or video statuses'
+        );
+      if (!caption)
+        throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'text is required for a text status');
+      if (caption.length > NOVEDADES_STATUS_TEXT_MAX_CHARS)
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          `text must not exceed ${NOVEDADES_STATUS_TEXT_MAX_CHARS} characters`
+        );
+      payload = { text: caption };
+    } else {
+      if (!Buffer.isBuffer(input.data) || input.data.length === 0)
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          `data is required for a ${input.type} status`
+        );
+      if (input.data.length > NOVEDADES_STATUS_MEDIA_MAX_BYTES)
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          `status media must not exceed ${NOVEDADES_STATUS_MEDIA_MAX_BYTES} decoded bytes`
+        );
+      const mimeType =
+        typeof input.mimeType === 'string'
+          ? input.mimeType.split(';', 1)[0].trim().toLowerCase()
+          : '';
+      const allowed =
+        input.type === 'image'
+          ? NOVEDADES_STATUS_IMAGE_MIME_TYPES
+          : NOVEDADES_STATUS_VIDEO_MIME_TYPES;
+      if (!allowed.has(mimeType))
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          `mimeType must be one of ${Array.from(allowed).join(', ')} for a ${input.type} status`
+        );
+      if (caption && caption.length > NOVEDADES_STATUS_CAPTION_MAX_CHARS)
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          `text caption must not exceed ${NOVEDADES_STATUS_CAPTION_MAX_CHARS} characters`
+        );
+      payload =
+        input.type === 'image'
+          ? { image: input.data, mimetype: mimeType, ...(caption ? { caption } : {}) }
+          : { video: input.data, mimetype: mimeType, ...(caption ? { caption } : {}) };
+    }
+
+    // Background and font only style text statuses in rc13 (the media upload
+    // path applies them for PTT audio only); drop them for image/video.
+    const options: Parameters<WASocket['sendMessage']>[2] & {
+      broadcast?: boolean;
+      statusJidList?: string[];
+      backgroundColor?: string;
+      font?: number;
+    } = { broadcast: true, statusJidList: recipients };
+    if (input.type === 'text') {
+      if (backgroundColor) options.backgroundColor = backgroundColor;
+      if (font) options.font = font;
+    }
+
+    const ownJid = sock.user?.id;
+    const started = Date.now();
+    const sent = await this.sendWithReceiptSnapshot(sock, 'status@broadcast', payload, options);
+    const messageId = sent?.key?.id;
+    this.logger.info(
+      `Novedades status dispatch finished id=${messageId || 'missing'} recipients=${recipients.length} type=${input.type} elapsedMs=${Date.now() - started}`
+    );
+    if (!messageId) throw new StatusSendUncertainError();
+    await this.persistSentNovedades(sent, ownJid);
+    return messageId;
+  }
+
+  private validateStatusRecipients(recipients: unknown): string[] {
+    if (!Array.isArray(recipients) || recipients.length === 0)
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        'recipients must be a non-empty array of direct WhatsApp JIDs'
+      );
+    if (recipients.length > NOVEDADES_STATUS_RECIPIENTS_MAX)
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        `recipients must not exceed ${NOVEDADES_STATUS_RECIPIENTS_MAX} entries`
+      );
+    // A `:device` suffix names one handset, not the contact: the status
+    // audience must carry the bare user JID (jidNormalizedUser strips the
+    // device and maps @c.us), and spellings of the same person are deduped in
+    // first-occurrence order so the relay list says exactly who is addressed.
+    const canonical = new Set<string>();
+    for (const value of recipients) {
+      if (typeof value !== 'string')
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          'recipients must contain WhatsApp JID strings'
+        );
+      const raw = this.toRawJid(value.trim());
+      if (!/^\d{1,20}(?::\d{1,3})?@(?:s\.whatsapp\.net|lid|hosted|hosted\.lid)$/.test(raw))
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          `recipients must be direct WhatsApp JIDs, got ${value}`
+        );
+      const bare = jidNormalizedUser(raw);
+      if (!bare)
+        throw new CapabilityError(
+          'INVALID_CAPABILITY_INPUT',
+          `recipients must be direct WhatsApp JIDs, got ${value}`
+        );
+      canonical.add(bare);
+    }
+    return Array.from(canonical);
+  }
+
+  private validateStatusBackgroundColor(value: string | undefined): string | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string' || !/^#?(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value.trim()))
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        'backgroundColor must be a 6 or 8 digit hex color'
+      );
+    return value.trim();
+  }
+
+  private validateStatusFont(value: number | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    if (
+      !Number.isInteger(value) ||
+      value < NOVEDADES_STATUS_FONT_MIN ||
+      value > NOVEDADES_STATUS_FONT_MAX
+    )
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        `font must be an integer between ${NOVEDADES_STATUS_FONT_MIN} and ${NOVEDADES_STATUS_FONT_MAX}`
+      );
+    return value;
+  }
+
+  async shareContact(
+    chatId: string,
+    input: { displayName: string; phone: string; organization?: string; email?: string }
+  ): Promise<string | undefined> {
+    if (!this.sock) throw new Error('Client not initialized');
+    const sent = await this.sendWithReceiptSnapshot(
+      this.sock,
+      this.toRawJid(chatId),
+      buildContactMessage(input)
+    );
+    await this.persistSentMessage(sent, this.toRawJid(chatId));
+    return sent?.key?.id || undefined;
+  }
+
+  async getPinnedMessages(chatId: string) {
+    return readPinnedMessages(this.toRawJid(chatId));
+  }
+
+  async sendPin(
+    input: PinSendInput,
+    messageId: string,
+    beforeSend: () => Promise<void>
+  ): Promise<string> {
+    if (!this.sock || !this.isConnected() || !this.meJid)
+      throw new PinSendError('PIN_DISCONNECTED', 'WhatsApp is not connected', 503);
+    const stored = await getRawWAMessage(input.targetMessageId, input.conversationId);
+    if (!stored?.key?.id || !stored.message)
+      throw new PinSendError('PIN_TARGET_UNAVAILABLE', 'Message is not available locally', 404);
+    const raw = this.toRawJid(input.conversationId);
+    let targetKey = stored.key;
+    if (
+      targetKey.remoteJid &&
+      targetKey.remoteJid !== raw &&
+      (await canonicalConversationId(this.normalizeJid(targetKey.remoteJid))) ===
+        (await canonicalConversationId(this.normalizeJid(raw)))
+    ) {
+      targetKey = { ...targetKey, remoteJid: raw };
+    }
+    const payload = await generateWAMessageContent(
+      pinMessageContent(targetKey, raw, input.pinned, input.duration),
+      { upload: this.sock.waUploadToServer }
+    );
+    const full = generateWAMessageFromContent(raw, payload, { messageId, userJid: this.meJid });
+    await beforeSend();
+    await this.sock.relayMessage(raw, full.message as proto.IMessage, { messageId });
+    const canonicalChatId = await canonicalConversationId(this.normalizeJid(raw));
+    await this.persistDurablePayload(full, canonicalChatId, 'sent').catch(() =>
+      this.logger.warn('Pin action relayed; local persistence is pending')
+    );
+    return messageId;
+  }
+
+  async sendEventResponse(
+    input: EventSendInput,
+    messageId: string,
+    beforeSend: () => Promise<void>
+  ): Promise<string> {
+    if (!this.sock || !this.isConnected())
+      throw new EventSendError('EVENT_DISCONNECTED', 'WhatsApp is not connected', 503);
+    const stored = await getRawWAMessage(input.eventMessageId, input.conversationId);
+    const content = normalizeMessageContent(stored?.message);
+    const event = content?.eventMessage;
+    if (!stored?.key?.id || !event)
+      throw new EventSendError('EVENT_NOT_FOUND', 'Event is not available locally', 404);
+    if (event.isCanceled) throw new EventSendError('EVENT_CANCELLED', 'Event was cancelled', 409);
+    if (input.extraGuestCount && !event.extraGuestsAllowed)
+      throw new EventSendError(
+        'EVENT_GUESTS_DISABLED',
+        'This event does not allow extra guests',
+        400
+      );
+    const secret =
+      content.messageContextInfo?.messageSecret ||
+      stored.message?.messageContextInfo?.messageSecret;
+    if (!(secret instanceof Uint8Array) || secret.length !== 32)
+      throw new EventSendError('EVENT_KEY_UNAVAILABLE', 'Event encryption key is unavailable', 409);
+    // Same identity rules as readEventResults: only a normalized phone number can encrypt a
+    // response. A missing LID mapping must surface as a typed 409 before the token is claimed.
+    const resolvePhone = async (jid: string | null | undefined): Promise<string | null> => {
+      if (!jid || !/^\d+(?::\d+)?@(?:s\.whatsapp\.net|c\.us|lid)$/.test(jid)) return null;
+      const normalized = jidNormalizedUser(jid);
+      if (!normalized.endsWith('@lid'))
+        return /^\d+@s\.whatsapp\.net$/.test(normalized) ? normalized : null;
+      let mapped: string | null | undefined;
+      try {
+        mapped = await this.sock?.signalRepository?.lidMapping?.getPNForLID?.(normalized);
+      } catch {
+        mapped = null;
+      }
+      return mapped && /^\d+@s\.whatsapp\.net$/.test(mapped) ? mapped : null;
+    };
+    const own = await resolvePhone(this.meJid);
+    const creator = await resolvePhone(
+      stored.key.fromMe ? this.meJid : stored.key.participant || stored.key.remoteJid
+    );
+    if (!own || !creator)
+      throw new EventSendError(
+        'EVENT_IDENTITY_UNAVAILABLE',
+        'Event identity cannot be resolved',
+        409
+      );
+    const response = buildEventResponse({
+      eventKey: stored.key,
+      eventSecret: secret,
+      creatorJid: creator,
+      responderJid: own,
+      attendance: input.attendance,
+      extraGuestCount: input.extraGuestCount,
+    });
+    const raw = this.toRawJid(input.conversationId);
+    const full = generateWAMessageFromContent(raw, response, { messageId, userJid: own });
+    await beforeSend();
+    await this.sock.relayMessage(raw, full.message as proto.IMessage, { messageId });
+    try {
+      await this.persistSentMessage(full, raw);
+    } catch {
+      this.logger.warn('Event response relayed; local persistence is pending');
+    }
+    return messageId;
+  }
+
+  async blockContact(chatId: string, blocked: boolean) {
+    if (!this.sock || !this.isConnected()) {
+      throw new ContactBlockError('WhatsApp is not connected', 503, 'not_connected');
+    }
+    return setContactBlocked(this.sock, chatId, blocked);
+  }
+
+  async contactBlocked(chatId: string) {
+    if (!this.sock || !this.isConnected()) {
+      throw new ContactBlockError('WhatsApp is not connected', 503, 'not_connected');
+    }
+    return readContactBlocked(this.sock, chatId);
+  }
+
+  async subscribePresence(chatId: string): Promise<{ subscribed: boolean; chatId: string }> {
+    if (!this.sock) throw new Error('Client not initialized');
+    const raw = this.toRawJid(chatId);
+    await this.sock.presenceSubscribe(raw);
+    this.presenceSubscribed.add(raw);
+    return { subscribed: true, chatId: this.normalizeJid(raw) };
+  }
+
+  async updatePresence(
+    chatId: string | undefined,
+    status: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused'
+  ): Promise<{ status: string; chatId?: string }> {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!['available', 'unavailable', 'composing', 'recording', 'paused'].includes(status)) {
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        `Unsupported presence state: ${status}`
+      );
+    }
+    const raw = chatId ? this.toRawJid(chatId) : undefined;
+    await this.sendPresence(status, chatId);
+    return { status, ...(raw ? { chatId: this.normalizeJid(raw) } : {}) };
+  }
+
+  async updatePrivacy(field: string, value: string): Promise<{ field: string; value: string }> {
+    if (!this.sock) throw new Error('Client not initialized');
+    const update = buildCapabilityPrivacyUpdate(field, value);
+    await (this.sock as any)[update.method](update.value);
+    return { field, value };
+  }
+
+  async setDefaultDisappearing(expiration: number): Promise<{ field: string; value: number }> {
+    if (!this.sock) throw new Error('Client not initialized');
+    if (!Number.isInteger(expiration) || expiration < 0) {
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        'Default disappearing expiration must be a non-negative integer'
+      );
+    }
+    await this.sock.updateDefaultDisappearingMode(expiration);
+    return { field: 'defaultDisappearing', value: expiration };
+  }
+
+  async sendPoll(
+    chatId: string,
+    poll: ValidatedPoll,
+    options?: StructuredSendOptions
+  ): Promise<StructuredSendResult>;
+  async sendPoll(
+    input: PreparedPoll,
+    messageId: string,
+    beforeSend: () => Promise<void>
+  ): Promise<string>;
+  async sendPoll(
+    chat: string | PreparedPoll,
+    poll: ValidatedPoll | string,
+    options: StructuredSendOptions | (() => Promise<void>) = {}
+  ): Promise<StructuredSendResult | string> {
+    if (typeof chat !== 'string')
+      return this.forkSendPoll(chat, poll as string, options as () => Promise<void>);
+    return this.prodSendPoll(chat, poll as ValidatedPoll, options as StructuredSendOptions);
+  }
+
+  async sendEvent(
+    chatId: string,
+    event: ValidatedEvent,
+    options?: StructuredSendOptions
+  ): Promise<StructuredSendResult>;
+  async sendEvent(
+    input: PreparedEvent,
+    messageId: string,
+    beforeSend: () => Promise<void>
+  ): Promise<string>;
+  async sendEvent(
+    chat: string | PreparedEvent,
+    event: ValidatedEvent | string,
+    options: StructuredSendOptions | (() => Promise<void>) = {}
+  ): Promise<StructuredSendResult | string> {
+    if (typeof chat !== 'string')
+      return this.forkSendEvent(chat, event as string, options as () => Promise<void>);
+    return this.prodSendEvent(chat, event as ValidatedEvent, options as StructuredSendOptions);
+  }
+
+  async sendPollVote(
+    chatId: string,
+    messageId: string,
+    selection: unknown,
+    options?: StructuredSendOptions
+  ): Promise<PollVoteResult>;
+  async sendPollVote(
+    chatId: string,
+    input: { pollMessageId: string; options: unknown },
+    messageId?: string,
+    beforeSend?: () => Promise<void>
+  ): Promise<string | undefined>;
+  async sendPollVote(
+    chatId: string,
+    input: string | { pollMessageId: string; options: unknown },
+    selection?: unknown,
+    options: StructuredSendOptions | (() => Promise<void>) = {}
+  ): Promise<PollVoteResult | string | undefined> {
+    if (typeof input !== 'string')
+      return this.forkSendPollVote(
+        chatId,
+        input,
+        selection as string | undefined,
+        typeof options === 'function' ? options : options.beforeSend
+      );
+    return this.prodSendPollVote(chatId, input, selection, options as StructuredSendOptions);
+  }
+
+  async getPollResults(chatId: string, messageId: string): Promise<PollResultsView>;
+  async getPollResults(chatId: string, messageIds: string[]): Promise<PollResultsEntry[]>;
+  async getPollResults(
+    chatId: string,
+    ids: string | string[]
+  ): Promise<PollResultsView | PollResultsEntry[]> {
+    return Array.isArray(ids)
+      ? this.forkGetPollResults(chatId, ids)
+      : this.prodGetPollResults(chatId, ids);
+  }
+
+  async getEventResults(chatId: string, messageId: string): Promise<EventResultsView>;
+  async getEventResults(chatId: string, messageIds: string[]): ReturnType<typeof readEventResults>;
+  async getEventResults(
+    chatId: string,
+    ids: string | string[]
+  ): Promise<EventResultsView | Awaited<ReturnType<typeof readEventResults>>> {
+    return Array.isArray(ids)
+      ? this.forkGetEventResults(chatId, ids)
+      : this.prodGetEventResults(chatId, ids);
+  }
+
+  async modifyCapabilityChat(
+    chatId: string,
+    action: string,
+    value?: unknown,
+    messageIds: Array<{ id: string; fromMe?: boolean }> = []
+  ): Promise<{ action: string; applied: boolean }> {
+    if (!this.sock) throw new Error('Client not initialized');
+    const normalized = action.trim().toLowerCase().replace(/_/g, '-');
+    if (normalized === 'read' || normalized === 'mark-read') {
+      await this.markAsRead(chatId);
+      return { action: 'read', applied: true };
+    }
+    const keys = await getMessageKeysForChat(chatId);
+    const lastMessages = keys.map(entry => ({
+      key: entry.key,
+      messageTimestamp: entry.messageTimestamp,
+    })) as any;
+    const modification = buildCapabilityChatModification(action, value, lastMessages, messageIds);
+    await this.sock.chatModify(modification, this.toRawJid(chatId));
+    const patch =
+      normalized === 'archive' || normalized === 'unarchive'
+        ? { archived: normalized === 'archive' }
+        : normalized === 'pin' || normalized === 'unpin'
+          ? { pinned: normalized === 'pin' }
+          : normalized === 'mute'
+            ? { muteUntil: Number(value) }
+            : normalized === 'unmute'
+              ? { muteUntil: null }
+              : normalized === 'star' || normalized === 'unstar'
+                ? { starred: normalized === 'star' }
+                : {};
+    await upsertChatState(chatId, patch);
+    const chat = this.chatStore.get(this.normalizeJid(this.toRawJid(chatId)));
+    if (chat) Object.assign(chat, patch);
+    return { action: normalized, applied: true };
+  }
+
+  async matchesPresenceChat(chatId: string, eventChatId: string): Promise<boolean> {
+    const eventId = this.normalizeJid(this.toRawJid(eventChatId));
+    return (await this.presenceKeys(this.toRawJid(chatId))).includes(eventId);
+  }
+
+  async getCapabilityPresence(
+    chatId: string,
+    participantId?: string
+  ): Promise<ReturnType<typeof buildPresenceSnapshot>> {
+    const rawChat = this.toRawJid(chatId);
+    const normalizedChat = this.normalizeJid(rawChat);
+    const chatKeys = await this.presenceKeys(rawChat);
+    const participantKeys = participantId
+      ? await this.presenceKeys(this.toRawJid(participantId))
+      : [];
+    const normalizedParticipant = participantKeys[0];
+    const fresh = (key: string) => {
+      const value = this.presenceState.get(key);
+      const ttl = value?.status === 'composing' || value?.status === 'recording' ? 8_000 : 60_000;
+      if (value && Date.now() - value.observedAt > ttl) {
+        this.presenceState.delete(key);
+        return undefined;
+      }
+      return value;
+    };
+    const candidates = [];
+    for (const key of this.presenceState.keys()) {
+      if (!chatKeys.some(chat => key.startsWith(`${chat}:`))) continue;
+      const value = fresh(key);
+      if (
+        !value ||
+        (participantKeys.length &&
+          !participantKeys.includes(value.participantId || key.slice(key.indexOf(':') + 1)))
+      )
+        continue;
+      candidates.push(value);
+    }
+    // PN and LID can both be cached; the latest observation supersedes an older state.
+    const state = candidates.sort((a, b) => b.observedAt - a.observedAt)[0];
+    return buildPresenceSnapshot(
+      normalizedChat,
+      state
+        ? {
+            lastKnownPresence: state.status as any,
+            ...(state.lastSeen === undefined ? {} : { lastSeen: state.lastSeen }),
+          }
+        : undefined,
+      normalizedParticipant || state?.participantId
+    );
+  }
+
+  async getCapabilityDisappearing(
+    chatId: string
+  ): Promise<{ chatId: string; expiration?: number; known: boolean }> {
+    if (!this.sock) throw new Error('Client not initialized');
+    const raw = this.toRawJid(chatId);
+    const results = await this.sock.fetchDisappearingDuration(raw).catch(() => undefined);
+    const first: any = Array.isArray(results) ? results[0] : undefined;
+    // Baileys' USync protocol is exposed as `disappearing_mode: { duration }`;
+    // retain fallbacks for older socket shapes used by deployed versions.
+    const mode = first?.disappearing_mode || first?.disappearingMode;
+    const expiration = mode?.duration ?? mode?.ephemeralExpiration ?? first?.ephemeralExpiration;
+    return {
+      chatId: this.normalizeJid(raw),
+      ...(typeof expiration === 'number' ? { expiration } : {}),
+      known: typeof expiration === 'number',
+    };
+  }
+
+  async deleteCapabilityMessageForMe(chatId: string, messageId: string): Promise<void> {
+    if (!this.sock) throw new Error('Client not initialized');
+    const entries = await getMessageKeysForChat(chatId);
+    const entry = entries.find(item => item.key.id === messageId);
+    if (!entry?.messageTimestamp) {
+      throw new CapabilityError(
+        'CAPABILITY_UNSUPPORTED',
+        `deleteMessageForMe: message ${messageId} has no durable key and timestamp`
+      );
+    }
+    await this.sock.chatModify(
+      {
+        deleteForMe: { deleteMedia: true, key: entry.key, timestamp: entry.messageTimestamp },
+      },
+      this.toRawJid(chatId)
+    );
+    await markCapabilityMessageDeletedForMe(messageId, chatId);
+    this.emit('message-update', { waMessageId: messageId, updateType: 'DELETED_FOR_ME' });
+  }
+
+  async forkCreateContact(input: {
+    jid?: string;
+    phone?: string;
+    name: string;
+    organization?: string;
+    email?: string;
+  }): Promise<unknown> {
+    if (!this.sock) throw new Error('Client not initialized');
+    const jid = this.toParticipantJid(input.jid || input.phone || '');
+    if (!jid || !input.name?.trim()) {
+      throw new CapabilityError(
+        'INVALID_CAPABILITY_INPUT',
+        'Contact name and jid/phone are required'
+      );
+    }
+    const existing = await (this.sock as any).onWhatsApp(jid).catch(() => []);
+    if (Array.isArray(existing) && existing[0]?.exists === false) {
+      throw new CapabilityError('INVALID_CAPABILITY_INPUT', 'Contact is not on WhatsApp', {
+        jid: this.normalizeJid(jid),
+      });
+    }
+    await this.sock.addOrEditContact(jid, {
+      fullName: input.name.trim(),
+      firstName: input.name.trim(),
+      pnJid: jid,
+      saveOnPrimaryAddressbook: true,
+    } as any);
+    const contact = {
+      jid: this.normalizeJid(jid),
+      phone: this.phoneFromJid(jid),
+      name: input.name.trim(),
+      organization: input.organization || null,
+      email: input.email || null,
+    };
+    await storeContact(contact);
+    this.rememberContactName([jid, this.normalizeJid(jid)], input.name, 'saved');
+    return contact;
+  }
+
+  async startChat(
+    phone: NormalizedWhatsAppPhone,
+    options?: { actor?: string }
+  ): Promise<StartedChat>;
+  async startChat(phone: string): Promise<{ id: string; name: string; phone: string }>;
+  async startChat(
+    phone: NormalizedWhatsAppPhone | string,
+    options: { actor?: string } = {}
+  ): Promise<StartedChat | { id: string; name: string; phone: string }> {
+    return typeof phone === 'string'
+      ? this.forkStartChat(phone)
+      : this.prodStartChat(phone, options);
+  }
+
+  async createContact(
+    input: { phone: NormalizedWhatsAppPhone; name: string; firstName?: string },
+    options?: { actor?: string }
+  ): Promise<CreatedContact>;
+  async createContact(input: {
+    jid?: string;
+    phone?: string;
+    name: string;
+    organization?: string;
+    email?: string;
+  }): Promise<unknown>;
+  async createContact(
+    input:
+      | { phone: NormalizedWhatsAppPhone; name: string; firstName?: string }
+      | { jid?: string; phone?: string; name: string; organization?: string; email?: string },
+    options: { actor?: string } = {}
+  ): Promise<unknown> {
+    return typeof input.phone === 'object'
+      ? this.prodCreateContact(
+          input as { phone: NormalizedWhatsAppPhone; name: string; firstName?: string },
+          options
+        )
+      : this.forkCreateContact(
+          input as {
+            jid?: string;
+            phone?: string;
+            name: string;
+            organization?: string;
+            email?: string;
+          }
+        );
   }
 }

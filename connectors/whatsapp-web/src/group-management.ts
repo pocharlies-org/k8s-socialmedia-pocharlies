@@ -136,6 +136,29 @@ export function findParticipant(
   return (meta.participants || []).find(p => participantIds(p).includes(wanted));
 }
 
+/**
+ * Whether a group-participants.update names this account: its participants
+ * (a jid, or {id, phoneNumber, lid}) matched against our PN / LID ids.
+ */
+export function participantsIncludeOwn(
+  participants: ReadonlyArray<string | Partial<GroupParticipant> | null | undefined>,
+  ownIds: Iterable<string>
+): boolean {
+  const own = new Set(
+    Array.from(ownIds)
+      .map(id => normalizedOrNull(id))
+      .filter((id): id is string => !!id)
+  );
+  if (!own.size) return false;
+  return (participants || []).some(p => {
+    const ids = typeof p === 'string' ? [p] : p ? [p.id, p.phoneNumber, p.lid] : [];
+    return ids.some(id => {
+      const normalized = normalizedOrNull(id);
+      return !!normalized && own.has(normalized);
+    });
+  });
+}
+
 /** Our own participant row in `meta` (matched by any of our PN / LID ids). */
 export function ownParticipant(
   meta: GroupMetadata,
@@ -254,6 +277,98 @@ export function participantOutcome(
     default:
       return { ok: false, reason: 'failed' };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Invites: people WhatsApp would not add (403 = their privacy only allows an
+// invite)
+// ---------------------------------------------------------------------------
+
+/**
+ * People invited per POST /groups/invite. Each invite is a private message to
+ * a real person who did not choose to be added: a smaller cap than the add.
+ */
+export const GROUP_INVITES_MAX = 20;
+/** Caption of an invite card (WA Web shows about a paragraph). */
+export const GROUP_INVITE_TEXT_MAX = 1024;
+/** Card expiry of an invite built from the group link (WhatsApp's private ones last 3 days). */
+export const LINK_INVITE_TTL_SECONDS = 3 * 24 * 60 * 60;
+
+/**
+ * The private invite WhatsApp hands back with a 403 on add: the participant
+ * node carries `<add_request code=… expiration=…/>`, a code valid for that
+ * person only (what WhatsApp's own "invite to group" sends them).
+ */
+export interface AddRequest {
+  code: string;
+  /** Unix seconds; null when WhatsApp gave none. */
+  expiration: number | null;
+}
+
+/** The `<add_request>` of a groupParticipantsUpdate answer entry (its `content` node). */
+export function addRequestOf(content: unknown): AddRequest | null {
+  const children = (content as { content?: unknown } | null)?.content;
+  if (!Array.isArray(children)) return null;
+  const node = children.find(
+    (child: unknown) => (child as { tag?: unknown } | null)?.tag === 'add_request'
+  ) as { attrs?: Record<string, unknown> } | undefined;
+  const code = node?.attrs?.code;
+  if (typeof code !== 'string' || !code) return null;
+  const expiration = Number(node?.attrs?.expiration);
+  return {
+    code,
+    expiration: Number.isFinite(expiration) && expiration > 0 ? Math.floor(expiration) : null,
+  };
+}
+
+/** One person of an add WhatsApp refused with 403: send them an invite instead. */
+export interface InviteRequiredEntry {
+  /** What the caller sent. */
+  participant: string;
+  /** Legacy jid (`…@c.us` / `…@lid`) the add went to. */
+  jid: string;
+  /** WhatsApp gave a private invite for them (POST /groups/invite uses it). */
+  privateInvite: boolean;
+  /** When that private invite expires (ISO); null without one. */
+  inviteExpiresAt: string | null;
+}
+
+/** One person of POST /groups/invite, as reported to the caller. */
+export interface GroupInviteResult {
+  participant: string;
+  /** Legacy jid of the chat the invite went to. */
+  jid: string;
+  ok: boolean;
+  /** invited | already_participant | send_failed | invite_link_unavailable */
+  reason: string;
+  /** private = WhatsApp's per-person code from the refused add; link = the group's link. */
+  invite: 'private' | 'link' | null;
+  messageId: string | null;
+}
+
+/** Optional caption of an invite card: a string up to GROUP_INVITE_TEXT_MAX, else 400. */
+export function parseGroupInviteText(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || value.length > GROUP_INVITE_TEXT_MAX) {
+    throw new GroupActionError(
+      `text must be a string of at most ${GROUP_INVITE_TEXT_MAX} characters`,
+      400,
+      'invalid_request'
+    );
+  }
+  return value.trim() || undefined;
+}
+
+/** Participants of an invite: as for an add (phones, PN / LID jids), at most GROUP_INVITES_MAX. */
+export function parseGroupInviteParticipants(value: unknown): ParticipantInput[] {
+  if (Array.isArray(value) && value.length > GROUP_INVITES_MAX) {
+    throw new GroupActionError(
+      `At most ${GROUP_INVITES_MAX} people per invite request`,
+      400,
+      'invalid_request'
+    );
+  }
+  return parseGroupParticipants(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,13 +608,16 @@ function participantCountOf(meta: Partial<GroupMetadata>): number | null {
 
 /**
  * The conversation row of a group WhatsApp told us about (groups.upsert: we
- * created it, or someone created it with us in it). Inserted under the
- * namespaced id with account_id / external_id; an existing live row only gets
- * the subject and size — never last_message_at, never a tombstone. Returns
- * the conversations.id written, undefined when nothing was.
+ * created it, or someone created it with us in it; group-participants.update:
+ * someone added us to an existing group). Inserted under the namespaced id
+ * with account_id / external_id; an existing live row only gets the subject
+ * and size — never last_message_at, never a tombstone. A new row's
+ * last_message_at is `activityAt` (when we joined), else the group's creation
+ * (else now). Returns the conversations.id written, undefined when nothing was.
  */
 export async function recordGroupConversation(
-  meta: Partial<GroupMetadata>
+  meta: Partial<GroupMetadata>,
+  options: { activityAt?: Date } = {}
 ): Promise<string | undefined> {
   const groupJid = normalizeGroupJid(meta.id);
   if (!groupJid) return undefined;
@@ -518,7 +636,7 @@ export async function recordGroupConversation(
       accountKey(groupJid),
       subject,
       participantCountOf(meta),
-      creationDate(meta.creation),
+      options.activityAt || creationDate(meta.creation),
       connectorAccount(),
       whatsappAccountId(),
       groupJid,

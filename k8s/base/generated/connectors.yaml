@@ -38,7 +38,7 @@ spec:
         kubernetes.io/arch: amd64
       containers:
       - name: whatsapp-connector
-        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
+        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e
         ports:
         - name: http
           containerPort: 3001
@@ -59,7 +59,7 @@ spec:
         - name: SESSION_PATH
           value: /app/persistent-session
         - name: WA_QR_PUBLIC_URL
-          value: https://whatsapp.e-dani.com/qr/page
+          value: https://whatsapp-qr.e-dani.com/qr/page
         - name: S3_ENDPOINT
           value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
         - name: S3_BUCKET
@@ -116,13 +116,21 @@ spec:
             cpu: 50m
             memory: 128Mi
           limits:
-            memory: 512Mi
+            memory: 1536Mi
         readinessProbe:
           httpGet:
             path: /api/v1/health
             port: 3001
           initialDelaySeconds: 15
           timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 3001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
         volumeMounts:
         - name: whatsapp-session-data
           mountPath: /app/persistent-session
@@ -171,6 +179,9 @@ spec:
       port: 3001
   - match: Host(`whatsapp.lan.e-dani.com`)
     kind: Rule
+    middlewares:
+    - name: sso-chain
+      namespace: keycloak
     services:
     - name: whatsapp-connector
       port: 3001
@@ -217,7 +228,7 @@ spec:
         kubernetes.io/arch: amd64
       containers:
       - name: whatsapp-connector-professional
-        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
+        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e
         ports:
         - name: http
           containerPort: 3001
@@ -312,6 +323,14 @@ spec:
             port: 3001
           initialDelaySeconds: 15
           timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 3001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
         volumeMounts:
         - name: whatsapp-session-data-professional
           mountPath: /app/persistent-session
@@ -360,6 +379,9 @@ spec:
       port: 3001
   - match: Host(`whatsapp-pro.lan.e-dani.com`)
     kind: Rule
+    middlewares:
+    - name: sso-chain
+      namespace: keycloak
     services:
     - name: whatsapp-connector-professional
       port: 3001
@@ -406,7 +428,7 @@ spec:
         kubernetes.io/arch: amd64
       containers:
       - name: whatsapp-connector-leila
-        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
+        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e
         ports:
         - name: http
           containerPort: 3001
@@ -501,6 +523,14 @@ spec:
             port: 3001
           initialDelaySeconds: 15
           timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 3001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
         volumeMounts:
         - name: whatsapp-session-data-leila
           mountPath: /app/persistent-session
@@ -549,6 +579,9 @@ spec:
       port: 3001
   - match: Host(`whatsapp-leila.lan.e-dani.com`)
     kind: Rule
+    middlewares:
+    - name: sso-chain
+      namespace: keycloak
     services:
     - name: whatsapp-connector-leila
       port: 3001
@@ -577,7 +610,7 @@ spec:
     spec:
       enableServiceLinks: false
       nodeSelector:
-        topology: lan
+        kubernetes.io/hostname: sauvage
         kubernetes.io/arch: amd64
       containers:
       - name: telegram-connector
@@ -596,6 +629,10 @@ spec:
         env:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets
@@ -604,7 +641,12 @@ spec:
             cpu: 30m
             memory: 256Mi
           limits:
-            memory: 768Mi
+            memory: 3Gi
+      tolerations:
+      - key: role
+        operator: Equal
+        value: edge
+        effect: NoSchedule
 ---
 apiVersion: v1
 kind: Service
@@ -746,7 +788,7 @@ spec:
     spec:
       enableServiceLinks: false
       nodeSelector:
-        topology: lan
+        kubernetes.io/hostname: sauvage
         kubernetes.io/arch: amd64
       containers:
       - name: telegram-connector
@@ -765,6 +807,10 @@ spec:
         env:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: CONNECTOR_ACCOUNT
           value: professional
         - name: TELEGRAM_SESSION_STRING
@@ -780,7 +826,12 @@ spec:
             cpu: 30m
             memory: 256Mi
           limits:
-            memory: 768Mi
+            memory: 3Gi
+      tolerations:
+      - key: role
+        operator: Equal
+        value: edge
+        effect: NoSchedule
 ---
 apiVersion: v1
 kind: Service

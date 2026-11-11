@@ -44,7 +44,13 @@ const wa = (accountId: string, extra: object = {}) => ({
 describe('account registry', () => {
   afterEach(() => resetAccountRegistryCache());
 
-  it('default registry reproduces the seven accounts prod served before the registry', () => {
+  it('accepts the NAS deployment account registry', () => {
+    const entries = JSON.parse(fs.readFileSync(path.join(REPO, 'deploy/accounts.json'), 'utf8'));
+    const accounts = parseAccounts(entries);
+    expect(accounts.find(account => account.channel === 'instagram')?.namespace).toBe('personal');
+  });
+
+  it('default registry reproduces the eight accounts prod serves (SC-1145 retired telegram:daniel/whatsapp:daniel)', () => {
     const accounts = defaultRegistry({});
     expect(accounts.map(a => `${a.channel}:${a.accountId}`)).toEqual([
       'whatsapp:personal',
@@ -52,6 +58,7 @@ describe('account registry', () => {
       'whatsapp:leila',
       'telegram:personal',
       'telegram:professional',
+      'telegram:leila',
       'instagram:skirmshop',
       'instagram:barbelpapis',
     ]);
@@ -59,6 +66,8 @@ describe('account registry', () => {
     expect(byKey['whatsapp:personal'].connectorUrl).toBe('http://whatsapp-connector:3001');
     expect(byKey['whatsapp:professional']).not.toHaveProperty('requireInboundBeforeSend');
     expect(byKey['telegram:professional'].bridgeUrl).toBe('http://telegram-sync-professional:3080');
+    expect(byKey['telegram:leila'].connectorUrl).toBe('http://telegram-connector-leila:3002');
+    expect(byKey['telegram:leila'].profile).toBe('leila');
     expect(byKey['instagram:skirmshop'].namespace).toBe('professional');
     expect(byKey['instagram:barbelpapis'].namespace).toBe('personal');
   });
@@ -83,6 +92,9 @@ describe('account registry', () => {
       TELEGRAM_BRIDGE_URL: 'http://telegram-sync.whatsapp-mcp.svc.cluster.local:3080',
       TELEGRAM_BRIDGE_PROFESSIONAL_URL:
         'http://telegram-sync-professional.whatsapp-mcp.svc.cluster.local:3080',
+      TELEGRAM_LEILA_URL: 'http://telegram-connector-leila.whatsapp-mcp.svc.cluster.local:3002',
+      TELEGRAM_BRIDGE_LEILA_URL:
+        'http://telegram-sync-leila.whatsapp-mcp.svc.cluster.local:3080',
     };
     const strip = (list: ReturnType<typeof parseAccounts>) =>
       list.map(({ label: _label, ...rest }) => rest);

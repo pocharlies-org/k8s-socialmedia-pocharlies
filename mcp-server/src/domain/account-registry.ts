@@ -49,6 +49,12 @@ export interface SocialAccount {
    */
   brainInstance: string;
   capabilities: Record<string, boolean>;
+  /** Pairing/QR endpoint exposed by the connector (NAS deployments). */
+  qrUrl?: string;
+  /** Name of the env var holding this account's connector secret. */
+  secretEnv?: string;
+  /** Refuse cold sends until an inbound message is seen (per-account policy). */
+  requireInboundBeforeSend?: boolean;
 }
 
 const ID_RE = /^[a-z][a-z0-9_-]*$/;
@@ -155,6 +161,19 @@ export function parseAccounts(value: unknown): SocialAccount[] {
     ) {
       throw new AccountRegistryError(`${key}: capabilities must map names to booleans`);
     }
+    const qrUrl = httpUrl(item.qrUrl, 'qrUrl', key);
+    if (
+      item.requireInboundBeforeSend !== undefined &&
+      typeof item.requireInboundBeforeSend !== 'boolean'
+    ) {
+      throw new AccountRegistryError(`${key}: requireInboundBeforeSend must be a boolean`);
+    }
+    if (
+      item.secretEnv !== undefined &&
+      (typeof item.secretEnv !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(item.secretEnv))
+    ) {
+      throw new AccountRegistryError(`${key}: secretEnv must reference an env var name`);
+    }
     return {
       channel,
       accountId: item.accountId,
@@ -171,6 +190,13 @@ export function parseAccounts(value: unknown): SocialAccount[] {
       profile,
       brainInstance,
       capabilities: { ...DEFAULT_CAPABILITIES[channel], ...(item.capabilities || {}) },
+      // Only present when declared: specs (and the connector payloads) must not
+      // see an undefined key for accounts that never opted in.
+      ...(qrUrl !== undefined ? { qrUrl } : {}),
+      ...(item.secretEnv !== undefined ? { secretEnv: item.secretEnv as string } : {}),
+      ...(item.requireInboundBeforeSend !== undefined
+        ? { requireInboundBeforeSend: item.requireInboundBeforeSend as boolean }
+        : {}),
     } as SocialAccount;
   });
   // An Instagram namespace must be a real WhatsApp/Telegram namespace, or its
@@ -215,6 +241,7 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       channel: 'whatsapp',
       accountId: 'leila',
       connectorUrl: env.WHATSAPP_LEILA_URL || 'http://whatsapp-connector-leila:3001',
+      brainInstance: 'leila',
     },
     {
       channel: 'telegram',
@@ -228,6 +255,17 @@ export function defaultRegistry(env: NodeJS.ProcessEnv = process.env): SocialAcc
       connectorUrl: env.TELEGRAM_PROFESSIONAL_URL || 'http://telegram-connector-professional:3002',
       bridgeUrl: env.TELEGRAM_BRIDGE_PROFESSIONAL_URL || 'http://telegram-sync-professional:3080',
       brainInstance: 'skirmshop',
+    },
+    {
+      channel: 'telegram',
+      accountId: 'leila',
+      connectorUrl: env.TELEGRAM_LEILA_URL || 'http://telegram-connector-leila:3002',
+      bridgeUrl: env.TELEGRAM_BRIDGE_LEILA_URL || 'http://telegram-sync-leila:3080',
+      brainInstance: 'leila',
+      // SC-4749: apagado por decisión de Dani en vivo (02-11) — la cuenta
+      // nunca llegó a emparejarse y el conector crash-loopaba. Debe batir
+      // con k8s/base/social-accounts.json (account-registry.spec.ts).
+      enabled: false,
     },
     {
       channel: 'instagram',
@@ -322,4 +360,21 @@ export function socialAccountId(channel: AccountChannel, accountId: string): str
 /** Brain instance for a DB namespace (brain-ingest). Undeclared → undefined. */
 export function brainInstanceForNamespace(namespace: string): string | undefined {
   return getAccounts(undefined, true).find(a => a.namespace === namespace)?.brainInstance;
+}
+
+/**
+ * Connector shared secret for an account (NAS fork): `secretEnv` names the env
+ * var when the account declares one, otherwise the shared
+ * CONNECTOR_SHARED_SECRET. Fail-closed: a missing secret is an error, not an
+ * unsigned request.
+ */
+export function connectorSecretFor(account: SocialAccount): string {
+  const secret = account.secretEnv
+    ? process.env[account.secretEnv]
+    : process.env.CONNECTOR_SHARED_SECRET;
+  if (!secret)
+    throw new AccountRegistryError(
+      `Missing connector secret for ${account.channel}:${account.accountId}`
+    );
+  return secret;
 }
