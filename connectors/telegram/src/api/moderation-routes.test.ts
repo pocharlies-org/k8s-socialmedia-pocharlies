@@ -1,11 +1,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
-import express from 'express';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
-import { createRouter } from './controller';
-import { wrapperWith } from '../test-harness';
+import { connectorFixture, TEST_CONNECTOR_SECRET as SECRET, TEST_GROUP_ID as CHAT } from '../test-harness';
 
 /**
  * The three moderation routes of INFRA-746 (bot Sauvage verificacion):
@@ -24,8 +20,6 @@ import { wrapperWith } from '../test-harness';
  * from resolvePeer.
  */
 
-const SECRET = 'test-connector-secret';
-const CHAT = '-1003365295248';
 const USER = '5551234567';
 
 class FakeMtcute {
@@ -57,23 +51,13 @@ class FakeMtcute {
   }
 }
 
-const open: Array<() => Promise<void>> = [];
+const serveBase = connectorFixture(SECRET, afterEach);
+const serve = (fake: FakeMtcute = new FakeMtcute()) => serveBase(fake);
+
 afterEach(async () => {
-  for (const close of open.splice(0)) await close();
   delete process.env.ENABLE_SENDING;
   delete process.env.EMERGENCY_DISABLE_SENDING;
 });
-
-async function serve(fake = new FakeMtcute()) {
-  const app = express();
-  app.use(express.json());
-  app.use('/api/v1', createRouter(wrapperWith(fake), SECRET));
-  const server: Server = await new Promise(resolve => {
-    const s = app.listen(0, () => resolve(s));
-  });
-  open.push(() => new Promise<void>(resolve => server.close(() => resolve())));
-  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-}
 
 async function call(base: string, path: string, body?: unknown) {
   const ts = Math.floor(Date.now() / 1000);

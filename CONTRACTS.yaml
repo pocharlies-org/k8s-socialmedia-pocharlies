@@ -1128,6 +1128,20 @@ contracts:
     backfill) and the MCP tool social_list_participants; 200 {participants}. Registered with the sending
     gate (the route predates the registry). The path, the body fields and the 200 shape are contract:
     changing any is breaking — a new `.v2` entry beside this one.'
+- id: http.telegram-connector.chats-participants.v2
+  kind: http-route
+  value: /chats/:id/participants
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'Compatible addition to chats-participants.v1 (which stays active and untouched): same
+    HMAC-signed GET, plus an optional `offset` query param and a `total` field on the 200.
+    MTProto returns at most 200 participants per call, so the bot sauvage-verificacion (INFRA-745,
+    C2) sweeps big groups by paging `offset` until a short page; `total` is the real member count
+    (channels.getParticipants count), not the page length. v1 callers that pass no `offset` keep
+    the exact 200 {participants} they always got — the added field is additive. Same route as v1,
+    marked with both ids.'
 - id: http.telegram-connector.peers-photo.v1
   kind: http-route
   value: /peers/:id/photo

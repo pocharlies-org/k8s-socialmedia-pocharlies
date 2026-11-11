@@ -886,12 +886,28 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
-   * Chat participants
+   * Chat participants: ONE MTProto page.
+   *
+   * `channels.getParticipants` returns at most 200 members per call, so a
+   * caller that wants a whole big group pages with `offset` (the bot
+   * sauvage-verificacion does — INFRA-745, qa found the sweep capped at the
+   * first 200). Filter `all` (channelParticipantsSearch with empty q):
+   * mtcute's default `recent` caps at the first 200 regardless of offset,
+   * only the search filter paginates past 200. `total` is the real member
+   * count Telegram reports (`res.count`), never the page length.
    */
-  async getParticipants(chatId: string, limit: number = 100): Promise<any[]> {
+  async getParticipants(
+    chatId: string,
+    limit: number = 100,
+    offset: number = 0
+  ): Promise<{ participants: any[]; total: number }> {
     if (!this.connected) throw new Error('Not connected');
-    const members = await this.client.getChatMembers(toMtcutePeer(chatId), { limit });
-    return members.map(m => {
+    const members = await this.client.getChatMembers(toMtcutePeer(chatId), {
+      limit: Math.min(Math.max(limit, 1), 200),
+      offset: Math.max(offset, 0),
+      type: 'all',
+    });
+    const participants = members.map(m => {
       const u = m.user;
       return {
         id: u.id.toString(),
@@ -901,6 +917,8 @@ export class TelegramClientWrapper extends EventEmitter {
         isBot: u.isBot,
       };
     });
+    const total = (members as unknown as { total?: unknown }).total;
+    return { participants, total: typeof total === 'number' ? total : participants.length };
   }
 
   /**
