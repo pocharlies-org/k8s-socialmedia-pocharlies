@@ -85,7 +85,7 @@ export class PublicadorWake {
       const presupuesto = Math.min(TIEMPO_INTENTO_MS, fin - this.ahora());
       if (presupuesto <= 0) break;
       const status = await this.intento(url, datos, presupuesto);
-      if (status === 202 || status === 200) {
+      if (status === 202) {
         this.contadores.publicados++;
         return 'publicado';
       }
