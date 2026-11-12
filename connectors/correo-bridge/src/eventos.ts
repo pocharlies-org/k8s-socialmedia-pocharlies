@@ -1,6 +1,7 @@
 import { createHmac } from 'crypto';
 import { setTimeout as sleep } from 'timers/promises';
 import type pino from 'pino';
+import { postConPresupuesto } from './peticion';
 
 /**
  * SC-5382 (pieza 5 de SC-5370): el wake de la secretaria de Skirmshop se PUBLICA
@@ -103,32 +104,10 @@ export class PublicadorWake {
   }
 
   /** El estado, o 'timeout' / 'red'. Nunca lanza. */
-  private async intento(url: URL, datos: string, presupuesto: number): Promise<number | 'timeout' | 'red'> {
-    const peticion = new AbortController();
-    const reloj = new AbortController();
-    const tiempo = this.dormir(presupuesto, reloj.signal).then(() => 'timeout' as const, () => 'cancelado' as const);
-    const llamada = this.fetchImpl(url.toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Synapse-Producer': PRODUCTOR,
-        'X-Hub-Signature-256': firmarEventos(this.opts.secreto, datos),
-      },
-      body: datos,
-      signal: peticion.signal,
-    }).then(
-      res => {
-        void res.arrayBuffer().catch(() => undefined);
-        return res.status;
-      },
-      () => 'red' as const
-    );
-    try {
-      const r = await Promise.race([llamada, tiempo]);
-      if (r === 'timeout') peticion.abort();
-      return r === 'cancelado' ? 'red' : r;
-    } finally {
-      reloj.abort();
-    }
+  private intento(url: URL, datos: string, presupuesto: number): Promise<number | 'timeout' | 'red'> {
+    return postConPresupuesto(url, {
+      'X-Synapse-Producer': PRODUCTOR,
+      'X-Hub-Signature-256': firmarEventos(this.opts.secreto, datos),
+    }, datos, presupuesto, { fetchImpl: this.fetchImpl, dormir: this.dormir });
   }
 }

@@ -62,6 +62,12 @@ spec:
             # SC-5382: it is published on POST /eventos of the Synapse gateway (base, no path).
             - { name: HERMES_WAKE_ENABLED, value: "false" }
             - { name: SYNAPSE_EVENTOS_URL, value: "http://synapse-gateway.synapse.svc.cluster.local:18790" }
+            # TRANSICIÓN SC-5382 (expand/contract): ArgoCD sincroniza este manifiesto en cuanto se
+            # mergea, pero la imagen nueva llega con el pin del release. Sin estas dos variables la
+            # imagen vieja (v1.3.148) aborta al arrancar con HERMES_WAKE_ENABLED=true y el bridge
+            # deja de entregar mensajes al núcleo. Se borran en el commit del pin, con el egreso
+            # hermes:8644 y el ExternalSecret correo-bridge-hermes-wake de abajo.
+            - { name: HERMES_WAKE_URL, value: "http://hermes-webhook.hermes.svc.cluster.local:8644/p/secretaria-skirmshop/webhooks/whatsapp-skirmshop" }
             # DGX-1550: one wake per burst — messages of one caso inside this window share one card.
             - { name: WAKE_DEBOUNCE_MIN, value: "5" }
             # Only the one key of whatsapp-mcp-secrets it needs (no envFrom).
@@ -77,6 +83,9 @@ spec:
               valueFrom: { secretKeyRef: { name: correo-bridge-tg-professional, key: productor } }
             - name: SYNAPSE_EVENTOS_SECRET
               valueFrom: { secretKeyRef: { name: correo-bridge-eventos-correo, key: webhook_secret } }
+            # TRANSICIÓN SC-5382: la imagen vieja todavía lee esta clave (ver arriba).
+            - name: HERMES_WAKE_SECRET
+              valueFrom: { secretKeyRef: { name: correo-bridge-hermes-wake, key: webhook_secret } }
           resources:
             requests: { cpu: 20m, memory: 64Mi }
             limits: { memory: 256Mi }
@@ -140,9 +149,27 @@ spec:
     - secretKey: productor
       remoteRef: { key: correo-productor-correo-bridge-tg/clave }
 ---
+# TRANSICIÓN SC-5382: la imagen vieja (v1.3.148) todavía monta esta clave. Se borra
+# en el commit del pin, junto con HERMES_WAKE_URL/SECRET y el egreso hermes:8644.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: correo-bridge-hermes-wake
+  namespace: whatsapp-mcp
+spec:
+  refreshInterval: 24h
+  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  target:
+    name: correo-bridge-hermes-wake
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: webhook_secret
+      remoteRef: { key: hermes-webhook-gmail/webhook_secret }
+---
 # SC-5382: the `correo` producer key of POST /eventos (the same 1Password item the
 # gateway reads as eventos.correo.webhook.secret — one source of truth, never a copy).
-# It replaced correo-bridge-hermes-wake: the bridge no longer calls Hermes directly.
+# It replaces correo-bridge-hermes-wake: the bridge no longer calls Hermes directly.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -218,6 +245,12 @@ spec:
           podSelector: { matchLabels: { app.kubernetes.io/name: synapse-gateway } }
       ports:
         - { protocol: TCP, port: 18790 }
+    # TRANSICIÓN SC-5382: la imagen vieja todavía llama a Hermes. Se borra con el pin.
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: hermes } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: hermes, app.kubernetes.io/instance: hermes } }
+      ports:
+        - { protocol: TCP, port: 8644 }
   policyTypes:
     - Egress
 ---

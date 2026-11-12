@@ -2,6 +2,7 @@ import { setTimeout as sleep } from 'timers/promises';
 import type pino from 'pino';
 import type { MensajeCanal } from './cuerpo';
 import { firmarV2 } from './firma';
+import { postConPresupuesto } from './peticion';
 
 /**
  * Bounded delivery of one message to the correo core (DGX-1235 B1.5, architect
@@ -79,34 +80,12 @@ export class Entrega {
   }
 
   /** The status, or 'timeout' / 'red'. Never throws. */
-  private async intento(url: URL, productor: { id: string; secreto: string }, datos: string, presupuesto: number): Promise<number | 'timeout' | 'red'> {
+  private intento(url: URL, productor: { id: string; secreto: string }, datos: string, presupuesto: number): Promise<number | 'timeout' | 'red'> {
     const ts = String(Math.floor(this.ahora() / 1000));
-    const peticion = new AbortController();
-    const reloj = new AbortController();
-    const tiempo = this.dormir(presupuesto, reloj.signal).then(() => 'timeout' as const, () => 'cancelado' as const);
-    const llamada = this.fetchImpl(url.toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Correo-Key-Id': productor.id,
-        'X-Correo-Timestamp': ts,
-        'X-Correo-Signature': firmarV2(productor.secreto, ts, 'POST', url.pathname + url.search, datos),
-      },
-      body: datos,
-      signal: peticion.signal,
-    }).then(
-      res => {
-        void res.arrayBuffer().catch(() => undefined);
-        return res.status;
-      },
-      () => 'red' as const
-    );
-    try {
-      const r = await Promise.race([llamada, tiempo]);
-      if (r === 'timeout') peticion.abort();
-      return r === 'cancelado' ? 'red' : r;
-    } finally {
-      reloj.abort();
-    }
+    return postConPresupuesto(url, {
+      'X-Correo-Key-Id': productor.id,
+      'X-Correo-Timestamp': ts,
+      'X-Correo-Signature': firmarV2(productor.secreto, ts, 'POST', url.pathname + url.search, datos),
+    }, datos, presupuesto, { fetchImpl: this.fetchImpl, dormir: this.dormir });
   }
 }
