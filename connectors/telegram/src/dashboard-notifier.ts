@@ -1,9 +1,11 @@
-// Posts ephemeral events (typing, inbound reactions) directly to the dashboard.
-// Uses the same HMAC scheme the dashboard uses to call back into the connectors.
+// Posts ephemeral events (typing, inbound reactions) to the messaging service
+// (dgx-messages, DASHBOARD_URL env — DGX-291). The HMAC scheme is the one the
+// service verifies with CONNECTOR_SHARED_SECRET from vault; there is no dev
+// fallback — an unset secret signs empty and the service answers 401.
 
 import { postDashboardEvent } from '@mcp-socialmedia/shared';
 
-const SECRET = process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
+const SECRET = process.env.CONNECTOR_SHARED_SECRET ?? '';
 
 export function dashboardUrl(): string | undefined {
   const value = process.env.DASHBOARD_URL?.trim();

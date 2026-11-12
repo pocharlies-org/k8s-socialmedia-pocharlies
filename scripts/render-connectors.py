@@ -90,12 +90,12 @@ S3_ENV = [
     _env("MINIO_BUCKET", "socialmedia-media"),
 ]
 NATS_ENV = _env("NATS_URL", f"nats://whatsapp-mcp-nats.{SVC}:4222")
-# Control Nexus dashboard: the connectors POST ephemeral events (typing,
-# reaction-snapshot) to its /api/messages/_connector/* endpoints. The compiled
-# default in connectors/telegram/src/dashboard-notifier.ts points at the retired
-# x86 dashboard (100.83.56.98:9002, refused since the dashboard moved to
-# control-nexus), so every event was a failed fetch (INFRA-888).
-DASHBOARD_URL_ENV = _env("DASHBOARD_URL", "http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002")
+# dgx-messages (ns messages): since the DGX-190 extraction the messaging service
+# owns /api/messages/_connector/* — the connectors POST ephemeral events (typing,
+# reaction-snapshot) there, HMAC-signed with CONNECTOR_SHARED_SECRET (envFrom
+# whatsapp-mcp-secrets, sourced from 1Password Connect). DGX-291 repointed the
+# consumers: the dashboard serves no /api/messages anymore and is not a proxy.
+DASHBOARD_URL_ENV = _env("DASHBOARD_URL", "http://dgx-messages.messages.svc.cluster.local")
 DB_ENV = _env(
     "DATABASE_URL",
     "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp",
@@ -174,6 +174,9 @@ def render_whatsapp(account):
             "@shared-valkey-master.databases.svc.cluster.local:6379/0",
         ),
         NATS_ENV,
+        # DGX-291: whatsapp-web forwards typing to the messaging service via
+        # shared/notifyDashboard; without DASHBOARD_URL the notifier is a no-op.
+        DASHBOARD_URL_ENV,
         DB_ENV,
         _env("ENABLE_SENDING", "true"),
         _env("SESSION_PATH", "/app/persistent-session"),
