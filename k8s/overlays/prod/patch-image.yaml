@@ -160,7 +160,7 @@ spec:
         # nombre de imagen y se llevaria por delante al pool inerte
         # telegram-pairing, que sigue a proposito en v1.3.57. Digest en Harbor (crane).
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.149@sha256:b81bbc6b514da5c46ae68c234af5b939d8efe046efcddcb7921160ce316cc2a3
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -175,7 +175,7 @@ spec:
     spec:
       containers:
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.137@sha256:6c1bc26117148ff686c34258d61a8f461293f56a83e2ce5c19687fbc85c7ce5b
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.149@sha256:b81bbc6b514da5c46ae68c234af5b939d8efe046efcddcb7921160ce316cc2a3
 ---
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
