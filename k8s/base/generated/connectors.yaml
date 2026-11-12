@@ -52,6 +52,8 @@ spec:
           value: redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: ENABLE_SENDING
@@ -244,6 +246,8 @@ spec:
           value: redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: ENABLE_SENDING
@@ -444,6 +448,8 @@ spec:
           value: redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: ENABLE_SENDING
@@ -630,7 +636,7 @@ spec:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
         - name: DASHBOARD_URL
-          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         envFrom:
@@ -808,7 +814,7 @@ spec:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
         - name: DASHBOARD_URL
-          value: http://dgx-dashboard-backend.control-nexus.svc.cluster.local:9002
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: CONNECTOR_ACCOUNT
