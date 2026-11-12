@@ -16,7 +16,7 @@ const BASE: Record<string, string> = {
   CORREO_CONECTOR_TG_ID: 'tg-professional',
   CORREO_CONECTOR_TG_SECRET: 't'.repeat(32),
 };
-const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'ENABLE_OUTBOUND', 'HERMES_WAKE_ENABLED', 'HERMES_WAKE_URL', 'HERMES_WAKE_SECRET', 'WAKE_STALE_MAX_MIN', 'WAKE_DEBOUNCE_MIN'];
+const OPCIONALES = ['NATS_URL', 'NATS_QUEUE_GROUP', 'PORT', 'ENABLE_OUTBOUND', 'HERMES_WAKE_ENABLED', 'SYNAPSE_EVENTOS_URL', 'SYNAPSE_EVENTOS_SECRET', 'WAKE_STALE_MAX_MIN', 'WAKE_DEBOUNCE_MIN'];
 
 function con(env: Record<string, string | undefined>, fn: () => void): void {
   const keys = [...Object.keys(BASE), ...OPCIONALES];
@@ -41,8 +41,8 @@ test('defaults: own queue group, port 8080', () => {
     const c = loadConfig();
     assert.equal(c.natsQueueGroup, 'correo-bridge');
     assert.equal(c.port, 8080);
-    assert.equal(c.hermesWakeUrl, null);
-    assert.equal(c.hermesWakeSecreto, null);
+    assert.equal(c.eventosUrl, null);
+    assert.equal(c.eventosSecreto, null);
     assert.equal(c.wakeStaleMaxMs, 30 * 60_000);
     assert.equal(c.wakeDebounceMs, 5 * 60_000);
     assert.deepEqual([...c.secretosConector.keys()].sort(), ['tg-professional', 'wa-professional']);
@@ -89,22 +89,26 @@ test('B2: ENABLE_OUTBOUND is off unless it says exactly true; anything else refu
   }
 });
 
-test('DGX-1533: the wake is off by default; when on, URL and secret are required', () => {
-  const WAKE = { HERMES_WAKE_URL: 'http://hermes-webhook.hermes.svc:8644/p/secretaria-skirmshop/webhooks/whatsapp-skirmshop', HERMES_WAKE_SECRET: 's'.repeat(40) };
+test('SC-5382: the wake is off by default; when on, the gateway base and its producer key are required', () => {
+  const WAKE = { SYNAPSE_EVENTOS_URL: 'http://synapse-gateway.synapse.svc.cluster.local:18790', SYNAPSE_EVENTOS_SECRET: 's'.repeat(40) };
   con({ ...BASE, ...WAKE }, () => {
     const c = loadConfig();
-    assert.equal(c.hermesWakeUrl, null);
+    assert.equal(c.eventosUrl, null);
   });
-  con({ ...BASE, HERMES_WAKE_ENABLED: 'true' }, () => assert.throws(loadConfig, /HERMES_WAKE_URL/));
-  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', HERMES_WAKE_SECRET: WAKE.HERMES_WAKE_SECRET }, () => assert.throws(loadConfig, /HERMES_WAKE_URL/));
-  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', HERMES_WAKE_URL: WAKE.HERMES_WAKE_URL }, () => assert.throws(loadConfig, /HERMES_WAKE_SECRET/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true' }, () => assert.throws(loadConfig, /SYNAPSE_EVENTOS_URL/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', SYNAPSE_EVENTOS_SECRET: WAKE.SYNAPSE_EVENTOS_SECRET }, () => assert.throws(loadConfig, /SYNAPSE_EVENTOS_URL/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', SYNAPSE_EVENTOS_URL: WAKE.SYNAPSE_EVENTOS_URL }, () => assert.throws(loadConfig, /SYNAPSE_EVENTOS_SECRET/));
   con({ ...BASE, HERMES_WAKE_ENABLED: 'true', ...WAKE }, () => {
     const c = loadConfig();
-    assert.equal(c.hermesWakeUrl, WAKE.HERMES_WAKE_URL);
-    assert.equal(c.hermesWakeSecreto, WAKE.HERMES_WAKE_SECRET);
+    assert.equal(c.eventosUrl, WAKE.SYNAPSE_EVENTOS_URL);
+    assert.equal(c.eventosSecreto, WAKE.SYNAPSE_EVENTOS_SECRET);
   });
-  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', HERMES_WAKE_URL: 'http://hermes-webhook.hermes.svc:8644', HERMES_WAKE_SECRET: WAKE.HERMES_WAKE_SECRET }, () => assert.throws(loadConfig, /HERMES_WAKE_URL/));
-  con({ ...BASE, HERMES_WAKE_ENABLED: 'si', HERMES_WAKE_URL: WAKE.HERMES_WAKE_URL, HERMES_WAKE_SECRET: WAKE.HERMES_WAKE_SECRET }, () => assert.throws(loadConfig, /HERMES_WAKE_ENABLED/));
+  // The path is the gateway's (/eventos), never config: a base with a path is a wrong URL.
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', SYNAPSE_EVENTOS_URL: `${WAKE.SYNAPSE_EVENTOS_URL}/eventos`, SYNAPSE_EVENTOS_SECRET: WAKE.SYNAPSE_EVENTOS_SECRET }, () => assert.throws(loadConfig, /SYNAPSE_EVENTOS_URL/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', SYNAPSE_EVENTOS_URL: WAKE.SYNAPSE_EVENTOS_URL, SYNAPSE_EVENTOS_SECRET: 'corta' }, () => assert.throws(loadConfig, /SYNAPSE_EVENTOS_SECRET/));
+  // Security condition: the producer key of the bus is its own, never a reused one.
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'true', SYNAPSE_EVENTOS_URL: WAKE.SYNAPSE_EVENTOS_URL, SYNAPSE_EVENTOS_SECRET: BASE.CONNECTOR_SHARED_SECRET }, () => assert.throws(loadConfig, /SYNAPSE_EVENTOS_SECRET/));
+  con({ ...BASE, HERMES_WAKE_ENABLED: 'si', ...WAKE }, () => assert.throws(loadConfig, /HERMES_WAKE_ENABLED/));
 });
 
 test('DGX-1550: the burst window is WAKE_DEBOUNCE_MIN minutes, 5 by default, positive only', () => {

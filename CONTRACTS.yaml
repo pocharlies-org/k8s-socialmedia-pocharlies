@@ -2726,8 +2726,16 @@ contracts:
   role: consumer
   files:
   - connectors/correo-bridge/src/main.ts
-  status: active
-  note: 'DGX-1533. correo-bridge POSTs the wake card of an entrant WhatsApp 1:1 message to the Hermes profile
+  status: deprecated
+  replaced_by: http.gateway.eventos.v1
+  remove_after: '2026-12-12'
+  note: 'SC-5382 (12-11-2026): correo-bridge no longer calls this route — it publishes the wake on
+    POST /eventos (http.gateway.eventos.v1, routing key eventos.hermes.wake) and synapse-adapter-gmail
+    (wake.py) delivers it to Hermes with retries, 429 handling and a DLQ. The route itself is NOT gone:
+    Hermes still serves it (helm/hermes/values.yaml webhook.routes.whatsapp-skirmshop) and that adapter
+    is its caller now, so the tombstone here is about this repo''s consumer. The netpol egress to
+    hermes:8644 went with it; hermes'' webhook.allowPods entry for this pod is now unused.
+    DGX-1533. correo-bridge POSTs the wake card of an entrant WhatsApp 1:1 message to the Hermes profile
     webhook (the Gmail webhook_by_account analogue): HMAC V2 (X-Webhook-Timestamp +
     X-Webhook-Signature-V2 = hex(HMAC(secret, "<ts>." + body)), X-Request-ID dedup),
     secret = 1Password item hermes-webhook-gmail (same as the gmail-* routes), 202 delivered / 200 duplicate /
@@ -2742,6 +2750,37 @@ contracts:
     (last 8, oldest->newest, per-text truncated as before); X-Request-ID = whatsapp-skirmshop:<chat>:<ref of the
     last>. The buffer is in-memory: a bridge restart inside a window loses that burst''s wake. Hermes consumes
     mensaje as free text, so consumers of the card need no change.'
+- id: http.gateway.eventos.v1
+  kind: http-route
+  value: /eventos
+  role: consumer
+  files:
+  - connectors/correo-bridge/src/eventos.ts
+  status: active
+  note: 'SC-5382. correo-bridge POSTs the secretary wake to the Synapse gateway (producer `correo`):
+    headers X-Synapse-Producer: correo and X-Hub-Signature-256: sha256=<hex HMAC(secret, raw body)>,
+    secret = 1Password item synapse-eventos-correo (field webhook_secret), the same one the gateway reads
+    as eventos.correo.webhook.secret. Flat signed body {routing_key, tenant, profile, route, request_id,
+    payload:{mensaje}}; routing_key must be in the producer''s closed allowlist (eventos.hermes.wake only).
+    202 = inbox+outbox written in ONE transaction (the durability limit); 401 unknown producer or bad
+    signature, 403 key outside the allowlist, 413 over 1 MiB, 503 declared-but-unloaded credential.
+    Provider: pocharlies-org/synapse services/synapse-gateway (marker http.gateway.eventos.v1).
+    Transport: netpol correo-bridge-egress allows TCP 18790 to the synapse gateway pods. The route is
+    cluster-internal, never published on the edge ingress.'
+- id: eventos.hermes.wake
+  kind: routing-key
+  value: eventos.hermes.wake
+  role: publisher
+  files:
+  - connectors/correo-bridge/src/eventos.ts
+  status: active
+  note: 'SC-5382 (pieza 5 de SC-5370). The command that wakes a Hermes profile: {tenant, profile, route,
+    request_id, payload:{mensaje}}. correo-bridge publishes it through POST /eventos (it cannot reach the
+    broker); synapse-adapter-gmail also publishes it directly for the Gmail wake, and is the consumer
+    (queue adapter.hermes.wake) that POSTs to the Hermes webhook with its retry budget, 429 handling and
+    DLQ, which the unattended re-drive of SC-5380 returns. request_id is Hermes'' dedup id: for WhatsApp
+    it stays whatsapp-skirmshop:<chat>:<ref of the last message of the burst> (DGX-1550), so a re-drive
+    never opens a second turn. Registry: synapse libs/synapse-contracts/registry.yaml.'
 - id: nats.correo-bridge.telegram-message-received.v1
   kind: routing-key
   value: telegram.MessageReceived

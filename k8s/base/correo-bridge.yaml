@@ -30,7 +30,7 @@ spec:
     spec:
       enableServiceLinks: false
       automountServiceAccountToken: false
-      # atlantic (INFRA-1103): fuera del x86; solo habla con NATS, los conectores, el core y Hermes, todos del clúster
+      # atlantic (INFRA-1103): fuera del x86; solo habla con NATS, los conectores, el core y el gateway de Synapse, todos del clúster
       nodeSelector: { node-pool: ovh-heavy, kubernetes.io/arch: amd64 }
       securityContext:
         runAsNonRoot: true
@@ -59,8 +59,9 @@ spec:
             - { name: ENABLE_OUTBOUND, value: "false" }
             # DGX-1533: wake of the Skirmshop secretary (inbound-only, never a customer
             # message). Off in base; the prod overlay turns it on (same pattern as ENABLE_OUTBOUND).
+            # SC-5382: it is published on POST /eventos of the Synapse gateway (base, no path).
             - { name: HERMES_WAKE_ENABLED, value: "false" }
-            - { name: HERMES_WAKE_URL, value: "http://hermes-webhook.hermes.svc.cluster.local:8644/p/secretaria-skirmshop/webhooks/whatsapp-skirmshop" }
+            - { name: SYNAPSE_EVENTOS_URL, value: "http://synapse-gateway.synapse.svc.cluster.local:18790" }
             # DGX-1550: one wake per burst — messages of one caso inside this window share one card.
             - { name: WAKE_DEBOUNCE_MIN, value: "5" }
             # Only the one key of whatsapp-mcp-secrets it needs (no envFrom).
@@ -74,8 +75,8 @@ spec:
               valueFrom: { secretKeyRef: { name: correo-bridge-tg-professional, key: conector } }
             - name: CORREO_PRODUCTOR_TG_SECRET
               valueFrom: { secretKeyRef: { name: correo-bridge-tg-professional, key: productor } }
-            - name: HERMES_WAKE_SECRET
-              valueFrom: { secretKeyRef: { name: correo-bridge-hermes-wake, key: webhook_secret } }
+            - name: SYNAPSE_EVENTOS_SECRET
+              valueFrom: { secretKeyRef: { name: correo-bridge-eventos-correo, key: webhook_secret } }
           resources:
             requests: { cpu: 20m, memory: 64Mi }
             limits: { memory: 256Mi }
@@ -139,23 +140,24 @@ spec:
     - secretKey: productor
       remoteRef: { key: correo-productor-correo-bridge-tg/clave }
 ---
-# DGX-1533: the HMAC secret of the Hermes webhook routes (the same 1Password item
-# Hermes and the gmail adapter read — one source of truth, never a copy).
+# SC-5382: the `correo` producer key of POST /eventos (the same 1Password item the
+# gateway reads as eventos.correo.webhook.secret — one source of truth, never a copy).
+# It replaced correo-bridge-hermes-wake: the bridge no longer calls Hermes directly.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: correo-bridge-hermes-wake
+  name: correo-bridge-eventos-correo
   namespace: whatsapp-mcp
 spec:
-  refreshInterval: 24h
-  secretStoreRef: { name: onepassword, kind: ClusterSecretStore }
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword-connect, kind: ClusterSecretStore }
   target:
-    name: correo-bridge-hermes-wake
+    name: correo-bridge-eventos-correo
     creationPolicy: Owner
     deletionPolicy: Retain
   data:
     - secretKey: webhook_secret
-      remoteRef: { key: hermes-webhook-gmail/webhook_secret }
+      remoteRef: { key: synapse-eventos-correo, property: webhook_secret }
 ---
 # Ingress: only the core pod (ns correo, component=core) and the vmagent. The pod is
 # excluded from whatsapp-mcp-allow-same-namespace (networkpolicy.yaml), so no
@@ -178,8 +180,8 @@ spec:
   policyTypes:
     - Ingress
 ---
-# Egress: DNS, NATS, the two professional connectors, the core and the Hermes
-# webhook (DGX-1533 secretary wake). Nothing else: no Postgres, no internet.
+# Egress: DNS, NATS, the two professional connectors, the core and the Synapse
+# gateway (SC-5382 secretary wake). Nothing else: no Postgres, no internet.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -212,10 +214,10 @@ spec:
       ports:
         - { protocol: TCP, port: 8081 }
     - to:
-        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: hermes } }
-          podSelector: { matchLabels: { app.kubernetes.io/name: hermes, app.kubernetes.io/instance: hermes } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: synapse } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: synapse-gateway } }
       ports:
-        - { protocol: TCP, port: 8644 }
+        - { protocol: TCP, port: 18790 }
   policyTypes:
     - Egress
 ---
@@ -257,3 +259,20 @@ spec:
               reconciliation, and the case will not show it until the customer
               writes again. Check the core's machine pod and the bridge logs
               ("correo core unreachable"); /status of the bridge has the counts.
+        # SC-5382: with the gateway up the wake is durable (inbox+outbox, then the
+        # adapter's retries and DLQ). This is the one loss left: the gateway itself
+        # unreachable for 30 s. The message is in the core; only the wake is lost.
+        - alert: CorreoBridgeDespertaresPerdidos
+          expr: increase(correo_bridge_despertares_total{resultado="agotado"}[15m]) > 0
+          labels:
+            severity: warning
+            namespace: whatsapp-mcp
+          annotations:
+            summary: "correo-bridge no publicó {{ $value }} wakes de la secretaria en el bus de Synapse"
+            description: >-
+              correo-bridge (ns whatsapp-mcp) could not reach POST /eventos of
+              synapse-gateway.synapse:18790 after 3 attempts in 30 s, so the
+              secretary was not woken for those entrant messages. The messages
+              themselves are in the correo core. Check the gateway pods and the
+              bridge logs ("synapse unreachable"); a 4xx lands in
+              resultado="rechazado" instead (credential or allowlist).
