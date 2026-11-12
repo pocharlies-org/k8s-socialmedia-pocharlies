@@ -361,7 +361,17 @@ spec:
   replicas: 1
   selector: { matchLabels: { app: instagram-connector } }
   template:
-    metadata: { labels: { app: instagram-connector } }
+    metadata:
+      labels: { app: instagram-connector }
+      annotations:
+        # SC-1214 C10 (SC-1194): rollout GitOps del retiro de las 5 claves
+        # INSTAGRAM*_ACCESS_TOKEN del item 1Password `whatsapp-mcp` (Request
+        # SC-5392, ejecutado por security 12-11). El pod vivo conserva los
+        # valores viejos en su env hasta reiniciar: cambiar esta anotacion
+        # cambia el hash del pod template y el Sync de ArgoCD rueda el pod,
+        # que es lo que descarga el Secret ya sin esas claves (runbook C10
+        # §3.5; `kubectl rollout restart` a mano no: selfHeal la revierte).
+        socialmedia.pocharlies/c10-credential-retirement: "2026-11-12"
     spec:
       enableServiceLinks: false
       nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
