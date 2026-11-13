@@ -238,5 +238,5 @@ images:
   # El bot Sauvage ejecuta la cadena dm->ban->readmision de la parte B; sale con
   # SAUVAGE_MODERATION=off (la activacion es del operador). Digest comprobado en Harbor (crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
-    newTag: v1.3.137
-    digest: sha256:431e15f132cbddb1128923c8c13c482bfc204ffea6a9e153461422c6e051feb6
+    newTag: v1.3.149
+    digest: sha256:81b329542c5c103ceb795b4fee38f1eda8eef50860cef132c5be8395b434ce93
