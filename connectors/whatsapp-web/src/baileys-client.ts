@@ -2046,6 +2046,16 @@ export class BaileysClient extends EventEmitter {
           !novedadesKind(msg.key)
         )
           continue;
+        // DGX-1587: sending from any device (the phone) means that chat was opened —
+        // WhatsApp clears its badge there and the linked session never hears about
+        // it (read state is per-device). Zero it here, store and DB, so the
+        // dashboard does not keep a phantom "1" after the owner replies.
+        if (msg.key?.fromMe && msg.key.remoteJid) {
+          const sentNorm = this.normalizeJid(msg.key.remoteJid);
+          const sentChat = this.chatStore.get(sentNorm);
+          if (sentChat) sentChat.unreadCount = 0;
+          void setCanonicalChatState(sentNorm, { unreadCount: 0 });
+        }
         try {
           await this.ingestMessage(msg, {
             source: isLive ? 'live' : 'baileys_history_sync',
