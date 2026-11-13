@@ -209,9 +209,17 @@ images:
   # superficies del parser de labels (ES/EN, sin referencia, pedido suelto, opt-out): el CTA del boton de
   # seguimiento ya no despierta a la secretaria ni abre sesion de caso. Pin a mano: el job manifests del
   # release reboto contra la fusion intermedia de #484 y luego contra la etiqueta inmutable sha-d64f0cb2ea00.
+  # SC-5382 (pieza 5 de SC-5370): v1.3.148 -> v1.3.151 (Release Production run 43467803484,
+  # deploy/prod@cfc0fa78, que contiene #491): el wake de la secretaria se publica en POST /eventos del
+  # gateway de Synapse (routing key eventos.hermes.wake, con DLQ y re-drive) en vez de llamar al webhook
+  # de Hermes, cuyo descarte a 30 s perda el aviso. En este mismo commit caen HERMES_WAKE_URL/SECRET, el
+  # ExternalSecret correo-bridge-hermes-wake y el egreso a hermes:8644: la v1.3.148 aborta sin esa URL,
+  # asi que imagen y manifiesto tienen que aterrizar juntos. Dos intentos antes: v1.3.150 ya estaba en
+  # Harbor desde otro commit (colision de tag inmutable) y el reintento sobre el mismo commit murio en
+  # cosign por el 409 de Rekor (digest ya firmado).
   - name: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge
-    newTag: v1.3.148
-    digest: sha256:e139b0aad5dae98655e3498099ea5b104b765fecfd60e314f7abd8433cbba922
+    newTag: v1.3.151
+    digest: sha256:d3db7f7b7e4dfb355adc39b5ebb3f558cdca0176df8fbdf5cecc37c2eb9ba457
   # SC-2760 24-10: v1.3.126 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): el join del listado (#384),
   # los ETag/304 (#371), los ticks (#354), el rail (#375), el <select> del audio (#376), el service worker
   # cache-first (#385) y la lista de chats virtualizada (#387).
