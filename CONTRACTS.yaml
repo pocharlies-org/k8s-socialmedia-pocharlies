@@ -348,7 +348,7 @@ contracts:
     (mcp-server/src/mcp/server.ts canonicalSetChatState; added later, surface unchanged). Internal behavior,
     not contract: when Baileys parks an app-state collection on a missing sync key the connector now asks
     the primary device for that key (connectors/whatsapp-web/src/app-state-key-request.ts), so phone-side
-    pin/unpin/archive/mute mutations resume instead of being lost forever.'
+    pin/unpin/archive/mute mutations resume instead of being lost forever. DGX-1587: a fromMe messages.upsert (the owner sent in the chat — sending means the chat was open and the phone cleared its badge, which WhatsApp never syncs to linked devices) zeroes unread_count in the in-memory store and on the canonical row, so the dashboard badge does not stick at 1 after a phone reply.'
 - id: http.whatsapp-connector.groups-state.v1
   kind: http-route
   value: /groups/state
