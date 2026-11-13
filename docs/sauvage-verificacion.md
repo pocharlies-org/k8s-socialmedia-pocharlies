@@ -31,6 +31,11 @@ ningún miembro ni expulsa a nadie; solo informa.
   la siguiente no empieza de cero (no re-audita a quien ya auditó hoy).
   `savage_actions` es el registro de la moderación (`dm`, `ban`, `unban`,
   `add`, `link`, `confirmado`, `omitido`, `cancelacion`) y la fuente de C3/C4/C7.
+- Evidencia de C1 (cada pasada en su propia sesión): la pasada resuelve el `ses_`
+  de su sesión de opencode y deja una fila en `savage_pasadas` (cuenta, `sesion_id`,
+  `pasada_at`; migración 044). El `ses_` del log del pod se lo lleva
+  `savage-pod-reaper` a las 2 h del éxito — la fila de la BD es la prueba estable;
+  el grep de logs (`pasada-sesion ses=`) sigue valiendo solo el mismo día.
 - Veredictos: `cara | sin_cara | dudoso | no_auditar`. Sin foto visible para la
   cuenta (404) = `dudoso`; un 504 de la foto (corte de 20 s del conector), un
   error del modelo o una salida no parseable = `no_auditar`, **nunca**
