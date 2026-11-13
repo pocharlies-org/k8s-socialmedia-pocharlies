@@ -1,8 +1,9 @@
 import type { Veredicto } from './vision';
 
 /**
- * Estado del bot en Postgres `whatsappmcp` (tablas de la migracion 042).
- * El bot solo toca savage_verdicts / savage_actions: nunca tablas del conector.
+ * Estado del bot en Postgres `whatsappmcp` (tablas de las migraciones 042 y
+ * 044). El bot solo toca savage_verdicts / savage_actions / savage_pasadas:
+ * nunca tablas del conector.
  */
 
 export interface EstadoDb {
@@ -19,6 +20,24 @@ export async function cargarEstado(db: EstadoDb): Promise<number> {
   const n = Number(rows[0]?.n ?? 0);
   console.log(`estado cargado: ${n} veredictos previos`);
   return n;
+}
+
+/**
+ * Una fila por pasada (savage_pasadas, migracion 044): el `ses_` de la sesion
+ * de opencode que ejecuto la pasada y su fecha/hora. Es la evidencia estable de
+ * C1: el log del pod con el `ses_` lo borre savage-pod-reaper a las 2 h del
+ * exito (SUCCEEDED_TTL_SECONDS=7200). `sesionId` null = pasada sin ses_
+ * resoluble (ver sesion-opencode.ts); la fila existe igual.
+ */
+export async function registrarPasada(
+  db: EstadoDb,
+  p: { account: string; sesionId: string | null }
+): Promise<void> {
+  await db.query(
+    `INSERT INTO savage_pasadas (account, sesion_id, pasada_at)
+     VALUES ($1, $2, NOW())`,
+    [p.account, p.sesionId]
+  );
 }
 
 /** Miembros con veredicto de hoy (reanudacion tras interrupcion). */

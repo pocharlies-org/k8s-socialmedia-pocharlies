@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConnectorClient, descargarFoto, listarParticipantes, type FetchFn, type FetchResponse } from './connector-client';
-import { cargarEstado, auditadosHoy, guardarVeredicto, type EstadoDb } from './estado';
+import { cargarEstado, auditadosHoy, guardarVeredicto, registrarPasada, type EstadoDb } from './estado';
+import { resolverSesionOpencode } from './sesion-opencode';
 import { veredictoDeVision, type Veredicto } from './vision';
 
 /**
@@ -17,6 +18,8 @@ import { veredictoDeVision, type Veredicto } from './vision';
  *   estado cargado: N veredictos previos      (C6)
  *   veredicto ID=<id> verdict=<v>             (C2, una linea por miembro)
  *   barrido total=N auditados=X no_auditados=Y (C2)
+ *   pasada-sesion ses=<ses_...|desconocido>   (C1; la fila estable va a
+ *     savage_pasadas — el log se lo lleva el pod-reaper a las 2 h)
  */
 
 export interface ConfigPasada {
@@ -29,6 +32,8 @@ export interface ConfigPasada {
   visionModel: string;
   promptVision: string;
   fotosDir: string;
+  /** Directorio de sesiones de opencode (C1): <dir>/<proyecto>/ses_<id>.json. */
+  sesionesOpencodeDir: string;
 }
 
 export function configDesdeEntorno(env: NodeJS.ProcessEnv): ConfigPasada {
@@ -61,6 +66,12 @@ export function configDesdeEntorno(env: NodeJS.ProcessEnv): ConfigPasada {
     visionModel: env.SAUVAGE_VISION_MODEL ?? 'qwen38-flash-next-uncensored',
     promptVision,
     fotosDir: env.SAUVAGE_FOTOS_DIR ?? '/tmp/sauvage-fotos',
+    // Dato de opencode (core/global.ts): <XDG_DATA_HOME>/opencode/storage/
+    // session. En el pod del CronJob XDG_DATA_HOME=/tmp/.local/share (emptyDir
+    // nuevo en cada job: la sesion mas reciente ES la sesion actual).
+    sesionesOpencodeDir:
+      env.SAUVAGE_OPENCODE_SESSIONS_DIR ??
+      join(env.XDG_DATA_HOME ?? join(env.HOME ?? '/tmp', '.local/share'), 'opencode', 'storage', 'session'),
   };
 }
 
@@ -130,6 +141,19 @@ export async function ejecutarPasada(
     console.log(`veredicto ID=${p.id} verdict=${verdict}`);
     if (verdict === 'no_auditar') noAuditados++;
     else auditados++;
+  }
+
+  // C1 (defecto encontrado por qa tras el cierre): la evidencia del ses_ no
+  // puede vivir solo en el log (savage-pod-reaper borra el pod a las 2 h). La
+  // fila en savage_pasadas es la prueba estable; el log del ses_ sigue igual.
+  // Fallo blando: sin tabla o sin ses_ la pasada termina y su informe se manda
+  // igual (la evidencia es metadata; no tumba el barrido).
+  const sesion = resolverSesionOpencode(cfg.sesionesOpencodeDir);
+  try {
+    await registrarPasada(db, { account: cfg.account, sesionId: sesion });
+    console.log(`pasada-sesion ses=${sesion ?? 'desconocido'}`);
+  } catch (e) {
+    console.log(`pasada-sesion: registro en BD fallo (${String(e)}); la pasada sigue`);
   }
 
   console.log(`barrido total=${total} auditados=${auditados} no_auditados=${noAuditados}`);

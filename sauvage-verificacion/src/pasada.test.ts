@@ -61,7 +61,10 @@ function dbFalsa(): EstadoDb & { guardados: string[] } {
     async query(sql: string, params?: unknown[]) {
       if (sql.includes('count(*)')) return { rows: [{ n: 0 }] };
       if (sql.includes('DISTINCT user_id')) return { rows: [] }; // nadie auditado hoy
-      guardados.push(String((params as unknown[])?.[1])); // INSERT de guardarVeredicto
+      // Solo los veredictos: savage_pasadas (C1) es otro INSERT con otros params.
+      if (sql.includes('INSERT INTO savage_verdicts')) {
+        guardados.push(String((params as unknown[])?.[1]));
+      }
       return { rows: [] };
     },
   };
@@ -78,6 +81,9 @@ function config(): ConfigPasada {
     visionModel: 'm',
     promptVision: 'criterio de prueba',
     fotosDir: mkdtempSync(join(tmpdir(), 'sauvage-test-')),
+    // Sin sesiones de opencode aqui: la pasada registra su fila con sesion NULL
+    // (lo que prueba el id real es pasada-sesion.test.ts).
+    sesionesOpencodeDir: join(mkdtempSync(join(tmpdir(), 'sauvage-ses-none-')), 'no-existe'),
   };
 }
 
