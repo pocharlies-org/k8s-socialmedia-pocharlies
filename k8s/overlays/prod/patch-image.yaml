@@ -66,6 +66,11 @@
 # conector responde 401 (también los envíos del mcp-server). Con el 120, que no tiene ese gate, el
 # HMAC con placeholder funciona como siempre. Avanzar de nuevo exige clave real en 1Password primero.
 #
+# DGX-1587 13-11: los tres house whatsapp-connector* avanzan a v1.3.151 (run 43479693004,
+# deploy/prod@cfc0fa7, PR #493): un mensaje propio (fromMe upsert) pone el badge de no-leídos
+# a 0 en store y BD — WhatsApp no sincroniza el leído al móvil y el «1 sin leer» se quedaba
+# clavado. professional venía de skirm-376-d515faa (d515faa, ya en el tronco). Digest
+# comprobado en Harbor (crane): v1.3.151 == sha-cfc0fa78934d. whatsapp-pairing intacto.
 # DGX-1495 07-11 a 08-11: whatsapp-connector (personal) avanza v1.3.120 -> v1.3.145 (deploy/prod@e1eca05,
 # PRs #470/#472/#474): el conector pide al dispositivo primario las app-state keys que faltan (los
 # desfijados/archivados del móvil perdidos por colecciones bloqueadas). El ask se reenvía con relayMessage
@@ -85,7 +90,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.145@sha256:ed1de167f7b532b5dcdb298d5fd5a4656f239f323e90353a76742eec1ec2902d
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.151@sha256:25cbb9e32a1c637390569a378069bece0c637420fa0f379c3f31ce836eb28935
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
@@ -102,7 +107,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-professional
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:skirm-376-d515faa@sha256:1a9634a83bc98e87e23cbe3eb7f7091125617e05766d2fa1e431415a1f58c810
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.151@sha256:25cbb9e32a1c637390569a378069bece0c637420fa0f379c3f31ce836eb28935
 ---
 # SC-1144 fase 2: la cuenta leila corre la MISMA imagen que las otras dos Baileys.
 # SKIRM-103 10-10: whatsapp-connector-leila advances v1.3.103 -> v1.3.109 (run 38008072969,
@@ -120,7 +125,7 @@ spec:
     spec:
       containers:
         - name: whatsapp-connector-leila
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.120@sha256:d2aba25a250beb9dc9383d8d4d03c42e8cc335da3343245d590ad222417ddb75
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.151@sha256:25cbb9e32a1c637390569a378069bece0c637420fa0f379c3f31ce836eb28935
 ---
 # SC-4613 04-11: instagram-connector advances v1.3.106 -> instagram-33e39d5
 # (release-instagram run 41927395010, deploy/prod@33e39d5: #436 strips the Graph
