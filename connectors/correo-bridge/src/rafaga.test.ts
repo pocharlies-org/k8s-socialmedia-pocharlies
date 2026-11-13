@@ -21,13 +21,13 @@ function evento(waMessageId: string, content: string): MessageReceivedEvent {
   };
 }
 
-function colector(): { avisar: (t: string, id: string) => Promise<'enviado'>; llamadas: { tarjeta: string; id: string }[] } {
+function colector(): { avisar: (t: string, id: string) => Promise<'publicado'>; llamadas: { tarjeta: string; id: string }[] } {
   const llamadas: { tarjeta: string; id: string }[] = [];
   return {
     llamadas,
     avisar: async (tarjeta: string, id: string) => {
       llamadas.push({ tarjeta, id });
-      return 'enviado';
+      return 'publicado';
     },
   };
 }

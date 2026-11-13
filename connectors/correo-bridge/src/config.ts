@@ -7,6 +7,7 @@
  *   per connector, `ingest:mensajes`, `conectores: [<id>]`): signs POST /v2/mensajes;
  * - one key per connector (`wa-*`, `tg-*`): the core signs its reads with it;
  * - CONNECTOR_SHARED_SECRET: the house HMAC towards the socialmedia connectors.
+ * - SYNAPSE_EVENTOS_SECRET (SC-5382): the `correo` producer key of POST /eventos.
  */
 
 import { ConfigError, requireEnv, optionalEnv, httpUrl, intEnv } from '@mcp-socialmedia/shared';
@@ -36,9 +37,9 @@ export interface BridgeConfig {
   refsMax: number;
   refsTtlMs: number;
   port: number;
-  /** DGX-1533: wake of the Skirmshop secretary (Hermes webhook). Both null when disabled. */
-  hermesWakeUrl: string | null;
-  hermesWakeSecreto: string | null;
+  /** SC-5382: base of the Synapse gateway (no path) and the `correo` producer key. Both null when disabled. */
+  eventosUrl: string | null;
+  eventosSecreto: string | null;
   /** An entrante older than this never wakes (backlog after an outage). */
   wakeStaleMaxMs: number;
   /** DGX-1550: burst window — messages of one caso inside it share ONE wake card. */
@@ -89,18 +90,20 @@ export function loadConfig(): BridgeConfig {
 
   // DGX-1533: off unless HERMES_WAKE_ENABLED is exactly `true` (the GitOps switch
   // back); when on, URL and secret are required or the bridge refuses to start.
+  // SC-5382: the wake goes to POST /eventos of the Synapse gateway, not to Hermes.
   const wakeEnabled = optionalEnv('HERMES_WAKE_ENABLED', 'false');
   if (wakeEnabled !== 'true' && wakeEnabled !== 'false') {
     throw new ConfigError('HERMES_WAKE_ENABLED must be true or false');
   }
-  let hermesWakeUrl: string | null = null;
-  let hermesWakeSecreto: string | null = null;
+  let eventosUrl: string | null = null;
+  let eventosSecreto: string | null = null;
   if (wakeEnabled === 'true') {
-    hermesWakeUrl = httpUrl('HERMES_WAKE_URL', requireEnv('HERMES_WAKE_URL'));
-    if (new URL(hermesWakeUrl).pathname === '/') throw new ConfigError('HERMES_WAKE_URL must carry the route path');
-    const secreto = requireEnv('HERMES_WAKE_SECRET');
-    if (secreto.length < 16) throw new ConfigError('HERMES_WAKE_SECRET must be at least 16 characters');
-    hermesWakeSecreto = secreto;
+    eventosUrl = httpUrl('SYNAPSE_EVENTOS_URL', requireEnv('SYNAPSE_EVENTOS_URL'));
+    if (new URL(eventosUrl).pathname !== '/') throw new ConfigError('SYNAPSE_EVENTOS_URL must have no path');
+    const secreto = requireEnv('SYNAPSE_EVENTOS_SECRET');
+    if (secreto.length < 16) throw new ConfigError('SYNAPSE_EVENTOS_SECRET must be at least 16 characters');
+    if (todas.includes(secreto)) throw new ConfigError('SYNAPSE_EVENTOS_SECRET must differ from every other key');
+    eventosSecreto = secreto;
   }
 
   return {
@@ -121,8 +124,8 @@ export function loadConfig(): BridgeConfig {
     refsMax: intEnv('REFS_MAX', 50_000),
     refsTtlMs: intEnv('REFS_TTL_MS', 30 * 86_400_000),
     port: intEnv('PORT', 8080),
-    hermesWakeUrl,
-    hermesWakeSecreto,
+    eventosUrl,
+    eventosSecreto,
     wakeStaleMaxMs: intEnv('WAKE_STALE_MAX_MIN', 30) * 60_000,
     wakeDebounceMs: intEnv('WAKE_DEBOUNCE_MIN', 5) * 60_000,
   };

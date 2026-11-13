@@ -5,7 +5,7 @@ import type { MessageReceivedEvent } from '@mcp-socialmedia/shared';
 import { loadConfig, BridgeConfig, ConfigError } from './config';
 import { procesar, SUBJECT_TELEGRAM, SUBJECT_WHATSAPP } from './filter';
 import { Entrega } from './entrega';
-import { AvisoHermes } from './hermes';
+import { PublicadorWake } from './eventos';
 import { casoWhatsapp, esViejo } from './caso';
 import { DespertarRafaga } from './rafaga';
 import { IndiceRefs } from './refs';
@@ -38,7 +38,7 @@ function countWakeDrop(reason: string): void {
   metrics.wakeDroppedByReason.set(reason, (metrics.wakeDroppedByReason.get(reason) ?? 0) + 1);
 }
 
-function statusPayload(nats: NatsSubscriber, meCache: MeCache, dedup: DedupCache, refs: IndiceRefs, entrega: Entrega, aviso: AvisoHermes | null): Record<string, unknown> {
+function statusPayload(nats: NatsSubscriber, meCache: MeCache, dedup: DedupCache, refs: IndiceRefs, entrega: Entrega, aviso: PublicadorWake | null): Record<string, unknown> {
   return {
     status: nats.isConnected() && meCache.isReady() ? 'ok' : 'degraded',
     service: 'correo-bridge',
@@ -58,7 +58,7 @@ function statusPayload(nats: NatsSubscriber, meCache: MeCache, dedup: DedupCache
 }
 
 /** Prometheus text for the VMServiceScrape; the alert reads correo_bridge_agotados_total. */
-function metricsText(entrega: Entrega, aviso: AvisoHermes | null): string {
+function metricsText(entrega: Entrega, aviso: PublicadorWake | null): string {
   const c = entrega.contadores;
   const lineas = [
     '# HELP correo_bridge_agotados_total Messages discarded after 3 attempts / 30 s without the correo core.',
@@ -79,10 +79,9 @@ function metricsText(entrega: Entrega, aviso: AvisoHermes | null): string {
   if (aviso) {
     const w = aviso.contadores;
     lineas.push(
-      '# HELP correo_bridge_despertares_total Secretary wakes sent to Hermes, by result.',
+      '# HELP correo_bridge_despertares_total Secretary wakes published on the Synapse bus, by result.',
       '# TYPE correo_bridge_despertares_total counter',
-      `correo_bridge_despertares_total{resultado="enviado"} ${w.enviados}`,
-      `correo_bridge_despertares_total{resultado="duplicado"} ${w.duplicados}`,
+      `correo_bridge_despertares_total{resultado="publicado"} ${w.publicados}`,
       `correo_bridge_despertares_total{resultado="rechazado"} ${w.rechazados}`,
       `correo_bridge_despertares_total{resultado="agotado"} ${w.agotados}`,
       '# HELP correo_bridge_despertares_descartados_total Entrants that did not wake the secretary, by reason.',
@@ -139,15 +138,18 @@ async function main(): Promise<void> {
   logger.info({ enableOutbound: config.enableOutbound }, 'send route');
   // DGX-1533: the wake of the Skirmshop secretary (inbound-only; the answer is the
   // case session's, after Dani's OK). GitOps switch: HERMES_WAKE_ENABLED=true.
-  // CONTRACT: http.webhook.hermes_whatsapp_notify.v1 — POST /p/secretaria-skirmshop/webhooks/whatsapp-skirmshop
+  // SC-5382: it is PUBLISHED on the Synapse bus; the gateway's inbox+outbox is the
+  // durability limit, and the gmail adapter delivers it to Hermes with retries and DLQ.
+  // CONTRACT: http.gateway.eventos.v1 — POST /eventos, productor `correo`
+  // CONTRACT: eventos.hermes.wake
   const aviso =
-    config.hermesWakeUrl && config.hermesWakeSecreto
-      ? new AvisoHermes({ url: config.hermesWakeUrl, secreto: config.hermesWakeSecreto, logger })
+    config.eventosUrl && config.eventosSecreto
+      ? new PublicadorWake({ eventosUrl: config.eventosUrl, secreto: config.eventosSecreto, logger })
       : null;
   logger.info({ wakeEnabled: aviso !== null }, 'secretary wake route');
   // DGX-1550: one wake per burst — WAKE_DEBOUNCE_MIN minutes from the first entrante
   // of a caso; a live chat no longer means one Hermes turn per message.
-  const rafaga = aviso ? new DespertarRafaga(config.wakeDebounceMs, (t, id) => aviso.avisar(t, id), logger) : null;
+  const rafaga = aviso ? new DespertarRafaga(config.wakeDebounceMs, (t, id) => aviso.publicar(t, id), logger) : null;
   // One NATS message, start to end. One sequential loop per subject: a dead
   // core costs each loop at most TOPE_MS per event (entrega.ts).
   const handle = async (subject: string, data: Uint8Array): Promise<void> => {

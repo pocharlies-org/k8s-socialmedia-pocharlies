@@ -1,7 +1,7 @@
 import type { MessageReceivedEvent } from '@mcp-socialmedia/shared';
 import type pino from 'pino';
 import { tarjetaWhatsapp } from './caso';
-import type { ResultadoAviso } from './hermes';
+import type { ResultadoWake } from './eventos';
 
 /**
  * DGX-1550: burst coalescer for the secretary wake (was: one full Hermes turn —
@@ -29,7 +29,7 @@ export class DespertarRafaga {
 
   constructor(
     private readonly ms: number,
-    private readonly avisar: (tarjeta: string, requestId: string) => Promise<ResultadoAviso>,
+    private readonly avisar: (tarjeta: string, requestId: string) => Promise<ResultadoWake>,
     private readonly logger: pino.Logger
   ) {}
 
@@ -39,7 +39,7 @@ export class DespertarRafaga {
     if (abierta) {
       abierta.eventos.push(evento);
       if (abierta.eventos.length > MAX_EN_LA_VENTANA) abierta.eventos.shift();
-      abierta.ref = ref; // the wake's X-Request-ID: the last message of the burst
+      abierta.ref = ref; // the wake's request_id (Hermes dedups on it): the last message of the burst
       return;
     }
     const ventana: Ventana = { chat, ref, eventos: [evento], temporizador: undefined as never };
