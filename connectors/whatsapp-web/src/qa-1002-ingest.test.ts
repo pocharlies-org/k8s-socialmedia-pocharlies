@@ -622,3 +622,30 @@ test('GET /chats/:jid/photo: a picture hidden by privacy (not-authorized) is 404
     restore();
   }
 });
+
+// DGX-1587: reading on the phone never reaches the linked session (read state is
+// per-device), so the DB badge stuck at "1" forever. Sending in the chat proves it
+// was open: the fromMe upsert must zero the badge in the store and in the DB.
+test('a message WE send zeroes the phantom unread badge (store + DB)', async () => {
+  const routeCanonical = (sql: string): Rows =>
+    /WITH RECURSIVE hop/i.test(sql)
+      ? [{ id: 'professional:2222@lid', external_id: '2222@lid' }]
+      : route(sql);
+  const { calls, restore } = stubPool(routeCanonical);
+  try {
+    const { client, handlers } = makeClient();
+    const norm = priv(client).normalizeJid('2222@lid');
+    priv(client).chatStore.set(norm, { id: norm, name: 'X', unreadCount: 5 });
+    await handlers['messages.upsert']({
+      type: 'notify',
+      messages: [waMessage({ key: { remoteJid: '2222@lid', id: 'SENT-1', fromMe: true }, message: { conversation: 'va' } })],
+    });
+    await new Promise(r => setTimeout(r, 50)); // setCanonicalChatState is fire-and-forget
+    assert.equal(priv(client).chatStore.get(norm)?.unreadCount, 0, 'in-memory store cleared');
+    const zero = calls.find(c => /UPDATE conversations SET[\s\S]*unread_count = CASE/.test(c.sql));
+    assert.ok(zero, 'DB badge zeroed');
+    assert.equal(zero.params[1], 0);
+  } finally {
+    restore();
+  }
+});
