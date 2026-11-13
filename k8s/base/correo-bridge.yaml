@@ -157,6 +157,31 @@ spec:
     - secretKey: webhook_secret
       remoteRef: { key: hermes-webhook-gmail/webhook_secret }
 ---
+# SC-5422 (SC-5382 pieza 5): HMAC with which the bridge signs its `POST /eventos`
+# wakes (routing key `eventos.hermes.wake`) as producer `correo` of the synapse
+# gateway. The gateway verifies the same item (ExternalSecret
+# synapse-gateway-webhooks, ns synapse). Connect form, refresh OnChange — unlike
+# the three above, which still use the retired `onepassword` store. Consumed as
+# secretKeyRef `correo-bridge-eventos-correo`/`webhook_secret` by the bridge
+# deployment in the SC-5382 PR.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: correo-bridge-eventos-correo
+  namespace: whatsapp-mcp
+spec:
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword-connect, kind: ClusterSecretStore }
+  target:
+    name: correo-bridge-eventos-correo
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: webhook_secret
+      remoteRef:
+        key: synapse-eventos-correo
+        property: webhook_secret
+---
 # Ingress: only the core pod (ns correo, component=core) and the vmagent. The pod is
 # excluded from whatsapp-mcp-allow-same-namespace (networkpolicy.yaml), so no
 # other pod of this namespace reaches it.
