@@ -245,6 +245,8 @@ images:
   # INFRA-125 (INFRA-746 B): v1.3.135 -> v1.3.137 (run 41810030536, deploy/prod@dd75cfc, GREEN).
   # El bot Sauvage ejecuta la cadena dm->ban->readmision de la parte B; sale con
   # SAUVAGE_MODERATION=off (la activacion es del operador). Digest comprobado en Harbor (crane).
+  # INFRA-125 (INFRA-745 C1): v1.3.149 -> v1.3.150 (tabla savage_pasadas, migracion 044, y guardado
+  # de sesion por pasada; fix C1). Digest comprobado en Harbor (crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
-    newTag: v1.3.149
-    digest: sha256:81b329542c5c103ceb795b4fee38f1eda8eef50860cef132c5be8395b434ce93
+    newTag: v1.3.150
+    digest: sha256:52f7f6133563331a30d97d6b8f4027e532244109d18cf3984518975c66152e14
