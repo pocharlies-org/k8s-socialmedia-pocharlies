@@ -190,9 +190,16 @@ images:
   # INFRA-1196 06-11: v1.3.139 -> v1.3.141 (run 42158985544, deploy/prod@7870a48): #456 añade la tool
   # social_update_content (edita el caption de una publicacion IG por media id via Graph API). Mueve
   # mcp-server, mcp-sse y los CronJobs brain-* (misma imagen). Digest de la evidencia del release.
+  # INFRA-125 (INFRA-745 C1): v1.3.141 -> v1.3.150 (run del release que lleva la migracion 044
+  # savage_pasadas, fusionada en deploy/prod por la PR 492; mismo tag y misma migracion que ya
+  # pinneó el bot en 47ed375). Sin este avance el Job PreSync whatsapp-mcp-migrate sigue en
+  # v1.3.141, la 044 no se aplica y savage_pasadas no existe (C1 de INFRA-745). Mueve mcp-server,
+  # mcp-sse, social-api, los CronJobs brain-* y voz, el backfill y el Job de migracion (bloque
+  # images: reescribe por nombre). Digest comprobado en Harbor (crane digest ...:v1.3.150 =
+  # sha256:acb11e3f..., distinto del v1.3.150 del bot, que es otra imagen).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.141
-    digest: sha256:bdcb5e6c8dc5fedb3eb7874defc74db7512aa3fac6e8e8c865c5d83b07f04b31
+    newTag: v1.3.150
+    digest: sha256:acb11e3fa413c0a58783b541df38b348cacc6ba5df667663dae02812a0de8ac2
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
