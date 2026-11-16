@@ -22,7 +22,7 @@ spec:
     metadata: { labels: { app: whatsapp-synapse-bridge } }
     spec:
       enableServiceLinks: false
-      nodeSelector: { topology: ovh, kubernetes.io/arch: amd64 }  # SC-5633: fuera del x86 (solo LLMs y casa); sin necesidad de IP de casa: habla con NATS in-cluster, el connector por DNS y Synapse por HTTPS
+      nodeSelector: { node-pool: ovh-heavy, kubernetes.io/arch: amd64 }  # SC-5633: atlantic (topology=ovh tambien casa con los control-plane ks5), fuera del x86 (solo LLMs y casa); sin necesidad de IP de casa: habla con NATS in-cluster, el connector por DNS y Synapse por HTTPS
       containers:
         - name: whatsapp-synapse-bridge
           image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge:latest
