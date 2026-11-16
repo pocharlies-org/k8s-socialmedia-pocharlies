@@ -134,7 +134,11 @@ export async function main(): Promise<void> {
   // exchange). Frees the delivery slot instead of requeueing hot.
   await ch.assertQueue(retryQueue, {
     durable: true,
-    arguments: { 'x-message-ttl': retryDelayMs, 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': queue },
+    arguments: {
+      'x-message-ttl': retryDelayMs,
+      'x-dead-letter-exchange': '',
+      'x-dead-letter-routing-key': queue,
+    },
   });
 
   await ch.prefetch(1);
@@ -143,7 +147,10 @@ export async function main(): Promise<void> {
     try {
       const disposition = await handleVoiceEvent(msg.content, { deps, runOpts });
       if (disposition === 'retry') {
-        ch.publish('', retryQueue, msg.content, { persistent: true, contentType: 'application/json' });
+        ch.publish('', retryQueue, msg.content, {
+          persistent: true,
+          contentType: 'application/json',
+        });
         ch.ack(msg);
       } else {
         ch.ack(msg);
@@ -152,7 +159,10 @@ export async function main(): Promise<void> {
       // Unexpected (DB unreachable, etc.): requeue after the same retry path so
       // we neither lose the event nor hot-loop.
       logger.error({ err: e }, 'voice-worker: handler threw, routing to retry');
-      ch.publish('', retryQueue, msg.content, { persistent: true, contentType: 'application/json' });
+      ch.publish('', retryQueue, msg.content, {
+        persistent: true,
+        contentType: 'application/json',
+      });
       ch.ack(msg);
     }
   });
