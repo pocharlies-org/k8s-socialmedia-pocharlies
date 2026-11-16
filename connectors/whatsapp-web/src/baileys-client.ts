@@ -3072,7 +3072,7 @@ export class BaileysClient extends EventEmitter {
       publishVoicePendingBestEffort(
         this.voiceEvents,
         {
-          messageId: msgId ?? waMessage.waMessageId,
+          messageId: msgId,
           account: connectorAccount(),
           waMessageId: waMessage.waMessageId,
         },

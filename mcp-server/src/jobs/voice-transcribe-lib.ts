@@ -107,7 +107,7 @@ WHERE m.platform = 'whatsapp'
 
 /**
  * DGX-1640: fetch one AUDIO/PTT row by its event ids (row id, falling back to
- * the raw wa_message_id when the connector could not return the row id). Used by
+ * the raw wa_message_id for an event that names only that). Used by
  * the event worker — the event names the row, so no queue query is needed.
  * Returns null when no live AUDIO/PTT row matches (stale/foreign event → ack).
  */
@@ -140,8 +140,8 @@ export async function selectVoiceRowById(
 /**
  * Optimistic claim: flip a row to `processing` ONLY while it is still
  * claimable (empty content, status pending or unmarked). Returns true when this
- * worker won the claim — false means another pass (a racing CronJob overlap or
- * a manual backfill Job) already took the row, and the caller must skip it.
+ * worker won the claim — false means another pass (the event worker, a manual
+ * voice-transcribe.ts run or a backfill Job) already took the row, and the caller must skip it.
  * Postgres serializes the two UPDATEs on the row, so exactly one worker sees
  * rowCount 1. The claim instant rides in metadata so crash recovery can tell
  * "being worked on" from "abandoned" without a schema change (messages has no
@@ -338,8 +338,8 @@ export interface VoiceDeps {
 
 /**
  * Build the Pool + MinIO-backed VoiceDeps from process.env. Shared by the event
- * worker and the backfill/cron pass so the wiring lives in one place (DGX-1640:
- * the worker replaced the CronJob's trigger, not its machinery). Throws if
+ * worker and the manual voice-transcribe.ts pass so the wiring lives in one place
+ * (DGX-1640: the worker replaced the CronJob's trigger, not its machinery). Throws if
  * DATABASE_URL is unset (SC-1239 C2: no fallback).
  */
 export function buildVoiceDeps(logger?: VoiceDeps['logger']): { pool: Pool; deps: VoiceDeps } {

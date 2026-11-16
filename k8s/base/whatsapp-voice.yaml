@@ -9,16 +9,17 @@
 # (ns llm, whisper-large-v3, API OpenAI /v1/audio/transcriptions): el worker es
 # un cliente HTTP fino, no monta modelo ni GPU propios.
 #
-# Los dos CronJobs corren en `topology: lan, amd64` (sauvage/ks5/ubuntu), como
+# El worker y el CronJob de backfill corren en `topology: lan, amd64` (sauvage/ks5/ubuntu), como
 # todo el namespace: NADA se programa en los Sparks (gx10-ec3d / nvidia-dgx).
 # stt-turbo vive en gx10-ec3d porque es un servicio residente preexistente del
 # plano llm; llamarlo por HTTP no añade carga de programación a los Sparks y su
-# cola es de un solo worker (VOICE_CONCURRENCY=2 es un tope de cortesía).
+# cola es de un solo worker (el worker va de uno en uno, prefetch 1; el
+# VOICE_CONCURRENCY=2 del backfill es un tope de cortesía).
 #
 # Imagen: la misma que mcp-server/brain-ingest (whatsappmcp-mcp-server, fuente
 # + tsx). El pin de digest del overlay (`patch-image.yaml` / `images:` del
 # prod kustomization) reescribe el nombre de imagen para TODOS los consumidores,
-# así que este CronJob viaja con el mismo digest que el mcp-server.
+# así que estos workloads viajan con el mismo digest que el mcp-server.
 ---
 # (a) RUTA VIVA (DGX-1640): worker residente que consume `eventos.whatsapp.voice.pending`
 # del bus de Synapse (RabbitMQ, ns databases) y transcribe la fila que el conector marcó

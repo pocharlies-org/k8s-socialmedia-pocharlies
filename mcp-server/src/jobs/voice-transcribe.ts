@@ -1,11 +1,12 @@
 /**
- * INFRA-364 fase 0 — live voice-note transcription pass (CronJob entry).
+ * INFRA-364 fase 0 — manual voice-note transcription pass (entry point; nothing
+ * schedules it since DGX-1640, the live path is voice-transcribe-worker.ts).
  *
- * Every few minutes, transcribe the WhatsApp AUDIO/PTT rows the connector
+ * On demand, transcribe the WhatsApp AUDIO/PTT rows the connector
  * marked `transcription_status=pending` at insert (plus recently-created
  * unmarked rows, adopted within VOICE_ADOPT_WINDOW_DAYS so a connector gap
  * never loses a fresh voice note). Historical rows are NOT adopted here — they
- * only enter the queue through voice-backfill.ts, so deploying this CronJob
+ * only enter the queue through voice-backfill.ts, so running this
  * cannot silently start the 4.5k-row historical run.
  *
  * Env:
@@ -17,7 +18,7 @@
  *   VOICE_BATCH             rows per claim (default 20)
  *   VOICE_CONCURRENCY       parallel STT requests (default 2 — stt-turbo is 1 replica)
  *   VOICE_MAX_ROWS          cap per run, 0 = no cap (default 0)
- *   VOICE_MAX_RUNTIME_MS    self-limit below activeDeadlineSeconds (default 240000)
+ *   VOICE_MAX_RUNTIME_MS    self-limit per run (default 240000)
  *   VOICE_MAX_ATTEMPTS      transient-failure retry budget (default 3)
  *   VOICE_ADOPT_WINDOW_DAYS adopt unmarked rows younger than N (default 7)
  *   VOICE_MEDIA_GRACE_HOURS wait for the async MinIO upload (default 6)
