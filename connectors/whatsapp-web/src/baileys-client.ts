@@ -125,10 +125,7 @@ import {
   markMessagesRead,
   participantDisplayName,
 } from './db-writer';
-import {
-  publishVoicePendingBestEffort,
-  voiceEventsConfigFromEnv,
-} from './voice-events';
+import { publishVoicePendingBestEffort, voiceEventsConfigFromEnv } from './voice-events';
 import {
   appendMediaEligible,
   documentFileName,

@@ -57,10 +57,7 @@ export function signEventosBody(bytes: Buffer, secret: string): string {
 
 /** Serializes ONCE; the signed bytes are the sent bytes (byte-identity invariant). */
 export function buildEventosBody(ev: VoicePendingEvent): Buffer {
-  return Buffer.from(
-    JSON.stringify({ routing_key: VOICE_PENDING_ROUTING_KEY, ...ev }),
-    'utf-8'
-  );
+  return Buffer.from(JSON.stringify({ routing_key: VOICE_PENDING_ROUTING_KEY, ...ev }), 'utf-8');
 }
 
 export interface VoiceEventsLogger {
