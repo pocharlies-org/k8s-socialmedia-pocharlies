@@ -90,6 +90,12 @@ S3_ENV = [
     _env("MINIO_BUCKET", "socialmedia-media"),
 ]
 NATS_ENV = _env("NATS_URL", f"nats://whatsapp-mcp-nats.{SVC}:4222")
+# DGX-1640: voice notes publish eventos.whatsapp.voice.pending to the Synapse gateway's
+# durable /eventos (replaces the transcription CronJob). The secret is the existing
+# WHATSAPP_WEBHOOK_SECRET (envFrom whatsapp-mcp-secrets); empty URL ⇒ publisher disabled.
+SYNAPSE_EVENTOS_URL_ENV = _env(
+    "SYNAPSE_EVENTOS_URL", "http://synapse-gateway.synapse.svc.cluster.local:18790/eventos"
+)
 # dgx-messages (ns messages): since the DGX-190 extraction the messaging service
 # owns /api/messages/_connector/* — the connectors POST ephemeral events (typing,
 # reaction-snapshot) there, HMAC-signed with CONNECTOR_SHARED_SECRET (envFrom
@@ -178,6 +184,7 @@ def render_whatsapp(account):
         # shared/notifyDashboard; without DASHBOARD_URL the notifier is a no-op.
         DASHBOARD_URL_ENV,
         DB_ENV,
+        SYNAPSE_EVENTOS_URL_ENV,
         _env("ENABLE_SENDING", "true"),
         _env("SESSION_PATH", "/app/persistent-session"),
     ]

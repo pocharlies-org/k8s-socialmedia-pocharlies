@@ -105,6 +105,38 @@ WHERE m.platform = 'whatsapp'
 }
 
 /**
+ * DGX-1640: fetch one AUDIO/PTT row by its event ids (row id, falling back to
+ * the raw wa_message_id when the connector could not return the row id). Used by
+ * the event worker — the event names the row, so no queue query is needed.
+ * Returns null when no live AUDIO/PTT row matches (stale/foreign event → ack).
+ */
+export async function selectVoiceRowById(
+  pool: Pool,
+  messageId: string,
+  waMessageId: string
+): Promise<VoiceRow | null> {
+  const res = await pool.query(
+    `SELECT m.id, m.account, m.message_type, m.created_at, m.wa_timestamp,
+            m.metadata->>'transcription_status' AS status,
+            COALESCE((m.metadata->>'transcription_attempts')::int, 0) AS attempts,
+            a.id AS attachment_id, a.file_url, a.mime_type
+       FROM messages m
+       LEFT JOIN LATERAL (
+         SELECT id, file_url, mime_type FROM attachments
+          WHERE message_id = m.id AND file_type IN ('AUDIO','PTT')
+          ORDER BY id DESC LIMIT 1
+       ) a ON TRUE
+      WHERE m.platform = 'whatsapp'
+        AND m.is_deleted = false
+        AND m.message_type IN ('AUDIO','PTT')
+        AND (m.id = $1 OR m.wa_message_id = $2)
+      LIMIT 1`,
+    [messageId, waMessageId]
+  );
+  return (res.rows[0] as VoiceRow | undefined) ?? null;
+}
+
+/**
  * Optimistic claim: flip a row to `processing` ONLY while it is still
  * claimable (empty content, status pending or unmarked). Returns true when this
  * worker won the claim — false means another pass (a racing CronJob overlap or

@@ -56,6 +56,8 @@ spec:
           value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: SYNAPSE_EVENTOS_URL
+          value: http://synapse-gateway.synapse.svc.cluster.local:18790/eventos
         - name: ENABLE_SENDING
           value: 'true'
         - name: SESSION_PATH
@@ -250,6 +252,8 @@ spec:
           value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: SYNAPSE_EVENTOS_URL
+          value: http://synapse-gateway.synapse.svc.cluster.local:18790/eventos
         - name: ENABLE_SENDING
           value: 'true'
         - name: SESSION_PATH
@@ -452,6 +456,8 @@ spec:
           value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: SYNAPSE_EVENTOS_URL
+          value: http://synapse-gateway.synapse.svc.cluster.local:18790/eventos
         - name: ENABLE_SENDING
           value: 'true'
         - name: SESSION_PATH

@@ -2781,6 +2781,33 @@ contracts:
     DLQ, which the unattended re-drive of SC-5380 returns. request_id is Hermes'' dedup id: for WhatsApp
     it stays whatsapp-skirmshop:<chat>:<ref of the last message of the burst> (DGX-1550), so a re-drive
     never opens a second turn. Registry: synapse libs/synapse-contracts/registry.yaml.'
+- id: eventos.whatsapp.voice.pending
+  kind: routing-key
+  value: eventos.whatsapp.voice.pending
+  role: both
+  files:
+  - connectors/whatsapp-web/src/voice-events.ts
+  - mcp-server/src/jobs/voice-transcribe-worker.ts
+  status: active
+  note: 'DGX-1640. A WhatsApp voice note (AUDIO/PTT row, content NULL, metadata.transcription_status
+    pending) is transcribed by event, not by the 5-min CronJob. The whatsapp-web connector publishes it
+    through POST /eventos (HMAC with whatsapp.webhook.secret, the same credential as /webhooks/whatsapp);
+    the resident worker (Deployment whatsapp-voice-transcribe, ns whatsapp-mcp) consumes queue
+    voice-transcribe, claims the row and calls stt-turbo. Body {messageId, account, waMessageId}. If the
+    bytes are not in MinIO yet the worker requeues via voice-transcribe.retry (TTL -> DLX), not hot.
+    Registry: synapse libs/synapse-contracts/registry.yaml.'
+- id: voice-transcribe
+  kind: queue
+  value: voice-transcribe
+  role: consumer
+  files:
+  - mcp-server/src/jobs/voice-transcribe-worker.ts
+  status: active
+  note: 'DGX-1640. The queue of the WhatsApp voice transcription worker, bound to
+    eventos.whatsapp.voice.pending and consumed by Deployment whatsapp-voice-transcribe
+    (prefetch 1, durable: an audio that arrives while the worker is down stays queued until it
+    reconnects). The retry uses the sibling queue voice-transcribe.retry (x-message-ttl 30s,
+    x-dead-letter-routing-key back to this one). Replaces the whatsapp-voice-transcribe CronJob.'
 - id: nats.correo-bridge.telegram-message-received.v1
   kind: routing-key
   value: telegram.MessageReceived
