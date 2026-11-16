@@ -25,21 +25,11 @@
  *   VOICE_DRY_RUN           'true' = read + call STT, write nothing (default false)
  *   S3_* / LEGACY_MINIO_* / MINIO_*  media storage (same as the mcp-server)
  */
-import { Pool } from 'pg';
 import pino from 'pino';
-import { MinIOClient } from '../infrastructure/storage/minio-client';
-import { runVoicePass, VoiceDeps } from './voice-transcribe-lib';
+import { runVoicePass, buildVoiceDeps } from './voice-transcribe-lib';
 
 const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
 
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-  throw new Error(
-    'DATABASE_URL is unset: refusing to start the voice-transcribe job without an explicit database connection'
-  );
-}
-
-const STT_URL = process.env.VOICE_STT_URL || 'http://stt-turbo.llm.svc.cluster.local:8000';
 const LANGUAGE = process.env.VOICE_LANGUAGE ?? 'es';
 const ACCOUNT = process.env.VOICE_ACCOUNT || undefined;
 const BATCH = parseInt(process.env.VOICE_BATCH || '20', 10);
@@ -49,25 +39,10 @@ const MAX_RUNTIME_MS = parseInt(process.env.VOICE_MAX_RUNTIME_MS || '240000', 10
 const MAX_ATTEMPTS = parseInt(process.env.VOICE_MAX_ATTEMPTS || '3', 10);
 const ADOPT_WINDOW_DAYS = parseFloat(process.env.VOICE_ADOPT_WINDOW_DAYS || '7');
 const MEDIA_GRACE_HOURS = parseFloat(process.env.VOICE_MEDIA_GRACE_HOURS || '6');
-const STT_TIMEOUT_MS = parseInt(process.env.VOICE_STT_TIMEOUT_MS || '120000', 10);
 const DRY_RUN = process.env.VOICE_DRY_RUN === 'true';
 
 async function main(): Promise<void> {
-  const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
-  const minio = new MinIOClient(
-    process.env.MINIO_ENDPOINT || 'whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local',
-    process.env.MINIO_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '',
-    process.env.MINIO_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '',
-    process.env.MINIO_BUCKET || 'socialmedia-media',
-    (process.env.MINIO_USE_SSL || 'false').toLowerCase() === 'true'
-  );
-  const deps: VoiceDeps = {
-    pool,
-    download: url => minio.downloadFile(url),
-    stt: { url: STT_URL, timeoutMs: STT_TIMEOUT_MS },
-    now: () => new Date(),
-    logger,
-  };
+  const { pool, deps } = buildVoiceDeps(logger);
   const tally = await runVoicePass(deps, {
     dryRun: DRY_RUN,
     adoptUnmarkedDays: ADOPT_WINDOW_DAYS,

@@ -26,6 +26,7 @@
  * transcription) are terminal `failed` with the reason in transcription_error.
  */
 import { Pool } from 'pg';
+import { MinIOClient } from '../infrastructure/storage/minio-client';
 
 /** WhatsApp message types that carry voice audio. */
 export const VOICE_MESSAGE_TYPES = ['AUDIO', 'PTT'] as const;
@@ -333,6 +334,40 @@ export interface VoiceDeps {
   stt: SttConfig;
   now: () => Date;
   logger?: { info(msg: string, meta?: unknown): void; warn(msg: string, meta?: unknown): void };
+}
+
+/**
+ * Build the Pool + MinIO-backed VoiceDeps from process.env. Shared by the event
+ * worker and the backfill/cron pass so the wiring lives in one place (DGX-1640:
+ * the worker replaced the CronJob's trigger, not its machinery). Throws if
+ * DATABASE_URL is unset (SC-1239 C2: no fallback).
+ */
+export function buildVoiceDeps(logger?: VoiceDeps['logger']): { pool: Pool; deps: VoiceDeps } {
+  const DATABASE_URL = process.env.DATABASE_URL;
+  if (!DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL is unset: refusing to start the voice worker without an explicit database connection'
+    );
+  }
+  const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
+  const minio = new MinIOClient(
+    process.env.MINIO_ENDPOINT || 'whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local',
+    process.env.MINIO_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '',
+    process.env.MINIO_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '',
+    process.env.MINIO_BUCKET || 'socialmedia-media',
+    (process.env.MINIO_USE_SSL || 'false').toLowerCase() === 'true'
+  );
+  const deps: VoiceDeps = {
+    pool,
+    download: url => minio.downloadFile(url),
+    stt: {
+      url: process.env.VOICE_STT_URL || 'http://stt-turbo.llm.svc.cluster.local:8000',
+      timeoutMs: parseInt(process.env.VOICE_STT_TIMEOUT_MS || '120000', 10),
+    },
+    now: () => new Date(),
+    logger,
+  };
+  return { pool, deps };
 }
 
 export interface VoiceRunOptions {

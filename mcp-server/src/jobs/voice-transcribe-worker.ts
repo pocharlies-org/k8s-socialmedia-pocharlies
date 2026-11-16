@@ -30,13 +30,12 @@
  *   VOICE_QUEUE / VOICE_RETRY_QUEUE  queue names (defaults below)
  *   S3_* / LEGACY_MINIO_* / MINIO_*  media storage (same as the mcp-server)
  */
-import { Pool } from 'pg';
 import * as amqp from 'amqplib';
 import pino from 'pino';
-import { MinIOClient } from '../infrastructure/storage/minio-client';
 import {
   VoiceDeps,
   VoiceRunOptions,
+  buildVoiceDeps,
   selectVoiceRowById,
   transcribeVoiceRow,
 } from './voice-transcribe-lib';
@@ -103,33 +102,12 @@ export async function handleVoiceEvent(
 }
 
 export async function main(): Promise<void> {
-  const DATABASE_URL = process.env.DATABASE_URL;
-  if (!DATABASE_URL) {
-    throw new Error('DATABASE_URL is unset: refusing to start the voice worker without a database');
-  }
   const RABBITMQ_URL = process.env.RABBITMQ_URL;
   if (!RABBITMQ_URL) {
     throw new Error('RABBITMQ_URL is unset: the voice worker is event-driven, it needs the bus');
   }
 
-  const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
-  const minio = new MinIOClient(
-    process.env.MINIO_ENDPOINT || 'whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local',
-    process.env.MINIO_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '',
-    process.env.MINIO_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '',
-    process.env.MINIO_BUCKET || 'socialmedia-media',
-    (process.env.MINIO_USE_SSL || 'false').toLowerCase() === 'true'
-  );
-  const deps: VoiceDeps = {
-    pool,
-    download: url => minio.downloadFile(url),
-    stt: {
-      url: process.env.VOICE_STT_URL || 'http://stt-turbo.llm.svc.cluster.local:8000',
-      timeoutMs: parseInt(process.env.VOICE_STT_TIMEOUT_MS || '120000', 10),
-    },
-    now: () => new Date(),
-    logger,
-  };
+  const { pool, deps } = buildVoiceDeps(logger);
   const runOpts: VoiceRunOptions = {
     dryRun: false,
     adoptUnmarkedDays: 0, // events name the row; no adoption window needed
