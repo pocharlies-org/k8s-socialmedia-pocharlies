@@ -125,6 +125,7 @@ import {
   markMessagesRead,
   participantDisplayName,
 } from './db-writer';
+import { publishVoicePendingBestEffort, voiceEventsConfigFromEnv } from './voice-events';
 import {
   appendMediaEligible,
   documentFileName,
@@ -1669,6 +1670,10 @@ export class BaileysClient extends EventEmitter {
     process.env.WA_AUDIO_PREEMIT_TIMEOUT_MS || '15000',
     10
   );
+  // DGX-1640: after an AUDIO/PTT row lands pending, publish eventos.whatsapp.voice.pending
+  // to Synapse so the resident worker transcribes it (replaces the 5-min CronJob). Env-gated:
+  // null (no SYNAPSE_EVENTOS_URL / secret) = silent no-op, the historical behavior.
+  private readonly voiceEvents = voiceEventsConfigFromEnv();
   private mediaPersistenceLocks = new Map<string, Promise<void>>();
 
   // me — populated on `connection.update { connection: 'open' }`
@@ -3055,6 +3060,24 @@ export class BaileysClient extends EventEmitter {
       if (waMessage.messageType === 'REACTION' || waMessage.messageType === 'POLL_VOTE') {
         this.emit('reaction', waMessage);
       }
+    }
+    // DGX-1640: voice note landed pending → tell Synapse (durable outbox) so the
+    // resident worker transcribes it. Fire-and-forget; never blocks ingest. Only
+    // for live ingest (options.publishEvent !== false), matching the row's
+    // pending marking in db-writer.
+    if (
+      options.publishEvent !== false &&
+      (waMessage.messageType === 'AUDIO' || waMessage.messageType === 'PTT')
+    ) {
+      publishVoicePendingBestEffort(
+        this.voiceEvents,
+        {
+          messageId: msgId ?? waMessage.waMessageId,
+          account: connectorAccount(),
+          waMessageId: waMessage.waMessageId,
+        },
+        this.logger
+      );
     }
     return { inserted: true, waMessage };
   }
