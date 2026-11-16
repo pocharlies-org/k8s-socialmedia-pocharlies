@@ -36,6 +36,7 @@ import {
   VoiceDeps,
   VoiceRunOptions,
   buildVoiceDeps,
+  runVoicePass,
   selectVoiceRowById,
   transcribeVoiceRow,
 } from './voice-transcribe-lib';
@@ -115,6 +116,22 @@ export async function main(): Promise<void> {
     maxAttempts: parseInt(process.env.VOICE_MAX_ATTEMPTS || '3', 10),
     language: process.env.VOICE_LANGUAGE ?? 'es',
   };
+
+  // C7: al arrancar, una pasada cubre lo que el disparo por evento no puede ver —
+  // claims `processing` abandonados (worker muerto a mitad) y filas `pending` cuyo
+  // evento se perdió (outbox no entregado, worker reiniciado). runVoicePass recupera
+  // los claims caducados y reclama pending en todas las cuentas; luego ya escuchamos.
+  // VOICE_STARTUP_PASS=false la apaga (p. ej. en un segundo réplica del worker).
+  if ((process.env.VOICE_STARTUP_PASS || 'true').toLowerCase() !== 'false') {
+    const tally = await runVoicePass(deps, {
+      ...runOpts,
+      batch: parseInt(process.env.VOICE_BATCH || '20', 10),
+      concurrency: parseInt(process.env.VOICE_CONCURRENCY || '2', 10),
+      maxRows: parseInt(process.env.VOICE_STARTUP_MAX_ROWS || '0', 10),
+      maxRuntimeMs: parseInt(process.env.VOICE_STARTUP_MAX_RUNTIME_MS || '240000', 10),
+    });
+    logger.info({ ...tally }, 'voice-worker: startup pass done');
+  }
 
   const queue = process.env.VOICE_QUEUE || VOICE_QUEUE;
   const retryQueue = process.env.VOICE_RETRY_QUEUE || VOICE_RETRY_QUEUE;
