@@ -33,7 +33,7 @@ spec:
   dataFrom:
     - extract: { key: whatsapp-mcp }
   # INFRA-364 (01-10-2026): LLM_API_KEY = virtual key `brain` de LiteLLM (prioridad minima,
-  # bot, sin fallback). La lee SOLO el LLM de las ventanas del brain (CronJob brain-windows);
+  # bot, sin fallback). La lee SOLO el LLM de las ventanas del brain (worker brain-windows);
   # vive en su propio item.
   # OPENAI_API_KEY (02-10-2026, Dani): virtual key `socialmedia` de LiteLLM, la UNICA de todo
   # socialmedia (mcp-sse / mcp-server: summarize, search, drafts, digest; y la consola
@@ -49,7 +49,7 @@ spec:
 
 ---
 # INFRA-364: URL AMQP del usuario RabbitMQ whatsapp_mcp_brain_windows (vhost
-# /synapse; configure ^$, write ^events$, read ^$). El CronJob brain-windows
+# /synapse; configure ^$, write ^events$, read ^$). El worker brain-windows
 # publica con el los eventos brain_window.* en Synapse. Item propio: un campo
 # nuevo en el item whatsapp-mcp tardaria hasta 96 h en salir de la cache de ESO.
 apiVersion: external-secrets.io/v1
@@ -222,121 +222,99 @@ spec:
 # (scripts/render-connectors.py). Edit k8s/base/social-accounts.json, not here.
 ---
 # ── Brain windows (INFRA-364, ADR 0002): conversation windows, Synapse -> Hindsight ─
-# Replaces the per-message `brain-ingest` CronJob (retired here on 30-09-2026,
-# #144 had already suspended it: Dani's ADR 0002 indexes WhatsApp/Telegram by
-# 1-hour-silence windows, parent + 200-400-token children, LLM summaries on
-# closed non-bot windows). The old per-message points were purged by the brain
-# repo (ADR 0002 §9 fase 1).
+# Indexes WhatsApp/Telegram by 1-hour-silence windows (parent + 200-400-token
+# children, LLM summaries on closed non-bot windows). The live producer of
+# Hindsight's conversation index: it publishes brain_window.<tenant>.* and
+# synapse-adapter-hindsight retains them (bank `personal`), which is what
+# mcp-sse's semantic search reads (SC-5827 retired the Brain).
 #
-# Each pass (mcp-server image: pg + tsx + the jobs):
-#   1. reads messages changed after `brain_windows_cursor` (updated_at keyset —
-#      edits, deletions, late history syncs and voice notes transcribed hours
-#      later all move updated_at, migration 015);
-#   2. recomputes the windows of the affected chats and diffs them against
-#      `brain_windows`: gone -> brain_window.<tenant>.deleted, new/changed ->
-#      brain_window.<tenant>.upserted (Synapse ingests both);
-#   3. runs the LLM (LiteLLM alias `tooling`, 2 in parallel by default, closed
-#      windows only, capped per pass) and re-pushes the parents with summary.
-#
-# ON since 02-10-2026 (INFRA-364). SC-5827 (16-11): el Brain murió; este cron
-# es hoy el productor vivo de las ventanas de conversación: publica
-# brain_window.<tenant>.* y synapse-adapter-hindsight los retiene en Hindsight
-# (banco `personal`), que es lo que lee la búsqueda semántica de mcp-sse
-# (SEMANTIC_PROVIDER=hindsight). El push directo al Brain (BRAIN_WINDOWS_SINK=
-# http) y el backfill se borraron con él; el sink único es Synapse.
-apiVersion: batch/v1
-kind: CronJob
+# SC-5926 (pieza A5 de SC-5806, «eventos, nunca sondeo»): era un CronJob de
+# 30 min; ahora es un worker residente que despierta la base. La migración 045
+# hace pg_notify('brain_windows_changes', {account}) en cada sentencia que mueve
+# messages.updated_at (mensaje nuevo, edición, borrado, voz transcrita, history
+# sync tardío) y el worker:
+#   1. recalcula la cuenta (debounce 15 s): mensajes tras `brain_windows_cursor`,
+#      ventanas de los chats afectados, diff contra `brain_windows` →
+#      brain_window.<tenant>.upserted|deleted. Sin LLM: no espera al residente;
+#   2. lanza el LLM (LiteLLM `tooling`, 2 en paralelo, BRAIN_WINDOWS_MAX_LLM por
+#      cuenta y oleada) con un timer al cierre más próximo que dice el ledger;
+#      una ventana fallida espera su backoff (10 min x 2^n, tope 6 h) y una
+#      oleada sin ningún resumen pausa el LLM (10 min, doblando hasta 1 h).
+# NOTIFY no es durable: al arrancar hace una pasada por cursor, y si pierde la
+# conexión del LISTEN sale con código 1 y Kubernetes lo relanza a esa pasada.
+# replicas: 1 y Recreate: dos workers recalcularían la misma cuenta a la vez.
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: brain-windows
   namespace: whatsapp-mcp
+  labels: { app: brain-windows }
 spec:
-  schedule: "*/30 * * * *"
-  timeZone: Europe/Madrid
-  suspend: false
-  concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 60
-  successfulJobsHistoryLimit: 2
-  # SC-3002 (30-10): con TTL 3600 el job fallido y su pod se borraban a la hora
-  # del fallo y el RCA quedaba pendiente (6 fallos en 5 días sin evidencia: el
-  # collector de logs ya no alcanzaba al contenedor). 3 fallos se ven enteros.
-  failedJobsHistoryLimit: 3
-  jobTemplate:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: brain-windows }
+  template:
+    metadata:
+      labels: { app: brain-windows }
     spec:
-      backoffLimit: 0
-      # 30-min schedule. The job stops starting work at MAX_RUNTIME_MS (18 min)
-      # and exits 0 before this deadline: an LLM call already in flight can
-      # still take LLM_TIMEOUT_MS x (LLM_RETRIES+1) = 2 x 180 s = 6 min. At 24
-      # min with 240 s x 3 attempts, 6 of ~20 passes overran on 02-10-2026 while
-      # the reindex LLM phase shared the resident model.
-      activeDeadlineSeconds: 1500
-      # SC-3002: 1 h no daba tiempo a capturar el pod fallido (ver arriba).
-      # 24 h: el job fallido y su pod sobreviven a la jornada de guardia.
-      ttlSecondsAfterFinished: 86400
-      template:
-        spec:
-          restartPolicy: Never
-          enableServiceLinks: false
-          nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
-          containers:
-            - name: brain-windows
-              image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
-              command:
-                - sh
-                - -c
-                - |
-                  cd mcp-server
-                  # SC-5827: el sink unico es Synapse (publica brain_window.*;
-                  # synapse-adapter-hindsight los retiene en Hindsight). El push
-                  # directo al Brain (BRAIN_WINDOWS_SINK=http) murio con el Brain.
-                  node --import tsx src/jobs/brain-windows.ts
-              env:
-                - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-                # LLM local (ADR 0002 §5): LiteLLM -> residente de los Sparks,
-                # alias de capacidad `tooling`. La clave debe ser una virtual de
-                # BAJA PRIORIDAD (tipo hermes-batch) via LLM_API_KEY en
-                # whatsapp-mcp-secrets (la `brain`); si faltara, el codigo cae a
-                # OPENAI_API_KEY (la `socialmedia`, la de mcp-sse contra LiteLLM).
-                - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
-                - { name: LLM_CHAT_MODEL, value: "tooling" }
-                # Ventanas y topes por pasada (ADR 0002 §7).
-                - { name: BRAIN_WINDOWS_SCAN_ROWS, value: "5000" }
-                - { name: BRAIN_WINDOWS_MAX_CHATS, value: "100" }
-                - { name: BRAIN_WINDOWS_MAX_LLM, value: "5" }
-                - { name: BRAIN_WINDOWS_COLDSTART_LOOKBACK_HOURS, value: "168" }
-                - { name: BRAIN_WINDOWS_MAX_RUNTIME_MS, value: "1080000" }
-                # Bound an in-flight LLM window so it always fits before the
-                # deadline (see activeDeadlineSeconds); a failed window is
-                # retried by the next pass.
-                - { name: LLM_TIMEOUT_MS, value: "180000" }
-                - { name: LLM_RETRIES, value: "1" }
-                # Métricas de la pasada (borrados rechazados por el tope, fin de
-                # pasada) a VictoriaMetrics; alerta BrainWindowsMassDeleteRefused.
-                - { name: BRAIN_WINDOWS_METRICS_URL, value: "http://vmsingle-vm-victoria-metrics-k8s-stack.monitoring.svc:8428/api/v1/import/prometheus?extra_label=job=brain_windows" }
-                - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
-                # INFRA-364 / SC-5827: la pasada publica en Synapse
-                # (brain_window.<tenant>.upserted|deleted); el unico consumidor
-                # vivo es synapse-adapter-hindsight (Hindsight, banco `personal`).
-                - name: SYNAPSE_RABBITMQ_URL
-                  valueFrom: { secretKeyRef: { name: whatsapp-mcp-synapse-rabbitmq, key: url } }
-                # Chats de bot/monitorizacion y canales (se indexan, no pasan
-                # por el LLM): ConfigMap brain-windows.
-                - { name: BRAIN_WINDOWS_CONFIG_FILE, value: "/brain-config/brain-windows-config.yaml" }
-                # Namespaces e instancia del brain por cuenta: registro de cuentas.
-                - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
-                # OPENAI_API_KEY / LLM_API_KEY salen del
-                # secret whatsapp-mcp-secrets (1Password) via envFrom.
-              envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
-              volumeMounts:
-                - { name: accounts, mountPath: /accounts, readOnly: true }
-                - { name: brain-config, mountPath: /brain-config, readOnly: true }
-              resources:
-                requests: { cpu: 50m, memory: 128Mi }
-                limits:   { memory: 1Gi }
-          volumes:
-            - name: accounts
-              configMap: { name: social-accounts }
-            - name: brain-config
-              configMap: { name: brain-windows }
+      enableServiceLinks: false
+      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      containers:
+        - name: brain-windows
+          image: harbor.e-dani.com/homelab/whatsappmcp-mcp-server:latest
+          command:
+            - sh
+            - -c
+            - |
+              cd mcp-server
+              exec node --import tsx src/jobs/brain-windows.ts
+          env:
+            - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
+            # LLM local (ADR 0002 §5): LiteLLM -> residente de los Sparks,
+            # alias de capacidad `tooling`. La clave debe ser una virtual de
+            # BAJA PRIORIDAD (tipo hermes-batch) via LLM_API_KEY en
+            # whatsapp-mcp-secrets (la `brain`); si faltara, el codigo cae a
+            # OPENAI_API_KEY (la `socialmedia`, la de mcp-sse contra LiteLLM).
+            - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
+            - { name: LLM_CHAT_MODEL, value: "tooling" }
+            # Topes por recálculo y por oleada (ADR 0002 §7).
+            - { name: BRAIN_WINDOWS_SCAN_ROWS, value: "5000" }
+            - { name: BRAIN_WINDOWS_MAX_CHATS, value: "100" }
+            - { name: BRAIN_WINDOWS_MAX_LLM, value: "5" }
+            - { name: BRAIN_WINDOWS_COLDSTART_LOOKBACK_HOURS, value: "168" }
+            - { name: BRAIN_WINDOWS_MAX_RUNTIME_MS, value: "1080000" }
+            - { name: LLM_TIMEOUT_MS, value: "180000" }
+            - { name: LLM_RETRIES, value: "1" }
+            # Métricas a VictoriaMetrics: borrados rechazados por el tope y fin de
+            # recálculo (alerta BrainWindowsMassDeleteRefused) y, tras cada oleada,
+            # brain_windows_llm_stalled_seconds (alerta BrainWindowsLlmStalled).
+            - { name: BRAIN_WINDOWS_METRICS_URL, value: "http://vmsingle-vm-victoria-metrics-k8s-stack.monitoring.svc:8428/api/v1/import/prometheus?extra_label=job=brain_windows" }
+            - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
+            # INFRA-364 / SC-5827: publica en Synapse
+            # (brain_window.<tenant>.upserted|deleted); el unico consumidor
+            # vivo es synapse-adapter-hindsight (Hindsight, banco `personal`).
+            - name: SYNAPSE_RABBITMQ_URL
+              valueFrom: { secretKeyRef: { name: whatsapp-mcp-synapse-rabbitmq, key: url } }
+            # Chats de bot/monitorizacion y canales (se indexan, no pasan
+            # por el LLM): ConfigMap brain-windows, releído en cada uso.
+            - { name: BRAIN_WINDOWS_CONFIG_FILE, value: "/brain-config/brain-windows-config.yaml" }
+            # Namespaces e instancia por cuenta: registro de cuentas.
+            - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
+            # OPENAI_API_KEY / LLM_API_KEY salen del
+            # secret whatsapp-mcp-secrets (1Password) via envFrom.
+          envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
+          volumeMounts:
+            - { name: accounts, mountPath: /accounts, readOnly: true }
+            - { name: brain-config, mountPath: /brain-config, readOnly: true }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 1Gi }
+      volumes:
+        - name: accounts
+          configMap: { name: social-accounts }
+        - name: brain-config
+          configMap: { name: brain-windows }
 ---
 apiVersion: apps/v1
 kind: Deployment

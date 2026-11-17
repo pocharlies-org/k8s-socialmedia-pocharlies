@@ -1,6 +1,6 @@
 # brain-windows (INFRA-364, ADR 0002 §5): knobs of the conversation-window
-# job (CronJob brain-windows). Mounted as the ConfigMap `brain-windows` at
-# /brain-config/brain-windows-config.yaml; the job reads it on every use (a change
+# worker (Deployment brain-windows, SC-5926). Mounted as the ConfigMap `brain-windows` at
+# /brain-config/brain-windows-config.yaml; the worker reads it on every use (a change
 # takes effect on the next recompute or LLM wave, no restart needed).
 #
 # Bots, monitoring and broadcast channels: their windows ARE built and pushed

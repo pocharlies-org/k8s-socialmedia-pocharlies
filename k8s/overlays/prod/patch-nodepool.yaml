@@ -94,16 +94,14 @@ spec:
         kubernetes.io/hostname: null
         node-pool: ks5-nvme
 ---
-apiVersion: batch/v1
-kind: CronJob
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: brain-windows
   namespace: whatsapp-mcp
 spec:
-  jobTemplate:
+  template:
     spec:
-      template:
-        spec:
-          nodeSelector:
-            topology: null
-            node-pool: ks5-nvme
+      nodeSelector:
+        topology: null
+        node-pool: ks5-nvme
