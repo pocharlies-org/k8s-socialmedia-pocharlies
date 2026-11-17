@@ -1984,8 +1984,9 @@ contracts:
     segundos que esa cuenta lleva con ventanas cerradas listas para el LLM sin que ninguna oleada haya
     resumido una (0 si no hay nada listo). Con el LLM parado las oleadas siguen como mucho cada hora (pausa
     de 10 min doblando hasta 1 h), así que la serie se refresca al menos cada ~80 min. Consumidor: la
-    alerta BrainWindowsLlmStalled de k8s-observability-pocharlies (manifests/rules.yaml). Renombrar la
-    métrica o la etiqueta account es breaking: nueva entrada .v2.'
+    alerta BrainWindowsLlmStalled de k8s-observability-pocharlies (manifests/rules.yaml). Marcador
+    `// CONTRACT:` en WindowsWorker.pushStall. Renombrar la métrica o la etiqueta account es breaking:
+    nueva entrada .v2.'
 - id: amqp.synapse.brain-window-upserted.v1
   kind: routing-key
   value: brain_window.{tenant}.upserted
