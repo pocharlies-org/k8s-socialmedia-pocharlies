@@ -64,11 +64,6 @@ export function searchLimit(limit: unknown): number {
 /** Semantic recall is capped at 50 hits (the brain's old `/search` top-k). */
 const SEMANTIC_MAX_HITS = 50;
 
-function envNumber(value: string | undefined, fallback: number): number {
-  const n = Number(value);
-  return value !== undefined && value.trim() !== '' && Number.isFinite(n) ? n : fallback;
-}
-
 export type SearchMode = 'semantic' | 'text';
 
 /** One account whose semantic backend could not be asked. */

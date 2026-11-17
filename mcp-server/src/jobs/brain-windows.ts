@@ -464,9 +464,7 @@ async function main(): Promise<void> {
   {
     const url = process.env.SYNAPSE_RABBITMQ_URL;
     if (!url)
-      throw new Error(
-        'SYNAPSE_RABBITMQ_URL is unset (secret whatsapp-mcp-synapse-rabbitmq)'
-      );
+      throw new Error('SYNAPSE_RABBITMQ_URL is unset (secret whatsapp-mcp-synapse-rabbitmq)');
     publisher = await connectPublisher(url);
     sink = synapseSink(publisher);
   }
