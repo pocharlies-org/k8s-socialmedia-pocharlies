@@ -20,6 +20,9 @@ import {
   processLlmWindow,
   groupAffectedChats,
   passMetricsText,
+  WindowsWorker,
+  WorkerHooks,
+  changedAccount,
 } from './brain-windows';
 import { LlmConfig } from './brain-window-llm';
 
@@ -326,7 +329,7 @@ describe('processLlmWindow', () => {
     llm_input_hash: null,
   };
 
-  function llmPool(summary: string | null) {
+  function llmPool(summary: string | null, committed = true) {
     return new FakePool([
       { match: 'SELECT name FROM conversations WHERE id = $1', rows: [{ name: 'Reforma casa' }] },
       { match: 'LEFT JOIN participants', rows: msgs },
@@ -335,8 +338,8 @@ describe('processLlmWindow', () => {
         rows: summary ? [{ llm_summary: summary }] : [],
       },
       { match: 'SELECT llm_summary', rows: summary ? [{ llm_summary: summary }] : [] },
+      { match: 'RETURNING source_id', rows: committed ? [{ source_id: built.source_id }] : [] },
       { match: 'SET llm_status', rows: [] },
-      { match: 'SET llm_summary', rows: [] },
     ]);
   }
 
@@ -371,14 +374,24 @@ describe('processLlmWindow', () => {
     expect(r).toBe('done');
     const llmCall = calls.find(c => c.url.includes('chat/completions'));
     expect((llmCall?.body.messages as { content: string }[])[0].content).toContain(built.header);
-    const status = pool.sqlLike('SET llm_status')[0];
-    expect(status[1]).toBe('done');
-    expect(String(status[2])).toMatch(/^[0-9a-f]{64}$/);
+    // done + summary in one UPDATE guarded by the content hash that was summarised
+    const commit = pool.sqlLike('RETURNING source_id')[0];
+    expect(commit[1]).toBe(built.content_hash);
+    expect(String(commit[2])).toMatch(/^[0-9a-f]{64}$/);
+    expect(commit[3]).toBe('La reforma sube un 15 %.');
     const doc = pushedDocs[0].docs[0];
     expect(doc.content).toBe(`${built.header}\nLa reforma sube un 15 %.`);
     expect(doc.metadata.llm_status).toBe('done');
     expect(doc.metadata.summary).toBe('La reforma sube un 15 %.');
     expect(doc.metadata.extraction).toBeDefined();
+  });
+
+  it('a window recomputed during the LLM call keeps its new state: nothing recorded or pushed', async () => {
+    const pool = llmPool(null, false);
+    mockLlm();
+    const r = await processLlmWindow(pool as never, SINK, LLM, row, false);
+    expect(r).toBe('skipped');
+    expect(pushedDocs.length).toBe(0);
   });
 
   it('feeds the previous window summary as context', async () => {
@@ -486,5 +499,166 @@ describe('passMetricsText', () => {
         'brain_windows_refused_deletes{account="professional"} 60 1790900000123\n' +
         'brain_windows_pass_finished_timestamp_seconds 1790900000 1790900000123\n'
     );
+  });
+});
+
+describe('changedAccount (045 NOTIFY payload)', () => {
+  it('reads the account and rejects anything else', () => {
+    expect(changedAccount('{"n": 2, "account": "personal"}')).toBe('personal');
+    expect(changedAccount('{"n": 2}')).toBeNull();
+    expect(changedAccount('not json')).toBeNull();
+    expect(changedAccount(undefined)).toBeNull();
+  });
+});
+
+describe('WindowsWorker (SC-5926: event-driven scheduler)', () => {
+  const MIN = 60_000;
+  let calls: string[];
+  let metrics: string[];
+  let readyAt: Date | null;
+  let waveResult: { done: number; failed: number; skipped: number };
+  let recomputeResult: { refused: number; more: boolean };
+  let llmReady: boolean;
+  let gate: Promise<void> | null;
+
+  function worker(): WindowsWorker {
+    const hooks: WorkerHooks = {
+      accounts: ['personal', 'professional'],
+      debounceMs: 15_000,
+      recompute: async account => {
+        calls.push(`recompute:${account}`);
+        if (gate) await gate;
+        return recomputeResult;
+      },
+      llmWave: async account => {
+        calls.push(`wave:${account}`);
+        return waveResult;
+      },
+      nextReadyAt: async () => readyAt,
+      llmReady: async () => llmReady,
+      metrics: async text => {
+        metrics.push(text);
+      },
+    };
+    return new WindowsWorker(hooks);
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: Date.parse('2026-11-17T18:00:00Z') });
+    calls = [];
+    metrics = [];
+    readyAt = null;
+    waveResult = { done: 0, failed: 0, skipped: 0 };
+    recomputeResult = { refused: 0, more: false };
+    llmReady = false;
+    gate = null;
+  });
+  afterEach(() => jest.useRealTimers());
+  /**
+   * Let the scheduler's await-chains (hook → metrics → re-arm) settle. A 0 ms
+   * timer is 1 ms (as in Node), so this moves the clock ~20 ms: the time checks
+   * below keep a 1 s margin.
+   */
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 20; i++) await jest.advanceTimersByTimeAsync(1);
+  }
+
+  it('debounces a burst of changes into one recompute per account, ignores unknown accounts', async () => {
+    const w = worker();
+    w.changed('personal');
+    await jest.advanceTimersByTimeAsync(5_000);
+    w.changed('personal');
+    w.changed('daniel');
+    await jest.advanceTimersByTimeAsync(9_999);
+    expect(calls).toEqual([]);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(calls).toEqual(['recompute:personal']);
+    expect(metrics[0]).toContain('brain_windows_refused_deletes{account="personal"} 0');
+    w.close();
+  });
+
+  it('a change during a recompute queues exactly one more; `more` reruns at once', async () => {
+    let release!: () => void;
+    gate = new Promise(r => (release = r));
+    const w = worker();
+    w.changed('personal', 0);
+    await flush();
+    w.changed('personal');
+    w.changed('personal');
+    gate = null;
+    release();
+    await flush();
+    await jest.advanceTimersByTimeAsync(15_000);
+    await flush();
+    expect(calls).toEqual(['recompute:personal', 'recompute:personal']);
+    let left = 1; // the first run leaves rows behind, the second finishes
+    w['h'].recompute = async account => {
+      calls.push(`recompute:${account}`);
+      return { refused: 0, more: left-- > 0 };
+    };
+    w.changed('professional', 0);
+    await flush();
+    expect(calls.filter(c => c === 'recompute:professional').length).toBe(2);
+    w.close();
+  });
+
+  it('the LLM wave fires at the next close read from the ledger, not before', async () => {
+    readyAt = new Date(Date.now() + 40 * MIN);
+    const w = worker();
+    w.changed('personal', 0);
+    await jest.advanceTimersByTimeAsync(0);
+    readyAt = null; // after the wave nothing else waits
+    await jest.advanceTimersByTimeAsync(40 * MIN - 1);
+    expect(calls).toEqual(['recompute:personal']);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(calls).toEqual(['recompute:personal', 'wave:personal', 'wave:professional']);
+    w.close();
+  });
+
+  it('a wave that summarised something chains the next; one that only failed pauses 10 min, then 20', async () => {
+    readyAt = new Date(Date.now() - 1);
+    let summarising = 2; // two productive waves, then the LLM only fails
+    const w = worker();
+    w['h'].llmWave = async account => {
+      calls.push(`wave:${account}`);
+      if (account === 'personal') summarising--;
+      return summarising >= 0
+        ? { done: 5, failed: 0, skipped: 0 }
+        : { done: 0, failed: 5, skipped: 0 };
+    };
+    await w.armLlm();
+    await flush();
+    // waves 1-2 summarised → chained at once; wave 3 failed → paused
+    const waves = (): number => calls.filter(c => c === 'wave:personal').length;
+    expect(waves()).toBe(3);
+    await jest.advanceTimersByTimeAsync(10 * MIN - 1_000);
+    expect(waves()).toBe(3);
+    await jest.advanceTimersByTimeAsync(1_000);
+    await flush();
+    expect(waves()).toBe(4);
+    await jest.advanceTimersByTimeAsync(20 * MIN - 1_000);
+    expect(waves()).toBe(4);
+    await jest.advanceTimersByTimeAsync(1_000);
+    await flush();
+    expect(waves()).toBe(5);
+    w.close();
+  });
+
+  it('stalled seconds grow while ready work gets no summary and reset on one', async () => {
+    readyAt = new Date(Date.now() - 1);
+    llmReady = true;
+    waveResult = { done: 0, failed: 5, skipped: 0 };
+    const w = worker();
+    await w.armLlm();
+    await flush();
+    expect(metrics.at(-1)).toContain('brain_windows_llm_stalled_seconds{account="personal"} 0');
+    await jest.advanceTimersByTimeAsync(10 * MIN);
+    await flush();
+    expect(metrics.at(-1)).toMatch(/brain_windows_llm_stalled_seconds\{account="personal"\} 600 /);
+    waveResult = { done: 1, failed: 0, skipped: 0 };
+    await jest.advanceTimersByTimeAsync(20 * MIN);
+    await flush();
+    expect(metrics.at(-1)).toContain('brain_windows_llm_stalled_seconds{account="personal"} 0');
+    w.close();
   });
 });
