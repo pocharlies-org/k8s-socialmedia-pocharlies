@@ -204,9 +204,13 @@ images:
   # (mcp-server, mcp-sse, social-api, CronJobs brain-*, backfill, Job de migracion) no importa jobs/: el
   # cambio solo aade el worker y refactors de voice-transcribe*, sin tocar su runtime ni migraciones.
   # Digest comprobado en Harbor (crane digest ...:v1.3.152).
+  # DGX-1640 17-11: v1.3.152 -> v1.3.153 (run 43985381231, deploy/prod@caf78d5, GREEN): #503, el worker
+  # hace una pasada al arrancar (recoverStuckProcessing + claim pending) para no dejar filas colgadas
+  # si se pierde el evento o el worker muere a mitad de STT (C7). Mismo bloque images: reescribe por
+  # nombre; el resto de consumidores no importa jobs/. Digest comprobado en Harbor (crane digest ...:v1.3.153).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.152
-    digest: sha256:9c227951cd132ab570a0e4c003080d1893804413cc5680deac92f19cbcf81116
+    newTag: v1.3.153
+    digest: sha256:9ebdc62e5f7c5c2fea066106307dff4738684032e300baebb2cd336dff635f5c
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
