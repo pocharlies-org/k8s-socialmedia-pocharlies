@@ -89,7 +89,7 @@ export interface WindowsJobOptions {
   maxChats: number; // chats recomputed per account pass
   maxLlm: number; // LLM windows per account pass
   coldstartLookbackHours: number; // first cursor: don't blind the recent past
-  maxRuntimeMs: number; // stop cleanly before activeDeadlineSeconds
+  maxRuntimeMs: number; // wall-clock budget of one recompute or LLM wave; stops cleanly when spent
   pushDocsCap: number; // safety cap of docs pushed for one chat
   maxDeletesPerChat: number; // above this the pass deletes nothing for the chat
 }
@@ -157,8 +157,7 @@ export async function recomputeChat(
   config: WindowsConfig,
   opts: Pick<WindowsJobOptions, 'pushDocsCap' | 'maxDeletesPerChat'>,
   account: string,
-  affected: AffectedChat,
-  dryRun: boolean
+  affected: AffectedChat
 ): Promise<{ pushed: number; deleted: number; docs: number; chats: number; refused: number }> {
   const meta = await fetchChatMeta(pool, account, [affected.conversation_id]);
   const m = meta.get(affected.conversation_id);
@@ -197,10 +196,8 @@ export async function recomputeChat(
   let deleted = 0;
   for (const gone of diff.toDelete) {
     try {
-      if (!dryRun) {
-        await sink.remove(account, chat.platform, gone.source_id, gone.chunk_count);
-        await deleteWindowRow(pool, gone.source_id);
-      }
+      await sink.remove(account, chat.platform, gone.source_id, gone.chunk_count);
+      await deleteWindowRow(pool, gone.source_id);
       deleted++;
     } catch (e) {
       logger.error(
@@ -221,10 +218,6 @@ export async function recomputeChat(
     const status = initialLlmStatus(w);
     const all = [parentDoc(w, { llm_status: status }), ...childDocs(w, chunks)];
     docs += all.length;
-    if (dryRun) {
-      pushed++;
-      continue;
-    }
     try {
       await sink.push(account, all);
     } catch (e) {
@@ -252,7 +245,7 @@ export async function runLlmPass(
   sink: WindowSink,
   llm: LlmConfig,
   account: string,
-  opts: { maxLlm: number; closedBefore: Date; budget: PassBudget; dryRun: boolean }
+  opts: { maxLlm: number; closedBefore: Date; budget: PassBudget }
 ): Promise<{ done: number; failed: number; skipped: number }> {
   const rows = await fetchPendingLlmWindows(pool, {
     accounts: [account],
@@ -271,7 +264,7 @@ export async function runLlmPass(
           return;
         }
         try {
-          const r = await processLlmWindow(pool, sink, llm, row, opts.dryRun);
+          const r = await processLlmWindow(pool, sink, llm, row);
           if (r === 'done') done++;
           else if (r === 'failed') failed++;
           else skipped++;
@@ -289,16 +282,15 @@ export async function processLlmWindow(
   pool: Pool,
   sink: WindowSink,
   llm: LlmConfig,
-  row: PendingLlmWindow,
-  dryRun: boolean
+  row: PendingLlmWindow
 ): Promise<'done' | 'failed' | 'skipped'> {
   const w = await loadWindowForLlm(pool, row);
   if (!w) {
-    await setWindowLlmResult(pool, row.source_id, 'failed', null, 'window messages not found');
+    await setWindowLlmResult(pool, row.source_id, 'failed', 'window messages not found');
     return 'failed';
   }
   if (w.trivial || !w.llm_eligible) {
-    await setWindowLlmResult(pool, row.source_id, 'skipped', null, null);
+    await setWindowLlmResult(pool, row.source_id, 'skipped', null);
     return 'skipped';
   }
   const freshHash = windowContentHash({
@@ -310,9 +302,9 @@ export async function processLlmWindow(
     conv_kind: w.chat.conv_kind,
   });
   if (freshHash !== row.content_hash) {
-    // The chat moved on since this row was pushed: the diff (which runs
-    // before this pass) will re-push it with a fresh hash; extracting the old
-    // text would mislabel it. Skip without touching the status.
+    // The chat moved on since this row was pushed: its next recompute will
+    // re-push it with a fresh hash; extracting the old text would mislabel it.
+    // Skip without touching the status.
     logger.info({ source: row.source_id }, 'llm skipped: content changed since ledger');
     return 'skipped';
   }
@@ -333,13 +325,11 @@ export async function processLlmWindow(
     ]);
     const summary = s.rows.length ? (s.rows[0].llm_summary as string | null) : null;
     if (summary) {
-      await setWindowLlmResult(pool, row.source_id, 'done', null, null);
-      if (!dryRun) await sink.push(w.chat.account, [parentDoc(w, { llm_status: 'done', summary })]);
+      await setWindowLlmResult(pool, row.source_id, 'done', null);
+      await sink.push(w.chat.account, [parentDoc(w, { llm_status: 'done', summary })]);
     }
     return 'skipped';
   }
-  if (dryRun) return 'skipped';
-
   try {
     const { extraction } = await extractWindow(llm, w, prev);
     if (
@@ -364,13 +354,12 @@ export async function processLlmWindow(
     ]);
     return 'done';
   } catch (e) {
-    // Failure keeps the previous input hash (NULL for a first attempt) so the
-    // next pass retries it — the checkpoint only short-circuits successes.
+    // Failure keeps the previous input hash (NULL for a first attempt) so it is
+    // retried once its backoff expires — the checkpoint only short-circuits successes.
     await setWindowLlmResult(
       pool,
       row.source_id,
       'failed',
-      null,
       e instanceof Error ? e.message : String(e)
     );
     return 'failed';
@@ -408,7 +397,7 @@ export async function recomputeAccount(
     for (const affected of chats.slice(0, opts.maxChats)) {
       if (budget.out()) break;
       try {
-        const r = await recomputeChat(pool, sink, config, opts, account, affected, false);
+        const r = await recomputeChat(pool, sink, config, opts, account, affected);
         stats.chats += r.chats;
         stats.pushed += r.pushed;
         stats.deleted += r.deleted;
@@ -660,7 +649,6 @@ async function main(): Promise<void> {
         maxLlm: opts.maxLlm,
         closedBefore: closedBefore(),
         budget: new PassBudget(Date.now(), opts.maxRuntimeMs),
-        dryRun: false,
       }),
     nextReadyAt: () => nextLlmReadyAt(pool, accounts, config().gapSeconds),
     llmReady: async account =>

@@ -1,5 +1,5 @@
 /**
- * brain-windows → Synapse (INFRA-364). The incremental cron publishes its
+ * brain-windows → Synapse (INFRA-364). The incremental worker publishes its
  * window documents as Synapse events; since SC-5827 the only consumer is
  * synapse-adapter-hindsight, which retains them in Hindsight (the synapse
  * workflows that pushed them to the Brain were retired with it):

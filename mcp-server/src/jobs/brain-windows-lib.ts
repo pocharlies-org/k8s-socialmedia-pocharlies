@@ -1126,7 +1126,7 @@ export interface UpsertWindowInput {
   llm_status: LlmStatus;
 }
 
-/** Record a window part after (or, in DRY_RUN, without) pushing it. */
+/** Record a window part after pushing it. */
 export async function upsertWindow(pool: Pool, input: UpsertWindowInput): Promise<void> {
   const { w } = input;
   await pool.query(
@@ -1195,15 +1195,13 @@ export async function setWindowLlmResult(
   pool: Pool,
   sourceId: string,
   status: LlmStatus,
-  inputHash: string | null,
   error: string | null
 ): Promise<void> {
   await pool.query(
     `UPDATE brain_windows
         SET llm_status = $2,
-            llm_input_hash = COALESCE($3, llm_input_hash),
             llm_done_at = CASE WHEN $2 = 'done' THEN now() ELSE llm_done_at END,
-            llm_error = CASE WHEN $2 = 'failed' THEN left($4, 2000) ELSE NULL END,
+            llm_error = CASE WHEN $2 = 'failed' THEN left($3, 2000) ELSE NULL END,
             -- SC-5926: a failed window waits min(2^attempts × 10 min, 6 h) before
             -- fetchPendingLlmWindows picks it again.
             llm_retry_after = CASE WHEN $2 = 'failed'
@@ -1213,7 +1211,7 @@ export async function setWindowLlmResult(
             llm_attempts = CASE WHEN $2 = 'failed' THEN llm_attempts + 1 ELSE 0 END,
             updated_at = now()
       WHERE source_id = $1`,
-    [sourceId, status, inputHash, error]
+    [sourceId, status, error]
   );
 }
 

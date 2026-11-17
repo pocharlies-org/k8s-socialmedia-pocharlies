@@ -112,15 +112,14 @@ afterEach(() => {
 
 const META = [{ id: 'reforma@g.us', name: 'Reforma casa', type: 'GROUP', is_group: true }];
 
-function recomputeRange(pool: FakePool, minTs: Date, maxTs: Date, dryRun = false) {
+function recomputeRange(pool: FakePool, minTs: Date, maxTs: Date) {
   return recomputeChat(
     pool as never,
     SINK,
     CFG,
     { pushDocsCap: 400, maxDeletesPerChat: 50 },
     'personal',
-    { platform: 'whatsapp', conversation_id: 'reforma@g.us', minTs, maxTs },
-    dryRun
+    { platform: 'whatsapp', conversation_id: 'reforma@g.us', minTs, maxTs }
   );
 }
 
@@ -139,7 +138,7 @@ describe('recomputeChat', () => {
       ledgerRows([]),
       { match: 'INSERT INTO brain_windows', rows: [] },
     ]);
-    const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[4].wa_timestamp, false);
+    const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[4].wa_timestamp);
     expect(r.chats).toBe(1);
     expect(r.pushed).toBe(1);
     const push = pushedDocs[0];
@@ -167,7 +166,7 @@ describe('recomputeChat', () => {
       ledgerRows([]),
       { match: 'INSERT INTO brain_windows', rows: [] },
     ]);
-    await recomputeRange(pool, msgs[0].wa_timestamp, msgs[2].wa_timestamp, false);
+    await recomputeRange(pool, msgs[0].wa_timestamp, msgs[2].wa_timestamp);
     const docs = pushedDocs[0].docs;
     expect(docs.length).toBe(1);
     expect(docs[0].metadata.llm_status).toBe('skipped');
@@ -189,7 +188,7 @@ describe('recomputeChat', () => {
         })),
       },
     ]);
-    const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp, false);
+    const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp);
     expect(r.pushed).toBe(0);
     expect(pushedDocs.length).toBe(0);
   });
@@ -207,8 +206,7 @@ describe('recomputeChat', () => {
     const r = await recomputeRange(
       pool,
       new Date('2026-03-14T09:00:00Z'),
-      new Date('2026-03-14T09:05:00Z'),
-      false
+      new Date('2026-03-14T09:05:00Z')
     );
     expect(r.deleted).toBe(1);
     expect(removedDocs).toEqual([
@@ -275,26 +273,12 @@ describe('recomputeChat', () => {
     const r = await recomputeRange(
       pool,
       new Date('2026-03-14T09:00:00Z'),
-      new Date('2026-03-14T09:05:00Z'),
-      false
+      new Date('2026-03-14T09:05:00Z')
     );
     expect(r.deleted).toBe(0);
     expect(r.refused).toBe(60);
     expect(removedDocs.length).toBe(0);
     expect(pool.sqlLike('DELETE FROM brain_windows').length).toBe(0);
-  });
-
-  it('DRY_RUN touches nothing', async () => {
-    const msgs = [msg(1), msg(2), msg(3), msg(4)];
-    const pool = new FakePool([
-      { match: 'FROM conversations', rows: META },
-      { match: 'LEFT JOIN participants', rows: msgs },
-      ledgerRows([]),
-    ]);
-    const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp, true);
-    expect(r.pushed).toBe(1);
-    expect(pushedDocs.length).toBe(0);
-    expect(pool.sqlLike('INSERT INTO brain_windows').length).toBe(0);
   });
 
   it('a failed push leaves no ledger row (next pass retries)', async () => {
@@ -305,7 +289,7 @@ describe('recomputeChat', () => {
       ledgerRows([]),
     ]);
     failNextPush = true;
-    const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp, false);
+    const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp);
     expect(r.pushed).toBe(0);
     expect(pool.sqlLike('INSERT INTO brain_windows').length).toBe(0);
   });
@@ -370,7 +354,7 @@ describe('processLlmWindow', () => {
   it('extracts, records done + summary and re-pushes the parent with header + summary', async () => {
     const pool = llmPool(null);
     const calls = mockLlm();
-    const r = await processLlmWindow(pool as never, SINK, LLM, row, false);
+    const r = await processLlmWindow(pool as never, SINK, LLM, row);
     expect(r).toBe('done');
     const llmCall = calls.find(c => c.url.includes('chat/completions'));
     expect((llmCall?.body.messages as { content: string }[])[0].content).toContain(built.header);
@@ -389,7 +373,7 @@ describe('processLlmWindow', () => {
   it('a window recomputed during the LLM call keeps its new state: nothing recorded or pushed', async () => {
     const pool = llmPool(null, false);
     mockLlm();
-    const r = await processLlmWindow(pool as never, SINK, LLM, row, false);
+    const r = await processLlmWindow(pool as never, SINK, LLM, row);
     expect(r).toBe('skipped');
     expect(pushedDocs.length).toBe(0);
   });
@@ -397,7 +381,7 @@ describe('processLlmWindow', () => {
   it('feeds the previous window summary as context', async () => {
     const pool = llmPool('resumen de la ventana anterior');
     const calls = mockLlm();
-    await processLlmWindow(pool as never, SINK, LLM, row, false);
+    await processLlmWindow(pool as never, SINK, LLM, row);
     const prompt = (
       calls.find(c => c.url.includes('chat/completions'))?.body.messages as { content: string }[]
     )[0].content;
@@ -409,13 +393,7 @@ describe('processLlmWindow', () => {
     const hash = llmInputHash(LLM.model, built.header, built.transcript, 'previo');
     const pool = llmPool('previo');
     const calls = mockLlm();
-    const r = await processLlmWindow(
-      pool as never,
-      SINK,
-      LLM,
-      { ...row, llm_input_hash: hash },
-      false
-    );
+    const r = await processLlmWindow(pool as never, SINK, LLM, { ...row, llm_input_hash: hash });
     expect(r).toBe('skipped');
     expect(calls.some(c => c.url.includes('chat/completions'))).toBe(false);
     // status restored to done and the parent re-pushed with the stored summary
@@ -428,17 +406,17 @@ describe('processLlmWindow', () => {
     global.fetch = jest.fn(
       async () => new Response('down', { status: 500 })
     ) as unknown as typeof fetch;
-    const r = await processLlmWindow(pool as never, SINK, LLM, row, false);
+    const r = await processLlmWindow(pool as never, SINK, LLM, row);
     expect(r).toBe('failed');
     const status = pool.sqlLike('SET llm_status')[0];
     expect(status[1]).toBe('failed');
-    expect(String(status[3])).toMatch(/down/);
+    expect(String(status[2])).toMatch(/down/);
   });
 
   it('a channel/bot or trivial row is marked skipped without any call', async () => {
     const pool = llmPool(null);
     const calls = mockLlm();
-    const r = await processLlmWindow(pool as never, SINK, LLM, { ...row, conv_kind: 'bot' }, false);
+    const r = await processLlmWindow(pool as never, SINK, LLM, { ...row, conv_kind: 'bot' });
     expect(r).toBe('skipped');
     expect(pool.sqlLike('SET llm_status')[0][1]).toBe('skipped');
     expect(calls.length).toBe(0);
@@ -447,13 +425,7 @@ describe('processLlmWindow', () => {
   it('content that moved on since the ledger is skipped, not extracted', async () => {
     const pool = llmPool(null);
     const calls = mockLlm();
-    const r = await processLlmWindow(
-      pool as never,
-      SINK,
-      LLM,
-      { ...row, content_hash: 'stale' },
-      false
-    );
+    const r = await processLlmWindow(pool as never, SINK, LLM, { ...row, content_hash: 'stale' });
     expect(r).toBe('skipped');
     expect(pool.sqlLike('SET llm_status').length).toBe(0);
     expect(calls.length).toBe(0);
