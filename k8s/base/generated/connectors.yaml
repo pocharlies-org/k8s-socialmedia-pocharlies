@@ -65,41 +65,41 @@ spec:
         - name: WA_QR_PUBLIC_URL
           value: https://whatsapp-qr.e-dani.com/qr/page
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         - name: EMBEDDING_BASE_URL
@@ -265,45 +265,45 @@ spec:
         - name: WA_EMIT_AUDIO_ATTACHMENTS
           value: 'true'
         - name: S3_PUBLIC_ENDPOINT
-          value: https://skirmshop-s3.e-dani.com
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_PRESIGN_EXPIRY_SECONDS
           value: '3600'
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         - name: EMBEDDING_BASE_URL
@@ -469,45 +469,45 @@ spec:
         - name: WA_EMIT_AUDIO_ATTACHMENTS
           value: 'true'
         - name: S3_PUBLIC_ENDPOINT
-          value: https://skirmshop-s3.e-dani.com
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_PRESIGN_EXPIRY_SECONDS
           value: '3600'
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         - name: EMBEDDING_BASE_URL
@@ -708,41 +708,41 @@ spec:
         - name: CONNECTOR_BASE_URL
           value: http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         envFrom:
@@ -895,41 +895,41 @@ spec:
         - name: CONNECTOR_BASE_URL
           value: http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         envFrom:

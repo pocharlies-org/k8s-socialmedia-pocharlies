@@ -62,16 +62,16 @@ spec:
             # legacy (socialmedia-media en el minio del ns). Idéntico al
             # bloque del mcp-server; las refs `s3://…` y crudas se resuelven
             # con parseStorageRef en minio-client.ts.
-            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
             - { name: S3_BUCKET, value: "skirmshop-drive" }
-            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_REGION, value: "sbg" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
-            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
-            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
-            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
-            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(AWS_ACCESS_KEY_ID)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(AWS_SECRET_ACCESS_KEY)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "true" }
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             # STT residente (whisper-large-v3). OpenAI-compatible.
             - { name: VOICE_STT_URL, value: "http://stt-turbo.llm.svc.cluster.local:8000" }
@@ -133,16 +133,16 @@ spec:
                   node --import tsx src/jobs/voice-backfill.ts
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-                - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+                - { name: S3_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
                 - { name: S3_BUCKET, value: "skirmshop-drive" }
-                - { name: S3_REGION, value: "us-east-1" }
+                - { name: S3_REGION, value: "sbg" }
                 - { name: S3_PREFIX, value: "socialmedia" }
-                - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
-                - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
-                - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
-                - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
-                - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
-                - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+                - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_ACCESS_KEY_ID } } }
+                - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_SECRET_ACCESS_KEY } } }
+                - { name: LEGACY_MINIO_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
+                - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(AWS_ACCESS_KEY_ID)" }
+                - { name: LEGACY_MINIO_SECRET_KEY, value: "$(AWS_SECRET_ACCESS_KEY)" }
+                - { name: LEGACY_MINIO_USE_SSL, value: "true" }
                 - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
                 - { name: VOICE_STT_URL, value: "http://stt-turbo.llm.svc.cluster.local:8000" }
                 - { name: VOICE_LANGUAGE, value: "es" }

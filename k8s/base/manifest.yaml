@@ -446,16 +446,16 @@ spec:
             - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
             - { name: WHATSAPP_PROFESSIONAL_URL, value: "http://whatsapp-connector-professional.whatsapp-mcp.svc.cluster.local:3001" }
             - { name: WHATSAPP_LEILA_URL, value: "http://whatsapp-connector-leila.whatsapp-mcp.svc.cluster.local:3001" }
-            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
             - { name: S3_BUCKET, value: "skirmshop-drive" }
-            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_REGION, value: "sbg" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
-            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
-            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
-            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
-            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(AWS_ACCESS_KEY_ID)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(AWS_SECRET_ACCESS_KEY)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "true" }
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             - { name: EMBEDDING_BASE_URL, value: "http://bge-m3-embedding.llm.svc.cluster.local:8000/v1" }
             - { name: EMBEDDING_MODEL, value: "bge-m3" }
@@ -553,16 +553,16 @@ spec:
             - { name: INSTAGRAM_CONNECTOR_URL, value: "http://instagram-connector.whatsapp-mcp.svc.cluster.local:3003" }
             - { name: LLM_BASE_URL, value: "http://litellm.litellm.svc.cluster.local:4000/v1" }
             - { name: LLM_CHAT_MODEL, value: "tooling" }
-            - { name: S3_ENDPOINT, value: "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000" }
+            - { name: S3_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
             - { name: S3_BUCKET, value: "skirmshop-drive" }
-            - { name: S3_REGION, value: "us-east-1" }
+            - { name: S3_REGION, value: "sbg" }
             - { name: S3_PREFIX, value: "socialmedia" }
-            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_ACCESS_KEY_ID } } }
-            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: skirmshop-drive-s3-socialmedia, key: AWS_SECRET_ACCESS_KEY } } }
-            - { name: LEGACY_MINIO_ENDPOINT, value: "whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000" }
-            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(MINIO_ROOT_USER)" }
-            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(MINIO_ROOT_PASSWORD)" }
-            - { name: LEGACY_MINIO_USE_SSL, value: "false" }
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_ACCESS_KEY_ID } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: socialmedia-s3-ovh, key: AWS_SECRET_ACCESS_KEY } } }
+            - { name: LEGACY_MINIO_ENDPOINT, value: "https://s3.sbg.io.cloud.ovh.net" }
+            - { name: LEGACY_MINIO_ACCESS_KEY, value: "$(AWS_ACCESS_KEY_ID)" }
+            - { name: LEGACY_MINIO_SECRET_KEY, value: "$(AWS_SECRET_ACCESS_KEY)" }
+            - { name: LEGACY_MINIO_USE_SSL, value: "true" }
             - { name: LEGACY_MINIO_BUCKET, value: "socialmedia-media" }
             # Busqueda semantica (SC-4304 S8): en Hindsight, banco `personal`, por la ruta de maquina
             # /hindsight-personal de AgentGateway con el principal `socialmedia-hindsight` (solo lectura).
