@@ -22,9 +22,7 @@
  * (missing env, DB unreachable, unreadable config) exit non-zero.
  */
 import { Pool } from 'pg';
-import { semanticProviderFromEnv } from '../infrastructure/hindsight-client';
 import pino from 'pino';
-import { ingestNamespaces } from './brain-ingest-lib';
 import {
   BuiltWindow,
   ChatRef,
@@ -59,7 +57,7 @@ import {
   upsertWindow,
   windowContentHash,
   WindowSink,
-  httpSink,
+  ingestNamespaces,
 } from './brain-windows-lib';
 import { connectPublisher, synapseSink } from './brain-windows-synapse';
 import {
@@ -446,10 +444,10 @@ async function accountPass(
 }
 
 async function main(): Promise<void> {
-  if (semanticProviderFromEnv() === 'hindsight') {
-    logger.info('brain-windows skipped: SEMANTIC_PROVIDER=hindsight');
-    return;
-  }
+  // SC-5827: sin guarda SEMANTIC_PROVIDER. Este cron es el productor vivo del
+  // indice de conversaciones en Hindsight (publica brain_window.* y
+  // synapse-adapter-hindsight lo retiene); con provider=hindsight NO debe
+  // saltarse, que es justo lo que alimenta la busqueda semantica de mcp-sse.
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl)
     throw new Error(
@@ -459,32 +457,18 @@ async function main(): Promise<void> {
   if (!configFile)
     throw new Error('BRAIN_WINDOWS_CONFIG_FILE is unset (k8s/base/brain-windows-config.yaml)');
   const config = loadWindowsConfig(configFile);
-  // INFRA-364: the incremental pass publishes to Synapse (retries and
-  // visibility in the engine); BRAIN_WINDOWS_SINK=http keeps the old direct
-  // push-ingest path for a rollback without a code change.
-  const sinkKind = process.env.BRAIN_WINDOWS_SINK || 'synapse';
+  // INFRA-364 / SC-5827: el sink unico es Synapse (reintentos y visibilidad en
+  // el engine; el unico consumidor vivo es synapse-adapter-hindsight).
   let publisher: Awaited<ReturnType<typeof connectPublisher>> | null = null;
   let sink: WindowSink;
-  if (sinkKind === 'http') {
-    sink = httpSink(
-      {
-        brainUrl:
-          process.env.BRAIN_URL ||
-          'http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local',
-        apiKey: process.env.BRAIN_API_KEY || '',
-      },
-      msg => logger.debug(msg)
-    );
-  } else if (sinkKind === 'synapse') {
+  {
     const url = process.env.SYNAPSE_RABBITMQ_URL;
     if (!url)
       throw new Error(
-        'SYNAPSE_RABBITMQ_URL is unset (secret whatsapp-mcp-synapse-rabbitmq); set BRAIN_WINDOWS_SINK=http to push directly'
+        'SYNAPSE_RABBITMQ_URL is unset (secret whatsapp-mcp-synapse-rabbitmq)'
       );
     publisher = await connectPublisher(url);
     sink = synapseSink(publisher);
-  } else {
-    throw new Error(`BRAIN_WINDOWS_SINK=${sinkKind}: expected synapse or http`);
   }
   const llm = llmConfigFromEnv(process.env);
   const opts = optionsFromEnv(process.env);
@@ -521,7 +505,7 @@ async function main(): Promise<void> {
     await pool.end();
     await publisher?.close();
   }
-  logger.info({ ...totals, sink: sinkKind, dryRun }, 'brain-windows pass finished');
+  logger.info({ ...totals, sink: 'synapse', dryRun }, 'brain-windows pass finished');
   if (!dryRun) await pushPassMetrics(process.env.BRAIN_WINDOWS_METRICS_URL, refusedByAccount);
 }
 

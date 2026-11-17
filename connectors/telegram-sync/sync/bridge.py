@@ -9,7 +9,6 @@ import os
 import time
 
 import asyncpg
-import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -56,13 +55,6 @@ def _verify(request: Request, body: bytes) -> bool:
         return False
     expected = hmac.new(BRIDGE_SECRET.encode(), f"{ts}:{body.decode()}".encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(sig.replace("sha256=", ""), expected)
-
-
-async def _get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None:
-        _http_client = httpx.AsyncClient(timeout=10)
-    return _http_client
 
 
 async def handle_send(request: Request) -> JSONResponse:
@@ -221,76 +213,3 @@ app = Starlette(routes=[
     Route("/health", handle_health, methods=["GET"]),
     Route("/unread", handle_unread, methods=["POST"]),
 ])
-
-
-# ─── Brain Context (Qdrant keyword search) ────────────────────────────────────
-
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
-QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
-QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "personal_documents")
-
-
-async def handle_brain_chat(request: Request) -> JSONResponse:
-    """POST /brain-chat — search personal knowledge base for context."""
-    body = await request.body()
-    if not _verify(request, body):
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-
-    data = json.loads(body)
-    query = data.get("query", "")
-    limit = data.get("limit", 5)
-
-    if not query:
-        return JSONResponse({"context": "", "count": 0})
-
-    # Extract keywords from query (words > 3 chars)
-    keywords = [w for w in query.split() if len(w) > 3]
-    if not keywords:
-        keywords = query.split()[:3]
-
-    context_parts = []
-    try:
-        client = await _get_http_client()
-        headers = {}
-        if QDRANT_API_KEY:
-            headers["api-key"] = QDRANT_API_KEY
-
-        # Search by each keyword in subject and content
-        seen_ids = set()
-        for kw in keywords[:3]:  # max 3 keywords
-            resp = await client.post(
-                f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points/scroll",
-                json={
-                    "limit": limit,
-                    "with_payload": {"include": ["subject", "content", "source", "from_address"]},
-                    "with_vectors": False,
-                    "filter": {
-                        "should": [
-                            {"key": "subject", "match": {"text": kw}},
-                            {"key": "content", "match": {"text": kw}},
-                        ]
-                    }
-                },
-                headers=headers,
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                for pt in resp.json().get("result", {}).get("points", []):
-                    pid = pt.get("id")
-                    if pid not in seen_ids:
-                        seen_ids.add(pid)
-                        payload = pt.get("payload", {})
-                        subject = payload.get("subject", "")
-                        content = (payload.get("content", "") or "")[:300]
-                        if subject or content:
-                            context_parts.append(f"[{payload.get('source','?')}] {subject}\n{content}")
-
-        context = "\n---\n".join(context_parts[:limit])
-        return JSONResponse({"context": context, "count": len(context_parts)})
-    except Exception as e:
-        logger.error(f"Brain search failed: {e}")
-        return JSONResponse({"context": "", "count": 0})
-
-# Register route
-from starlette.routing import Route as _Route2
-app.routes.append(_Route2("/brain-chat", handle_brain_chat, methods=["POST"]))

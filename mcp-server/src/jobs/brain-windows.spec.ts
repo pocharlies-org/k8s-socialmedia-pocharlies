@@ -1,17 +1,19 @@
 /**
- * Integration-ish specs for the brain-windows jobs: fake pool + fake brain
- * (global.fetch), exercising the real diff/push/delete/LLM choreography of
- * recomputeChat and processLlmWindow without Postgres or skirmshop-brain.
+ * Integration-ish specs for the brain-windows jobs: fake pool + recording
+ * WindowSink + fake LLM (global.fetch), exercising the real diff/push/delete/
+ * LLM choreography of recomputeChat and processLlmWindow without Postgres.
+ * The sink is the seam: the Synapse publisher (brain-windows-synapse.spec)
+ * and the LLM HTTP are the only real I/O in production.
  */
 import { useTestAccounts } from '../domain/test-accounts';
-import { BrainPushConfig } from './brain-ingest-lib';
 import {
+  BrainDoc,
   ChatRef,
   PendingLlmWindow,
   WindowMessage,
   buildWindows,
   DEFAULT_WINDOWS_CONFIG,
-  httpSink,
+  WindowSink,
 } from './brain-windows-lib';
 import {
   recomputeChat,
@@ -24,8 +26,26 @@ import { LlmConfig } from './brain-window-llm';
 useTestAccounts({ whatsapp: { personal: 'http://wa' } });
 
 const CFG = DEFAULT_WINDOWS_CONFIG;
-const BRAIN: BrainPushConfig = { brainUrl: 'http://brain', apiKey: 'k' };
-const SINK = httpSink(BRAIN);
+
+// Recording sink (SC-5827: el push/delete al Brain murio; el unico sink real
+// es brain-windows-synapse.ts, probado en su propio spec).
+let pushedDocs: { account: string; docs: BrainDoc[] }[] = [];
+let removedDocs: { account: string; platform: string; sourceId: string; chunkCount: number }[] = [];
+let failNextPush = false;
+const SINK: WindowSink = {
+  async push(account, docs) {
+    if (failNextPush) throw new Error('sink push failed');
+    pushedDocs.push({ account, docs });
+  },
+  async remove(account, platform, sourceId, chunkCount) {
+    removedDocs.push({ account, platform, sourceId, chunkCount });
+  },
+};
+beforeEach(() => {
+  pushedDocs = [];
+  removedDocs = [];
+  failNextPush = false;
+});
 const LLM: LlmConfig = {
   baseUrl: 'http://litellm:4000/v1',
   apiKey: 'sk',
@@ -85,14 +105,7 @@ afterEach(() => {
   global.fetch = realFetch;
 });
 
-function mockBrainFetch() {
-  const pushes: { url: string; body: Record<string, unknown> }[] = [];
-  global.fetch = jest.fn(async (url: string, init: RequestInit) => {
-    pushes.push({ url, body: JSON.parse(String(init.body)) });
-    return new Response(JSON.stringify({ chunks_ingested: 1 }), { status: 200 });
-  }) as unknown as typeof fetch;
-  return pushes;
-}
+// (el push ya no es HTTP: se registra en SINK; mockBrainFetch desaparece)
 
 const META = [{ id: 'reforma@g.us', name: 'Reforma casa', type: 'GROUP', is_group: true }];
 
@@ -123,14 +136,12 @@ describe('recomputeChat', () => {
       ledgerRows([]),
       { match: 'INSERT INTO brain_windows', rows: [] },
     ]);
-    const pushes = mockBrainFetch();
     const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[4].wa_timestamp, false);
     expect(r.chats).toBe(1);
     expect(r.pushed).toBe(1);
-    const push = pushes[0];
-    expect(push.url).toBe('http://brain/instances/personal/push-ingest');
-    const docs = push.body.documents as { source_id: string; metadata: { type: string } }[];
-    expect(push.body.adapter).toBe('whatsapp');
+    const push = pushedDocs[0];
+    expect(push.account).toBe('personal');
+    const docs = push.docs;
     expect(docs[0].metadata.type).toBe('conversation_window');
     expect(docs.length).toBeGreaterThan(1); // at least one child
     expect(docs.slice(1).every(d => d.metadata.type === 'conversation_chunk')).toBe(true);
@@ -153,9 +164,8 @@ describe('recomputeChat', () => {
       ledgerRows([]),
       { match: 'INSERT INTO brain_windows', rows: [] },
     ]);
-    const pushes = mockBrainFetch();
     await recomputeRange(pool, msgs[0].wa_timestamp, msgs[2].wa_timestamp, false);
-    const docs = pushes[0].body.documents as { metadata: { type: string; llm_status: string } }[];
+    const docs = pushedDocs[0].docs;
     expect(docs.length).toBe(1);
     expect(docs[0].metadata.llm_status).toBe('skipped');
   });
@@ -176,13 +186,12 @@ describe('recomputeChat', () => {
         })),
       },
     ]);
-    const pushes = mockBrainFetch();
     const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp, false);
     expect(r.pushed).toBe(0);
-    expect(pushes.length).toBe(0);
+    expect(pushedDocs.length).toBe(0);
   });
 
-  it('vanished windows are deleted from the brain (parent + children) and the ledger', async () => {
+  it('vanished windows are removed through the sink (parent + chunkCount) and the ledger', async () => {
     const pool = new FakePool([
       { match: 'FROM conversations', rows: META },
       { match: 'LEFT JOIN participants', rows: [] },
@@ -192,7 +201,6 @@ describe('recomputeChat', () => {
       },
       { match: 'DELETE FROM brain_windows', rows: [] },
     ]);
-    const calls = mockBrainFetch();
     const r = await recomputeRange(
       pool,
       new Date('2026-03-14T09:00:00Z'),
@@ -200,10 +208,9 @@ describe('recomputeChat', () => {
       false
     );
     expect(r.deleted).toBe(1);
-    const deleted = calls
-      .filter(c => c.url.endsWith('/delete-document'))
-      .map(c => c.body.source_id);
-    expect(deleted).toEqual(['win:gone', 'win:gone#c1', 'win:gone#c2']);
+    expect(removedDocs).toEqual([
+      { account: 'personal', platform: 'whatsapp', sourceId: 'win:gone', chunkCount: 2 },
+    ]);
     expect(pool.sqlLike('DELETE FROM brain_windows').length).toBe(1);
   });
 
@@ -242,12 +249,8 @@ describe('recomputeChat', () => {
       ),
       { match: 'DELETE FROM brain_windows', rows: [] },
     ]);
-    const calls = mockBrainFetch();
     const r = await recomputeRange(pool, minTs, maxTs);
-    const deleted = calls
-      .filter(c => c.url.endsWith('/delete-document'))
-      .map(c => c.body.source_id);
-    expect(deleted).toEqual(['win:gone']);
+    expect(removedDocs.map(x => x.sourceId)).toEqual(['win:gone']);
     expect(r.deleted).toBe(1);
     const q = pool.sqlLike('content_hash, chunk_count, llm_status')[0];
     expect(q.length).toBe(5);
@@ -266,7 +269,6 @@ describe('recomputeChat', () => {
       ledgerRows(stored),
       { match: 'DELETE FROM brain_windows', rows: [] },
     ]);
-    const calls = mockBrainFetch();
     const r = await recomputeRange(
       pool,
       new Date('2026-03-14T09:00:00Z'),
@@ -275,7 +277,7 @@ describe('recomputeChat', () => {
     );
     expect(r.deleted).toBe(0);
     expect(r.refused).toBe(60);
-    expect(calls.filter(c => c.url.endsWith('/delete-document')).length).toBe(0);
+    expect(removedDocs.length).toBe(0);
     expect(pool.sqlLike('DELETE FROM brain_windows').length).toBe(0);
   });
 
@@ -286,10 +288,9 @@ describe('recomputeChat', () => {
       { match: 'LEFT JOIN participants', rows: msgs },
       ledgerRows([]),
     ]);
-    const pushes = mockBrainFetch();
     const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp, true);
     expect(r.pushed).toBe(1);
-    expect(pushes.length).toBe(0);
+    expect(pushedDocs.length).toBe(0);
     expect(pool.sqlLike('INSERT INTO brain_windows').length).toBe(0);
   });
 
@@ -300,9 +301,7 @@ describe('recomputeChat', () => {
       { match: 'LEFT JOIN participants', rows: msgs },
       ledgerRows([]),
     ]);
-    global.fetch = jest.fn(
-      async () => new Response('nope', { status: 400 })
-    ) as unknown as typeof fetch;
+    failNextPush = true;
     const r = await recomputeRange(pool, msgs[0].wa_timestamp, msgs[3].wa_timestamp, false);
     expect(r.pushed).toBe(0);
     expect(pool.sqlLike('INSERT INTO brain_windows').length).toBe(0);
@@ -352,24 +351,22 @@ describe('processLlmWindow', () => {
     trivial: false,
   };
 
-  function mockLlmAndBrain() {
+  function mockLlm() {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
     global.fetch = jest.fn(async (url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
       calls.push({ url, body });
-      if (url.includes('chat/completions'))
-        return new Response(
-          JSON.stringify({ choices: [{ message: { content: JSON.stringify(GOOD) } }] }),
-          { status: 200 }
-        );
-      return new Response(JSON.stringify({ chunks_ingested: 1 }), { status: 200 });
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify(GOOD) } }] }),
+        { status: 200 }
+      );
     }) as unknown as typeof fetch;
     return calls;
   }
 
   it('extracts, records done + summary and re-pushes the parent with header + summary', async () => {
     const pool = llmPool(null);
-    const calls = mockLlmAndBrain();
+    const calls = mockLlm();
     const r = await processLlmWindow(pool as never, SINK, LLM, row, false);
     expect(r).toBe('done');
     const llmCall = calls.find(c => c.url.includes('chat/completions'));
@@ -377,10 +374,7 @@ describe('processLlmWindow', () => {
     const status = pool.sqlLike('SET llm_status')[0];
     expect(status[1]).toBe('done');
     expect(String(status[2])).toMatch(/^[0-9a-f]{64}$/);
-    const parentPush = calls.find(c => c.url.includes('push-ingest'));
-    const doc = (
-      parentPush?.body.documents as { content: string; metadata: Record<string, unknown> }[]
-    )[0];
+    const doc = pushedDocs[0].docs[0];
     expect(doc.content).toBe(`${built.header}\nLa reforma sube un 15 %.`);
     expect(doc.metadata.llm_status).toBe('done');
     expect(doc.metadata.summary).toBe('La reforma sube un 15 %.');
@@ -389,7 +383,7 @@ describe('processLlmWindow', () => {
 
   it('feeds the previous window summary as context', async () => {
     const pool = llmPool('resumen de la ventana anterior');
-    const calls = mockLlmAndBrain();
+    const calls = mockLlm();
     await processLlmWindow(pool as never, SINK, LLM, row, false);
     const prompt = (
       calls.find(c => c.url.includes('chat/completions'))?.body.messages as { content: string }[]
@@ -401,7 +395,7 @@ describe('processLlmWindow', () => {
     const { llmInputHash } = require('./brain-windows-lib');
     const hash = llmInputHash(LLM.model, built.header, built.transcript, 'previo');
     const pool = llmPool('previo');
-    const calls = mockLlmAndBrain();
+    const calls = mockLlm();
     const r = await processLlmWindow(
       pool as never,
       SINK,
@@ -413,7 +407,7 @@ describe('processLlmWindow', () => {
     expect(calls.some(c => c.url.includes('chat/completions'))).toBe(false);
     // status restored to done and the parent re-pushed with the stored summary
     expect(pool.sqlLike('SET llm_status')[0][1]).toBe('done');
-    expect(calls.some(c => c.url.includes('push-ingest'))).toBe(true);
+    expect(pushedDocs.length).toBe(1);
   });
 
   it('LLM failure records llm_status=failed with the error', async () => {
@@ -430,7 +424,7 @@ describe('processLlmWindow', () => {
 
   it('a channel/bot or trivial row is marked skipped without any call', async () => {
     const pool = llmPool(null);
-    const calls = mockLlmAndBrain();
+    const calls = mockLlm();
     const r = await processLlmWindow(pool as never, SINK, LLM, { ...row, conv_kind: 'bot' }, false);
     expect(r).toBe('skipped');
     expect(pool.sqlLike('SET llm_status')[0][1]).toBe('skipped');
@@ -439,7 +433,7 @@ describe('processLlmWindow', () => {
 
   it('content that moved on since the ledger is skipped, not extracted', async () => {
     const pool = llmPool(null);
-    const calls = mockLlmAndBrain();
+    const calls = mockLlm();
     const r = await processLlmWindow(
       pool as never,
       SINK,

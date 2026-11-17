@@ -48,7 +48,7 @@ export function boundaryRecallConfigFromEnv(env: Env = process.env): BoundaryRec
     clientSecret,
     timeoutMs: number(env.HINDSIGHT_TIMEOUT_MS, 10000),
     maxTokens: number(env.HINDSIGHT_RECALL_MAX_TOKENS, 8192),
-    // Set from the measured probes before the cutover (see search.service.ts, DEFAULT_SEMANTIC_MIN_SCORE).
+    // Set from the measured probes before the cutover (HINDSIGHT_MIN_SCORE, medido 05-11).
     minScore: number(env.HINDSIGHT_MIN_SCORE, 0),
     // synapse-personal = the live brain_window path; socialmedia-mensajes = this repo's backfill.
     writerIdentities: (

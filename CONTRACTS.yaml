@@ -1916,9 +1916,14 @@ contracts:
   files:
   - mcp-server/src/jobs/brain-windows-lib.ts
   - mcp-server/src/jobs/brain-windows.ts
-  - mcp-server/src/jobs/brain-windows-backfill.ts
-  status: active
-  note: 'This repo is the CONSUMER; the provider is skirmshop-brain-v2 (service skirmshop-brain-ingest,
+  status: deprecated
+  replaced_by: amqp.synapse.brain-window-upserted.v1
+  remove_after: '2026-12-17'
+  note: 'SC-5827 (16-11-2026): PROVIDER RETIRADO — Dani ordenó apagar el Brain y Qdrant enteros.
+    El consumidor de este repo se borra con él (httpSink, pushToBrain, deleteFromBrain y el backfill);
+    la forma de los documentos vive desde ahora solo en amqp.synapse.brain-window-*.v1, cuyo consumidor
+    vivo es synapse-adapter-hindsight (retención en Hindsight, banco `personal`). Lo que sigue:
+    This repo is the CONSUMER; the provider is skirmshop-brain-v2 (service skirmshop-brain-ingest,
     ns skirmshop-brain-prod), which this repo must not rename. The brain-windows jobs (INFRA-364, ADR
     0002) push, per account instance (personal|skirmshop from the account registry) and adapter (whatsapp|telegram),
     parent documents of metadata.type `conversation_window` (content = header + summary or header + first
@@ -1982,9 +1987,11 @@ contracts:
     documents: [{source_id, content, metadata}]}}, con los MISMOS documentos que describe http.brain.push-ingest.conversation-window.v1
     y como mucho 25 por evento. Propiedades AMQP: persistent, content_type application/json, message_id
     = UUID aleatorio (un re-publish deliberado no debe quedar deduplicado en el inbox del engine; push-ingest
-    ya es upsert por source_id), cabeceras tenant_id y event_id. Consumidor: el workflow <tenant>.brain.conversation-window-upserted
-    de pocharlies-org/synapse, que llama a brain.ingest con `documents | native` y reintenta 60s/10m/60m.
-    Renombrar la clave, los campos de data o el mapeo cuenta→tenant es breaking: nueva entrada .v2.'
+    ya es upsert por source_id), cabeceras tenant_id y event_id. Consumidor (SC-5827, 16-11-2026):
+    synapse-adapter-hindsight, que retiene padre e hijos en Hindsight (banco `personal`; document_id =
+    source_id). El workflow <tenant>.brain.conversation-window-upserted de pocharlies-org/synapse (push
+    al Brain) se retiró con el Brain. Renombrar la clave, los campos de data o el mapeo cuenta→tenant
+    es breaking: nueva entrada .v2.'
 - id: amqp.synapse.brain-window-deleted.v1
   kind: routing-key
   value: brain_window.{tenant}.deleted
@@ -1994,9 +2001,11 @@ contracts:
   status: active
   note: 'INFRA-364. Mismo exchange, usuario y mapeo de tenant que amqp.synapse.brain-window-upserted.v1.
     Un evento por documento retirado (el padre y cada hijo ''#cN''): {data: {adapter, source_id}}, message_id
-    UUID aleatorio (el borrado es idempotente en el brain). Consumidor: el workflow <tenant>.brain.conversation-window-deleted
-    de pocharlies-org/synapse → brain.delete_document. Renombrar la clave o los campos es breaking: nueva
-    entrada .v2.'
+    UUID aleatorio (el borrado es idempotente en el brain). Consumidor (SC-5827, 16-11-2026):
+    synapse-adapter-hindsight, que sobrescribe el documento con una lápida de una línea bajo el mismo
+    document_id (el escritor de Hindsight solo retiene). El workflow <tenant>.brain.conversation-window-deleted
+    de pocharlies-org/synapse (brain.delete_document) se retiró con el Brain. Renombrar la clave o los
+    campos es breaking: nueva entrada .v2.'
 - id: mcp.socialmedia-tools.v2
   kind: mcp-tools
   value: socialmedia-tools

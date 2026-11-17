@@ -3820,8 +3820,8 @@ export class MCPServer {
             similarity: r.similarity,
             rank: r.rank,
           })),
-          // Which branch answered: `semantic` = the brain (INFRA-486),
-          // `text` = Postgres full-text, with why the brain did not.
+          // Which branch answered: `semantic` = Hindsight (INFRA-486/SC-4304),
+          // `text` = Postgres full-text, with why the semantic backend did not.
           mode,
           ...(fallbackReason ? { fallbackReason } : {}),
         },

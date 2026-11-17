@@ -238,10 +238,12 @@ spec:
 #   3. runs the LLM (LiteLLM alias `tooling`, 2 in parallel by default, closed
 #      windows only, capped per pass) and re-pushes the parents with summary.
 #
-# ON since 02-10-2026 (INFRA-364): the reindex push (ADR 0002 §9 fase 2) and
-# the per-message purge are done; the LLM phase of the reindex runs as a
-# separate job. Pass output goes through Synapse (brain_window.<tenant>.*,
-# ADR §7.1), not straight to push-ingest.
+# ON since 02-10-2026 (INFRA-364). SC-5827 (16-11): el Brain murió; este cron
+# es hoy el productor vivo de las ventanas de conversación: publica
+# brain_window.<tenant>.* y synapse-adapter-hindsight los retiene en Hindsight
+# (banco `personal`), que es lo que lee la búsqueda semántica de mcp-sse
+# (SEMANTIC_PROVIDER=hindsight). El push directo al Brain (BRAIN_WINDOWS_SINK=
+# http) y el backfill se borraron con él; el sink único es Synapse.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -283,26 +285,12 @@ spec:
                 - -c
                 - |
                   cd mcp-server
-                  # SC-4304: sin guarda de /health del Brain. Con BRAIN_WINDOWS_SINK=synapse
-                  # la pasada no llama al Brain (lee Postgres y publica brain_window.*);
-                  # saltarla con el Brain caido dejaba a Hindsight sin mensajes.
+                  # SC-5827: el sink unico es Synapse (publica brain_window.*;
+                  # synapse-adapter-hindsight los retiene en Hindsight). El push
+                  # directo al Brain (BRAIN_WINDOWS_SINK=http) murio con el Brain.
                   node --import tsx src/jobs/brain-windows.ts
               env:
                 - { name: DATABASE_URL, value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp" }
-                - { name: BRAIN_URL, value: "http://skirmshop-brain-ingest.skirmshop-brain-prod.svc.cluster.local" }
-                # Ventana de reintento del push (pushToBrain, heredada de
-                # brain-ingest; la fija brain-ingest-lib.spec). Manda el
-                # PRESUPUESTO BRAIN_PUSH_BUDGET_MS (240 s); BRAIN_PUSH_RETRIES
-                # es solo techo de seguridad y debe cubrir la ventana: con
-                # backoff capped en RETRY_MAX_DELAY (30 s), 20 intentos cubren
-                # >240 s. BRAIN_INGEST_MAX_RUNTIME_MS recorta el presupuesto si
-                # fuera menor (240 < 300-30: no recorta aqui).
-                - { name: BRAIN_PUSH_RETRIES, value: "20" }
-                - { name: BRAIN_PUSH_TIMEOUT_MS, value: "90000" }
-                - { name: BRAIN_PUSH_RETRY_MAX_DELAY_MS, value: "30000" }
-                - { name: BRAIN_PUSH_BUDGET_MS, value: "240000" }
-                - { name: BRAIN_PUSH_CONCURRENCY, value: "1" }
-                - { name: BRAIN_INGEST_MAX_RUNTIME_MS, value: "300000" }
                 # LLM local (ADR 0002 §5): LiteLLM -> residente de los Sparks,
                 # alias de capacidad `tooling`. La clave debe ser una virtual de
                 # BAJA PRIORIDAD (tipo hermes-batch) via LLM_API_KEY en
@@ -325,11 +313,9 @@ spec:
                 # pasada) a VictoriaMetrics; alerta BrainWindowsMassDeleteRefused.
                 - { name: BRAIN_WINDOWS_METRICS_URL, value: "http://vmsingle-vm-victoria-metrics-k8s-stack.monitoring.svc:8428/api/v1/import/prometheus?extra_label=job=brain_windows" }
                 - { name: BRAIN_WINDOWS_PUSH_DOCS_CAP, value: "400" }
-                # INFRA-364: el incremental publica en Synapse
-                # (brain_window.<tenant>.upserted|deleted) y Synapse lo ingiere con
-                # reintentos (workflows */brain/conversation-window-*.v1.yaml).
-                # BRAIN_WINDOWS_SINK=http vuelve al push-ingest directo sin tocar codigo.
-                - { name: BRAIN_WINDOWS_SINK, value: "synapse" }
+                # INFRA-364 / SC-5827: la pasada publica en Synapse
+                # (brain_window.<tenant>.upserted|deleted); el unico consumidor
+                # vivo es synapse-adapter-hindsight (Hindsight, banco `personal`).
                 - name: SYNAPSE_RABBITMQ_URL
                   valueFrom: { secretKeyRef: { name: whatsapp-mcp-synapse-rabbitmq, key: url } }
                 # Chats de bot/monitorizacion y canales (se indexan, no pasan
@@ -567,7 +553,8 @@ spec:
             # Busqueda semantica (SC-4304 S8): en Hindsight, banco `personal`, por la ruta de maquina
             # /hindsight-personal de AgentGateway con el principal `socialmedia-hindsight` (solo lectura).
             # Las cuentas sin banco (profesional, leila, cloudblue) caen a texto y lo dicen en
-            # `fallbackReason`. Vuelta atras: SEMANTIC_PROVIDER=brain (el brain sigue arriba hasta S8).
+            # `fallbackReason`. SC-5827 (16-11): el Brain murio; ya no hay vuelta atras `brain`,
+            # sin Hindsight configurado la busqueda es solo de texto.
             - { name: SEMANTIC_PROVIDER, value: "hindsight" }
             # recall (rerank incluido) sobre el banco `personal` pasa de los 10 s por defecto del cliente.
             - { name: HINDSIGHT_TIMEOUT_MS, value: "40000" }
@@ -575,7 +562,6 @@ spec:
             # 0.0008-0.0019; consultas reales, su mejor acierto entre 0.13 y 0.77. 0.02 deja pasar el acierto mas flojo
             # medido (0.13) y corta el ruido. Pocas consultas: se reajusta si aparecen aciertos reales por debajo.
             - { name: HINDSIGHT_MIN_SCORE, value: "0.02" }
-            - { name: BRAIN_SEARCH_URL, value: "http://skirmshop-brain.skirmshop-brain-prod.svc.cluster.local" }
             - name: HINDSIGHT_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: socialmedia-hindsight-reader, key: HINDSIGHT_CLIENT_SECRET } }
             - name: MCP_SSE_AUTH_TOKEN

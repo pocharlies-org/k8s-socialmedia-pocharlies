@@ -17,8 +17,13 @@
  */
 import { createHash, randomUUID } from 'crypto';
 import * as amqp from 'amqplib';
-import { BrainDoc, adapterForPlatform } from './brain-ingest-lib';
-import { WindowSink, instanceForNamespace, wellFormedDeep } from './brain-windows-lib';
+import {
+  adapterForPlatform,
+  BrainDoc,
+  instanceForNamespace,
+  wellFormedDeep,
+  WindowSink,
+} from './brain-windows-lib';
 
 export const SYNAPSE_EVENTS_EXCHANGE = 'events';
 export const UPSERT_BATCH = 25;

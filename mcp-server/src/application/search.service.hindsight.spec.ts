@@ -43,7 +43,7 @@ beforeEach(() => {
 
 const service = (hindsight: unknown, rows: unknown[] = [row()]) => {
   const query = jest.fn(async () => ({ rows }));
-  return { query, svc: new SearchService({ query } as any, null, jest.fn(), hindsight as any) };
+  return { query, svc: new SearchService({ query } as any, undefined, hindsight as any) };
 };
 
 it('pide solo chunks de la cuenta y plataforma, y devuelve filas de Postgres con cuenta y conversación', async () => {
