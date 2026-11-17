@@ -216,9 +216,14 @@ images:
   # nombre; el resto de consumidores no importa jobs/. Digest comprobado en Harbor (crane digest ...:v1.3.153).
   # SC-5827 17-11: v1.3.153 -> v1.3.154 (run 44078201664, deploy/prod@42c8541): #505, brain-windows y mcp-sse
   # sin el Brain (brain-windows sigue alimentando Hindsight por synapse). Digest comprobado en Harbor.
+  # SC-5926 17-11: v1.3.154 -> v1.3.155 (run 44142403954, deploy/prod@7210716): #509, brain-windows como
+  # worker residente despertado por el NOTIFY de la migración 045 (la aplica el Job PreSync con esta
+  # imagen). Viaja en el mismo PR que cambia el CronJob brain-windows por su Deployment: con la imagen
+  # vieja el Deployment haría pasadas en bucle, y con la nueva el CronJob nunca terminaría. El resto de
+  # consumidores no cambia de código (solo jobs/brain-windows*). Revisión y digest comprobados con crane.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.154
-    digest: sha256:41852733e70b4e30da07db17b3ff135f27344ad7df89e15a3d09fbbb1a3bf36b
+    newTag: v1.3.155
+    digest: sha256:9ea708f3798c5fe69fbf986064cc6eba7b358eb51ee8db1f440c51a83b3835d2
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
