@@ -4,8 +4,8 @@
  * closes a window; the window is pushed as a parent `conversation_window`
  * document plus `conversation_chunk` children (small-to-big retrieval, ADR
  * §3/§4). Everything that decides bytes (sessionizing, splitting, formatting,
- * hashing, chunking, diffing) lives here as pure functions; the DB and HTTP
- * plumbing sits below them and is exercised with fakes in the specs.
+ * hashing, chunking, diffing) lives here as pure functions; the DB plumbing
+ * sits below them and is exercised with fakes in the specs.
  */
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
@@ -1086,27 +1086,28 @@ export async function sessionEndBound(
 }
 
 /**
- * Ledger windows of a chat. With `range`, only those starting inside it: the
- * incremental rebuilds just the affected sessions, so comparing against the
- * whole chat made every window outside the range look "vanished" and got it
- * deleted (02-10-2026: ~26k windows in four passes). The backfill rebuilds the
- * whole chat and calls this without a range.
+ * Ledger windows of a chat starting inside `range`: the incremental rebuilds
+ * just the affected sessions, so comparing against the whole chat made every
+ * window outside the range look "vanished" and got it deleted (02-10-2026:
+ * ~26k windows in four passes).
  */
 export async function loadStoredWindows(
   pool: Pool,
   chat: ChatRef,
-  range?: { from: Date; to: Date }
+  range: { from: Date; to: Date }
 ): Promise<StoredWindow[]> {
-  const params: unknown[] = [chat.account, chat.platform, chat.conversation_id];
-  let where = 'account = $1 AND platform = $2 AND conversation_id = $3';
-  if (range) {
-    params.push(range.from, range.to);
-    where += ' AND start_ts >= $4 AND start_ts <= $5';
-  }
+  const params: unknown[] = [
+    chat.account,
+    chat.platform,
+    chat.conversation_id,
+    range.from,
+    range.to,
+  ];
   const r = await pool.query(
     `SELECT source_id, content_hash, chunk_count, llm_status
        FROM brain_windows
-      WHERE ${where}`,
+      WHERE account = $1 AND platform = $2 AND conversation_id = $3
+        AND start_ts >= $4 AND start_ts <= $5`,
     params
   );
   return r.rows as StoredWindow[];
@@ -1228,15 +1229,9 @@ export async function fetchPendingLlmWindows(
     accounts: string[];
     closedBefore: Date;
     limit: number;
-    after?: { end_ts: Date; source_id: string } | null;
   }
 ): Promise<PendingLlmWindow[]> {
   const params: unknown[] = [opts.accounts, opts.closedBefore, opts.limit];
-  let keyset = '';
-  if (opts.after) {
-    params.push(opts.after.end_ts, opts.after.source_id);
-    keyset = `AND (w.end_ts, w.source_id) < ($4::timestamptz, $5::text)`;
-  }
   const r = await pool.query(
     `SELECT w.source_id, w.account, w.platform, w.conversation_id, w.window_key, w.part,
             w.start_ts, w.end_ts, w.message_count, w.conv_kind, w.content_hash, w.llm_input_hash
@@ -1244,7 +1239,6 @@ export async function fetchPendingLlmWindows(
       WHERE w.account = ANY ($1::text[])
         AND w.llm_status IN ('pending','failed')
         AND w.end_ts <= $2::timestamptz
-        ${keyset}
       ORDER BY w.end_ts DESC, w.source_id DESC
       LIMIT $3`,
     params
@@ -1323,7 +1317,6 @@ export async function loadWindowForLlm(
 
 // ── backfill plumbing ─────────────────────────────────────────────────────
 
-/** Store the LLM summary on the ledger row (previous-window context). */
 export interface BackfillCursor {
   last_account: string | null;
   last_platform: string | null;
@@ -1382,6 +1375,7 @@ export async function setBackfillCursor(
   );
 }
 
+/** Store the LLM summary on the ledger row (previous-window context). */
 export async function setWindowSummary(
   pool: Pool,
   sourceId: string,

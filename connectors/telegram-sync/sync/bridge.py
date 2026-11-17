@@ -23,7 +23,6 @@ BRIDGE_SECRET = os.environ.get("BRIDGE_SECRET", "telegram-bridge-secret-2026")
 # holding its own Telethon client.
 _connector = None
 _db_pool: asyncpg.Pool | None = None
-_http_client: httpx.AsyncClient | None = None
 _startup_error: dict[str, str] | None = None
 
 

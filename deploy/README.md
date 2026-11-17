@@ -30,7 +30,7 @@ Embedding defaults match the existing deployment: `qwen3-embedding-8b`, dimensio
 
 ## Environment configuration
 
-Semantic retrieval can use the upstream brain or an existing Hindsight server.
+Semantic retrieval uses an existing Hindsight server; without it, search is text-only (the upstream brain was retired, SC-5827).
 See [optional Hindsight retrieval](../docs/hindsight-provider.md) for the `.env`
 switch, dedicated `socialmedia-staticduo` bank and resumable indexing worker.
 

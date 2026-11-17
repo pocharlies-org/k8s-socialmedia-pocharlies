@@ -25,10 +25,9 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 
 - **Depende de** — Postgres compartido + pgvector, Redis/Valkey, MinIO, NATS (`whatsapp-mcp-nats.whatsapp-mcp`), LiteLLM, Meta Graph/Cloud
   API, Baileys parcheado (`patches/@whiskeysockets__baileys@7.0.0-rc13.patch`), Harbor, 1Password/ExternalSecrets.
-- **Búsqueda semántica → `skirmshop-brain`** (API `POST /instances/{instancia}/search`, `BRAIN_SEARCH_URL`; clave con alcance
-  `BRAIN_MESSAGING_SEARCH_KEY`, Secret `whatsapp-mcp-brain-search` (item 1Password `brain-messaging-search`) montado solo en `mcp-sse`, INFRA-637:
-  el brain exige `filters.account`). Hacia el otro lado, el brain depende de
-  `brain-windows` (este repo) para su contenido.
+- **Búsqueda semántica → Hindsight** (banco `personal`, ruta de máquina `/hindsight-personal` de AgentGateway con el principal
+  `socialmedia-hindsight` de solo lectura; SC-4304 S8; SC-5827 retiró el Brain y Qdrant). Hacia el otro lado, Hindsight depende de
+  `brain-windows` (este repo) para su contenido: publica `brain_window.*` por Synapse y `synapse-adapter-hindsight` lo retiene.
 - **Núcleo de «correo» (DGX-1235)** — `correo-bridge` mete en el núcleo (`correo-machine.correo`, `POST /v2/mensajes/{conector}` de
   `correo.ingest.v2`) cada mensaje 1:1 de las cuentas profesionales de WhatsApp y Telegram, sin texto, y le sirve la lectura en vivo de
   `correo.connector.v1`. Hacia el otro lado, el núcleo llama a sus rutas de lectura con la clave de cada conector.
@@ -65,7 +64,7 @@ Los clientes de producto (Hermes, Claude, Synapse) consumen el MCP vía AgentGat
 | Python (telethon) | `connectors/telegram-sync` | ingesta Telegram | — |
 | `scripts/render-connectors.py` | PyYAML 6.0.2 | **genera** `generated/connectors.yaml` desde una fuente única | editar el generado a mano |
 | Kustomize base + overlays | — | render | Helm |
-| Búsqueda semántica de mensajes | brain (`/instances/{instancia}/search`) | la lectura **ya no usa pgvector ni embeddings de LiteLLM**; sin clave o con el brain caído contesta Postgres full-text y lo dice (`fallbackReason`); el escritor (`EmbeddingJob` → `message_embeddings`, pgvector) sigue activo y queda como deuda: retirarlo es otro cambio, con el cierre de INFRA-486 | embeber el query en este repo |
+| Búsqueda semántica de mensajes | Hindsight (banco `personal`, `/hindsight-personal`) | la lectura **ya no usa pgvector ni embeddings de LiteLLM**; sin Hindsight configurado, sin banco para la cuenta o con Hindsight caído contesta Postgres full-text y lo dice (`fallbackReason`); el escritor (`EmbeddingJob` → `message_embeddings`, pgvector) sigue activo y queda como deuda: retirarlo es otro cambio, con el cierre de INFRA-486 | embeber el query en este repo |
 
 ## 4. Componentes compartidos
 
@@ -152,7 +151,7 @@ Total de casos Jest: **pendiente de medir**.
 - Hosts `*.lan.e-dani.com` de los conectores de WhatsApp (`whatsapp`, `whatsapp-pro`, `whatsapp-leila`; IngressRoutes generadas por `render-connectors.py`): `/api/public` va a `connector-public-api-deny`; `/qr` **y el resto del host** (`/api/v1/*`, `/status`) van tras `sso-chain` (ns `keycloak`, SKIRM-110; antes solo `/qr`, y `GET /api/v1/auth/qr` de leila respondía 200 sin credencial en la LAN). Los clientes de máquina no usan esos hosts: llaman al Service interno (`<conector>.whatsapp-mcp.svc.cluster.local:3001`, con el HMAC); un cliente nuevo que apunte a un host `.lan` recibe la redirección a Keycloak.
 - WhatsApp Web personal usa sesión persistente: perderla exige re-emparejar (`http.whatsapp-pairing…`).
 - `auto-reply-worker` personal está deshabilitado (tombstone): las respuestas de WhatsApp Business las lleva Synapse.
-- `leila` comparte la instancia `personal` del brain y se aísla por `filters.account` (cada fragmento y cada fila se ligan a la cuenta de su consulta). Una instancia por cuenta (decisión INFRA-487) espera al ingest de `leila` en su vault: INFRA-554 (y INFRA-602 para los 43 puntos `account=leila`). `BRAIN_MESSAGING_SEARCH_KEY` (INFRA-637) llega a `mcp-sse` por el ExternalSecret `whatsapp-mcp-brain-search` (item `brain-messaging-search`, el mismo que lee el brain: lo compara por igualdad), con `secretKeyRef` **sin `optional`**: `mcp-sse` es `Recreate` con `hostPort: 3010`, así que sin el Secret el pod no arranca y cae todo `/social`; el item se crea antes de fusionar. Con el brain caído o un valor distinto (401) la búsqueda cae a texto con `fallbackReason`. `mcp-sse` espera al brain `BRAIN_SEARCH_TIMEOUT_MS=30000` (INFRA-743; el código corta a 10 s por defecto y las lecturas frías de Qdrant tardan 2–50 s, INFRA-744); lo que hay delante lo admite (AgentGateway `/social` `requestTimeout: 120s`). `mcp-server` no la monta: nadie lo llama (el gateway va a `mcp-sse:3010`). ArgoCD no evalúa la salud de un ExternalSecret aquí: la sync-wave `-1` del ES ordena su creación, no espera al Secret.
+- `leila` no tiene banco en Hindsight (solo `personal`): su búsqueda semántica contesta la de texto con `fallbackReason`; su `brainInstance` (INFRA-554) solo decide el tenant de Synapse de sus ventanas.
 - Envío 1:1 sin tctoken (SKIRM-92): `outbound_history` cuenta cualquier OUTBOUND no fallido de la conversación canónica (enviado desde el móvil del dueño o por el conector tras el guard). Un envío que WhatsApp rechaza con 463 solo deja de contar si `setMessageStatus` (`'failed'`) llega después de que exista la fila; un ack muy temprano la deja contando.
 - Medios de Telegram (SKIRM-101): el estado de reintento vive en `messages.metadata` (`media_status` retry/stored/unavailable/deleted,
   `media_attempts`, `media_next_retry` en epoch), sin tabla ni columna. Cada fallo espera 30 s duplicando por intento hasta 3600 s, o el `Retry-After` de un

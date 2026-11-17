@@ -2,8 +2,8 @@
  * brain-windows — incremental conversation-window pass (INFRA-364, ADR 0002 §7).
  * Publishes the parent `conversation_window` documents and their
  * `conversation_chunk` children as Synapse events (brain_window.<tenant>.*,
- * brain-windows-synapse.ts), which Synapse ingests with retries; the
- * backfill still uses push-ingest directly. CronJob every 30 min. Per
+ * brain-windows-synapse.ts), which synapse-adapter-hindsight retains in
+ * Hindsight (SC-5827: the Brain is gone). CronJob every 30 min. Per
  * account (DB namespace):
  *
  *   1. read messages changed after `brain_windows_cursor` (keyset on
@@ -11,8 +11,8 @@
  *      notes transcribed hours later all move `updated_at`);
  *   2. recompute the windows of every affected chat over the affected range,
  *      grown to complete windows (session boundaries);
- *   3. diff against `brain_windows`: vanished windows are deleted from the
- *      brain (parent + children), new/changed ones pushed (content_hash);
+ *   3. diff against `brain_windows`: vanished windows are published as deleted
+ *      (parent + children), new/changed ones pushed (content_hash);
  *   4. windows younger than the gap go up provisional (llm_status pending);
  *   5. the LLM runs over CLOSED pending windows, newest first, 2 in parallel,
  *      capped per pass; parents are re-pushed with their summary.

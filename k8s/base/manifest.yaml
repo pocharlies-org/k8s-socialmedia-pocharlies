@@ -221,12 +221,12 @@ spec:
 # GENERATED from the account registry: see k8s/base/generated/connectors.yaml
 # (scripts/render-connectors.py). Edit k8s/base/social-accounts.json, not here.
 ---
-# ── Brain windows (INFRA-364, ADR 0002): conversation windows into SkirmBrain ─
+# ── Brain windows (INFRA-364, ADR 0002): conversation windows, Synapse -> Hindsight ─
 # Replaces the per-message `brain-ingest` CronJob (retired here on 30-09-2026,
 # #144 had already suspended it: Dani's ADR 0002 indexes WhatsApp/Telegram by
 # 1-hour-silence windows, parent + 200-400-token children, LLM summaries on
-# closed non-bot windows). The old per-message points are purged by the brain
-# repo (ADR 0002 §9 fase 1) and the code stays for brain-replay (recovery).
+# closed non-bot windows). The old per-message points were purged by the brain
+# repo (ADR 0002 §9 fase 1).
 #
 # Each pass (mcp-server image: pg + tsx + the jobs):
 #   1. reads messages changed after `brain_windows_cursor` (updated_at keyset —
@@ -323,7 +323,7 @@ spec:
                 - { name: BRAIN_WINDOWS_CONFIG_FILE, value: "/brain-config/brain-windows-config.yaml" }
                 # Namespaces e instancia del brain por cuenta: registro de cuentas.
                 - { name: SOCIAL_ACCOUNTS_FILE, value: "/accounts/social-accounts.json" }
-                # BRAIN_API_KEY / OPENAI_API_KEY / LLM_API_KEY salen del
+                # OPENAI_API_KEY / LLM_API_KEY salen del
                 # secret whatsapp-mcp-secrets (1Password) via envFrom.
               envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
               volumeMounts:

@@ -89,7 +89,6 @@ const HINDSIGHT_NAMESPACES = new Set(['personal']);
 export class SearchService {
   private dbClient: Pool;
   private logger: pino.Logger;
-  private readonly fetchImpl: FetchLike;
   private readonly hindsight: HindsightBoundaryRecall | null;
 
   constructor(
@@ -102,7 +101,6 @@ export class SearchService {
       : null
   ) {
     this.dbClient = dbClient;
-    this.fetchImpl = fetchImpl;
     this.hindsight = hindsight;
     this.logger = createServiceLogger();
     this.logger.info(

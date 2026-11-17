@@ -23,7 +23,6 @@ function serverWith(
     dbClient: { query },
     // Sin Hindsight configurado: search() cae a la busqueda de texto (FTS).
     // SC-5827: el backend brain murio; el semantico es Hindsight.
-    fetchImpl: (url: string, init: RequestInit) => Promise.resolve(new Response('{}')),
     hindsight: hindsight ?? null,
     logger: { warn: jest.fn() },
   });
@@ -188,13 +187,10 @@ describe('social_search_messages — mediaType', () => {
   it('T8 una cuenta sin banco en Hindsight: el fallo se cuenta en fallbackReason y el resto se responde en texto', async () => {
     // Hindsight fake (banco `personal` solo): `professional` no tiene banco y
     // falla, `personal` no tiene aciertos => searchDetailed cae al texto y lo
-    // dice, con el fallo en meta.partialErrors (SC-5827: antes era una
-    // instancia del brain caida).
+    // dice en fallbackReason (SC-5827: antes era una instancia del brain caida).
     const hindsight = {
       minScore: 0,
-      recall: jest.fn(async (_q: string, tags: string[]) => {
-        return [];
-      }),
+      recall: jest.fn(async () => []),
     };
     const { run, query } = serverWith(hindsight);
     query.mockResolvedValueOnce({

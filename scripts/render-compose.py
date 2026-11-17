@@ -185,7 +185,6 @@ def render(accounts, stack_dir, source_dir, output_dir, settings=None):
     common = {'DATABASE_URL': database, 'NATS_URL': configurable('NATS_URL', 'tls://socialmedia-nats:4222'), 'NATS_CA_CERT': '${NATS_CA_CERT-/certs/ca.crt}', 'NODE_EXTRA_CA_CERTS': '${NODE_EXTRA_CA_CERTS-/certs/ca.crt}', 'SOCIAL_ACCOUNTS_FILE': '/config/accounts.json'}
     semantic = {
         'SEMANTIC_PROVIDER': configurable('SEMANTIC_PROVIDER', 'brain'),
-        'SEMANTIC_MIN_SCORE': configurable('SEMANTIC_MIN_SCORE', '-5'),
         'HINDSIGHT_URL': configurable('HINDSIGHT_URL'),
         'HINDSIGHT_BANK_ID': configurable('HINDSIGHT_BANK_ID', 'socialmedia-staticduo'),
         'HINDSIGHT_API_KEY': configurable('HINDSIGHT_API_KEY'),
