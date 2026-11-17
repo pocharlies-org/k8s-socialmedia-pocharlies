@@ -1,24 +1,29 @@
 /**
  * brain-windows → Synapse (INFRA-364). The incremental cron publishes its
- * window documents as Synapse events instead of calling push-ingest itself;
- * Synapse's workflows ingest them with retries:
+ * window documents as Synapse events; since SC-5827 the only consumer is
+ * synapse-adapter-hindsight, which retains them in Hindsight (the synapse
+ * workflows that pushed them to the Brain were retired with it):
  *
- *   brain_window.<tenant>.upserted → brain.ingest (the documents of ONE window,
+ *   brain_window.<tenant>.upserted → retain (the documents of ONE window,
  *                                    parent + children, batches of 25)
- *   brain_window.<tenant>.deleted  → brain.delete_document (one doc per event)
+ *   brain_window.<tenant>.deleted  → tombstone (one doc per event)
  *
  * tenant: follows the account's brain instance in the account registry —
  * instance `personal` → family, instance `leila` → leila (INFRA-554), anything
- * else (`skirmshop`) → skirmshop. Workflows live in pocharlies-org/synapse
- * `workflows/{family,leila,skirmshop}/brain/conversation-window-*.v1.yaml`.
+ * else (`skirmshop`) → skirmshop.
  *
  * Publishing goes straight to the `events` topic exchange of vhost /synapse
  * with a write-only user (configure ^$, read ^$): never assert the exchange.
  */
 import { createHash, randomUUID } from 'crypto';
 import * as amqp from 'amqplib';
-import { BrainDoc, adapterForPlatform } from './brain-ingest-lib';
-import { WindowSink, instanceForNamespace, wellFormedDeep } from './brain-windows-lib';
+import {
+  adapterForPlatform,
+  BrainDoc,
+  instanceForNamespace,
+  wellFormedDeep,
+  WindowSink,
+} from './brain-windows-lib';
 
 export const SYNAPSE_EVENTS_EXCHANGE = 'events';
 export const UPSERT_BATCH = 25;

@@ -60,7 +60,7 @@ integration('real PostgreSQL account and channel isolation', () => {
     expect(counts.rows[0]).toEqual({ count: 5, senders: 5 });
   });
   test('Instagram raw and indexed search selectors return only requested scope', async () => {
-    const search = new SearchService(db as any, null);
+    const search = new SearchService(db as any);
     for (const account of ['personal', 'instagram', 'other_ig']) {
       for (const chatId of ['42', `ig_${account}_thread_42`]) {
         const results = await search.keywordSearch('isolationneedle', {

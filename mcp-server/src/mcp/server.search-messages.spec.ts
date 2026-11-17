@@ -10,10 +10,7 @@ import { SOCIAL_TOOL_REGISTRY } from './tool-registry';
  * account's DB namespace) and the mediaType filter on every channel.
  */
 function serverWith(
-  brain: {
-    config: unknown;
-    fetchImpl: (url: string, init: RequestInit) => Promise<Response>;
-  } | null = null
+  hindsight: { recall: (query: string, tags: string[]) => Promise<unknown[]>; minScore: number } | null = null
 ) {
   const server = Object.create(MCPServer.prototype) as MCPServer;
   const query = jest.fn(async (..._args: unknown[]) => ({ rows: [] as any[] }));
@@ -24,9 +21,9 @@ function serverWith(
   const searchService = Object.create(SearchService.prototype) as SearchService;
   Object.assign(searchService as unknown as Record<string, unknown>, {
     dbClient: { query },
-    // No brain configured: search() falls back to the keyword (FTS) query.
-    brain: brain?.config ?? null,
-    fetchImpl: brain?.fetchImpl,
+    // Sin Hindsight configurado: search() cae a la busqueda de texto (FTS).
+    // SC-5827: el backend brain murio; el semantico es Hindsight.
+    hindsight: hindsight ?? null,
     logger: { warn: jest.fn() },
   });
   Object.assign(server as unknown as Record<string, unknown>, {
@@ -187,26 +184,15 @@ describe('social_search_messages — mediaType', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('T8 an instance that is down is a partial read: meta.partialErrors, results of the others intact', async () => {
-    const fetchImpl = jest.fn(async (url: string) => {
-      if (url.includes('/instances/skirmshop/')) return new Response('down', { status: 502 });
-      return new Response(
-        JSON.stringify({
-          instance_id: 'personal',
-          documents: [
-            {
-              score: 0.9,
-              metadata: { type: 'conversation_chunk', account: 'personal', message_ids: ['3EB0A'] },
-            },
-          ],
-        }),
-        { status: 200 }
-      );
-    });
-    const { run, query } = serverWith({
-      config: { url: 'http://brain', apiKey: 'k', timeoutMs: 1000, minScore: 0.2 },
-      fetchImpl,
-    });
+  it('T8 una cuenta sin banco en Hindsight: el fallo se cuenta en fallbackReason y el resto se responde en texto', async () => {
+    // Hindsight fake (banco `personal` solo): `professional` no tiene banco y
+    // falla, `personal` no tiene aciertos => searchDetailed cae al texto y lo
+    // dice en fallbackReason (SC-5827: antes era una instancia del brain caida).
+    const hindsight = {
+      minScore: 0,
+      recall: jest.fn(async () => []),
+    };
+    const { run, query } = serverWith(hindsight);
     query.mockResolvedValueOnce({
       rows: [
         {
@@ -226,13 +212,10 @@ describe('social_search_messages — mediaType', () => {
     const out = await run({ query: 'hola' });
 
     expect(out.structuredContent.data.results).toHaveLength(1);
-    expect(out.structuredContent.data.mode).toBe('semantic');
-    expect(out.structuredContent.data.fallbackReason).toBeUndefined();
-    expect(out.structuredContent.meta.source.completeness).toBe('partial');
-    expect(out.structuredContent.meta.partialErrors[0]).toMatchObject({
-      accountId: 'professional',
-      code: 'provider_error',
-      message: expect.stringContaining('brain skirmshop 502'),
-    });
+    expect(out.structuredContent.data.mode).toBe('text');
+    expect(out.structuredContent.data.fallbackReason).toMatch(/no tiene banco/);
+    // En el fallback a texto el fallo del backend se cuenta en fallbackReason
+    // (searchDetailed no propaga partialErrors cuando no hubo aciertos).
+    expect(out.structuredContent.meta.source.completeness).toBe('complete');
   });
 });

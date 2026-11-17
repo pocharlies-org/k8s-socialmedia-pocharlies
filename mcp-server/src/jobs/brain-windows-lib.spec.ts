@@ -16,7 +16,6 @@ import {
   childDocs,
   chunkWindow,
   classifyConvKind,
-  deleteFromBrain,
   diffWindows,
   initialLlmStatus,
   isProvisional,
@@ -28,7 +27,6 @@ import {
   parentContent,
   parentDoc,
   parseWindowsConfig,
-  pushWindowDocs,
   renderHeader,
   renderTranscript,
   sessionEndBound,
@@ -637,53 +635,6 @@ describe('config file (ADR 0002 §5)', () => {
   });
 });
 
-describe('brain http surface', () => {
-  const realFetch = global.fetch;
-  afterEach(() => {
-    global.fetch = realFetch;
-  });
-
-  it('deleteFromBrain: 200 and 404 succeed, 5xx retries, 4xx fails fast', async () => {
-    const calls: { url: string; body: unknown }[] = [];
-    global.fetch = jest.fn(async (url: string, init: RequestInit) => {
-      calls.push({ url, body: JSON.parse(String(init.body)) });
-      if (calls.length === 1) return new Response('', { status: 404 });
-      if (calls.length === 2) return new Response('boom', { status: 502 });
-      return new Response('', { status: 200 });
-    }) as unknown as typeof fetch;
-    const cfg = { brainUrl: 'http://brain' };
-    await deleteFromBrain(cfg, 'personal', 'whatsapp', 'win:k', async () => {});
-    await deleteFromBrain(cfg, 'personal', 'whatsapp', 'win:k2', async () => {}); // 502 -> retry -> 200
-    expect(calls[0].url).toBe('http://brain/instances/personal/delete-document');
-    expect(calls[0].body).toEqual({ adapter: 'whatsapp', source_id: 'win:k' });
-    expect(calls.length).toBe(3);
-    await expect(
-      (async () => {
-        global.fetch = jest.fn(
-          async () => new Response('nope', { status: 400 })
-        ) as unknown as typeof fetch;
-        return deleteFromBrain(cfg, 'personal', 'whatsapp', 'win:k3', async () => {});
-      })()
-    ).rejects.toThrow(/400/);
-  });
-
-  it('pushWindowDocs batches docs and routes by account registry', async () => {
-    const bodies: { documents: { source_id: string }[] }[] = [];
-    global.fetch = jest.fn(async (_url: string, init: RequestInit) => {
-      bodies.push(JSON.parse(String(init.body)));
-      return new Response(JSON.stringify({ chunks_ingested: 1 }), { status: 200 });
-    }) as unknown as typeof fetch;
-    const docs = Array.from({ length: 60 }, (_, i) => ({
-      source_id: `win:k#c${i}`,
-      content: 'x',
-      metadata: { platform: 'telegram' },
-    }));
-    const n = await pushWindowDocs({ brainUrl: 'http://brain' }, 'personal', docs, 25);
-    expect(n).toBe(3); // 3 push-ingest calls of 25/25/10
-    expect(bodies[0].documents.length).toBe(25);
-    expect(bodies[2].documents.length).toBe(10);
-  });
-});
 
 describe('session boundary helpers', () => {
   it('sessionEndBound walks forward through small gaps (fake pool)', async () => {

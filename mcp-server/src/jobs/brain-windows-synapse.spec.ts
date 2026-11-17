@@ -1,5 +1,4 @@
 import { useTestAccounts } from '../domain/test-accounts';
-import { BrainDoc } from './brain-ingest-lib';
 import {
   EventPublisher,
   SynapseEvent,
@@ -9,6 +8,7 @@ import {
   tenantForAccount,
   upsertEvents,
 } from './brain-windows-synapse';
+import { BrainDoc } from './brain-windows-lib';
 
 useTestAccounts({
   whatsapp: { personal: 'http://wa', professional: 'http://wa-pro', leila: 'http://wa-leila' },

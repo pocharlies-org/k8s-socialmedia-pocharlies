@@ -17,7 +17,6 @@ class RenderTests(unittest.TestCase):
         for name in ('mcp-server', 'mcp-sse'):
             env = doc['services'][name]['environment']
             self.assertEqual(env['SEMANTIC_PROVIDER'], '${SEMANTIC_PROVIDER:-brain}')
-            self.assertEqual(env['BRAIN_MESSAGING_SEARCH_KEY'], '${BRAIN_MESSAGING_SEARCH_KEY:-}')
         doc, _, _ = module.render(self.accounts, '/volume2/docker/social-media', module.ROOT,
                                   '/tmp/generated', {'SEMANTIC_PROVIDER': 'hindsight'})
         worker = doc['services']['hindsight-sync']

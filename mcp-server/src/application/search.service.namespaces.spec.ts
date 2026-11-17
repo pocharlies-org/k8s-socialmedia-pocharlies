@@ -15,7 +15,6 @@ import path from 'node:path';
 import { resetAccountRegistryCache } from '../domain/account-registry';
 import { SearchService } from './search.service';
 
-const BRAIN = { url: 'http://brain', apiKey: 'k', timeoutMs: 1000, minScore: 0.2 };
 const wa = (accountId: string, extra: object = {}) => ({
   channel: 'whatsapp',
   accountId,
@@ -46,7 +45,7 @@ afterAll(() => {
 
 function keywordService() {
   const query = jest.fn(async () => ({ rows: [] }));
-  return { query, service: new SearchService({ query } as any, null) };
+  return { query, service: new SearchService({ query } as any) };
 }
 const paramsOf = (query: jest.Mock) => (query.mock.calls[0] as unknown as [string, unknown[]])[1];
 
@@ -115,46 +114,16 @@ describe('text search account isolation', () => {
   });
 });
 
-describe('account-less semantic search (brain scopes)', () => {
-  function brainService() {
-    const calls: Array<{ url: string; body: any }> = [];
-    const fetchImpl = jest.fn(async (url: string, init: RequestInit) => {
-      calls.push({ url, body: JSON.parse(String(init.body)) });
-      const instance = decodeURIComponent(url.split('/instances/')[1].split('/')[0]);
-      return new Response(JSON.stringify({ documents: [], instance_id: instance }), {
-        status: 200,
-      });
-    });
-    const query = jest.fn(async () => ({ rows: [] }));
-    return { calls, service: new SearchService({ query } as any, BRAIN, fetchImpl) };
-  }
-  const scopesOf = (calls: Array<{ body: any }>) =>
-    calls.map(c => `${c.body.filters.account}=${c.body.filters.conversation_ids}`).sort();
-
-  it('a bare chat id is asked in every account scope with that account namespace', async () => {
-    const { calls, service } = brainService();
-    await service.semanticSearch('hola', { chatId: '34600@s.whatsapp.net' });
-    expect(scopesOf(calls)).toEqual([
-      'leila=leila:34600@s.whatsapp.net',
-      'personal=34600@s.whatsapp.net',
-      'professional=professional:34600@s.whatsapp.net',
-    ]);
-  });
-
-  it('an id namespaced to one account is asked only in that account scope', async () => {
-    const { calls, service } = brainService();
-    await expect(
-      service.semanticSearch('hola', { chatId: 'leila:34600@s.whatsapp.net' })
-    ).resolves.toEqual({ results: [], failures: [] });
-    expect(scopesOf(calls)).toEqual(['leila=leila:34600@s.whatsapp.net']);
-  });
-
-  it('with an explicit account, a foreign namespace makes no semantic request', async () => {
-    const { calls, service } = brainService();
-    await service.semanticSearch('hola', {
-      account: 'professional',
-      chatId: 'leila:34600@s.whatsapp.net',
-    });
-    expect(calls).toHaveLength(0);
+describe('semantic search sin backend (SC-5827: el Brain murio)', () => {
+  it('semanticSearch throws when Hindsight no esta configurado (searchDetailed cae a texto)', async () => {
+    const { query, service } = keywordService();
+    await expect(service.semanticSearch('hola', { chatId: '34600@s.whatsapp.net' })).rejects.toThrow(
+      /Hindsight sin configurar/
+    );
+    // searchDetailed no deja de responder: el fallback de texto consulta Postgres.
+    const out = await service.searchDetailed('hola', { chatId: '34600@s.whatsapp.net' });
+    expect(out.mode).toBe('text');
+    expect(out.fallbackReason).toMatch(/Hindsight sin configurar/);
+    expect(query).toHaveBeenCalled();
   });
 });

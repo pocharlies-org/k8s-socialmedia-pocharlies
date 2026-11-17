@@ -126,7 +126,7 @@ test('Instagram sender and message keys preserve both accounts', async () => {
 
 test('cross-account search only includes enabled configured channel/account pairs', async () => {
   const db = { query: jest.fn(async () => ({ rows: [] })) };
-  const search = new SearchService(db as any, null);
+  const search = new SearchService(db as any);
   await search.keywordSearch('text');
   const calls = db.query.mock.calls as unknown as Array<[string, unknown[]]>;
   expect(calls[0][0]).toContain("m.metadata->>'instagram_account'");
@@ -136,7 +136,7 @@ test('cross-account search only includes enabled configured channel/account pair
 
 test('Instagram search isolates two provider accounts sharing one storage namespace', async () => {
   const query = jest.fn(async () => ({ rows: [] }));
-  const search = new SearchService({ query } as any, null);
+  const search = new SearchService({ query } as any);
   await search.keywordSearch('text', { platform: 'instagram', account: 'instagram' });
   const calls = query.mock.calls as unknown as Array<[string, unknown[]]>;
   expect(calls[0][1][1]).toEqual(['instagram:instagram']);

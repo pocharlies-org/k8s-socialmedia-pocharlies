@@ -43,9 +43,10 @@ export interface SocialAccount {
    */
   profile: string;
   /**
-   * Brain instance this account's messages are ingested into (brain-ingest
-   * job). Every account sharing a DB namespace must agree, because the job
-   * ingests per namespace. Defaults to 'personal'.
+   * Brain instance of this account's conversation windows (it picks the
+   * Synapse tenant, brain-windows-synapse). Every account sharing a DB
+   * namespace must agree, because the windows are built per namespace.
+   * Defaults to 'personal'.
    */
   brainInstance: string;
   capabilities: Record<string, boolean>;
@@ -357,7 +358,7 @@ export function socialAccountId(channel: AccountChannel, accountId: string): str
   return `${channel}:${accountId}`;
 }
 
-/** Brain instance for a DB namespace (brain-ingest). Undeclared → undefined. */
+/** Brain instance for a DB namespace (brain-windows). Undeclared → undefined. */
 export function brainInstanceForNamespace(namespace: string): string | undefined {
   return getAccounts(undefined, true).find(a => a.namespace === namespace)?.brainInstance;
 }
