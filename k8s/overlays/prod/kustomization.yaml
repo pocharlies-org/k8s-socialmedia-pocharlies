@@ -60,9 +60,13 @@ images:
   # SC-4836 07-11: v1.3.110 -> v1.3.142 (run 42328277914, deploy/prod@c8ad657): #468, un 401/403
   # del conector (firma rechazada) ya no gasta intentos de medios. Arrastra los cambios de
   # telegram-sync de #74 (21-10) que no estaban desplegados (decisión de Dani). Digest de Harbor.
+  # DGX-1591 17-11: v1.3.142 -> v1.3.153 (run 43985381231, deploy/prod@caf78d5): #498 fija
+  # av<19 (PyAV 19 quitó el metadata_errors que faster-whisper pasa a av.open y el worker
+  # transcriber moría en cada audio) y arrastra el worker de voz por evento de DGX-1640.
+  # Digest de Harbor (crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.142
-    digest: sha256:ef67824334fcee2256a49a8184e851ff9cab7b2f1a602f202887e3e775f8f9c1
+    newTag: v1.3.153
+    digest: sha256:1c1fff5601c2dfd189d113fbbcd024e0abf5998f33a950c35e2413e06c1eb056
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
