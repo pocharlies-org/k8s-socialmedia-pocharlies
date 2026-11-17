@@ -71,22 +71,26 @@ def _secret_env(name, secret, key):
 
 # Storage envs shared by every connector that touches media (order matters:
 # the $(VAR) references resolve against envFrom and earlier entries).
+# INFRA-1175: los dos buckets (skirmshop-drive y el legacy socialmedia-media)
+# viven en OVH Object Storage; una sola credencial (Secret socialmedia-s3-ovh,
+# 1Password ovh-object-storage-s3) para los dos clientes.
+OVH_S3 = "https://s3.sbg.io.cloud.ovh.net"
 S3_ENV = [
-    _env("S3_ENDPOINT", "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000"),
+    _env("S3_ENDPOINT", OVH_S3),
     _env("S3_BUCKET", "skirmshop-drive"),
-    _env("S3_REGION", "us-east-1"),
+    _env("S3_REGION", "sbg"),
     _env("S3_PREFIX", "socialmedia"),
-    _secret_env("AWS_ACCESS_KEY_ID", "skirmshop-drive-s3-socialmedia", "AWS_ACCESS_KEY_ID"),
-    _secret_env("AWS_SECRET_ACCESS_KEY", "skirmshop-drive-s3-socialmedia", "AWS_SECRET_ACCESS_KEY"),
-    _env("LEGACY_MINIO_ENDPOINT", f"whatsapp-mcp-minio.{SVC}:9000"),
-    _env("LEGACY_MINIO_ACCESS_KEY", "$(MINIO_ROOT_USER)"),
-    _env("LEGACY_MINIO_SECRET_KEY", "$(MINIO_ROOT_PASSWORD)"),
-    _env("LEGACY_MINIO_USE_SSL", "false"),
+    _secret_env("AWS_ACCESS_KEY_ID", "socialmedia-s3-ovh", "AWS_ACCESS_KEY_ID"),
+    _secret_env("AWS_SECRET_ACCESS_KEY", "socialmedia-s3-ovh", "AWS_SECRET_ACCESS_KEY"),
+    _env("LEGACY_MINIO_ENDPOINT", OVH_S3),
+    _env("LEGACY_MINIO_ACCESS_KEY", "$(AWS_ACCESS_KEY_ID)"),
+    _env("LEGACY_MINIO_SECRET_KEY", "$(AWS_SECRET_ACCESS_KEY)"),
+    _env("LEGACY_MINIO_USE_SSL", "true"),
     _env("LEGACY_MINIO_BUCKET", "socialmedia-media"),
-    _env("MINIO_ENDPOINT", f"whatsapp-mcp-minio.{SVC}:9000"),
-    _env("MINIO_ACCESS_KEY", "$(MINIO_ROOT_USER)"),
-    _env("MINIO_SECRET_KEY", "$(MINIO_ROOT_PASSWORD)"),
-    _env("MINIO_USE_SSL", "false"),
+    _env("MINIO_ENDPOINT", OVH_S3),
+    _env("MINIO_ACCESS_KEY", "$(AWS_ACCESS_KEY_ID)"),
+    _env("MINIO_SECRET_KEY", "$(AWS_SECRET_ACCESS_KEY)"),
+    _env("MINIO_USE_SSL", "true"),
     _env("MINIO_BUCKET", "socialmedia-media"),
 ]
 NATS_ENV = _env("NATS_URL", f"nats://whatsapp-mcp-nats.{SVC}:4222")
@@ -194,7 +198,7 @@ def render_whatsapp(account):
     if d["emitAudioAttachments"]:
         env += [
             _env("WA_EMIT_AUDIO_ATTACHMENTS", "true"),
-            _env("S3_PUBLIC_ENDPOINT", "https://skirmshop-s3.e-dani.com"),
+            _env("S3_PUBLIC_ENDPOINT", OVH_S3),  # OVH ya es público: presign directo, sin pasar por el edge
             _env("S3_PRESIGN_EXPIRY_SECONDS", "3600"),
         ]
     env += S3_ENV

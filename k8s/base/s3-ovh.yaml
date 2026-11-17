@@ -1,0 +1,35 @@
+# socialmedia-s3-ovh — credenciales del almacén de media de los conectores, el
+# mcp-server, el app y los jobs de voz (INFRA-1175, onda 4). Los dos buckets
+# viven en OVH Object Storage (https://s3.sbg.io.cloud.ovh.net, región sbg):
+#   - skirmshop-drive  (S3_*, refs s3://skirmshop-drive/socialmedia/...)
+#   - socialmedia-media (LEGACY_MINIO_* / MINIO_*, claves legacy sueltas)
+# Sustituye al Secret skirmshop-drive-s3-socialmedia (usuario por-consumidor del
+# MinIO de Sauvage) y al MINIO_ROOT_* de whatsapp-mcp-secrets (root del MinIO
+# whatsapp-mcp-minio): las dos instancias se apagan en la onda 5.
+#
+# Item 1Password `ovh-object-storage-s3` (access_key / secret_key) = el usuario
+# S3 `k8s-objectstore` de OVH, compartido con velero, cnpg, loki, harbor, chat,
+# langfuse, dgx-messages y skirmbooks: se rota en el lote semanal (clase
+# object-storage). Forma Connect (`key: item` + `property: campo`).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: socialmedia-s3-ovh
+  namespace: whatsapp-mcp
+  labels:
+    security.e-dani.com/rotation-class: object-storage
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshInterval: 24h
+  refreshPolicy: OnChange
+  secretStoreRef: { name: onepassword-connect, kind: ClusterSecretStore }
+  target:
+    name: socialmedia-s3-ovh
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: AWS_ACCESS_KEY_ID
+      remoteRef: { key: ovh-object-storage-s3, property: access_key }
+    - secretKey: AWS_SECRET_ACCESS_KEY
+      remoteRef: { key: ovh-object-storage-s3, property: secret_key }
