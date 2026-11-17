@@ -282,7 +282,7 @@ export interface ExtractResult {
 
 /**
  * Run the extraction for one window. Throws on persistent failure (the caller
- * records llm_status=failed and retries next pass, ADR §5).
+ * records llm_status=failed and retries after its backoff, ADR §5 / 045).
  */
 export async function extractWindow(
   config: LlmConfig,

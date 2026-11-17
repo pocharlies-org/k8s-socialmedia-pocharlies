@@ -880,6 +880,12 @@ export async function ensureBrainWindowsTables(pool: Pool): Promise<void> {
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (run_id, phase)
   )`);
+  // 045 (SC-5926): backoff of a failed LLM window.
+  await pool.query(
+    `ALTER TABLE brain_windows
+       ADD COLUMN IF NOT EXISTS llm_attempts INTEGER NOT NULL DEFAULT 0,
+       ADD COLUMN IF NOT EXISTS llm_retry_after TIMESTAMPTZ`
+  );
 }
 
 /**
@@ -1120,7 +1126,7 @@ export interface UpsertWindowInput {
   llm_status: LlmStatus;
 }
 
-/** Record a window part after (or, in DRY_RUN, without) pushing it. */
+/** Record a window part after pushing it. */
 export async function upsertWindow(pool: Pool, input: UpsertWindowInput): Promise<void> {
   const { w } = input;
   await pool.query(
@@ -1189,18 +1195,23 @@ export async function setWindowLlmResult(
   pool: Pool,
   sourceId: string,
   status: LlmStatus,
-  inputHash: string | null,
   error: string | null
 ): Promise<void> {
   await pool.query(
     `UPDATE brain_windows
         SET llm_status = $2,
-            llm_input_hash = COALESCE($3, llm_input_hash),
             llm_done_at = CASE WHEN $2 = 'done' THEN now() ELSE llm_done_at END,
-            llm_error = CASE WHEN $2 = 'failed' THEN left($4, 2000) ELSE NULL END,
+            llm_error = CASE WHEN $2 = 'failed' THEN left($3, 2000) ELSE NULL END,
+            -- SC-5926: a failed window waits min(2^attempts × 10 min, 6 h) before
+            -- fetchPendingLlmWindows picks it again.
+            llm_retry_after = CASE WHEN $2 = 'failed'
+                                   THEN now() + least(interval '10 minutes' * power(2, llm_attempts),
+                                                      interval '6 hours')
+                                   ELSE NULL END,
+            llm_attempts = CASE WHEN $2 = 'failed' THEN llm_attempts + 1 ELSE 0 END,
             updated_at = now()
       WHERE source_id = $1`,
-    [sourceId, status, inputHash, error]
+    [sourceId, status, error]
   );
 }
 
@@ -1239,11 +1250,34 @@ export async function fetchPendingLlmWindows(
       WHERE w.account = ANY ($1::text[])
         AND w.llm_status IN ('pending','failed')
         AND w.end_ts <= $2::timestamptz
+        AND (w.llm_status = 'pending' OR w.llm_retry_after IS NULL OR w.llm_retry_after <= now())
       ORDER BY w.end_ts DESC, w.source_id DESC
       LIMIT $3`,
     params
   );
   return r.rows as PendingLlmWindow[];
+}
+
+/**
+ * SC-5926: when the next window becomes LLM-ready — the earliest close
+ * (end_ts + gap) of a pending window, or the end of a failed one's backoff.
+ * In the past = something is ready now. null = nothing waits for the LLM.
+ */
+export async function nextLlmReadyAt(
+  pool: Pool,
+  accounts: string[],
+  gapSeconds: number
+): Promise<Date | null> {
+  const r = await pool.query(
+    `SELECT min(GREATEST(w.end_ts + make_interval(secs => $2),
+                         CASE WHEN w.llm_status = 'failed' THEN w.llm_retry_after END)) AS at
+       FROM brain_windows w
+      WHERE w.account = ANY ($1::text[])
+        AND w.llm_status IN ('pending','failed')`,
+    [accounts, gapSeconds]
+  );
+  const at = (r.rows[0] as { at: Date | null } | undefined)?.at;
+  return at ? new Date(at) : null;
 }
 
 /**
@@ -1375,14 +1409,26 @@ export async function setBackfillCursor(
   );
 }
 
-/** Store the LLM summary on the ledger row (previous-window context). */
-export async function setWindowSummary(
+/**
+ * Record a successful extraction (status done + summary for the next window's
+ * context) only if the row still holds the content that was summarised. The
+ * resident worker (SC-5926) recomputes windows while an LLM call is in flight;
+ * false = the chat moved on, the caller must not push the stale summary.
+ */
+export async function commitLlmSummary(
   pool: Pool,
   sourceId: string,
+  contentHash: string,
+  inputHash: string,
   summary: string
-): Promise<void> {
-  await pool.query(
-    `UPDATE brain_windows SET llm_summary = $2, updated_at = now() WHERE source_id = $1`,
-    [sourceId, summary]
+): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE brain_windows
+        SET llm_status = 'done', llm_input_hash = $3, llm_done_at = now(), llm_error = NULL,
+            llm_summary = $4, llm_attempts = 0, llm_retry_after = NULL, updated_at = now()
+      WHERE source_id = $1 AND content_hash = $2
+  RETURNING source_id`,
+    [sourceId, contentHash, inputHash, summary]
   );
+  return r.rows.length > 0;
 }

@@ -54,7 +54,7 @@ export function searchLimit(limit: unknown): number {
 /**
  * Semantic search lives in Hindsight (SC-4304 S8; SC-5827 retiró el Brain y
  * Qdrant): the `personal` bank holds the conversation chunks that the
- * brain-windows cron feeds through Synapse (ADR 0002). This service does not
+ * brain-windows worker feeds through Synapse (ADR 0002). This service does not
  * embed anything: it recalls the chunks that match, scoped to the tool's
  * account/channel/chat/dates, and resolves their `message_ids` against
  * `messages` here, where the filters Hindsight does not have (sender,
