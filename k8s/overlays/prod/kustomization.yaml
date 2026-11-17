@@ -64,9 +64,11 @@ images:
   # av<19 (PyAV 19 quitó el metadata_errors que faster-whisper pasa a av.open y el worker
   # transcriber moría en cada audio) y arrastra el worker de voz por evento de DGX-1640.
   # Digest de Harbor (crane).
+  # SC-5827 17-11: v1.3.153 -> v1.3.154 (run 44078201664, deploy/prod@42c8541): #505, telegram-sync sin el
+  # proxy /brain-chat (y sin el NameError de httpx que dejaba). Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.153
-    digest: sha256:1c1fff5601c2dfd189d113fbbcd024e0abf5998f33a950c35e2413e06c1eb056
+    newTag: v1.3.154
+    digest: sha256:ee38739842662eedb7f5a05d0c8829ae5e7e26a55c209f2c31df4d191d24cc9e
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
@@ -212,9 +214,11 @@ images:
   # hace una pasada al arrancar (recoverStuckProcessing + claim pending) para no dejar filas colgadas
   # si se pierde el evento o el worker muere a mitad de STT (C7). Mismo bloque images: reescribe por
   # nombre; el resto de consumidores no importa jobs/. Digest comprobado en Harbor (crane digest ...:v1.3.153).
+  # SC-5827 17-11: v1.3.153 -> v1.3.154 (run 44078201664, deploy/prod@42c8541): #505, brain-windows y mcp-sse
+  # sin el Brain (brain-windows sigue alimentando Hindsight por synapse). Digest comprobado en Harbor.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.153
-    digest: sha256:9ebdc62e5f7c5c2fea066106307dff4738684032e300baebb2cd336dff635f5c
+    newTag: v1.3.154
+    digest: sha256:41852733e70b4e30da07db17b3ff135f27344ad7df89e15a3d09fbbb1a3bf36b
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
     newTag: socialmedia-v2-c88dce16
     digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
