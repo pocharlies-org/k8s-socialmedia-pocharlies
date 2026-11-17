@@ -2807,7 +2807,10 @@ contracts:
     eventos.whatsapp.voice.pending and consumed by Deployment whatsapp-voice-transcribe
     (prefetch 1, durable: an audio that arrives while the worker is down stays queued until it
     reconnects). The retry uses the sibling queue voice-transcribe.retry (x-message-ttl 30s,
-    x-dead-letter-routing-key back to this one). Replaces the whatsapp-voice-transcribe CronJob.'
+    x-dead-letter-routing-key back to this one). Replaces the whatsapp-voice-transcribe CronJob.
+    On startup the consumer runs one pass (recoverStuckProcessing + claim pending) to catch rows
+    whose event was lost or whose claim was abandoned (worker died mid-STT); the queue value is
+    unchanged, only the startup behaviour of the consumer. VOICE_STARTUP_PASS=false disables it.'
 - id: nats.correo-bridge.telegram-message-received.v1
   kind: routing-key
   value: telegram.MessageReceived

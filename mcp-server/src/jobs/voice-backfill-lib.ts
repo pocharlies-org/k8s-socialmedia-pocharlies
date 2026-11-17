@@ -52,7 +52,7 @@ ORDER BY m.account`;
 
 /**
  * Mark never-touched voice rows as `pending` — the ONLY way historical rows
- * enter the queue (the live CronJob adopts just the last few days).
+ * enter the queue (the manual voice-transcribe.ts pass adopts just the last few days).
  *
  * Idempotent + resumable: the WHERE clause matches rows whose
  * transcription_status IS NULL, so re-running never re-queues done/failed/

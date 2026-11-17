@@ -883,11 +883,12 @@ export async function getParticipantAvatar(id: string): Promise<string | null> {
 /**
  * INFRA-364 fase 0: las notas de voz de WhatsApp (AUDIO/PTT, con o sin `ptt`,
  * INBOUND y OUTBOUND) se transcriben a `content` por el worker
- * `mcp-server/src/jobs/voice-transcribe.ts`, con el MISMO contrato de metadata
+ * `mcp-server/src/jobs/voice-transcribe-worker.ts`, con el MISMO contrato de metadata
  * que Telegram (sync/db.py): `needs_transcription` + `transcription_status`
  * pending → processing → done/failed + `transcription_attempts`. Marcarlas en el
  * insert para que el worker las coja al instante; las filas viejas sin marcar las
- * adopta el backfill (`voice-backfill.ts`) o la ventana de gracia del worker.
+ * adopta el backfill (`voice-backfill.ts`) o la ventana de adopción de la pasada
+ * manual `voice-transcribe.ts` (el worker de eventos no adopta).
  *
  * Pure and idempotent: if the metadata already carries a transcription_status
  * (replay after relink, or a row the worker already touched) it is left

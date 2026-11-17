@@ -11,9 +11,9 @@
  * same claim/STT/write machinery the CronJob used.
  *
  * Fail-open by design (same posture as buildAudioAttachmentsBeforeEmit): a
- * publish failure NEVER blocks ingest. The row stays `pending` and the worker's
- * startup sweep picks it up on its next restart; losing this event is never
- * losing the transcription, only its latency.
+ * publish failure NEVER blocks ingest. The row stays `pending` and the worker
+ * does not re-drive it (it has no startup sweep): a manual `voice-transcribe.ts`
+ * pass picks it up, so losing this event delays the transcription, not loses it.
  *
  * Payload is ids only (no content, no PII beyond what the assistant stream
  * already carries). HMAC over the raw bytes, exactly once (byte-identity
