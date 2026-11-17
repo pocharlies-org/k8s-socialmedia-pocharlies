@@ -558,6 +558,7 @@ export class WindowsWorker {
     await this.armLlm();
   }
 
+  // CONTRACT: metric.brain-windows.llm-stalled.v1
   /** brain_windows_llm_stalled_seconds: how long ready LLM work has waited without one summary. */
   private async pushStall(): Promise<void> {
     const now = Date.now();
