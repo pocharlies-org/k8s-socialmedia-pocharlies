@@ -7,7 +7,7 @@
  * kinds never reach this module (the callers filter, ADR §5).
  *
  * The output shape is the ADR §5 JSON, validated with zod: a model answer
- * that does not fit the schema is a FAILED extraction, not a corrupt brain.
+ * that does not fit the schema is a FAILED extraction, not a corrupt document.
  */
 import { z } from 'zod';
 import { BuiltWindow, llmInputHash, wellFormed } from './brain-windows-lib';

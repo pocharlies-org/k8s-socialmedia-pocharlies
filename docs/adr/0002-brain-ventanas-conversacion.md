@@ -2,6 +2,13 @@
 
 Estado: aceptado (30-09-2026, Dani). Sustituye a la ingesta por mensaje suelto (`brain-ingest`).
 
+**Actualizado (SC-5827, 16-11-2026):** el Brain de destino se apagó y borró. El mecanismo de ventanas
+de este ADR sigue vivo y es el productor de contenido de Hindsight; lo que ya no existe es el
+destino `push-ingest` ni la vuelta atrás `BRAIN_WINDOWS_SINK=http`. El único sumidero es Synapse
+(`brain_window.{tenant}.*` → `synapse-adapter-hindsight` → Hindsight), registrado en
+`amqp.synapse.brain-window-upserted.v1` / `…-deleted.v1` de `CONTRACTS.yaml`. Las referencias al
+brain (`skirmshop-brain-v2`, `push-ingest`) se leen en pasado.
+
 ## Contexto
 
 `brain-ingest` subía **un documento por mensaje** (`toDoc` en `mcp-server/src/jobs/brain-ingest-lib.ts`) y el

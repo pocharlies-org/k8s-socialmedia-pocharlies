@@ -32,10 +32,10 @@ TRANSCRIBE_TYPES = {"voice", "audio"}
 # message (Hermes gateway with `echo_transcripts: true`, DGX Studio). When the
 # gateway embeds the RAW STT response body instead of its `.text`, the echo
 # arrives as e.g. `🎙️ "{"text":"…","usage":null}"` — emoji marker + quoted JSON,
-# inner quotes unescaped. The DB must store only the clean text (the brain and
-# the window builder read `content` as prose), so we unwrap exactly those shapes
-# on ingest, keeping the 🎙️ marker the echo intends. A message that merely
-# *mentions* JSON is not the shape and passes through untouched.
+# inner quotes unescaped. The DB must store only the clean text (the window
+# builder and the index read `content` as prose), so we unwrap exactly those
+# shapes on ingest, keeping the 🎙️ marker the echo intends. A message that
+# merely *mentions* JSON is not the shape and passes through untouched.
 VOICE_ECHO_PREFIX = "🎙️"
 
 
