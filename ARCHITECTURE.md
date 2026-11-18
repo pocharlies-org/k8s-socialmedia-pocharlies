@@ -182,6 +182,12 @@ Total de casos Jest: **pendiente de medir**.
   (2) comprobar por sha256, sin imprimirla, que ya no es el valor por defecto, (3) `mcp-sse`: pin de la imagen de `mcp-server` y el interruptor en el mismo commit, (4) un conector cada vez
   (leila, professional, personal) con su pin y su interruptor en el mismo commit, con `restartCount` estable y la sesión sin re-emparejar. El interruptor se retira cuando el estricto pase a
   ser el valor por defecto (SC-2149). Prueba de cierre: un GET firmado con el valor por defecto a `/api/public/chats` responde 401 en cada conector.
+  **Estado (SC-2092, medido 18-11)**: la rotación se hizo el 31-10 — el valor propio vive en 1Password (`whatsapp-mcp/CONNECTOR_SHARED_SECRET` y
+  `synapse-prod/whatsappmcp.connector.secret`, mismo valor en ambos) y las seis copias del Secret valen el mismo sha256 `ea01071d…` (medido por hash,
+  el valor no se escribe aquí); el GET firmado con el valor por defecto responde 401 en los tres whatsapp-connector y en el de Telegram, y en 24 h no
+  hay ningún `[public-api] rejected`. `CONNECTOR_SECRET_STRICT=true` activo en producción en `mcp-sse` y los tres whatsapp-connector
+  (`k8s/overlays/prod/patch-connector-secret-strict.yaml`, esta PR). El host x86 ya no es consumidor: INFRA-912 retiró el script y la limpieza del
+  fichero de clave se completó el 18-11 (dgx-infra).
 - `/api/public/*` del conector de Telegram (SKIRM-111): `dialogs`, `messages/:chatId` y `send/:chatId` exigen la firma HMAC del conector (`createPublicRouter` en
   `connectors/telegram/src/api/public-routes.ts`, con el `authMiddleware` de `/api/v1`; no hay ruta de Traefik hacia Telegram, llegan los pods del namespace, el dashboard y el host). Un GET firma `{}`;
   `send` firma el cuerpo, `JSON.stringify` del JSON que el conector leyó (telegram-sync firma los mismos bytes que envía). Firma a mano: la receta de `openssl` de arriba (`/api/public/*` de WhatsApp), contra el puerto 3002. La puerta va **antes** de la del envío: sin firma 401, nunca el 403 `disabled_sending`.
@@ -218,9 +224,9 @@ Total de casos Jest: **pendiente de medir**.
   estampa siempre el sub del JWT en la fila). Esos dos envs (`CREDENTIAL_STORE_ENABLED=true` +
   `CREDENTIAL_SESSION_KEY=<sub>`) van en `k8s/overlays/prod/patch-credential-store.yaml` — no en el
   registro ni en `generated/` — y el pin de imagen del conector en `k8s/overlays/prod/patch-image.yaml`
-  (atomicidad CTO: el flag ON solo viaja con un pin que lleve `payload-crypto`; techo actual del
-  whatsapp-connector **v1.3.120**: el tronco del 133+ trae el fail-closed de SC-2092 y
-  `CONNECTOR_SHARED_SECRET` sigue placeholder en 1Password — subirlo es trabajo de `security`). La clave
+  (atomicidad CTO: el flag ON solo viaja con un pin que lleve `payload-crypto`; el techo del 133+ por el
+  fail-closed de SC-2092 quedó sin objeto el 31-10: la clave propia está en 1Password y el STRICT está
+  activo — en producción el whatsapp-connector corre v1.3.151, medido 18-11). La clave
   maestra del store llega por el `envFrom` compartido `whatsapp-mcp-secrets` (patrón SC-1197: cero
   ExternalSecrets nuevos por cuenta). El enrutado por identidad lo decide
   `mcp-server/src/domain/identity-bindings.ts` (`resolveBoundAccount`, `canonicalCode 'forbidden'`) cuando
