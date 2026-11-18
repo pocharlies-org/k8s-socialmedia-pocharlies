@@ -3,14 +3,14 @@
  *
  * WhatsApp AUDIO/PTT rows land with `content = NULL` (convertMessage sets the
  * body to null for audioMessage; the bytes ride separately to MinIO via the
- * connector's downloadAndStoreMedia). The brain only embeds `content`, so those
- * ~4.5k voice notes are invisible to it. This lib closes the gap the same way
+ * connector's downloadAndStoreMedia). The semantic index only reads `content`,
+ * so those ~4.5k voice notes were invisible to it. This lib closes the gap the same way
  * Telegram does (connectors/telegram-sync/sync/db.py): the worker picks pending
  * voice rows, fetches the stored audio from MinIO, POSTs it to the in-cluster
  * Whisper service and writes the text into `content`, tracking
  * `metadata.transcription_status` (pending → processing → done/failed),
  * `transcription_attempts` and `transcription_error` with the SAME key names
- * the Telegram sync uses, so consumers (window builder, brain) see one shape.
+ * the Telegram sync uses, so consumers (window builder, Hindsight) see one shape.
  *
  * Unlike telegram-sync (which runs faster-whisper in-process on CPU), this
  * worker is a thin client of `stt-turbo` (ns `llm`, whisper-large-v3,

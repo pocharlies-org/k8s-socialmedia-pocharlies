@@ -2007,7 +2007,8 @@ contracts:
     ya es upsert por source_id), cabeceras tenant_id y event_id. Consumidor (SC-5827, 16-11-2026):
     synapse-adapter-hindsight, que retiene padre e hijos en Hindsight (banco `personal`; document_id =
     source_id). El workflow <tenant>.brain.conversation-window-upserted de pocharlies-org/synapse (push
-    al Brain) se retiró con el Brain. Renombrar la clave, los campos de data o el mapeo cuenta→tenant
+    al Brain) se retiró con el Brain. El marcador `// CONTRACT:` del fichero nombra ya a ese consumidor
+    (SC-5827, 18-11-2026). Renombrar la clave, los campos de data o el mapeo cuenta→tenant
     es breaking: nueva entrada .v2.'
 - id: amqp.synapse.brain-window-deleted.v1
   kind: routing-key

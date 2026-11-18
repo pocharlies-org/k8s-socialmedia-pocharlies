@@ -48,11 +48,11 @@ export interface SynapseEvent {
 
 // CONTRACT: amqp.synapse.brain-window-upserted.v1 — routing key
 // brain_window.{tenant}.upserted, body {data: {adapter, source_id,
-// payload_hash, documents[]}} (consumer: synapse workflow
-// <tenant>.brain.conversation-window-upserted). message_id is random: the
-// engine inbox keeps ids for days, and a deliberate re-publish of the same
-// documents (recovery, ADR 0002 §7.1) must not be swallowed — push-ingest is
-// already an idempotent upsert by source_id.
+// payload_hash, documents[]}} (consumer since SC-5827: synapse-adapter-hindsight,
+// which retains parent and children in Hindsight with document_id = source_id).
+// message_id is random: the engine inbox keeps ids for days, and a deliberate
+// re-publish of the same documents (recovery, ADR 0002 §7.1) must not be
+// swallowed — the downstream retain is an idempotent upsert by document_id.
 export function upsertEvents(account: string, docs: BrainDoc[]): SynapseEvent[] {
   if (!docs.length) return [];
   const tenant = tenantForAccount(account);

@@ -104,7 +104,7 @@ _pool: asyncpg.Pool | None = None
 
 async def create_pool() -> asyncpg.Pool:
     global _pool
-    dsn = os.environ.get("DATABASE_URL", "postgresql://brain:brainpass@localhost:5437/brain")
+    dsn = os.environ.get("DATABASE_URL", "postgresql://whatsappmcp:whatsappmcp@localhost:5432/whatsappmcp")
     _pool = await asyncpg.create_pool(dsn, min_size=2, max_size=5)
     logger.info("Database pool created")
     return _pool
@@ -399,7 +399,7 @@ async def mark_transcription_processing(pool: asyncpg.Pool, msg_id: MessageId):
 
 
 async def complete_transcription(pool: asyncpg.Pool, msg_id: MessageId, text: str):
-    # Belt & braces (INFRA-364): `content` is prose the brain reads. If an STT
+    # Belt & braces (INFRA-364): `content` is prose the search reads. If an STT
     # backend ever hands back its raw response body (`{"text":"…"}`) instead of
     # the transcript, unwrap it here — the single writer of transcriptions —
     # so no JSON shape reaches the row. Clean text passes through unchanged.

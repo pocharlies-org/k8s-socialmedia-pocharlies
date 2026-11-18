@@ -1,8 +1,8 @@
 # INFRA-364 fase 0 — transcripción de las notas de voz de WhatsApp (ADR 0002).
 #
 # Las filas AUDIO/PTT de `messages` (plataforma whatsapp) entran con `content`
-# vacío: los bytes se suben a MinIO pero nadie los transcribía, así que el brain
-# nunca los veía. Telegram sí lo hace (connectors/telegram-sync, faster-whisper
+# vacío: los bytes se suben a MinIO pero nadie los transcribía, así que ninguna
+# búsqueda los veía. Telegram sí lo hace (connectors/telegram-sync, faster-whisper
 # en el propio pod). Aquí se reutiliza el CONTRATO de metadata de Telegram
 # (needs_transcription / transcription_status pending→processing→done/failed /
 # transcription_attempts) pero el STT es el servicio ya residente `stt-turbo`
@@ -16,7 +16,7 @@
 # cola es de un solo worker (el worker va de uno en uno, prefetch 1; el
 # VOICE_CONCURRENCY=2 del backfill es un tope de cortesía).
 #
-# Imagen: la misma que mcp-server/brain-ingest (whatsappmcp-mcp-server, fuente
+# Imagen: la misma que mcp-server (whatsappmcp-mcp-server, fuente
 # + tsx). El pin de digest del overlay (`patch-image.yaml` / `images:` del
 # prod kustomization) reescribe el nombre de imagen para TODOS los consumidores,
 # así que estos workloads viajan con el mismo digest que el mcp-server.
