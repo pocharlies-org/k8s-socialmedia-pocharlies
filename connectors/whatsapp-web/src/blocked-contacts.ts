@@ -216,3 +216,14 @@ export async function describeBlockedPeople(
   }
   return entries;
 }
+
+/** Compatibility view for the web app: direct provider identities, without grouping. */
+export function parseProviderBlocklist(raw: unknown): string[] {
+  return providerBlocklistEntries(raw).sort();
+}
+
+export async function readBlockedContacts(socket: {
+  fetchBlocklist(): Promise<unknown>;
+}): Promise<string[]> {
+  return parseProviderBlocklist(await socket.fetchBlocklist());
+}

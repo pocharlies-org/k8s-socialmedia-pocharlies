@@ -1,4 +1,7 @@
+import { qrPageUrl, dashboardUrl, whatsappSocketOptions } from './url-config';
 import express from 'express';
+import { createUiPath } from './ui-path';
+import { createConnectorAccess } from './api/access';
 import { BaileysClient, WhatsAppMessage } from './baileys-client';
 import { QRHandler } from './qr-handler';
 import { EventPublisher } from './events/publisher';
@@ -39,13 +42,15 @@ const ENCRYPTION_KEY =
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const PORT = parseInt(process.env.PORT || '3001', 10);
-// SKIRM-103 F3-2: no key, no start; the placeholder warns, and CONNECTOR_SECRET_STRICT=true refuses it.
+// HMAC is mandatory at runtime; placeholder handling stays centralized.
 const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
-// When true, the public /qr/page renders a "Generate new QR" button wired to an
-// unauthenticated POST /qr/renew. Only enable on LAN-only deployments (e.g. the
-// professional connector at whatsapp-pro.e-dani.com) — never on the
-// internet-exposed personal page, where anyone with the URL could disconnect.
+// Browser renewal requires configured UI credentials and this explicit opt-in.
+
 const ALLOW_WEB_RENEW = process.env.ALLOW_WEB_RENEW === 'true';
+const uiPath = createUiPath();
+const publicQrUrl = qrPageUrl();
+dashboardUrl();
+whatsappSocketOptions();
 
 function isKnownUndiciStreamAbort(error: unknown): boolean {
   const err = error as any;
@@ -65,6 +70,12 @@ process.on('uncaughtException', error => {
   process.exit(1);
 });
 
+const logCallerIdentity: import('express').RequestHandler = (req, _res, next) => {
+  const sub = req.headers['x-user-sub'];
+  if (typeof sub === 'string' && sub) console.log(`API request carries x-user-sub=${sub}`);
+  next();
+};
+
 async function main(): Promise<void> {
   // SC-705 phase 1.5: per-user sessions are keyed by the caller's Keycloak
   // `sub` (CREDENTIAL_SESSION_KEY = `<sub>` or `<sub>:<cuenta>`). The house
@@ -80,28 +91,25 @@ async function main(): Promise<void> {
 
   const app = express();
   app.use(express.json({ limit: '15mb' })); // large enough for base64 voice notes
+  app.use(createConnectorAccess(CONNECTOR_SHARED_SECRET));
   // SC-705: the mcp-server forwards the verified caller identity
   // (`x-user-sub`, from the gateway JWT) on every connector call. Phase 1.5
   // logs it (observable proof the header traverses gateway→mcp-server→
   // connector); the phase-2 per-sub client pool will route on it.
-  app.use('/api/v1', (req, _res, next) => {
-    const sub = req.headers['x-user-sub'];
-    if (typeof sub === 'string' && sub) console.log(`API request carries x-user-sub=${sub}`);
-    next();
-  });
+  app.use('/api/v1', logCallerIdentity);
   app.use('/api/v1', createRouter(client, qrHandler, CONNECTOR_SHARED_SECRET));
   app.use('/api/v2', createAuthQrV2Router(qrHandler, CONNECTOR_SHARED_SECRET));
 
   app.get('/', (_req, res) => {
-    res.redirect(302, '/qr/page');
+    res.redirect(302, uiPath('/qr/page'));
   });
 
   app.get('/manual-open', (_req, res) => {
-    res.redirect(302, '/api/v1/manual-open/page');
+    res.redirect(302, uiPath('/api/v1/manual-open/page'));
   });
 
   app.get('/manual-open/page', (_req, res) => {
-    res.redirect(302, '/api/v1/manual-open/page');
+    res.redirect(302, uiPath('/api/v1/manual-open/page'));
   });
 
   app.use(
@@ -116,7 +124,7 @@ async function main(): Promise<void> {
 
   app.listen(PORT, () => {
     console.log(`WhatsApp Connector API listening on port ${PORT}`);
-    console.log(`QR page: http://localhost:${PORT}/qr/page`);
+    console.log(`QR page: ${publicQrUrl}`);
   });
 
   // NATS is optional

@@ -127,3 +127,12 @@ def test_complete_transcription_stores_clean_text():
     pool = _FakePool()
     asyncio.run(db.complete_transcription(pool, 7, "texto limpio de whisper"))
     assert pool.calls[0] == (7, "texto limpio de whisper")
+
+
+def test_complete_transcription_preserves_uuid_and_unwraps():
+    from uuid import UUID
+    message_id = UUID('56cd55b5-e62b-45fc-8a76-4584b6b6abf2')
+    pool = _FakePool()
+    asyncio.run(db.complete_transcription(pool, message_id, '{"text":"hola"}'))
+    assert pool.calls[0][0] is message_id
+    assert pool.calls[0][1] == 'hola'

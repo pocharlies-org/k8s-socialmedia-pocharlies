@@ -6,8 +6,8 @@
  * already merged or blocked.
  *
  *   1. conversations / participants: one UPDATE each (≈3k / 11k rows).
- *   2. messages: batched by id range so no single statement holds row locks
- *      on the whole 800k-row table (measured on a prod copy: ~70 s total).
+ *   2. messages: batched by missing keys so UUID and numeric primary keys both
+ *      work without holding row locks on the whole table.
  *   3. verify: zero rows left without keys, else exit 1 before any index.
  *   4. UNIQUE (account_id, external_id) indexes, CONCURRENTLY (no write lock).
  *      An index left INVALID by a failed build is dropped and reported.
@@ -87,26 +87,28 @@ export async function runBackfill(client: BackfillClient, opts: BackfillOptions)
       WHERE p2.id = p.id AND (p.account_id IS NULL OR p.external_id IS NULL)`
   );
 
-  const bounds = await client.query(
-    `SELECT min(id) AS lo, max(id) AS hi FROM messages WHERE account_id IS NULL OR external_id IS NULL`
-  );
-  const lo = bounds.rows[0]?.lo == null ? null : Number(bounds.rows[0].lo);
-  const hi = bounds.rows[0]?.hi == null ? null : Number(bounds.rows[0].hi);
-  if (lo !== null && hi !== null) {
-    let updated = 0;
-    for (let from = lo; from <= hi; from += opts.batch) {
-      const res = await client.query(
-        `UPDATE messages m SET account_id = s.account_id, external_id = s.external_id
-           FROM messages m2, LATERAL social_split_legacy_id(m2.wa_message_id, m2.account, m2.platform) s
-          WHERE m2.id = m.id AND m.id >= $1 AND m.id < $2
-            AND (m.account_id IS NULL OR m.external_id IS NULL)`,
-        [from, from + opts.batch]
-      );
-      updated += res.rowCount ?? 0;
-      if (opts.pauseMs) await pause(opts.pauseMs);
-    }
-    logger.info({ updated }, 'multiaccount backfill: messages keyed');
+  let updated = 0;
+  let count = opts.batch;
+  while (count === opts.batch) {
+    const res = await client.query(
+      `WITH batch AS (
+         SELECT m.id, s.account_id, s.external_id
+           FROM messages m
+           CROSS JOIN LATERAL social_split_legacy_id(m.wa_message_id, m.account, m.platform) s
+          WHERE (m.account_id IS NULL OR m.external_id IS NULL)
+            AND s.account_id IS NOT NULL AND s.external_id IS NOT NULL
+          ORDER BY m.id LIMIT $1
+       )
+       UPDATE messages m SET account_id = batch.account_id, external_id = batch.external_id
+         FROM batch WHERE m.id = batch.id`,
+      [opts.batch]
+    );
+    count = res.rowCount ?? 0;
+    updated += count;
+    if (count < opts.batch) break;
+    if (opts.pauseMs) await pause(opts.pauseMs);
   }
+  logger.info({ updated }, 'multiaccount backfill: messages keyed');
 
   const after = await missingKeys(client);
   const left = Object.entries(after).filter(([, n]) => n > 0);

@@ -172,13 +172,17 @@ export async function markMessageRevoked(
   messageId: string,
   options: MutationOptions
 ): Promise<boolean> {
+  // metadata is shared by both schemas; row JSON can read the optional legacy column.
   const result = await getPool().query(
     `UPDATE messages
         SET is_deleted = TRUE,
             status = 'deleted',
             status_at = now(),
             metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
-              'deleted_at', $3::text, 'deleted_source', $4::text, 'deleted_by', $5::text))
+              'deleted_at', COALESCE(NULLIF(metadata->>'deleted_at', ''),
+                to_jsonb(messages)->>'deleted_at', $3::text),
+              'deleted_source', COALESCE(metadata->>'deleted_source', $4::text),
+              'deleted_by', COALESCE(metadata->>'deleted_by', $5::text)))
       WHERE wa_message_id = $1 AND account_id = $2 AND platform = 'whatsapp'
         AND NOT COALESCE(is_deleted, FALSE)
       RETURNING id`,

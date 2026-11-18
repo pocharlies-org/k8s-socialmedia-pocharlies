@@ -171,8 +171,9 @@ spec:
     metadata: { labels: { app: telegram-pairing } }
     spec:
       enableServiceLinks: false
-      # Mismo sitio que telegram-connector en prod (patch-telegram-dgx.yaml no esta activo).
-      nodeSelector: { topology: lan, kubernetes.io/arch: amd64 }
+      # Mismo sitio que telegram-connector (sauvage desde INFRA-1103): sesiones en memoria y en la BD.
+      nodeSelector: { kubernetes.io/hostname: sauvage, kubernetes.io/arch: amd64 }
+      tolerations: [{ key: role, operator: Equal, value: edge, effect: NoSchedule }]
       containers:
         - name: telegram-pairing
           image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest

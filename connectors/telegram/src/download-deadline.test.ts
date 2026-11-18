@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
-import { MtArgumentError, tl, TelegramClient, FileLocation, Long } from '@mtcute/node';
+import { MtArgumentError, MtTimeoutError, networkMiddlewares, tl, TelegramClient, FileLocation, Long } from '@mtcute/node';
 import { TelegramClientWrapper } from './telegram-client';
 import { createRouter } from './api/controller';
 
@@ -227,10 +227,11 @@ test('single message and flood wait HTTP contracts support durable recovery', as
     client.getMessage = async () => null;
     assert.equal((await get('/messages/single/123/1')).status, 404);
     const flood = async () => { throw tl.RpcError.fromTl({ _: 'rpc_error', errorCode: 420, errorMessage: 'FLOOD_WAIT_18' }); };
+    client.getMessages = flood;
     client.getMessage = flood;
     client.downloadMedia = flood;
     client.downloadPeerPhoto = flood;
-    for (const route of ['/messages/single/123/1', '/messages/media/123/1', '/peers/123/photo']) {
+    for (const route of ['/messages/123', '/messages/single/123/1', '/messages/media/123/1', '/peers/123/photo']) {
       const res = await get(route);
       assert.equal(res.status, 429);
       assert.equal(res.headers.get('Retry-After'), '18');
@@ -272,4 +273,63 @@ test('an existing message with a parse failure is retryable, not deleted', async
   await assert.rejects(client.getMessage('123', 1), /Failed to parse existing/);
   const absent = wrapper({ getMessages: async () => [] });
   assert.equal(await absent.getMessage('123', 1), null);
+});
+
+test('real mtcute media workers stop 503 retry storms and a later download can succeed', async () => {
+  let failing = true;
+  let calls = 0;
+  let warnings = 0;
+  const handler = networkMiddlewares.internalErrorsHandler({});
+  const manager = { params: {}, _log: { warn: () => warnings++ } };
+  const inner = {
+    storage: {}, getPrimaryDcId: async () => 2, getPoolSize: async () => 1,
+    log: { debug: () => {} },
+    call: async (request: unknown, params: { maxRetryCount: number; throw503: boolean }) => {
+      assert.equal(params.maxRetryCount, 2);
+      assert.equal(params.throw503, true);
+      return handler({ request, params, manager } as any, async () => {
+        calls++;
+        return failing
+          ? { _: 'mt_rpc_error', errorCode: -503, errorMessage: 'Timeout' }
+          : { _: 'upload.file', type: { _: 'storage.fileUnknown' }, mtime: 0, bytes: Uint8Array.from([7]) };
+      });
+    },
+  };
+  const location = new FileLocation({ _: 'inputDocumentFileLocation', id: Long.fromInt(1), accessHash: Long.fromInt(1),
+    fileReference: new Uint8Array(), thumbSize: '' }, 1, 2);
+  const client = wrapper({ _client: inner, getPeer: async () => ({ photo: { big: location } }),
+    downloadAsBuffer: TelegramClient.prototype.downloadAsBuffer });
+  await assert.rejects(client.downloadPeerPhoto('123'), MtTimeoutError);
+  assert.equal(calls, 1);
+  assert.equal(warnings, 0);
+  failing = false;
+  assert.deepEqual(await client.downloadPeerPhoto('123'), Buffer.from([7]));
+  assert.equal(calls, 2);
+});
+
+test('media and avatar transient server failures return retryable 503 without marking media absent', async () => {
+  const secret = 'test-telegram-media-outage';
+  const client = wrapper({});
+  const app = express();
+  app.use('/api/v1', createRouter(client, secret));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1`;
+  try {
+    for (const error of [new MtTimeoutError(), tl.RpcError.fromTl({ _: 'rpc_error', errorCode: 500, errorMessage: 'INTERNAL' })]) {
+      client.downloadMedia = client.downloadPeerPhoto = async () => { throw error; };
+      for (const route of ['/messages/media/123/1', '/peers/123/photo']) {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const response = await fetch(`${base}${route}`, { headers: {
+          'x-connector-timestamp': String(timestamp),
+          'x-connector-signature': generateHMACSignature({}, timestamp, secret),
+        } });
+        assert.equal(response.status, 503);
+        assert.equal(response.headers.get('Retry-After'), '60');
+        assert.deepEqual(await response.json(), { error: 'Telegram media temporarily unavailable', retryAfter: 60 });
+      }
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });

@@ -1,0 +1,123 @@
+import {pollDraft} from './poll-draft.mjs';
+
+export function createPollComposer({documentRef = globalThis.document, submit, isCurrent = () => true, onSent = () => {}, createToken = () => crypto.randomUUID()}) {
+  const node = (tag, className = '', text) => {
+    const element = documentRef.createElement(tag);
+    element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  };
+  const button = (text, label = text) => {
+    const element = node('button', 'feature-button', text);
+    element.type = 'button'; element.setAttribute('aria-label', label);
+    return element;
+  };
+  const form = node('form', 'poll-composer feature-form');
+  // UX #44.2: el tope ya lo pone maxLength; el contador lo hace visible al
+  // acercarse, como el del composer (QA #60).
+  const counter = (input, max) => {
+    const span = node('span', 'poll-count'); span.hidden = true;
+    input.addEventListener('input', () => { span.hidden = input.value.length < max - 25; span.textContent = `${input.value.length}/${max}`; });
+    return span;
+  };
+  // La validación nativa (required) bloqueaba el submit sin mensaje visible
+  // dentro del diálogo: pollDraft ya valida y su error llega al status (QA #13).
+  form.noValidate = true;
+  const fields = node('fieldset', 'poll-fields');
+  const questionLabel = node('label', 'feature-field', 'Pregunta');
+  const question = node('textarea'); question.name = 'question'; question.rows = 2;
+  question.maxLength = 255; question.required = true; question.placeholder = 'Haz una pregunta';
+  // QA #78: el placeholder no es nombre accesible; el label envuelto no bastaba.
+  question.setAttribute('aria-label', 'Pregunta de la encuesta');
+  questionLabel.append(question, counter(question, 255));
+  const heading = node('h3', '', 'Opciones');
+  const list = node('div', 'poll-option-list');
+  const rows = [];
+  const add = button('A\u00f1adir otra opci\u00f3n');
+  const multipleLabel = node('label', 'poll-multiple');
+  // UX #8.7: WhatsApp crea la encuesta con votación única (el toggle, apagado).
+  const multiple = node('input'); multiple.type = 'checkbox'; multiple.checked = false;
+  multiple.setAttribute('role', 'switch');
+  multipleLabel.append(multiple, node('span', '', 'Permitir varias respuestas'));
+  const status = node('p', 'poll-composer-status'); status.setAttribute('role', 'alert'); status.hidden = true;
+  const send = button('Enviar encuesta'); send.type = 'submit'; send.classList.add('primary');
+  fields.append(questionLabel, heading, list, add, multipleLabel);
+  form.append(fields, status, send);
+  let pending = false;
+  let signature = '';
+  let token = '';
+  // QA #10: «Enviar encuesta» quedaba activo con pregunta u opciones vacías.
+  // Se deshabilita hasta tener pregunta y todas las opciones rellenas (como la
+  // app oficial); el alert de pollDraft queda para lo que no se ve en el
+  // estado (opciones repetidas, longitudes).
+  function syncSend() { send.disabled = !question.value.trim() || rows.some(row => !row.input.value.trim()); }
+  form.oninput = () => {if (!pending) { status.hidden = true; syncSend(); }};
+
+  function renderRows(focus) {
+    list.replaceChildren();
+    rows.forEach((row, index) => {
+      row.label.textContent = `Opci\u00f3n ${index + 1}`;
+      row.label.append(row.input, row.counter);
+      row.up.disabled = index === 0; row.down.disabled = index === rows.length - 1;
+      row.remove.disabled = rows.length <= 2;
+      row.up.setAttribute('aria-label', `Subir opci\u00f3n ${index + 1}`);
+      row.down.setAttribute('aria-label', `Bajar opci\u00f3n ${index + 1}`);
+      row.remove.setAttribute('aria-label', `Eliminar opci\u00f3n ${index + 1}`);
+      list.append(row.element);
+    });
+    add.disabled = rows.length >= 12;
+    syncSend();
+    focus?.focus();
+  }
+  function addRow() {
+    if (pending || rows.length >= 12) return;
+    const element = node('div', 'poll-option-row');
+    const label = node('label', 'feature-field');
+    const input = node('input'); input.type = 'text'; input.maxLength = 100; input.required = true; input.placeholder = 'A\u00f1ade texto';
+    input.setAttribute('aria-label', 'Texto de la opci\u00f3n');
+    const up = button('\u2191'); const down = button('\u2193'); const remove = button('\u00d7');
+    const controls = node('div', 'poll-option-controls'); controls.append(up, down, remove);
+    const row = {element, label, input, up, down, remove, counter: counter(input, 100)};
+    element.append(label, controls); rows.push(row);
+    function move(delta) {
+      if (pending) return;
+      const index = rows.indexOf(row); const next = index + delta;
+      if (next < 0 || next >= rows.length) return;
+      [rows[index], rows[next]] = [rows[next], rows[index]];
+      renderRows(input);
+    }
+    up.onclick = () => move(-1); down.onclick = () => move(1);
+    remove.onclick = () => {
+      if (pending || rows.length <= 2) return;
+      const index = rows.indexOf(row); rows.splice(index, 1);
+      renderRows(rows[Math.min(index, rows.length - 1)].input);
+    };
+    renderRows(input);
+  }
+  add.onclick = addRow;
+  addRow(); addRow();
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (pending || !isCurrent()) return;
+    let payload;
+    try {
+      payload = pollDraft({question: question.value, options: rows.map(row => row.input.value), selectableCount: multiple.checked ? rows.length : 1});
+    } catch (error) {
+      status.textContent = error.message; status.hidden = false; return;
+    }
+    const nextSignature = JSON.stringify(payload);
+    if (nextSignature !== signature) {token = createToken(); signature = nextSignature;}
+    pending = true; fields.disabled = true; send.disabled = true;
+    send.textContent = 'Enviando...'; form.setAttribute('aria-busy', 'true'); status.hidden = true;
+    try {
+      await submit(payload, token);
+      if (isCurrent()) onSent();
+    } catch (error) {
+      if (isCurrent()) {status.textContent = error.message || 'No se ha podido enviar la encuesta.'; status.hidden = false;}
+    } finally {
+      pending = false; fields.disabled = false; syncSend();
+      send.textContent = 'Enviar encuesta'; form.setAttribute('aria-busy', 'false');
+    }
+  };
+  return form;
+}

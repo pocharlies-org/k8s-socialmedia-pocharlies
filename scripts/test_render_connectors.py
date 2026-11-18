@@ -89,6 +89,10 @@ class RenderConnectorsTest(unittest.TestCase):
                 ("Service", "telegram-sync-acme"),
             ],
         )
+        # DGX-1235 B2: the connector reaches telegram_send_attempts for keyed sends.
+        dep = next(d for d in yaml.safe_load_all(manifest) if d and d["metadata"]["name"] == "telegram-connector-acme")
+        env = {e["name"]: e.get("value") for e in dep["spec"]["template"]["spec"]["containers"][0]["env"]}
+        self.assertIn("postgres-shared-rw.databases.svc.cluster.local", env["DATABASE_URL"])
 
     def test_disabled_and_instagram_render_nothing(self):
         manifest, _ = rc.render(

@@ -113,7 +113,8 @@ Writes pass through the connector's `ENABLE_SENDING` /
 - `social_set_chat_state`: `archive`, `unarchive`, `pin`, `unpin`, `mute`
   (optional `durationMs` or `muteUntil`), `unmute`, `markRead`, `markUnread`.
 - `social_get_group` / `social_manage_group`: `create`, `update` (subject,
-  description, `announce`, `restrict`), `add|remove|promote|demoteParticipants`.
+  description, `announce`, `restrict`), `add|remove|promote|demoteParticipants`,
+  `setPhoto` (`photoUrl`, admins only — WhatsApp's own crop and rules apply).
   An add WhatsApp refuses for someone's privacy lists them in `inviteRequired`
   (in `data`, or in `error.details` when nobody was added).
 - `social_invite_to_group` (admins only): sends WhatsApp's private "join group"
@@ -121,6 +122,9 @@ Writes pass through the connector's `ENABLE_SENDING` /
   message to each; members are reported, not messaged. Per-person `results`
   with `reason` `invited | already_participant | send_failed |
 invite_link_unavailable`; nobody invited → `invite_not_sent`.
+- `social_get_reactions` (Telegram, read-only): `total` (Telegram's own count)
+  and `byEmoji` for one `messageId`, or for every message of a forum topic
+  (`topicId`, or target `<chat>_<topic>`) sorted by total — the photo-contest tally.
 - `social_send_poll`, `social_vote_poll` (`options: []` retracts),
   `social_get_poll_results`, `social_send_event`, `social_respond_event`,
   `social_get_event_results`.

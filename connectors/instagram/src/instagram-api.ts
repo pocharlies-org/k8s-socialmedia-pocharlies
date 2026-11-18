@@ -4,8 +4,7 @@
  * Handles all communication with Meta's Graph API for Instagram Business accounts.
  */
 
-const GRAPH_API_BASE = 'https://graph.instagram.com/v21.0';
-const FB_GRAPH_API_BASE = 'https://graph.facebook.com/v22.0';
+import { graphBaseUrl } from './url-config';
 
 export interface InstagramConfig {
   accessToken: string;
@@ -47,7 +46,7 @@ export async function discoverFacebookInstagramAccount(
   accessToken: string,
   expectedId?: string
 ): Promise<FacebookInstagramAccount | undefined> {
-  const url = new URL(`${FB_GRAPH_API_BASE}/me/accounts`);
+  const url = new URL(`${graphBaseUrl('facebook')}/me/accounts`);
   url.searchParams.set('fields', 'id,name,instagram_business_account{id,username,name}');
   url.searchParams.set('access_token', accessToken);
   const response = await fetch(url.toString());
@@ -90,10 +89,29 @@ export interface Conversation {
   updated_time: string;
 }
 
+/**
+ * Graph API paging.next/previous URLs embed access_token in plaintext and end
+ * up in MCP transcripts; nothing here follows them, so they never leave the
+ * connector. Recursive because /conversations nests paging inside each
+ * conversation's messages (SC-4613).
+ */
+function stripPaging<T>(payload: T): T {
+  if (Array.isArray(payload)) {
+    for (const item of payload) stripPaging(item);
+  } else if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>;
+    delete obj.paging;
+    for (const value of Object.values(obj)) stripPaging(value);
+  }
+  return payload;
+}
+
 export class InstagramAPI {
   private config: InstagramConfig;
 
   constructor(config: InstagramConfig) {
+    graphBaseUrl('instagram');
+    graphBaseUrl('facebook');
     this.config = config;
   }
 
@@ -118,7 +136,7 @@ export class InstagramAPI {
   }
 
   private primaryBaseUrl(): string {
-    return this.config.primaryApi === 'facebook-login' ? FB_GRAPH_API_BASE : GRAPH_API_BASE;
+    return this.config.primaryApi === 'facebook-login' ? graphBaseUrl('facebook') : graphBaseUrl('instagram');
   }
 
   private primaryAccessToken(): string {
@@ -136,7 +154,7 @@ export class InstagramAPI {
     endpoint: string,
     params: Record<string, string> = {},
     method: 'GET' | 'POST' = 'GET',
-    body?: Record<string, string>
+    body?: Record<string, string | string[]>
   ): Promise<T> {
     const url = new URL(`${this.primaryBaseUrl()}${endpoint}`);
     url.searchParams.set('access_token', this.primaryAccessToken());
@@ -155,7 +173,7 @@ export class InstagramAPI {
       const error = await response.text();
       throw new Error(`Instagram API error (${response.status}): ${error}`);
     }
-    return response.json() as Promise<T>;
+    return stripPaging((await response.json()) as T);
   }
 
   /**
@@ -175,7 +193,7 @@ export class InstagramAPI {
           'Set INSTAGRAM_<ACCOUNT>_FB_ACCESS_TOKEN in the connector .env.'
       );
     }
-    const url = new URL(`${FB_GRAPH_API_BASE}${endpoint}`);
+    const url = new URL(`${graphBaseUrl('facebook')}${endpoint}`);
     url.searchParams.set('access_token', this.config.fbAccessToken);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
@@ -190,7 +208,7 @@ export class InstagramAPI {
       const error = await response.text();
       throw new Error(`Facebook API error (${response.status}): ${error}`);
     }
-    return response.json() as Promise<T>;
+    return stripPaging((await response.json()) as T);
   }
 
   async getProfile() {
@@ -275,11 +293,24 @@ export class InstagramAPI {
   }
 
   async publishMedia(containerId: string) {
+    // Meta has not downloaded the media until the container is FINISHED; publishing earlier fails 9007.
+    await this.waitForMediaReady(containerId);
     return this.request<{ id: string }>(
       `/${this.primaryAccountId()}/media_publish`,
       { creation_id: containerId },
       'POST'
     );
+  }
+
+  /**
+   * Edit the caption of a published media. Uses fbRequest (graph.facebook.com + EAA), NOT
+   * request(): the edit is an Instagram Business API endpoint that does not exist on
+   * graph.instagram.com — the IG Login API answers {success:true} as a silent no-op there
+   * (probado en real con skirmshopes, primaryApi=instagram-login). comment_enabled es obligatorio
+   * (400 code 100 si falta); se manda true (comentarios ON por defecto en cuentas de empresa).
+   */
+  async updateMediaCaption(mediaId: string, caption: string) {
+    return this.fbRequest<{ success: boolean }>(`/${mediaId}`, {}, 'POST', { caption, comment_enabled: 'true' });
   }
 
   async getMediaContainerStatus(containerId: string) {
@@ -358,6 +389,7 @@ export class InstagramAPI {
         body
       );
       childIds.push(child.id);
+      await this.waitForMediaReady(child.id);
     }
     const carouselBody: Record<string, string> = {
       media_type: 'CAROUSEL',
@@ -374,20 +406,29 @@ export class InstagramAPI {
     return { container_id: carousel.id, media_id: published.id, child_container_ids: childIds };
   }
 
-  async publishReel(videoUrl: string, caption?: string, shareToFeed = true) {
-    const body: Record<string, string> = {
+  async publishReel(opts: {
+    videoUrl: string;
+    caption?: string;
+    shareToFeed?: boolean;
+    coverUrl?: string;
+    thumbOffsetMs?: number;
+    collaborators?: string[];
+  }) {
+    const body: Record<string, string | string[]> = {
       media_type: 'REELS',
-      video_url: videoUrl,
-      share_to_feed: String(shareToFeed),
+      video_url: opts.videoUrl,
+      share_to_feed: String(opts.shareToFeed ?? true),
     };
-    if (caption) body.caption = caption;
+    if (opts.caption) body.caption = opts.caption;
+    if (opts.coverUrl) body.cover_url = opts.coverUrl;
+    if (opts.thumbOffsetMs !== undefined) body.thumb_offset = String(opts.thumbOffsetMs);
+    if (opts.collaborators?.length) body.collaborators = opts.collaborators;
     const container = await this.request<{ id: string }>(
       `/${this.primaryAccountId()}/media`,
       {},
       'POST',
       body
     );
-    await this.waitForMediaReady(container.id);
     const published = await this.publishMedia(container.id);
     return { container_id: container.id, media_id: published.id };
   }

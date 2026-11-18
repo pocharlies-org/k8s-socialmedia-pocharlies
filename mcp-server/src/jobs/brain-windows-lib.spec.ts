@@ -16,7 +16,6 @@ import {
   childDocs,
   chunkWindow,
   classifyConvKind,
-  deleteFromBrain,
   diffWindows,
   initialLlmStatus,
   isProvisional,
@@ -28,7 +27,6 @@ import {
   parentContent,
   parentDoc,
   parseWindowsConfig,
-  pushWindowDocs,
   renderHeader,
   renderTranscript,
   sessionEndBound,
@@ -82,20 +80,29 @@ describe('classifyConvKind (ADR 0002 §3)', () => {
       ],
     };
     expect(
-      classifyConvKind({ type: 'supergroup', is_group: true }, 'tg_-1003785136626', 'Synapse monitor', cfg)
+      classifyConvKind(
+        { type: 'supergroup', is_group: true },
+        'tg_-1003785136626',
+        'Synapse monitor',
+        cfg
+      )
     ).toBe('bot');
-    expect(classifyConvKind({ type: 'private' }, 'tg_7934536267', 'ALERTAS MONITORING SKIRMSHOP', cfg)).toBe(
-      'bot'
-    );
+    expect(
+      classifyConvKind({ type: 'private' }, 'tg_7934536267', 'ALERTAS MONITORING SKIRMSHOP', cfg)
+    ).toBe('bot');
   });
 
   it('channel by type or channel list; group by type/is_group; else chat', () => {
     const cfg: WindowsConfig = { ...CFG, channelChats: [{ name: 'Ofertas Chollos' }] };
     expect(classifyConvKind({ type: 'channel' }, 'tg_1', 'X', cfg)).toBe('channel');
-    expect(classifyConvKind({ type: 'supergroup' }, 'tg_2', 'Ofertas Chollos', cfg)).toBe('channel');
+    expect(classifyConvKind({ type: 'supergroup' }, 'tg_2', 'Ofertas Chollos', cfg)).toBe(
+      'channel'
+    );
     expect(classifyConvKind({ type: 'group' }, 'tg_3', 'G', cfg)).toBe('group');
     expect(classifyConvKind({ type: 'GROUP' }, 'tg_4', 'G', cfg)).toBe('group');
-    expect(classifyConvKind({ type: 'private', is_group: true }, 'x@g.us', 'Reforma', cfg)).toBe('group');
+    expect(classifyConvKind({ type: 'private', is_group: true }, 'x@g.us', 'Reforma', cfg)).toBe(
+      'group'
+    );
     expect(classifyConvKind({ type: 'private' }, '34600@c.us', 'Ana', cfg)).toBe('chat');
     expect(classifyConvKind({ type: 'INDIVIDUAL' }, 'tg_5', 'Ana', cfg)).toBe('chat');
   });
@@ -136,15 +143,33 @@ describe('header and transcript (ADR 0002 §2)', () => {
   });
 
   it('falls back to the conversation id when the chat has no name', () => {
-    const h = renderHeader(chat({ conversation_name: null }), ['Ana'], new Date('2026-03-14T17:00:00Z'), new Date('2026-03-14T17:05:00Z'));
+    const h = renderHeader(
+      chat({ conversation_name: null }),
+      ['Ana'],
+      new Date('2026-03-14T17:00:00Z'),
+      new Date('2026-03-14T17:05:00Z')
+    );
     expect(h).toContain('«reforma@g.us»');
   });
 
   it('names OUTBOUND by account and INBOUND by name > push_name > number', () => {
     const msgs = [
       msg({ id: '1', wa_message_id: 'a', direction: 'OUTBOUND' }),
-      msg({ id: '2', wa_message_id: 'b', sender_name: null, sender_push_name: 'Lui', content: 'ok' }),
-      msg({ id: '3', wa_message_id: 'c', sender_name: null, sender_push_name: null, sender_wa_id: '34600555666@c.us', content: 'vale' }),
+      msg({
+        id: '2',
+        wa_message_id: 'b',
+        sender_name: null,
+        sender_push_name: 'Lui',
+        content: 'ok',
+      }),
+      msg({
+        id: '3',
+        wa_message_id: 'c',
+        sender_name: null,
+        sender_push_name: null,
+        sender_wa_id: '34600555666@c.us',
+        content: 'vale',
+      }),
     ];
     const t = renderTranscript(msgs, chat(), CFG);
     expect(t).toBe('18:04 Dani: hola\n18:04 Lui: ok\n18:04 34600555666: vale');
@@ -152,14 +177,26 @@ describe('header and transcript (ADR 0002 §2)', () => {
 
   it('marks [voz] and [reenviado] and inserts day separators', () => {
     const msgs = [
-      msg({ id: '1', wa_message_id: 'a', wa_timestamp: new Date('2026-03-14T22:50:00Z'), content: 'temprano' }),
       msg({
-        id: '2', wa_message_id: 'b', wa_timestamp: new Date('2026-03-14T23:10:00Z'),
-        message_type: 'VOICE', is_forwarded: true, direction: 'OUTBOUND', content: 'si, llevo muestras',
+        id: '1',
+        wa_message_id: 'a',
+        wa_timestamp: new Date('2026-03-14T22:50:00Z'),
+        content: 'temprano',
+      }),
+      msg({
+        id: '2',
+        wa_message_id: 'b',
+        wa_timestamp: new Date('2026-03-14T23:10:00Z'),
+        message_type: 'VOICE',
+        is_forwarded: true,
+        direction: 'OUTBOUND',
+        content: 'si, llevo muestras',
       }),
     ];
     const t = renderTranscript(msgs, chat(), CFG);
-    expect(t).toBe('23:50 Ana: temprano\n— 2026-03-15 —\n00:10 Dani [voz] [reenviado]: si, llevo muestras');
+    expect(t).toBe(
+      '23:50 Ana: temprano\n— 2026-03-15 —\n00:10 Dani [voz] [reenviado]: si, llevo muestras'
+    );
   });
 
   it('collapses newlines so one message is one line', () => {
@@ -171,14 +208,20 @@ describe('header and transcript (ADR 0002 §2)', () => {
     const t = renderTranscript(
       [
         // Real row 1254112: bot echo with the raw STT body, still unfixed.
-        msg({ id: '1', wa_message_id: 'a', content: '🎙️ "{"text":"La prueba de voz.","usage":null}"' }),
+        msg({
+          id: '1',
+          wa_message_id: 'a',
+          content: '🎙️ "{"text":"La prueba de voz.","usage":null}"',
+        }),
         // Prose that merely mentions the JSON shape stays verbatim.
         msg({ id: '2', wa_message_id: 'b', content: 'dice 🎙️ "{"text":"x"}" al final null' }),
       ],
       chat(),
       CFG
     );
-    expect(t).toBe('18:04 Ana: 🎙️ La prueba de voz.\n18:04 Ana: dice 🎙️ "{"text":"x"}" al final null');
+    expect(t).toBe(
+      '18:04 Ana: 🎙️ La prueba de voz.\n18:04 Ana: dice 🎙️ "{"text":"x"}" al final null'
+    );
   });
 });
 
@@ -281,7 +324,10 @@ describe('trivial detection (ADR 0002 §3)', () => {
 
   it('is not trivial with real content', () => {
     const msgs = Array.from({ length: 4 }, (_, i) =>
-      msg({ id: String(i), content: `pues mira, el presupuesto del azulejo sube un quince por ciento respecto al ${i}` })
+      msg({
+        id: String(i),
+        content: `pues mira, el presupuesto del azulejo sube un quince por ciento respecto al ${i}`,
+      })
     );
     expect(isTrivialWindow(msgs, CFG)).toBe(false);
   });
@@ -290,15 +336,21 @@ describe('trivial detection (ADR 0002 §3)', () => {
 describe('ids and hashes (ADR 0002 §1/§5)', () => {
   it('window_key carries the epoch seconds of the first message', () => {
     const k = windowKey(chat(), new Date('2026-03-14T17:02:00Z'));
-    expect(k).toBe(`whatsapp:personal:reforma@g.us:${Math.floor(Date.parse('2026-03-14T17:02:00Z') / 1000)}`);
+    expect(k).toBe(
+      `whatsapp:personal:reforma@g.us:${Math.floor(Date.parse('2026-03-14T17:02:00Z') / 1000)}`
+    );
     expect(windowSourceId(k, 0)).toBe(`win:${k}`);
     expect(windowSourceId(k, 2)).toBe(`win:${k}:p2`);
   });
 
   it('content_hash is stable and reacts to edits', () => {
     const a = {
-      window_key: 'k', part: 0, transcript: 'hola', message_ids: ['w1'],
-      conversation_name: 'n', conv_kind: 'chat' as const,
+      window_key: 'k',
+      part: 0,
+      transcript: 'hola',
+      message_ids: ['w1'],
+      conversation_name: 'n',
+      conv_kind: 'chat' as const,
     };
     expect(windowContentHash(a)).toBe(windowContentHash({ ...a }));
     expect(windowContentHash(a)).not.toBe(windowContentHash({ ...a, transcript: 'hola editado' }));
@@ -318,7 +370,9 @@ describe('buildWindows (ADR 0002 §1-§3)', () => {
     const base = Date.parse('2026-03-14T09:00:00Z');
     const msgs = Array.from({ length: 20 }, (_, i) =>
       msg({
-        id: String(i + 1), wa_message_id: `w${i + 1}`, content: 'x'.repeat(1000),
+        id: String(i + 1),
+        wa_message_id: `w${i + 1}`,
+        content: 'x'.repeat(1000),
         wa_timestamp: new Date(base + i * 60_000),
       })
     );
@@ -332,7 +386,19 @@ describe('buildWindows (ADR 0002 §1-§3)', () => {
   });
 
   it('a single window has part 0 and no suffix', () => {
-    const ws = buildWindows(chat(), [msg(), msg({ id: '2' }), msg({ id: '3' }), msg({ id: '4', content: 'texto suficiente para no ser trivial en absoluto, con contenido real y todo' })], CFG);
+    const ws = buildWindows(
+      chat(),
+      [
+        msg(),
+        msg({ id: '2' }),
+        msg({ id: '3' }),
+        msg({
+          id: '4',
+          content: 'texto suficiente para no ser trivial en absoluto, con contenido real y todo',
+        }),
+      ],
+      CFG
+    );
     expect(ws.length).toBe(1);
     expect(ws[0].part).toBe(0);
     expect(ws[0].source_id).toMatch(/^win:whatsapp:personal:reforma@g\.us:\d+$/);
@@ -345,7 +411,10 @@ describe('buildWindows (ADR 0002 §1-§3)', () => {
     expect(initialLlmStatus(trivial)).toBe('skipped');
 
     const real = Array.from({ length: 4 }, (_, i) =>
-      msg({ id: String(i), content: `hablemos del pedido de azulejos para la reforma del bano numero ${i}` })
+      msg({
+        id: String(i),
+        content: `hablemos del pedido de azulejos para la reforma del bano numero ${i}`,
+      })
     );
     const w = buildWindows(chat({ conv_kind: 'channel' }), real, CFG)[0];
     expect(w.trivial).toBe(false);
@@ -372,7 +441,8 @@ describe('chunkWindow (ADR 0002 §3)', () => {
     const base = Date.parse('2026-03-14T09:00:00Z');
     const msgs = Array.from({ length: 12 }, (_, i) =>
       msg({
-        id: String(i + 1), wa_message_id: `w${i + 1}`,
+        id: String(i + 1),
+        wa_message_id: `w${i + 1}`,
         content: `mensaje numero ${i + 1} con algo de texto util para que pese lo suyo en el trozo`,
         wa_timestamp: new Date(base + i * 60_000),
       })
@@ -401,9 +471,17 @@ describe('chunkWindow (ADR 0002 §3)', () => {
   it('splits a single message over 1600 chars by sentences', () => {
     const msgs = [
       msg({ id: '1', wa_message_id: 'w1', content: 'frase larga de relleno. '.repeat(120) }),
-      msg({ id: '2', wa_message_id: 'w2', content: 'y aqui Ana responde con algo de sustancia real' }),
+      msg({
+        id: '2',
+        wa_message_id: 'w2',
+        content: 'y aqui Ana responde con algo de sustancia real',
+      }),
       msg({ id: '3', wa_message_id: 'w3', content: 'y Luis tercia con mas texto util del tema' }),
-      msg({ id: '4', wa_message_id: 'w4', content: 'y cierra Dani la idea con un poco mas de rollo' }),
+      msg({
+        id: '4',
+        wa_message_id: 'w4',
+        content: 'y cierra Dani la idea con un poco mas de rollo',
+      }),
     ];
     const w = windowOf(msgs);
     const chunks = chunkWindow(w, CFG);
@@ -414,7 +492,11 @@ describe('chunkWindow (ADR 0002 §3)', () => {
 
   it('a small window becomes a single child', () => {
     const msgs = Array.from({ length: 4 }, (_, i) =>
-      msg({ id: String(i), wa_message_id: `w${i}`, content: `cuatro mensajes con algo de texto cada uno ${i}` })
+      msg({
+        id: String(i),
+        wa_message_id: `w${i}`,
+        content: `cuatro mensajes con algo de texto cada uno ${i}`,
+      })
     );
     const w = windowOf(msgs);
     const chunks = chunkWindow(w, CFG);
@@ -427,7 +509,8 @@ describe('brain documents (ADR 0002 §3)', () => {
   const built = (): BuiltWindow => {
     const msgs = Array.from({ length: 5 }, (_, i) =>
       msg({
-        id: String(i), wa_message_id: `w${i}`,
+        id: String(i),
+        wa_message_id: `w${i}`,
         content: `contenido real de la conversacion sobre la reforma, mensaje ${i}`,
         wa_timestamp: new Date(Date.parse('2026-03-14T09:00:00Z') + i * 60_000),
       })
@@ -452,7 +535,11 @@ describe('brain documents (ADR 0002 §3)', () => {
 
   it('parent content switches to header + summary when extracted', () => {
     const w = built();
-    const doc = parentDoc(w, { llm_status: 'done', summary: 'Resumen: la reforma sube.', extraction: { topics: ['reforma'] } });
+    const doc = parentDoc(w, {
+      llm_status: 'done',
+      summary: 'Resumen: la reforma sube.',
+      extraction: { topics: ['reforma'] },
+    });
     expect(doc.content).toBe(`${w.header}\nResumen: la reforma sube.`);
     expect((doc.metadata as Record<string, unknown>).extraction).toEqual({ topics: ['reforma'] });
   });
@@ -476,7 +563,7 @@ describe('brain documents (ADR 0002 §3)', () => {
 
 describe('diffWindows (ADR 0002 §7.3)', () => {
   const w = (source_id: string, content_hash: string): BuiltWindow =>
-    ({ source_id, content_hash } as BuiltWindow);
+    ({ source_id, content_hash }) as BuiltWindow;
 
   it('pushes new and changed, deletes vanished, leaves equal alone', () => {
     const d = diffWindows(
@@ -515,7 +602,10 @@ describe('config file (ADR 0002 §5)', () => {
     const file = join(dir, 'c.yaml');
     writeFileSync(
       file,
-      require('fs').readFileSync(join(__dirname, '../../../k8s/base/brain-windows-config.yaml'), 'utf8')
+      require('fs').readFileSync(
+        join(__dirname, '../../../k8s/base/brain-windows-config.yaml'),
+        'utf8'
+      )
     );
     const cfg = loadWindowsConfig(file);
     expect(cfg.botChats.map(b => b.name)).toEqual(
@@ -532,7 +622,11 @@ describe('config file (ADR 0002 §5)', () => {
     expect(cfg.channelChats.map(c => c.name)).toEqual(
       expect.arrayContaining(['Ofertas Chollos', 'Anonymous Catalonia', 'Airsoft4Tiesos'])
     );
-    expect(cfg.outboundNames).toEqual({ personal: 'Dani', professional: 'Skirmshop', leila: 'Leila' });
+    expect(cfg.outboundNames).toEqual({
+      personal: 'Dani',
+      professional: 'Skirmshop',
+      leila: 'Leila',
+    });
   });
 
   it('rejects malformed entries', () => {
@@ -541,51 +635,6 @@ describe('config file (ADR 0002 §5)', () => {
   });
 });
 
-describe('brain http surface', () => {
-  const realFetch = global.fetch;
-  afterEach(() => {
-    global.fetch = realFetch;
-  });
-
-  it('deleteFromBrain: 200 and 404 succeed, 5xx retries, 4xx fails fast', async () => {
-    const calls: { url: string; body: unknown }[] = [];
-    global.fetch = jest.fn(async (url: string, init: RequestInit) => {
-      calls.push({ url, body: JSON.parse(String(init.body)) });
-      if (calls.length === 1) return new Response('', { status: 404 });
-      if (calls.length === 2) return new Response('boom', { status: 502 });
-      return new Response('', { status: 200 });
-    }) as unknown as typeof fetch;
-    const cfg = { brainUrl: 'http://brain' };
-    await deleteFromBrain(cfg, 'personal', 'whatsapp', 'win:k', async () => {});
-    await deleteFromBrain(cfg, 'personal', 'whatsapp', 'win:k2', async () => {}); // 502 -> retry -> 200
-    expect(calls[0].url).toBe('http://brain/instances/personal/delete-document');
-    expect(calls[0].body).toEqual({ adapter: 'whatsapp', source_id: 'win:k' });
-    expect(calls.length).toBe(3);
-    await expect(
-      (async () => {
-        global.fetch = jest.fn(async () => new Response('nope', { status: 400 })) as unknown as typeof fetch;
-        return deleteFromBrain(cfg, 'personal', 'whatsapp', 'win:k3', async () => {});
-      })()
-    ).rejects.toThrow(/400/);
-  });
-
-  it('pushWindowDocs batches docs and routes by account registry', async () => {
-    const bodies: { documents: { source_id: string }[] }[] = [];
-    global.fetch = jest.fn(async (_url: string, init: RequestInit) => {
-      bodies.push(JSON.parse(String(init.body)));
-      return new Response(JSON.stringify({ chunks_ingested: 1 }), { status: 200 });
-    }) as unknown as typeof fetch;
-    const docs = Array.from({ length: 60 }, (_, i) => ({
-      source_id: `win:k#c${i}`,
-      content: 'x',
-      metadata: { platform: 'telegram' },
-    }));
-    const n = await pushWindowDocs({ brainUrl: 'http://brain' }, 'personal', docs, 25);
-    expect(n).toBe(3); // 3 push-ingest calls of 25/25/10
-    expect(bodies[0].documents.length).toBe(25);
-    expect(bodies[2].documents.length).toBe(10);
-  });
-});
 
 describe('session boundary helpers', () => {
   it('sessionEndBound walks forward through small gaps (fake pool)', async () => {
@@ -607,24 +656,36 @@ describe('session boundary helpers', () => {
 describe('upsertWindow SQL', () => {
   it('has as many VALUES expressions as target columns', async () => {
     const calls: string[] = [];
-    const pool = { query: async (sql: string) => { calls.push(sql); return { rows: [] }; } };
+    const pool = {
+      query: async (sql: string) => {
+        calls.push(sql);
+        return { rows: [] };
+      },
+    };
     const base = Date.parse('2026-03-14T09:00:00Z');
-    const ms = [msg({ id: '1', wa_message_id: 'w1', content: 'hola', wa_timestamp: new Date(base) })];
+    const ms = [
+      msg({ id: '1', wa_message_id: 'w1', content: 'hola', wa_timestamp: new Date(base) }),
+    ];
     const w = buildWindows(chat(), ms, CFG)[0];
     await upsertWindow(pool as any, { w, pushed_hash: 'h', chunk_count: 0, llm_status: 'skipped' });
     const sql = calls[0];
     const splitTop = (s: string) => {
       const out: string[] = [];
-      let depth = 0, cur = '';
+      let depth = 0,
+        cur = '';
       for (const ch of s) {
         if (ch === '(') depth++;
         if (ch === ')') depth--;
-        if (ch === ',' && depth === 0) { out.push(cur); cur = ''; } else cur += ch;
+        if (ch === ',' && depth === 0) {
+          out.push(cur);
+          cur = '';
+        } else cur += ch;
       }
       out.push(cur);
       return out.map(x => x.trim()).filter(Boolean);
     };
-    const m = /INSERT INTO brain_windows \(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*)\)\s*ON CONFLICT/.exec(sql);
+    const m =
+      /INSERT INTO brain_windows \(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*)\)\s*ON CONFLICT/.exec(sql);
     expect(m).not.toBeNull();
     const cols = splitTop(m![1]);
     const vals = splitTop(m![2]);
@@ -645,7 +706,10 @@ describe('wellFormed (lone UTF-16 surrogates)', () => {
   });
   it('cleans every string inside a document, leaving numbers and dates alone', () => {
     const d = new Date(0);
-    const doc = { content: 'a' + emoji.slice(1), metadata: { transcript: [emoji.slice(0, 1)], n: 3, when: d } };
+    const doc = {
+      content: 'a' + emoji.slice(1),
+      metadata: { transcript: [emoji.slice(0, 1)], n: 3, when: d },
+    };
     const out = wellFormedDeep(doc);
     expect(out.content).toBe('a\uFFFD');
     expect(out.metadata.transcript[0]).toBe('\uFFFD');
@@ -656,7 +720,12 @@ describe('wellFormed (lone UTF-16 surrogates)', () => {
 
 describe('childChunks (bots and channels: parent only)', () => {
   const long = (i: number) =>
-    msg({ id: String(i + 1), wa_message_id: `w${i + 1}`, content: 'texto de alerta con bastante contenido '.repeat(20), wa_timestamp: new Date(Date.parse('2026-03-14T09:00:00Z') + i * 60_000) });
+    msg({
+      id: String(i + 1),
+      wa_message_id: `w${i + 1}`,
+      content: 'texto de alerta con bastante contenido '.repeat(20),
+      wa_timestamp: new Date(Date.parse('2026-03-14T09:00:00Z') + i * 60_000),
+    });
   const msgs = Array.from({ length: 12 }, (_, i) => long(i));
   it('chunks a real chat', () => {
     const w = buildWindows(chat(), msgs, CFG)[0];

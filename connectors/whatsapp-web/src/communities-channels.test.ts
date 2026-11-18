@@ -15,6 +15,9 @@
  * Run: pnpm --filter @mcp-socialmedia/connector test
  */
 import './test-env';
+import { fileURLToPath } from 'node:url';
+
+process.env.SOCIAL_ACCOUNTS_FILE = fileURLToPath(new URL('./group-accounts.fixture.json', import.meta.url));
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';

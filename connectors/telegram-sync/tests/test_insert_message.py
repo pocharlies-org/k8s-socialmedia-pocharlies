@@ -42,18 +42,19 @@ def test_new_message_returns_int_and_writes_prod_shape(monkeypatch):
     message_id, is_new = _insert(conn)
     assert (message_id, is_new) == (5, True) and type(message_id) is int
 
-    # chat_type goes into conversations.type as it comes; the timestamp is not converted.
+    # Shared tables use canonical conversation types and naive UTC timestamps.
+    expected_timestamp = datetime(2026, 10, 8, 10, 30)
     conversation = conn.calls[db.ENSURE_CONVERSATION_SQL]
-    assert conversation == ("professional:tg_-1001", "Chat", True, "supergroup", TS,
+    assert conversation == ("professional:tg_-1001", "Chat", True, "GROUP", expected_timestamp,
                             "tg_-1001", "professional")
-    assert conversation[4] is TS
+    assert conversation[4] == expected_timestamp
     private = Connection(new_id=6)
     _insert(private, "private")
-    assert private.calls[db.ENSURE_CONVERSATION_SQL][2:4] == (False, "private")
+    assert private.calls[db.ENSURE_CONVERSATION_SQL][2:4] == (False, "INDIVIDUAL")
 
     row = conn.calls[db.INSERT_MESSAGE_SQL]
     assert row[:3] == ("professional:tg_-1001_42", "professional:tg_-1001", "professional:tg_7")
-    assert row[3] is TS
+    assert row[3] == expected_timestamp
     assert row[4:7] == ("INBOUND", "hola", "PHOTO")
     assert row[-1] == "professional"
 

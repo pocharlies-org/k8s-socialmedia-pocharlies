@@ -1,30 +1,42 @@
 /**
- * brain-windows → Synapse (INFRA-364). The incremental cron publishes its
- * window documents as Synapse events instead of calling push-ingest itself;
- * Synapse's workflows ingest them with retries:
+ * brain-windows → Synapse (INFRA-364). The incremental worker publishes its
+ * window documents as Synapse events; since SC-5827 the only consumer is
+ * synapse-adapter-hindsight, which retains them in Hindsight (the synapse
+ * workflows that pushed them to the Brain were retired with it):
  *
- *   brain_window.<tenant>.upserted → brain.ingest (the documents of ONE window,
+ *   brain_window.<tenant>.upserted → retain (the documents of ONE window,
  *                                    parent + children, batches of 25)
- *   brain_window.<tenant>.deleted  → brain.delete_document (one doc per event)
+ *   brain_window.<tenant>.deleted  → tombstone (one doc per event)
  *
  * tenant: follows the account's brain instance in the account registry —
- * instance `personal` → family, anything else (`skirmshop`) → skirmshop. Workflows live in pocharlies-org/synapse
- * `workflows/{family,skirmshop}/brain/conversation-window-*.v1.yaml`.
+ * instance `personal` → family, instance `leila` → leila (INFRA-554), anything
+ * else (`skirmshop`) → skirmshop.
  *
  * Publishing goes straight to the `events` topic exchange of vhost /synapse
  * with a write-only user (configure ^$, read ^$): never assert the exchange.
  */
 import { createHash, randomUUID } from 'crypto';
 import * as amqp from 'amqplib';
-import { BrainDoc, adapterForPlatform } from './brain-ingest-lib';
-import { WindowSink, instanceForNamespace, wellFormedDeep } from './brain-windows-lib';
+import {
+  adapterForPlatform,
+  BrainDoc,
+  instanceForNamespace,
+  wellFormedDeep,
+  WindowSink,
+} from './brain-windows-lib';
 
 export const SYNAPSE_EVENTS_EXCHANGE = 'events';
 export const UPSERT_BATCH = 25;
 
 /** Synapse tenant of an account: its brain instance decides (registry), not its name. */
 export function tenantForAccount(account: string): string {
-  return instanceForNamespace(account) === 'personal' ? 'family' : 'skirmshop';
+  const instance = instanceForNamespace(account);
+  if (instance === 'personal') return 'family';
+  // INFRA-554: Leila's own vault. Additive on amqp.synapse.brain-window-upserted.v1
+  // (routing key brain_window.{tenant}.*): the leila workflows in synapse bind
+  // this key with instance `leila`. Never fall through to skirmshop.
+  if (instance === 'leila') return 'leila';
+  return 'skirmshop';
 }
 
 export interface SynapseEvent {
@@ -36,11 +48,11 @@ export interface SynapseEvent {
 
 // CONTRACT: amqp.synapse.brain-window-upserted.v1 — routing key
 // brain_window.{tenant}.upserted, body {data: {adapter, source_id,
-// payload_hash, documents[]}} (consumer: synapse workflow
-// <tenant>.brain.conversation-window-upserted). message_id is random: the
-// engine inbox keeps ids for days, and a deliberate re-publish of the same
-// documents (recovery, ADR 0002 §7.1) must not be swallowed — push-ingest is
-// already an idempotent upsert by source_id.
+// payload_hash, documents[]}} (consumer since SC-5827: synapse-adapter-hindsight,
+// which retains parent and children in Hindsight with document_id = source_id).
+// message_id is random: the engine inbox keeps ids for days, and a deliberate
+// re-publish of the same documents (recovery, ADR 0002 §7.1) must not be
+// swallowed — the downstream retain is an idempotent upsert by document_id.
 export function upsertEvents(account: string, docs: BrainDoc[]): SynapseEvent[] {
   if (!docs.length) return [];
   const tenant = tenantForAccount(account);

@@ -16,18 +16,130 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { generateHMACSignature } from '@mcp-socialmedia/shared';
 import type {
   CredentialChannel,
   CredentialStore,
   StoredCredential,
 } from '@mcp-socialmedia/shared';
 import { createInstagramApp, loadAccounts } from './main';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHmac } from 'node:crypto';
 
 /** Env without a single account field — the exact state C10 leaves behind. */
 const EMPTY_ACCOUNTS_ENV = {
   INSTAGRAM_ACCOUNTS: '',
   INSTAGRAM_ACCESS_TOKEN: '',
 } as NodeJS.ProcessEnv;
+
+for (const businessAccountId of ['biz-a', '']) {
+  test(`legacy env webhook requires raw-byte signature (business ID ${businessAccountId ? 'configured' : 'discovered'})`, async () => {
+    const originalFetch = globalThis.fetch;
+    const events: unknown[] = [];
+    let server: Server | undefined;
+    const env = {
+      INSTAGRAM_ACCESS_TOKEN: 'test-access-token',
+      INSTAGRAM_BUSINESS_ACCOUNT_ID: businessAccountId,
+      FACEBOOK_APP_SECRET: 'test-app-secret',
+      WEBHOOK_VERIFY_TOKEN: 'test-verify-token',
+    };
+    try {
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        if (String(url).includes('graph.instagram.com')) {
+          return new Response(JSON.stringify({ id: 'biz-a' }), { status: 200 });
+        }
+        return originalFetch(url as never, init as never);
+      }) as typeof fetch;
+      const accounts = loadAccounts({ env });
+      const app = await createInstagramApp({ env, accounts, credentialStore: null,
+        publisher: { publish(account, event) { events.push({ account, event }); } } });
+      const listening = await listen(app);
+    server = listening.server;
+      const body = '{ "object": "instagram", "entry": [{ "id": "biz-a", "messaging": [{ "sender": { "id": "sender-a" }, "recipient": { "id": "biz-a" }, "timestamp": 1700000000, "message": { "mid": "message-a", "text": "hello" } }] }] }';
+      const sign = (raw: string) => 'sha256=' + createHmac('sha256', env.FACEBOOK_APP_SECRET).update(raw).digest('hex');
+      const post = (signature?: string) => originalFetch(listening.base + '/webhook', {
+        method: 'POST', headers: { 'content-type': 'application/json',
+          ...(signature === undefined ? {} : { 'x-hub-signature-256': signature }) }, body,
+      });
+      assert.equal((await post()).status, 401);
+      assert.equal((await post('sha256=' + '0'.repeat(64))).status, 401);
+      assert.equal((await post(sign(JSON.stringify(JSON.parse(body))))).status, 401);
+      assert.equal(events.length, 0, 'unsigned or altered requests never publish events');
+      assert.equal((await post(sign(body))).status, 200);
+      assert.equal(events.length, 1);
+      assert.equal((events[0] as { account: string }).account, 'default');
+      assert.equal((await originalFetch(listening.base + '/webhook?hub.mode=subscribe&hub.verify_token=test-verify-token&hub.challenge=challenge')).status, 200);
+      accounts.get('default')!.config.appSecret = '';
+      await new Promise<void>(resolve => server!.close(() => resolve()));
+      server = undefined;
+      const missingSecretApp = await createInstagramApp({
+        env: { ...env, FACEBOOK_APP_SECRET: '' },
+        accounts,
+        credentialStore: null,
+        publisher: { publish() {} },
+      });
+      const missingSecret = await listen(missingSecretApp);
+      server = missingSecret.server;
+      const postMissingSecret = () =>
+        originalFetch(missingSecret.base + '/webhook', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) },
+          body,
+        });
+      assert.equal(
+        (await postMissingSecret()).status,
+        503,
+        'missing app secret never permits unsigned delivery'
+      );
+      assert.equal(events.length, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (server) await new Promise<void>(resolve => server!.close(() => resolve()));
+    }
+  });
+}
+
+test('registry app isolates account listing and keeps OAuth routes before account authorization', async () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'ig-registry-app-')), 'accounts.json');
+  writeFileSync(file, JSON.stringify([
+    { channel: 'instagram', accountId: 'test-one', enabled: true, secretEnv: 'ONE' },
+    { channel: 'instagram', accountId: 'second', enabled: true, secretEnv: 'TWO' },
+  ]));
+  const env = {
+    SOCIAL_ACCOUNTS_FILE: file,
+    INSTAGRAM_ACCOUNTS: 'test-one,second',
+    ONE: 'one',
+    TWO: 'two',
+    CONNECTOR_SHARED_SECRET: CONNECTOR_KEY,
+  };
+  const accounts = loadAccounts({ env });
+  assert.equal(accounts.size, 2);
+  assert.equal(accounts.get('test-one')?.ready, false);
+  const app = await createInstagramApp({ env, accounts, credentialStore: null, publisher: { publish() {} } });
+  const { server, base } = await listen(app);
+  const get = (path: string, token = '') =>
+    fetch(base + path, {
+      headers: connectorHeaders({ authorization: `Bearer ${token}` }),
+    });
+  try {
+    assert.deepEqual(await (await get('/health')).json(), { status: 'alive' });
+    assert.equal((await get('/api/v1/accounts')).status, 401);
+    const list = await get('/api/v1/accounts', 'one');
+    assert.equal(list.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await list.json(), { accounts: [{ name: 'test-one', status: 'setup-required' }] });
+    assert.equal((await get('/api/v1/second/profile', 'one')).status, 401);
+    assert.equal((await get('/api/v1/test-one/profile', 'one')).status, 503);
+    const oauth = await fetch(base + '/api/v1/oauth/instagram/authorize-url', {
+      headers: connectorHeaders({ 'x-user-sub': 'test-user' }),
+    });
+    assert.equal(oauth.status, 400);
+    assert.equal((await oauth.json()).error.code, 'instagram_pairing_unavailable');
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
 
 class FakeStore implements CredentialStore {
   rows = new Map<string, StoredCredential>();
@@ -71,6 +183,17 @@ async function listen(app: Awaited<ReturnType<typeof createInstagramApp>>): Prom
   });
   const port = (server.address() as AddressInfo).port;
   return { server, base: `http://127.0.0.1:${port}` };
+}
+
+/** SKIRM-112: /api/v1 needs the connector signature; a GET signs `{}`. */
+const CONNECTOR_KEY = 'boot-test-connector-key';
+function connectorHeaders(extra: Record<string, string>): Record<string, string> {
+  const ts = Math.floor(Date.now() / 1000);
+  return {
+    'x-connector-timestamp': String(ts),
+    'x-connector-signature': generateHMACSignature({}, ts, CONNECTOR_KEY),
+    ...extra,
+  };
 }
 
 test('flag ON + env de cuentas vacío → arranca con 0 legacy y log claro (C1)', () => {
@@ -177,7 +300,11 @@ test('boot con store ON y 0 cuentas: /health 200 y ruta por actor sirve desde el
     assert.equal(accounts.size, 0);
 
     const app = await createInstagramApp({
-      env: { ...EMPTY_ACCOUNTS_ENV, CREDENTIAL_STORE_ENABLED: 'true' },
+      env: {
+        ...EMPTY_ACCOUNTS_ENV,
+        CREDENTIAL_STORE_ENABLED: 'true',
+        CONNECTOR_SHARED_SECRET: CONNECTOR_KEY,
+      },
       accounts,
       credentialStore: store,
       publisher: { publish: () => {} },
@@ -192,7 +319,7 @@ test('boot con store ON y 0 cuentas: /health 200 y ruta por actor sirve desde el
 
       // Ruta por actor: sin filas legacy, sólo el store puede servirla.
       const profile = await fetch(`${base}/api/v1/mi_cuenta/profile`, {
-        headers: { 'x-user-sub': 'u-123' },
+        headers: connectorHeaders({ 'x-user-sub': 'u-123' }),
       });
       const profileText = await profile.text();
       assert.equal(profile.status, 200, profileText);
@@ -206,7 +333,7 @@ test('boot con store ON y 0 cuentas: /health 200 y ruta por actor sirve desde el
 
       // Un sub sin fila sigue recibiendo el error explícito (SC-1194 criterio 4).
       const denied = await fetch(`${base}/api/v1/mi_cuenta/profile`, {
-        headers: { 'x-user-sub': 'pm-test-sin-fila' },
+        headers: connectorHeaders({ 'x-user-sub': 'pm-test-sin-fila' }),
       });
       assert.equal(denied.status, 400);
       const deniedBody = (await denied.json()) as { error: { code: string } };

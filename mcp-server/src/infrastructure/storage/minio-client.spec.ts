@@ -2,7 +2,9 @@ import { MinIOClient, parseStorageRefValue, withStoragePrefix } from './minio-cl
 
 describe('shared S3 storage helpers', () => {
   it('parses durable s3 refs as primary storage', () => {
-    expect(parseStorageRefValue('s3://skirmshop-drive/socialmedia/attachments/1/a.jpg', 'legacy')).toEqual({
+    expect(
+      parseStorageRefValue('s3://skirmshop-drive/socialmedia/attachments/1/a.jpg', 'legacy')
+    ).toEqual({
       bucket: 'skirmshop-drive',
       key: 'socialmedia/attachments/1/a.jpg',
       legacy: false,
@@ -18,7 +20,9 @@ describe('shared S3 storage helpers', () => {
   });
 
   it('applies socialmedia prefix to new object keys', () => {
-    expect(withStoragePrefix('attachments/1/a.jpg', 'socialmedia')).toBe('socialmedia/attachments/1/a.jpg');
+    expect(withStoragePrefix('attachments/1/a.jpg', 'socialmedia')).toBe(
+      'socialmedia/attachments/1/a.jpg'
+    );
   });
 
   it('rejects path traversal in new object keys', () => {
@@ -40,7 +44,13 @@ integrationDescribe('shared S3 storage integration', () => {
   });
 
   afterEach(() => {
-    for (const key of ['S3_ENDPOINT', 'S3_BUCKET', 'S3_PREFIX', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']) {
+    for (const key of [
+      'S3_ENDPOINT',
+      'S3_BUCKET',
+      'S3_PREFIX',
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SECRET_ACCESS_KEY',
+    ]) {
       if (previousEnv[key] === undefined) {
         delete process.env[key];
       } else {
@@ -58,7 +68,11 @@ integrationDescribe('shared S3 storage integration', () => {
       false
     );
 
-    const uri = await client.uploadFile('attachments/test/hello.txt', Buffer.from('hello s3'), 'text/plain');
+    const uri = await client.uploadFile(
+      'attachments/test/hello.txt',
+      Buffer.from('hello s3'),
+      'text/plain'
+    );
 
     expect(uri).toBe(`s3://${process.env.S3_BUCKET}/socialmedia/attachments/test/hello.txt`);
     expect(await client.fileExists(uri)).toBe(true);

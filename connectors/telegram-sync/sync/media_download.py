@@ -33,7 +33,7 @@ async def _download_and_store_media(
     connector: ConnectorClient,
     pool: asyncpg.Pool,
     msg: dict,
-    message_id: int,
+    message_id: db.MessageId,
     message_type: str,
 ) -> bool:
     """Store one attachment, preserving a durable retry on every failure."""
@@ -70,7 +70,7 @@ async def _download_and_store_media(
                 )
                 await conn.execute(
                     db.INSERT_ATTACHMENT_SQL, message_id, message_type.upper(),
-                    meta["mime_type"], meta["file_name"], meta["file_size"] or size, storage_key,
+                    meta["mime_type"], meta["file_name"], size, storage_key,
                     meta["duration"], meta["width"], meta["height"],
                     msg.get("content") or None,
                 )
@@ -93,7 +93,7 @@ class MediaAttemptFailed(Exception):
 
 async def download_and_store_media(
     connector: ConnectorClient, pool: asyncpg.Pool, msg: dict,
-    message_id: int, message_type: str,
+    message_id: db.MessageId, message_type: str,
 ) -> bool:
     try:
         return await _download_and_store_media(connector, pool, msg, message_id, message_type)

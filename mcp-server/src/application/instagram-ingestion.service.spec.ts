@@ -64,7 +64,9 @@ describe('InstagramIngestionService account isolation', () => {
 
   it('refuses an undeclared account instead of filing it under personal', async () => {
     const { calls, service } = capture();
-    await service.handleEvent(dm('ghost'));
+    await expect(service.handleEvent(dm('ghost'))).rejects.toThrow(
+      'Unknown or disabled instagram account: ghost'
+    );
     expect(calls).toHaveLength(0);
   });
 });
@@ -100,7 +102,9 @@ describe('InstagramIngestionService and the cross-account guard', () => {
     resetAccountRegistryCache();
     try {
       const { calls, service } = capture();
-      await service.handleEvent(dm('old_ig'));
+      await expect(service.handleEvent(dm('old_ig'))).rejects.toThrow(
+        'Unknown or disabled instagram account: old_ig'
+      );
       expect(calls).toHaveLength(0);
     } finally {
       if (previous === undefined) delete process.env.SOCIAL_ACCOUNTS_FILE;

@@ -15,7 +15,9 @@ import {
 
 const SESSION_PAYLOAD = {
   files: {
-    'creds.json': Buffer.from(JSON.stringify({ noiseKey: 'SUPER-SECRET-NOISE' })).toString('base64'),
+    'creds.json': Buffer.from(JSON.stringify({ noiseKey: 'SUPER-SECRET-NOISE' })).toString(
+      'base64'
+    ),
     'session-1': 'AAECAz8A',
   },
 };
@@ -62,7 +64,9 @@ describe('SC-705 credential payload envelope crypto', () => {
     const envelope = encryptCredentialPayload(SESSION_PAYLOAD, masterKey);
     const ct = Buffer.from(envelope.ct, 'base64');
     ct[0] ^= 0xff;
-    expect(() => decryptCredentialPayload({ ...envelope, ct: ct.toString('base64') }, masterKey)).toThrow();
+    expect(() =>
+      decryptCredentialPayload({ ...envelope, ct: ct.toString('base64') }, masterKey)
+    ).toThrow();
   });
 
   test('tampering with the wrapped DEK fails closed', () => {
@@ -70,7 +74,10 @@ describe('SC-705 credential payload envelope crypto', () => {
     const keyCt = Buffer.from(envelope.key.ct, 'base64');
     keyCt[0] ^= 0xff;
     expect(() =>
-      decryptCredentialPayload({ ...envelope, key: { ...envelope.key, ct: keyCt.toString('base64') } }, masterKey)
+      decryptCredentialPayload(
+        { ...envelope, key: { ...envelope.key, ct: keyCt.toString('base64') } },
+        masterKey
+      )
     ).toThrow();
   });
 
@@ -91,7 +98,9 @@ describe('SC-705 credential payload envelope crypto', () => {
     expect(
       credentialMasterKeyFromEnv({ CREDENTIAL_STORE_MASTER_KEY: masterKey.toString('base64') })
     ).toEqual(masterKey);
-    expect(() => credentialMasterKeyFromEnv({ CREDENTIAL_STORE_MASTER_KEY: 'not-key-material' })).toThrow();
+    expect(() =>
+      credentialMasterKeyFromEnv({ CREDENTIAL_STORE_MASTER_KEY: 'not-key-material' })
+    ).toThrow();
   });
 
   test('isEncryptedPayloadEnvelope rejects plaintext and malformed payloads', () => {

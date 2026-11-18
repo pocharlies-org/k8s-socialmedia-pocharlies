@@ -1,3 +1,5 @@
+import { validateUrl } from './url-config';
+
 export type WhatsAppCustomerAllowlistStatus =
   'ready' | 'seeded_missing_token' | 'not_on_whatsapp' | 'invalid_phone' | 'probe_failed';
 
@@ -39,7 +41,11 @@ export interface WhatsAppContactSeedResult {
 export function buildManualWhatsAppOpenUrl(phoneE164: string, text?: string | null): string {
   const digits = phoneE164.replace(/\D/g, '');
   const suffix = text && text.length > 0 ? `?text=${encodeURIComponent(text)}` : '';
-  return `https://wa.me/${digits}${suffix}`;
+  const base = validateUrl(
+    process.env.WHATSAPP_LINK_BASE_URL?.trim() || 'https://wa.me',
+    'WHATSAPP_LINK_BASE_URL'
+  );
+  return `${base}/${digits}${suffix}`;
 }
 
 function defaultCountryCode(): string {

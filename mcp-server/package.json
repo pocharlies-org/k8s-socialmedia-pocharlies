@@ -13,7 +13,7 @@
     "instagram:validate": "INSTAGRAM_BACKFILL_VALIDATE_ONLY=true tsx src/jobs/instagram-backfill.ts",
     "instagram:backfill": "tsx src/jobs/instagram-backfill.ts",
     "backfill:embeddings": "tsx src/infrastructure/jobs/backfill-embeddings.ts",
-    "lint": "eslint src --ext .ts",
+    "lint": "pnpm --filter @mcp-socialmedia/shared run build && eslint src --ext .ts",
     "test": "pnpm --filter @mcp-socialmedia/shared run build && jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@mcp-socialmedia/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@nestjs/common": "^10.3.0",
     "@nestjs/core": "^10.3.0",
     "@nestjs/platform-express": "^10.3.0",
@@ -42,7 +42,7 @@
     "pino-pretty": "^10.2.0",
     "reflect-metadata": "^0.1.13",
     "typeorm": "^0.3.17",
-    "zod": "3.25.76"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.8",

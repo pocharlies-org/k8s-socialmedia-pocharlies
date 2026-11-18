@@ -244,6 +244,8 @@ test('presence requests: chat-states need the chat, account-wide states refuse o
 test('presence.update is kept for reads AND still lights the dashboard typing indicator', async () => {
   useAccount('professional');
   const pool = stubPool();
+  const previousDashboardUrl = process.env.DASHBOARD_URL;
+  process.env.DASHBOARD_URL = 'http://dashboard.test';
   const posted: Array<{ url: string; body: any }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string, init?: { body?: string }) => {
@@ -281,6 +283,8 @@ test('presence.update is kept for reads AND still lights the dashboard typing in
     );
   } finally {
     globalThis.fetch = originalFetch;
+    if (previousDashboardUrl === undefined) delete process.env.DASHBOARD_URL;
+    else process.env.DASHBOARD_URL = previousDashboardUrl;
     pool.restore();
   }
 });

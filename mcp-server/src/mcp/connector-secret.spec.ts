@@ -59,11 +59,15 @@ describe('requireConnectorSecret', () => {
     flag => {
       // Fresh module state: the warning is once per process.
       jest.isolateModules(() => {
-        const fresh = require('@mcp-socialmedia/shared') as typeof import('@mcp-socialmedia/shared');
+        const fresh =
+          require('@mcp-socialmedia/shared') as typeof import('@mcp-socialmedia/shared');
         const warn = jest.fn();
         expect(
           fresh.requireConnectorSecret(
-            { CONNECTOR_SHARED_SECRET: CONNECTOR_SECRET_PLACEHOLDER, CONNECTOR_SECRET_STRICT: flag },
+            {
+              CONNECTOR_SHARED_SECRET: CONNECTOR_SECRET_PLACEHOLDER,
+              CONNECTOR_SECRET_STRICT: flag,
+            },
             warn
           )
         ).toBe(CONNECTOR_SECRET_PLACEHOLDER);

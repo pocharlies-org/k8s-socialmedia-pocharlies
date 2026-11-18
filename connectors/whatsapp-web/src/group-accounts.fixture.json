@@ -1,0 +1,5 @@
+[
+  { "channel": "whatsapp", "accountId": "personal", "enabled": true },
+  { "channel": "whatsapp", "accountId": "professional", "enabled": true },
+  { "channel": "whatsapp", "accountId": "leila", "enabled": true }
+]

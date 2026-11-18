@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from typing import Optional
+from uuid import UUID
 
 from minio import Minio
 
@@ -116,7 +117,7 @@ def pick_ext(mime_type: Optional[str], file_name: Optional[str]) -> str:
 
 
 def upload_media(
-    message_id: int,
+    message_id: int | UUID,
     data: bytes,
     mime_type: Optional[str],
     file_name: Optional[str],

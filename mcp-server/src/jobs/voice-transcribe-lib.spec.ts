@@ -62,6 +62,19 @@ function runOpts(over: Partial<VoiceRunOptions> = {}): VoiceRunOptions {
   };
 }
 
+function transcribeWithoutAttachment(pool: FakePool, createdAt: Date) {
+  return transcribeVoiceRow(
+    {
+      pool: pool as never,
+      download: async () => Buffer.from('x'),
+      stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fakeFetch([{ ok: true }]).fn },
+      now: () => NOW,
+    },
+    voiceRow({ attachment_id: null, file_url: null, created_at: createdAt }),
+    runOpts()
+  );
+}
+
 /** fetch double: records the FormData sent per call and replies with canned JSON. */
 function fakeFetch(replies: { ok: boolean; status?: number; body?: unknown }[]) {
   const seen: { fields: [string, string][]; hasFile: boolean }[] = [];
@@ -78,7 +91,12 @@ function fakeFetch(replies: { ok: boolean; status?: number; body?: unknown }[]) 
     const r = replies[Math.min(i, replies.length - 1)];
     i += 1;
     if (!r.ok) {
-      return { ok: false, status: r.status ?? 500, text: async () => 'boom', json: async () => ({}) };
+      return {
+        ok: false,
+        status: r.status ?? 500,
+        text: async () => 'boom',
+        json: async () => ({}),
+      };
     }
     return { ok: true, status: 200, text: async () => '', json: async () => r.body };
   }) as unknown as typeof fetch;
@@ -112,12 +130,18 @@ describe('pendingRowsQuery', () => {
 
 describe('audioFilename / parseSttResponse', () => {
   it('maps stored mimes to whisper-friendly names and defaults legacy .bin to ogg', () => {
-    expect(audioFilename('audio/ogg; codecs=opus')).toEqual({ name: 'voice.ogg', type: 'audio/ogg' });
+    expect(audioFilename('audio/ogg; codecs=opus')).toEqual({
+      name: 'voice.ogg',
+      type: 'audio/ogg',
+    });
     expect(audioFilename('audio/mpeg')).toEqual({ name: 'voice.mp3', type: 'audio/mpeg' });
     expect(audioFilename(null)).toEqual({ name: 'voice.ogg', type: 'audio/ogg' });
   });
   it('trims text and tolerates missing fields', () => {
-    expect(parseSttResponse({ text: ' hola ', language: 'es' })).toEqual({ text: 'hola', language: 'es' });
+    expect(parseSttResponse({ text: ' hola ', language: 'es' })).toEqual({
+      text: 'hola',
+      language: 'es',
+    });
     expect(parseSttResponse({})).toEqual({ text: '', language: null });
     expect(parseSttResponse(null)).toEqual({ text: '', language: null });
   });
@@ -126,7 +150,9 @@ describe('audioFilename / parseSttResponse', () => {
 describe('transcribeVoiceRow', () => {
   it('happy path: processing → download → STT(es) → content + done', async () => {
     const pool = new FakePool();
-    const { fn, seen } = fakeFetch([{ ok: true, body: { text: 'sí, llevo las muestras', language: 'es' } }]);
+    const { fn, seen } = fakeFetch([
+      { ok: true, body: { text: 'sí, llevo las muestras', language: 'es' } },
+    ]);
     const downloaded: string[] = [];
     const out = await transcribeVoiceRow(
       {
@@ -182,40 +208,27 @@ describe('transcribeVoiceRow', () => {
     const pool = new FakePool();
     const { fn, seen } = fakeFetch([{ ok: true, body: { text: 'hola' } }]);
     let downloads = 0;
-    const out = await transcribeVoiceRow(
-      {
-        pool: pool as never,
-        download: async () => {
-          downloads += 1;
-          return Buffer.from('x');
-        },
-        stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fn },
-        now: () => NOW,
+    const deps = {
+      pool: pool as never,
+      download: async () => {
+        downloads += 1;
+        return Buffer.from('x');
       },
-      voiceRow(),
-      runOpts()
-    );
+      stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fn },
+      now: () => NOW,
+    };
+    const out = await transcribeVoiceRow(deps, voiceRow(), runOpts());
     // The claim UPDATE must be guarded: only empty-content rows still pending
     // (or unmarked) can be claimed.
     const claim = pool.updates()[0];
     expect(claim.sql).toContain("btrim(COALESCE(content,'')) = ''");
-    expect(claim.sql).toContain("COALESCE(metadata->>'transcription_status','') IN ('', 'pending')");
+    expect(claim.sql).toContain(
+      "COALESCE(metadata->>'transcription_status','') IN ('', 'pending')"
+    );
     // Now simulate losing the race: rowCount 0 → skipped, nothing else runs.
     pool.calls.length = 0;
     pool.updateRowCount = 0;
-    const out2 = await transcribeVoiceRow(
-      {
-        pool: pool as never,
-        download: async () => {
-          downloads += 1;
-          return Buffer.from('x');
-        },
-        stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fn },
-        now: () => NOW,
-      },
-      voiceRow(),
-      runOpts()
-    );
+    const out2 = await transcribeVoiceRow(deps, voiceRow(), runOpts());
     expect(out2).toEqual({ id: '100', outcome: 'skipped', reason: 'claim_lost' });
     expect(downloads).toBe(1); // only the first (won) call downloaded
     expect(seen).toHaveLength(1); // STT called once, not twice
@@ -223,16 +236,7 @@ describe('transcribeVoiceRow', () => {
 
   it('no attachment + young row → back to pending without burning an attempt', async () => {
     const pool = new FakePool();
-    const out = await transcribeVoiceRow(
-      {
-        pool: pool as never,
-        download: async () => Buffer.from('x'),
-        stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fakeFetch([{ ok: true }]).fn },
-        now: () => NOW,
-      },
-      voiceRow({ attachment_id: null, file_url: null, created_at: new Date(NOW.getTime() - 3600_000) }),
-      runOpts()
-    );
+    const out = await transcribeWithoutAttachment(pool, new Date(NOW.getTime() - 3600_000));
     expect(out).toEqual({ id: '100', outcome: 'pending', reason: 'attachment_pending' });
     const patch = JSON.parse(pool.updates().at(-1)!.params[1] as string);
     expect(patch.transcription_status).toBe('pending');
@@ -241,20 +245,7 @@ describe('transcribeVoiceRow', () => {
 
   it('no attachment + old row → terminal failed no_attachment', async () => {
     const pool = new FakePool();
-    const out = await transcribeVoiceRow(
-      {
-        pool: pool as never,
-        download: async () => Buffer.from('x'),
-        stt: { url: 'http://stt.test', timeoutMs: 100, fetchImpl: fakeFetch([{ ok: true }]).fn },
-        now: () => NOW,
-      },
-      voiceRow({
-        attachment_id: null,
-        file_url: null,
-        created_at: new Date(NOW.getTime() - 24 * 3600_000),
-      }),
-      runOpts()
-    );
+    const out = await transcribeWithoutAttachment(pool, new Date(NOW.getTime() - 24 * 3600_000));
     expect(out).toEqual({ id: '100', outcome: 'failed', reason: 'no_attachment' });
     const patch = JSON.parse(pool.updates().at(-1)!.params[1] as string);
     expect(patch.transcription_status).toBe('failed');
@@ -355,7 +346,9 @@ describe('complete/fail primitives', () => {
   it('completeTranscription guards against overwriting a done row', async () => {
     const pool = new FakePool();
     await completeTranscription(pool as never, '9', 'texto', 'es');
-    expect(pool.calls[0].sql).toContain("COALESCE(metadata->>'transcription_status', 'pending') <> 'done'");
+    expect(pool.calls[0].sql).toContain(
+      "COALESCE(metadata->>'transcription_status', 'pending') <> 'done'"
+    );
   });
   it('failTranscription truncates long errors', async () => {
     const pool = new FakePool();
@@ -373,7 +366,12 @@ describe('runVoicePass', () => {
     const pool = new FakePool();
     pool.selectRows = [
       voiceRow({ id: '1' }),
-      voiceRow({ id: '2', attachment_id: null, file_url: null, created_at: new Date(NOW.getTime() - 48 * 3600_000) }),
+      voiceRow({
+        id: '2',
+        attachment_id: null,
+        file_url: null,
+        created_at: new Date(NOW.getTime() - 48 * 3600_000),
+      }),
     ];
     const { fn } = fakeFetch([{ ok: true, body: { text: 'hola', language: 'es' } }]);
     const tally = await runVoicePass(

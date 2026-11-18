@@ -38,7 +38,7 @@ spec:
         kubernetes.io/arch: amd64
       containers:
       - name: whatsapp-connector
-        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
+        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e
         ports:
         - name: http
           containerPort: 3001
@@ -52,50 +52,54 @@ spec:
           value: redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: SYNAPSE_EVENTOS_URL
+          value: http://synapse-gateway.synapse.svc.cluster.local:18790/eventos
         - name: ENABLE_SENDING
           value: 'true'
         - name: SESSION_PATH
           value: /app/persistent-session
         - name: WA_QR_PUBLIC_URL
-          value: https://whatsapp.e-dani.com/qr/page
+          value: https://whatsapp-qr.e-dani.com/qr/page
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         - name: EMBEDDING_BASE_URL
@@ -116,13 +120,21 @@ spec:
             cpu: 50m
             memory: 128Mi
           limits:
-            memory: 1Gi
+            memory: 1536Mi
         readinessProbe:
           httpGet:
             path: /api/v1/health
             port: 3001
           initialDelaySeconds: 15
           timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 3001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
         volumeMounts:
         - name: whatsapp-session-data
           mountPath: /app/persistent-session
@@ -220,7 +232,7 @@ spec:
         kubernetes.io/arch: amd64
       containers:
       - name: whatsapp-connector-professional
-        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
+        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e
         ports:
         - name: http
           containerPort: 3001
@@ -236,8 +248,12 @@ spec:
           value: redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: SYNAPSE_EVENTOS_URL
+          value: http://synapse-gateway.synapse.svc.cluster.local:18790/eventos
         - name: ENABLE_SENDING
           value: 'true'
         - name: SESSION_PATH
@@ -249,45 +265,45 @@ spec:
         - name: WA_EMIT_AUDIO_ATTACHMENTS
           value: 'true'
         - name: S3_PUBLIC_ENDPOINT
-          value: https://skirmshop-s3.e-dani.com
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_PRESIGN_EXPIRY_SECONDS
           value: '3600'
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         - name: EMBEDDING_BASE_URL
@@ -315,6 +331,14 @@ spec:
             port: 3001
           initialDelaySeconds: 15
           timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 3001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
         volumeMounts:
         - name: whatsapp-session-data-professional
           mountPath: /app/persistent-session
@@ -412,7 +436,7 @@ spec:
         kubernetes.io/arch: amd64
       containers:
       - name: whatsapp-connector-leila
-        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae
+        image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e
         ports:
         - name: http
           containerPort: 3001
@@ -428,8 +452,12 @@ spec:
           value: redis://socialmedia:$(SHARED_VALKEY_SOCIALMEDIA_PASSWORD)@shared-valkey-master.databases.svc.cluster.local:6379/0
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
         - name: DATABASE_URL
           value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
+        - name: SYNAPSE_EVENTOS_URL
+          value: http://synapse-gateway.synapse.svc.cluster.local:18790/eventos
         - name: ENABLE_SENDING
           value: 'true'
         - name: SESSION_PATH
@@ -441,45 +469,45 @@ spec:
         - name: WA_EMIT_AUDIO_ATTACHMENTS
           value: 'true'
         - name: S3_PUBLIC_ENDPOINT
-          value: https://skirmshop-s3.e-dani.com
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_PRESIGN_EXPIRY_SECONDS
           value: '3600'
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         - name: EMBEDDING_BASE_URL
@@ -507,6 +535,14 @@ spec:
             port: 3001
           initialDelaySeconds: 15
           timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 3001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
         volumeMounts:
         - name: whatsapp-session-data-leila
           mountPath: /app/persistent-session
@@ -586,7 +622,7 @@ spec:
     spec:
       enableServiceLinks: false
       nodeSelector:
-        topology: lan
+        kubernetes.io/hostname: sauvage
         kubernetes.io/arch: amd64
       containers:
       - name: telegram-connector
@@ -605,6 +641,10 @@ spec:
         env:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         envFrom:
         - secretRef:
             name: whatsapp-mcp-secrets
@@ -613,7 +653,12 @@ spec:
             cpu: 30m
             memory: 256Mi
           limits:
-            memory: 768Mi
+            memory: 3Gi
+      tolerations:
+      - key: role
+        operator: Equal
+        value: edge
+        effect: NoSchedule
 ---
 apiVersion: v1
 kind: Service
@@ -663,41 +708,41 @@ spec:
         - name: CONNECTOR_BASE_URL
           value: http://telegram-connector.whatsapp-mcp.svc.cluster.local:3002
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         envFrom:
@@ -755,7 +800,7 @@ spec:
     spec:
       enableServiceLinks: false
       nodeSelector:
-        topology: lan
+        kubernetes.io/hostname: sauvage
         kubernetes.io/arch: amd64
       containers:
       - name: telegram-connector
@@ -774,6 +819,10 @@ spec:
         env:
         - name: NATS_URL
           value: nats://whatsapp-mcp-nats.whatsapp-mcp.svc.cluster.local:4222
+        - name: DASHBOARD_URL
+          value: http://dgx-messages.messages.svc.cluster.local
+        - name: DATABASE_URL
+          value: postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp
         - name: CONNECTOR_ACCOUNT
           value: professional
         - name: TELEGRAM_SESSION_STRING
@@ -789,7 +838,12 @@ spec:
             cpu: 30m
             memory: 256Mi
           limits:
-            memory: 768Mi
+            memory: 3Gi
+      tolerations:
+      - key: role
+        operator: Equal
+        value: edge
+        effect: NoSchedule
 ---
 apiVersion: v1
 kind: Service
@@ -841,41 +895,41 @@ spec:
         - name: CONNECTOR_BASE_URL
           value: http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002
         - name: S3_ENDPOINT
-          value: http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: S3_BUCKET
           value: skirmshop-drive
         - name: S3_REGION
-          value: us-east-1
+          value: sbg
         - name: S3_PREFIX
           value: socialmedia
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: skirmshop-drive-s3-socialmedia
+              name: socialmedia-s3-ovh
               key: AWS_SECRET_ACCESS_KEY
         - name: LEGACY_MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: LEGACY_MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: LEGACY_MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: LEGACY_MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: LEGACY_MINIO_BUCKET
           value: socialmedia-media
         - name: MINIO_ENDPOINT
-          value: whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local:9000
+          value: https://s3.sbg.io.cloud.ovh.net
         - name: MINIO_ACCESS_KEY
-          value: $(MINIO_ROOT_USER)
+          value: $(AWS_ACCESS_KEY_ID)
         - name: MINIO_SECRET_KEY
-          value: $(MINIO_ROOT_PASSWORD)
+          value: $(AWS_SECRET_ACCESS_KEY)
         - name: MINIO_USE_SSL
-          value: 'false'
+          value: 'true'
         - name: MINIO_BUCKET
           value: socialmedia-media
         envFrom:

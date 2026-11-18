@@ -11,7 +11,12 @@ describe('MediaService', () => {
     const db = {} as any;
     const service = new MediaService(minio as any, db);
 
-    const ref = await service.uploadAttachment('msg-1', Buffer.from('image'), AttachmentType.IMAGE, 'image/jpeg');
+    const ref = await service.uploadAttachment(
+      'msg-1',
+      Buffer.from('image'),
+      AttachmentType.IMAGE,
+      'image/jpeg'
+    );
 
     expect(ref).toBe('s3://skirmshop-drive/socialmedia/attachments/msg-1/file.jpg');
     expect(minio.uploadFile).toHaveBeenCalledWith(

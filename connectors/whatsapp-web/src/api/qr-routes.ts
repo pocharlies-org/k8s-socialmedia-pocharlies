@@ -1,4 +1,5 @@
 import express from 'express';
+import { createUiPath } from '../ui-path';
 import type { BaileysClient } from '../baileys-client';
 import type { EventPublisher } from '../events/publisher';
 import type { QRHandler } from '../qr-handler';
@@ -26,6 +27,7 @@ export function createQrRouter({
   allowWebRenew,
 }: QrRouterDeps): express.Router {
   const router = express.Router();
+  const uiPath = createUiPath();
 
   // Live QR endpoint — serves QR as PNG image from memory
   router.get('/qr', (_req, res) => {
@@ -58,7 +60,7 @@ async function renewQr() {
   const msg = document.getElementById('renew-msg');
   btn.disabled = true; msg.textContent = 'Regenerating QR...';
   try {
-    const r = await fetch('/qr/renew', { method: 'POST' });
+    const r = await fetch('${uiPath('/qr/renew')}', { method: 'POST' });
     const d = await r.json().catch(() => ({}));
     msg.textContent = r.ok ? 'New QR coming in a few seconds — scan it.' : ('Error: ' + (d.error || r.status));
   } catch (e) { msg.textContent = 'Error: ' + e; }
@@ -79,16 +81,16 @@ button:disabled{opacity:.5;cursor:default}
 </style>
 <script>
 async function checkStatus() {
+  let connected = false;
   try {
-    const res = await fetch('/status');
+    const res = await fetch('${uiPath('/status')}', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Status unavailable');
     const data = await res.json();
-    if (data.connected) {
-      document.getElementById('qr-section').style.display = 'none';
-      document.getElementById('connected-section').style.display = 'block';
-      return;
-    }
+    connected = data.connected === true;
   } catch(e) {}
-  document.getElementById('qr-img').src = '/qr?' + Date.now();
+  document.getElementById('qr-section').style.display = connected ? 'none' : 'block';
+  document.getElementById('connected-section').style.display = connected ? 'block' : 'none';
+  if (!connected) document.getElementById('qr-img').src = '${uiPath('/qr')}?' + Date.now();
   setTimeout(checkStatus, 3000);
 }
 window.onload = checkStatus;
@@ -96,7 +98,7 @@ window.onload = checkStatus;
 </head><body>
 <div id="qr-section">
   <h2>Scan with WhatsApp</h2>
-  <img id="qr-img" src="/qr" onerror="this.style.opacity='0.3'" />
+  <img id="qr-img" src="${uiPath('/qr')}" onerror="this.style.opacity='0.3'" />
   <p class="waiting">Waiting for scan... (auto-refreshes every 3s)</p>
   ${renewButton}
 </div>

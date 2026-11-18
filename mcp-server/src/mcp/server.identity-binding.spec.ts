@@ -122,7 +122,10 @@ describe('executeCanonicalTool identity gate', () => {
     enableBinding();
     const server = createServer();
     await runWithRequestActor({ sub: DANIEL }, () =>
-      server.executeCanonicalTool(definition('social_search_messages'), { channel: 'whatsapp', query: 'hola' })
+      server.executeCanonicalTool(definition('social_search_messages'), {
+        channel: 'whatsapp',
+        query: 'hola',
+      })
     );
     expect(server.dispatchCanonicalTool).toHaveBeenCalledWith(
       'searchMessages',

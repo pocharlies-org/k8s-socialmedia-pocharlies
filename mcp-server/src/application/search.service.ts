@@ -1,8 +1,15 @@
 import { Pool } from 'pg';
-import pino from 'pino';
-import { accountKey, stripAccount, type Account } from '../domain/account';
-import { accountNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
+import type pino from 'pino';
+import { createServiceLogger } from './service-logger';
+import { accountKey, normalizeAccount, stripAccount, type Account } from '../domain/account';
+import { getAccounts } from '../domain/account-registry';
 import { mediaTypePredicate, messageTypesFor, type MediaType } from './media-type-filter';
+import { semanticProviderFromEnv } from '../infrastructure/hindsight-client';
+import {
+  HindsightBoundaryRecall,
+  boundaryRecallConfigFromEnv,
+} from '../infrastructure/hindsight-boundary-recall';
+import { chunkMessageIds, resolveChunks } from './hindsight-chunks';
 
 export interface SearchResult {
   messageId: string;
@@ -45,84 +52,21 @@ export function searchLimit(limit: unknown): number {
 }
 
 /**
- * Semantic search lives in the brain (INFRA-486/487, Dani 04-10-2026): one
- * vector index for the WhatsApp/Telegram conversations, the Qdrant collections
- * that `brain-windows` already feeds (ADR 0002). This service no longer embeds
- * anything: it asks `POST /instances/{instance}/search` for the conversation
- * chunks that match, scoped to the tool's account/channel/chat/dates, and
- * resolves their `message_ids` against `messages` here, where the filters the
- * brain does not have (sender, mediaType, deletions, the exact time window) live.
+ * Semantic search lives in Hindsight (SC-4304 S8; SC-5827 retiró el Brain y
+ * Qdrant): the `personal` bank holds the conversation chunks that the
+ * brain-windows worker feeds through Synapse (ADR 0002). This service does not
+ * embed anything: it recalls the chunks that match, scoped to the tool's
+ * account/channel/chat/dates, and resolves their `message_ids` against
+ * `messages` here, where the filters Hindsight does not have (sender,
+ * mediaType, deletions, the exact time window) live. Without Hindsight
+ * configured the tool answers by keyword only and says so in `fallbackReason`.
  */
-export interface BrainSearchConfig {
-  url: string;
-  apiKey: string;
-  timeoutMs: number;
-  /**
-   * Relevance floor on the brain's score: the raw logit of its reranker
-   * (bge-reranker-v2-m3), not a 0..1 similarity. Below it a chunk is noise and
-   * the search falls through to keyword search.
-   */
-  minScore: number;
-}
-
-/** A conversation chunk is stamped with its first message (`observed_at`):
- *  one that starts before `from` can still hold messages after it. The brain
- *  is asked a day earlier and the exact cut is applied per message here. */
-const CHUNK_WINDOW_SLACK_MS = 24 * 60 * 60 * 1000;
-/** The brain caps a search at 50 hits (`/search` top-k). */
-const BRAIN_MAX_HITS = 50;
-
-function envNumber(value: string | undefined, fallback: number): number {
-  const n = Number(value);
-  return value !== undefined && value.trim() !== '' && Number.isFinite(n) ? n : fallback;
-}
-
-/**
- * The brain only opens messaging conversations to its scoped messaging key
- * (`BRAIN_MESSAGING_SEARCH_KEY`, INFRA-487): `/search` only, the messaging
- * instances only, always with an account. The shared key cannot lift the
- * `skirmshop` audience filter nor read `leila`, so without the scoped key there
- * is no semantic search, and the tool says so instead of half-working.
- */
-export function brainSearchConfigFromEnv(
-  env: NodeJS.ProcessEnv = process.env
-): BrainSearchConfig | null {
-  const url = (env.BRAIN_SEARCH_URL || '').trim().replace(/\/+$/, '');
-  const apiKey = (env.BRAIN_MESSAGING_SEARCH_KEY || '').trim();
-  if (!url || !apiKey) return null;
-  return {
-    url,
-    apiKey,
-    timeoutMs: envNumber(env.BRAIN_SEARCH_TIMEOUT_MS, 10000),
-    minScore: envNumber(env.SEMANTIC_MIN_SCORE, DEFAULT_SEMANTIC_MIN_SCORE),
-  };
-}
-
-/**
- * Measured 04-10-2026 against prod (scoped chunk searches, brain-39c0788):
- * on-topic queries score +0.8..+3.5 at the top; the hard paraphrase «el gestor
- * de contraseñas no me deja acceder a mis claves» finds its 1Password chunks at
- * -2.3 (first) and -4.9; nonsense («xqzv plorf bandurria…») tops out at -6.7
- * (professional) and -7.8 (personal). -5 keeps the paraphrase and drops the noise.
- */
-export const DEFAULT_SEMANTIC_MIN_SCORE = -5;
-
-interface BrainScope {
-  instance: string;
-  account: Account;
-  conversationIds?: string[];
-}
-
-interface BrainChunk {
-  /** The scope's account: with `messageIds` it is the key of the row it ranks. */
-  account: string;
-  score: number;
-  messageIds: string[];
-}
+/** Semantic recall is capped at 50 hits (the brain's old `/search` top-k). */
+const SEMANTIC_MAX_HITS = 50;
 
 export type SearchMode = 'semantic' | 'text';
 
-/** One brain instance that could not be asked, named by the account it serves. */
+/** One account whose semantic backend could not be asked. */
 export interface SearchFailure {
   accountId: string;
   message: string;
@@ -131,79 +75,103 @@ export interface SearchFailure {
 export interface SearchOutcome {
   results: SearchResult[];
   mode: SearchMode;
-  /** Semantic answered, but these accounts' instances did not (`meta.partialErrors`). */
+  /** Semantic answered, but these accounts' backends did not (`meta.partialErrors`). */
   partialErrors?: SearchFailure[];
-  /** Why the keyword branch answered: no semantic match, or the brain failed. */
+  /** Why the keyword branch answered: no semantic match, or the backend failed. */
   fallbackReason?: string;
 }
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
+/** Namespaces with a Hindsight bank for message search; the rest answer by keyword (tienda is not granted). */
+const HINDSIGHT_NAMESPACES = new Set(['personal']);
+
 export class SearchService {
   private dbClient: Pool;
   private logger: pino.Logger;
-  private readonly brain: BrainSearchConfig | null;
-  private readonly fetchImpl: FetchLike;
+  private readonly hindsight: HindsightBoundaryRecall | null;
 
   constructor(
     dbClient: Pool,
-    brain: BrainSearchConfig | null = brainSearchConfigFromEnv(),
-    fetchImpl: FetchLike = (url, init) => fetch(url, init)
+    fetchImpl: FetchLike = (url, init) => fetch(url, init),
+    hindsight: HindsightBoundaryRecall | null = semanticProviderFromEnv() === 'hindsight'
+      ? new HindsightBoundaryRecall(boundaryRecallConfigFromEnv(), (url, init) =>
+          fetchImpl(String(url), init ?? {})
+        )
+      : null
   ) {
     this.dbClient = dbClient;
-    this.brain = brain;
-    this.fetchImpl = fetchImpl;
-    this.logger = pino({
-      transport: {
-        target: 'pino-pretty',
-        options: { colorize: true },
-      },
-    });
+    this.hindsight = hindsight;
+    this.logger = createServiceLogger();
     this.logger.info(
-      brain
-        ? `SearchService: búsqueda semántica en el brain ${brain.url} (corte ${brain.minScore})`
-        : 'SearchService: BRAIN_SEARCH_URL o BRAIN_MESSAGING_SEARCH_KEY sin configurar, solo búsqueda de texto'
+      hindsight
+        ? 'SearchService: búsqueda semántica en Hindsight (banco personal, por AgentGateway)'
+        : 'SearchService: SEMANTIC_PROVIDER!=hindsight, solo búsqueda de texto (el Brain se retiró, SC-5827)'
+    );
+  }
+
+  /** Resolve enabled provider accounts before querying either search backend. */
+  private searchScopes(options: SearchOptions): ReturnType<typeof getAccounts> {
+    // The argument may be an account id or the namespace it files rows under.
+    const requested = options.account
+      ? normalizeAccount(options.account, options.platform)
+      : undefined;
+    return getAccounts(options.platform).filter(
+      a => !requested || (options.platform ? a.accountId === requested : a.namespace === requested)
     );
   }
 
   /**
-   * Performs keyword search using PostgreSQL Full Text Search
+   * Storage keys for a raw conversation/sender id across the selected accounts.
+   * An id already namespaced to a different account is dropped (fail closed).
+   * WhatsApp/Telegram rows are keyed by their account namespace; Instagram rows
+   * are keyed by the Instagram accountId (ig_<account>_...) while they are
+   * FILTERED by the namespace the registry declares for that account.
    */
-  async keywordSearch(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+  private indexKeys(
+    scopes: ReturnType<typeof getAccounts>,
+    id: string,
+    kind: 'thread' | 'sender'
+  ): string[] {
+    return [
+      ...new Set(
+        scopes.flatMap(scope => {
+          if (scope.channel === 'instagram') {
+            const prefix = `ig_${scope.accountId}_`;
+            if (id.startsWith(prefix)) return [id];
+            if (id.startsWith('ig_')) return [];
+            return [`${prefix}${kind === 'thread' ? 'thread_' : ''}${id}`];
+          }
+          const parsed = stripAccount(id);
+          if (parsed.id !== id && parsed.account !== scope.namespace) return [];
+          return [accountKey(scope.namespace, id)];
+        })
+      ),
+    ];
+  }
+
+  /** Appends the identical account and message filters for both search strategies. */
+  private appendSearchFilters(sql: string, params: unknown[], options: SearchOptions) {
     const { chatId, from, to, sender } = options;
-    const limit = searchLimit(options.limit);
-
-    let sql = `
-      SELECT 
-        m.id as message_id,
-        m.conversation_id,
-        m.content,
-        m.sender_wa_id,
-        m.wa_timestamp,
-        m.platform,
-        m.account,
-        m.message_type,
-        ts_rank(to_tsvector('english', m.content), plainto_tsquery('english', $1)) as rank
-      FROM messages m
-      WHERE to_tsvector('english', m.content) @@ plainto_tsquery('english', $1)
-        AND (m.is_deleted IS NULL OR m.is_deleted = false)
-    `;
-
-    const params: unknown[] = [query];
-    let paramIndex = 2;
+    // A stale semantic index must never resurrect a message hidden locally.
+    sql += " AND m.metadata->>'deleted_for_me' IS DISTINCT FROM 'true'";
+    let paramIndex = params.length + 1;
+    const scopes = this.searchScopes(options);
+    // Instagram accounts may share a storage namespace; the ingested provider
+    // account is authoritative for their search boundary.
+    sql += ` AND (m.platform || ':' || CASE WHEN m.platform = 'instagram'
+      THEN m.metadata->>'instagram_account' ELSE m.account END) = ANY($${paramIndex++}::text[])`;
+    params.push(
+      scopes.map(a => `${a.channel}:${a.channel === 'instagram' ? a.accountId : a.namespace}`)
+    );
 
     if (chatId) {
-      if (options.rawIds) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(chatId);
-      } else if (options.account) {
-        sql += ` AND m.conversation_id = $${paramIndex}`;
-        params.push(accountKey(options.account, chatId));
-      } else {
-        sql += ` AND m.conversation_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(chatId));
-      }
-      paramIndex++;
+      sql += ` AND m.conversation_id = ANY($${paramIndex++}::text[])`;
+      params.push(
+        options.rawIds && options.platform !== 'instagram'
+          ? [chatId]
+          : this.indexKeys(scopes, chatId, 'thread')
+      );
     }
 
     if (from) {
@@ -219,22 +187,19 @@ export class SearchService {
     }
 
     if (sender) {
-      if (options.rawIds) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(sender);
-      } else if (options.account) {
-        sql += ` AND m.sender_wa_id = $${paramIndex}`;
-        params.push(accountKey(options.account, sender));
-      } else {
-        sql += ` AND m.sender_wa_id = ANY($${paramIndex}::text[])`;
-        params.push(inEveryNamespace(sender));
-      }
-      paramIndex++;
+      sql += ` AND m.sender_wa_id = ANY($${paramIndex++}::text[])`;
+      params.push(
+        options.rawIds && options.platform !== 'instagram'
+          ? [sender]
+          : this.indexKeys(scopes, sender, 'sender')
+      );
     }
 
     if (options.account) {
-      sql += ` AND m.account = $${paramIndex}`;
-      params.push(options.account);
+      // The stored dimension is the registry namespace, not the tool argument:
+      // an Instagram account argument resolves to the namespace its rows live in.
+      sql += ` AND m.account = ANY($${paramIndex}::text[])`;
+      params.push([...new Set(scopes.map(a => a.namespace))]);
       paramIndex++;
     }
     if (options.platform) {
@@ -242,12 +207,42 @@ export class SearchService {
       params.push(options.platform);
       paramIndex++;
     }
+
     const messageTypes = messageTypesFor(options.mediaType);
     if (messageTypes) {
-      sql += mediaTypePredicate('m', paramIndex);
+      sql += mediaTypePredicate('m', paramIndex++);
       params.push(messageTypes);
-      paramIndex++;
     }
+
+    return { sql, paramIndex };
+  }
+
+  /**
+   * Performs keyword search using PostgreSQL Full Text Search
+   */
+  async keywordSearch(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+    const limit = searchLimit(options.limit);
+
+    let sql = `
+      SELECT
+        m.id as message_id,
+        m.conversation_id,
+        m.content,
+        m.sender_wa_id,
+        m.wa_timestamp,
+        m.platform,
+        m.account,
+        m.message_type,
+        ts_rank(to_tsvector('english', m.content), plainto_tsquery('english', $1)) as rank
+      FROM messages m
+      WHERE to_tsvector('english', m.content) @@ plainto_tsquery('english', $1)
+        AND (m.is_deleted IS NULL OR m.is_deleted = false)
+    `;
+
+    const params: unknown[] = [query];
+    const filters = this.appendSearchFilters(sql, params, options);
+    sql = filters.sql;
+    const paramIndex = filters.paramIndex;
 
     sql += ` ORDER BY rank DESC, m.wa_timestamp DESC LIMIT $${paramIndex}`;
     params.push(limit);
@@ -268,59 +263,95 @@ export class SearchService {
   }
 
   /**
-   * Semantic search in the brain (INFRA-486): the conversation chunks that
-   * match, scoped to the tool's filters, resolved to the messages they hold.
+   * Semantic search (INFRA-486; tras SC-5827 solo Hindsight): los chunks de
+   * conversacion que casan, con los filtros de la tool, resueltos a sus mensajes.
    *
    * Every hit is a chunk of 3-8 consecutive messages (ADR 0002 §2): its messages
    * come back in chunk order (best first) and, inside a chunk, in time order,
-   * each with the chunk's score as `similarity`. Throws if the brain cannot be
-   * asked at all; one instance failing does not fail the others: it comes back in
+   * each with the chunk's score as `similarity`. Throws if the semantic backend
+   * is not configured at all; one account failing does not fail the others: it comes back in
    * `failures`, so `searchDetailed` can say what is missing or why it fell back.
    */
   async semanticSearch(
     query: string,
     options: SearchOptions = {}
   ): Promise<{ results: SearchResult[]; failures: SearchFailure[] }> {
-    if (!this.brain)
-      throw new Error('BRAIN_SEARCH_URL o BRAIN_MESSAGING_SEARCH_KEY sin configurar');
+    if (this.hindsight) return this.hindsightSemanticSearch(query, options);
+    throw new Error('Hindsight sin configurar (SEMANTIC_PROVIDER=hindsight)');
+  }
+
+  /**
+   * Semantic search in Hindsight (SC-4304 S8), bank `personal` through the read-only gateway
+   * route. A hit is a retained chunk: `hindsight-chunks` recovers the ledger window it was
+   * written from and recomputes its messages, then the same Postgres tail ranks and filters
+   * them. Accounts without a bank here answer through `failures`.
+   */
+  private async hindsightSemanticSearch(
+    query: string,
+    options: SearchOptions
+  ): Promise<{ results: SearchResult[]; failures: SearchFailure[] }> {
+    const hindsight = this.hindsight as HindsightBoundaryRecall;
     // Instagram does not go through brain-windows: there are no chunks to find.
     if (options.platform === 'instagram') return { results: [], failures: [] };
-    const limit = searchLimit(options.limit);
-    const scopes = this.brainScopes(options);
-    if (!scopes.length) return { results: [], failures: [] };
-
-    const settled = await Promise.allSettled(
-      scopes.map(scope => this.askBrain(query, scope, options, limit))
-    );
+    const namespaces = [
+      ...new Set(
+        this.searchScopes(options)
+          .filter(a => a.channel !== 'instagram')
+          .map(a => a.namespace)
+      ),
+    ];
     const failures: SearchFailure[] = [];
-    const perScope: BrainChunk[][] = [];
-    settled.forEach((outcome, i) => {
-      if (outcome.status === 'fulfilled') perScope.push(outcome.value);
-      else
-        failures.push({
-          accountId: scopes[i].account,
-          message: (outcome.reason as Error)?.message || String(outcome.reason),
-        });
-    });
-    const chunks = perScope
-      .flat()
-      .filter(c => c.score >= (this.brain as BrainSearchConfig).minScore)
-      .sort((a, b) => b.score - a.score);
-    if (!chunks.length) return { results: [], failures };
-
-    // The key carries the account: a row only ranks under the scope whose chunk named it.
-    const rankKey = (account: string, id: string) => `${account}\u0000${id}`;
     const best = new Map<string, { score: number; order: number; id: string }>();
-    chunks.forEach((chunk, order) => {
-      for (const id of chunk.messageIds) {
-        const key = rankKey(chunk.account, id);
-        if (!best.has(key)) best.set(key, { score: chunk.score, order, id });
+    for (const account of namespaces) {
+      if (!HINDSIGHT_NAMESPACES.has(account)) {
+        failures.push({
+          accountId: account,
+          message: `la cuenta ${account} no tiene banco en Hindsight`,
+        });
+        continue;
       }
-    });
+      try {
+        const tags = [
+          'type:conversation_chunk',
+          `account:${account}`,
+          ...(options.platform ? [`platform:${options.platform}`] : []),
+        ];
+        const hits = (await hindsight.recall(query, tags))
+          .filter(h => h.score >= hindsight.minScore)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, SEMANTIC_MAX_HITS);
+        const resolved = await resolveChunks(
+          this.dbClient,
+          hits.map(h => h.documentId),
+          account,
+          hindsight.writerIdentities
+        );
+        const ids = await chunkMessageIds(this.dbClient, resolved);
+        for (const hit of hits)
+          for (const id of ids.get(hit.documentId) ?? []) {
+            const key = `${account}\u0000${id}`;
+            if (!best.has(key)) best.set(key, { score: hit.score, order: best.size, id });
+          }
+      } catch (e) {
+        failures.push({ accountId: account, message: (e as Error)?.message || String(e) });
+      }
+    }
+    if (!best.size) return { results: [], failures };
+    return {
+      results: await this.rankedMessages(best, options, searchLimit(options.limit)),
+      failures,
+    };
+  }
+
+  private async rankedMessages(
+    best: Map<string, { score: number; order: number; id: string }>,
+    options: SearchOptions,
+    limit: number
+  ): Promise<SearchResult[]> {
     const rows = await this.messagesById([...new Set([...best.values()].map(b => b.id))], options);
-    const results = rows
+    return rows
       .flatMap(row => {
-        const rank = best.get(rankKey(row.account, row.wa_message_id));
+        const rank = best.get(`${row.account}\u0000${row.wa_message_id}`);
         return rank ? [{ row, rank }] : [];
       })
       .sort(
@@ -340,111 +371,6 @@ export class SearchService {
         account: row.account,
         messageType: row.message_type,
       }));
-    return { results, failures };
-  }
-
-  /**
-   * One brain query per account in scope: each account's conversations live
-   * in its own brain instance (`brainInstance` in the account registry), and
-   * the account goes in the filter too, so a search never returns another
-   * account's chunks even if two ever shared an instance.
-   */
-  private brainScopes(options: SearchOptions): BrainScope[] {
-    const namespaces = options.account ? [options.account] : accountNamespaces();
-    // Account-less and the chat id already carries an account's prefix (`leila:…`,
-    // as the index returns it): only that account's scope can hold it, and
-    // accountKey would refuse it as a cross-account identifier for the others.
-    const own =
-      options.chatId && !options.rawIds && !options.account ? stripAccount(options.chatId) : null;
-    const scopes: BrainScope[] = [];
-    for (const account of namespaces) {
-      if (own && own.id !== options.chatId && own.account !== account) continue;
-      const instance = brainInstanceForNamespace(account);
-      if (!instance) continue;
-      const scope: BrainScope = { instance, account };
-      if (options.chatId) {
-        scope.conversationIds = [
-          options.rawIds ? options.chatId : accountKey(account, options.chatId),
-        ];
-      }
-      scopes.push(scope);
-    }
-    return scopes;
-  }
-
-  private async askBrain(
-    query: string,
-    scope: BrainScope,
-    options: SearchOptions,
-    limit: number
-  ): Promise<BrainChunk[]> {
-    const brain = this.brain as BrainSearchConfig;
-    const filters: Record<string, unknown> = {
-      account: scope.account,
-      types: ['conversation_chunk'],
-    };
-    if (options.platform) filters.platform = options.platform;
-    if (scope.conversationIds) filters.conversation_ids = scope.conversationIds;
-    if (options.from)
-      filters.from = new Date(options.from.getTime() - CHUNK_WINDOW_SLACK_MS).toISOString();
-    if (options.to) filters.to = options.to.toISOString();
-
-    let body: {
-      instance_id?: string;
-      documents?: Array<{ score?: number; metadata?: Record<string, unknown> }>;
-    };
-    try {
-      const response = await this.fetchImpl(
-        `${brain.url}/instances/${encodeURIComponent(scope.instance)}/search`,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(brain.apiKey ? { 'X-API-Key': brain.apiKey } : {}),
-          },
-          body: JSON.stringify({
-            query,
-            limit: Math.min(limit, BRAIN_MAX_HITS),
-            filters,
-            // The chunk with ITS message ids, not the whole parent window.
-            expand_windows: false,
-            // `skirmshop` hides WhatsApp/Telegram from its customer chat; the
-            // professional account's conversations live there and this caller
-            // is internal.
-            include_internal: true,
-          }),
-          signal: AbortSignal.timeout(brain.timeoutMs),
-        }
-      );
-      if (!response.ok) {
-        const detail = (await response.text().catch(() => '')).slice(0, 200);
-        throw new Error(`brain ${scope.instance} ${response.status}: ${detail}`);
-      }
-      body = (await response.json()) as typeof body;
-    } catch (e) {
-      const message = (e as Error).message;
-      // the 'brain <instance> <status>' message above already names the instance
-      throw new Error(
-        message.startsWith(`brain ${scope.instance} `)
-          ? message
-          : `brain ${scope.instance}: ${message}`
-      );
-    }
-    // Each instance is its own collection: an answer from another one is not ours to read.
-    if (body.instance_id !== scope.instance)
-      throw new Error(`brain ${scope.instance}: respondió la instancia ${body.instance_id}`);
-    return (body.documents || [])
-      .filter(
-        d => d.metadata?.type === 'conversation_chunk' && d.metadata?.account === scope.account
-      )
-      .map(d => ({
-        account: scope.account,
-        score: Number(d.score) || 0,
-        messageIds: Array.isArray(d.metadata?.message_ids)
-          ? (d.metadata?.message_ids as unknown[]).map(String)
-          : [],
-      }))
-      .filter(c => c.messageIds.length > 0);
   }
 
   /** The rows behind a set of `wa_message_id`s, with the tool's filters applied exactly. */
@@ -465,39 +391,15 @@ export class SearchService {
         AND (m.is_deleted IS NULL OR m.is_deleted = false)
     `;
     const params: unknown[] = [waMessageIds];
-    let paramIndex = 2;
-    const add = (clause: string, value: unknown) => {
-      sql += ` AND ${clause.replace('?', `$${paramIndex}`)}`;
-      params.push(value);
-      paramIndex++;
-    };
-    const { chatId, from, to, sender } = options;
-    if (chatId) {
-      if (options.rawIds) add('m.conversation_id = ?', chatId);
-      else if (options.account) add('m.conversation_id = ?', accountKey(options.account, chatId));
-      else add('m.conversation_id = ANY(?::text[])', inEveryNamespace(chatId));
-    }
-    if (from) add('m.wa_timestamp >= ?', from);
-    if (to) add('m.wa_timestamp <= ?', to);
-    if (sender) {
-      if (options.rawIds) add('m.sender_wa_id = ?', sender);
-      else if (options.account) add('m.sender_wa_id = ?', accountKey(options.account, sender));
-      else add('m.sender_wa_id = ANY(?::text[])', inEveryNamespace(sender));
-    }
-    if (options.account) add('m.account = ?', options.account);
-    if (options.platform) add('m.platform = ?', options.platform);
-    const messageTypes = messageTypesFor(options.mediaType);
-    if (messageTypes) {
-      sql += mediaTypePredicate('m', paramIndex);
-      params.push(messageTypes);
-      paramIndex++;
-    }
+    // Only WhatsApp and Telegram are ingested as conversation chunks.
+    sql += " AND m.platform IN ('whatsapp', 'telegram')";
+    sql = this.appendSearchFilters(sql, params, options).sql;
     const result = await this.dbClient.query(sql, params);
     return result.rows;
   }
 
   /**
-   * Semantic first (the brain), keyword second (Postgres full-text), and it
+   * Semantic first (Hindsight), keyword second (Postgres full-text), and it
    * says which one answered and why the second one had to.
    */
   async searchDetailed(query: string, options: SearchOptions = {}): Promise<SearchOutcome> {
@@ -600,15 +502,4 @@ export async function ensureSearchIndexes(
       await client.end().catch(() => {});
     }
   }
-}
-
-/**
- * Account-less filter: the raw id under every declared namespace (personal = bare).
- * An id that already carries an account's prefix is that account's row as stored:
- * it is looked up as given, never widened to the other accounts (accountKey would
- * refuse it as a cross-account identifier).
- */
-function inEveryNamespace(id: string): string[] {
-  if (stripAccount(id).id !== id) return [id];
-  return [...new Set(accountNamespaces().map(a => accountKey(a, id)))];
 }

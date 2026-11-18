@@ -10,10 +10,7 @@ import { SOCIAL_TOOL_REGISTRY } from './tool-registry';
  * account's DB namespace) and the mediaType filter on every channel.
  */
 function serverWith(
-  brain: {
-    config: unknown;
-    fetchImpl: (url: string, init: RequestInit) => Promise<Response>;
-  } | null = null
+  hindsight: { recall: (query: string, tags: string[]) => Promise<unknown[]>; minScore: number } | null = null
 ) {
   const server = Object.create(MCPServer.prototype) as MCPServer;
   const query = jest.fn(async (..._args: unknown[]) => ({ rows: [] as any[] }));
@@ -24,9 +21,9 @@ function serverWith(
   const searchService = Object.create(SearchService.prototype) as SearchService;
   Object.assign(searchService as unknown as Record<string, unknown>, {
     dbClient: { query },
-    // No brain configured: search() falls back to the keyword (FTS) query.
-    brain: brain?.config ?? null,
-    fetchImpl: brain?.fetchImpl,
+    // Sin Hindsight configurado: search() cae a la busqueda de texto (FTS).
+    // SC-5827: el backend brain murio; el semantico es Hindsight.
+    hindsight: hindsight ?? null,
     logger: { warn: jest.fn() },
   });
   Object.assign(server as unknown as Record<string, unknown>, {
@@ -75,15 +72,16 @@ describe('social_search_messages — Instagram', () => {
     });
     expect(out.isError).toBeFalsy();
     const { sql, params } = lastQuery();
-    expect(sql).toContain('m.conversation_id = $2');
-    expect(sql).toContain('m.sender_wa_id = $3');
-    expect(sql).toContain('m.account = $4');
-    expect(sql).toContain('m.platform = $5');
+    expect(sql).toContain('m.conversation_id = ANY($3::text[])');
+    expect(sql).toContain('m.sender_wa_id = ANY($4::text[])');
+    expect(sql).toContain('m.account = ANY($5::text[])');
+    expect(sql).toContain('m.platform = $6');
     expect(params).toEqual([
       'precio',
-      'ig_skirmshop_thread_42',
-      'ig_skirmshop_42',
-      'professional',
+      ['instagram:skirmshop'],
+      ['ig_skirmshop_thread_42'],
+      ['ig_skirmshop_42'],
+      ['professional'],
       'instagram',
       20,
     ]);
@@ -109,9 +107,16 @@ describe('social_search_messages — mediaType', () => {
     const { run, lastQuery } = serverWith();
     await run({ channel: 'instagram', accountId: 'barbelpapis', query: 'run', mediaType: 'video' });
     const { sql, params } = lastQuery();
-    expect(sql).toContain('upper(m.message_type) = ANY($4::text[])');
-    expect(sql).toContain("upper(split_part(m.content, ' |', 1)) = ANY($4::text[])");
-    expect(params).toEqual(['run', 'personal', 'instagram', ['VIDEO', 'VIDEO_NOTE'], 20]);
+    expect(sql).toContain('upper(m.message_type) = ANY($5::text[])');
+    expect(sql).toContain("upper(split_part(m.content, ' |', 1)) = ANY($5::text[])");
+    expect(params).toEqual([
+      'run',
+      ['instagram:barbelpapis'],
+      ['personal'],
+      'instagram',
+      ['VIDEO', 'VIDEO_NOTE'],
+      20,
+    ]);
   });
 
   it('filters WhatsApp images keeping the namespaced chat id', async () => {
@@ -126,8 +131,9 @@ describe('social_search_messages — mediaType', () => {
     const { params } = lastQuery();
     expect(params).toEqual([
       'factura',
-      'professional:34600@s.whatsapp.net',
-      'professional',
+      ['whatsapp:professional'],
+      ['professional:34600@s.whatsapp.net'],
+      ['professional'],
       'whatsapp',
       messageTypesFor('image'),
       20,
@@ -159,10 +165,14 @@ describe('social_search_messages — mediaType', () => {
     const { run, lastQuery } = serverWith();
     await run({ query: 'hola', mediaType: 'any' });
     expect(lastQuery().sql).not.toContain('message_type) = ANY');
-    expect(lastQuery().sql).not.toContain('m.platform = ');
-    expect(lastQuery().params).toEqual(['hola', 20]);
+    expect(lastQuery().sql).not.toMatch(/AND m.platform = \$/);
+    const allowedScopes = lastQuery().params[1];
+    expect(allowedScopes).toEqual(
+      expect.arrayContaining(['whatsapp:personal', 'instagram:skirmshop'])
+    );
+    expect(lastQuery().params).toEqual(['hola', allowedScopes, 20]);
     await run({ query: 'hola', mediaType: 'sticker' });
-    expect(lastQuery().params).toEqual(['hola', ['STICKER'], 20]);
+    expect(lastQuery().params).toEqual(['hola', allowedScopes, ['STICKER'], 20]);
   });
 
   it('rejects an unknown mediaType before touching the index', async () => {
@@ -174,26 +184,15 @@ describe('social_search_messages — mediaType', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('T8 an instance that is down is a partial read: meta.partialErrors, results of the others intact', async () => {
-    const fetchImpl = jest.fn(async (url: string) => {
-      if (url.includes('/instances/skirmshop/')) return new Response('down', { status: 502 });
-      return new Response(
-        JSON.stringify({
-          instance_id: 'personal',
-          documents: [
-            {
-              score: 0.9,
-              metadata: { type: 'conversation_chunk', account: 'personal', message_ids: ['3EB0A'] },
-            },
-          ],
-        }),
-        { status: 200 }
-      );
-    });
-    const { run, query } = serverWith({
-      config: { url: 'http://brain', apiKey: 'k', timeoutMs: 1000, minScore: 0.2 },
-      fetchImpl,
-    });
+  it('T8 una cuenta sin banco en Hindsight: el fallo se cuenta en fallbackReason y el resto se responde en texto', async () => {
+    // Hindsight fake (banco `personal` solo): `professional` no tiene banco y
+    // falla, `personal` no tiene aciertos => searchDetailed cae al texto y lo
+    // dice en fallbackReason (SC-5827: antes era una instancia del brain caida).
+    const hindsight = {
+      minScore: 0,
+      recall: jest.fn(async () => []),
+    };
+    const { run, query } = serverWith(hindsight);
     query.mockResolvedValueOnce({
       rows: [
         {
@@ -213,13 +212,10 @@ describe('social_search_messages — mediaType', () => {
     const out = await run({ query: 'hola' });
 
     expect(out.structuredContent.data.results).toHaveLength(1);
-    expect(out.structuredContent.data.mode).toBe('semantic');
-    expect(out.structuredContent.data.fallbackReason).toBeUndefined();
-    expect(out.structuredContent.meta.source.completeness).toBe('partial');
-    expect(out.structuredContent.meta.partialErrors[0]).toMatchObject({
-      accountId: 'professional',
-      code: 'provider_error',
-      message: expect.stringContaining('brain skirmshop 502'),
-    });
+    expect(out.structuredContent.data.mode).toBe('text');
+    expect(out.structuredContent.data.fallbackReason).toMatch(/no tiene banco/);
+    // En el fallback a texto el fallo del backend se cuenta en fallbackReason
+    // (searchDetailed no propaga partialErrors cuando no hubo aciertos).
+    expect(out.structuredContent.meta.source.completeness).toBe('complete');
   });
 });

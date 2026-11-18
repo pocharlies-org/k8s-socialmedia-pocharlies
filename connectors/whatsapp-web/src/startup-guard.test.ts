@@ -20,7 +20,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import './test-env';
-import { notifyDashboard } from './dashboard-notifier';
+import { notifyDashboard } from '@mcp-socialmedia/shared';
 
 const run = promisify(execFile);
 const PLACEHOLDER = 'dev-secret-change-in-production';
@@ -70,6 +70,7 @@ async function withNotifier(
   const saved = {
     secret: process.env.CONNECTOR_SHARED_SECRET,
     strict: process.env.CONNECTOR_SECRET_STRICT,
+    dashboard: process.env.DASHBOARD_URL,
   };
   const seen = {
     sent: [] as { headers: Record<string, string> }[],
@@ -95,6 +96,7 @@ async function withNotifier(
     for (const [key, value] of [
       ['CONNECTOR_SHARED_SECRET', saved.secret],
       ['CONNECTOR_SECRET_STRICT', saved.strict],
+      ['DASHBOARD_URL', saved.dashboard],
     ] as const) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -104,9 +106,21 @@ async function withNotifier(
 
 test('el notifier del dashboard no envía nada sin clave, o con el placeholder si es estricto', async () => {
   const cases: Record<string, string | undefined>[] = [
-    { CONNECTOR_SHARED_SECRET: undefined, CONNECTOR_SECRET_STRICT: undefined },
-    { CONNECTOR_SHARED_SECRET: '', CONNECTOR_SECRET_STRICT: undefined },
-    { CONNECTOR_SHARED_SECRET: PLACEHOLDER, CONNECTOR_SECRET_STRICT: 'true' },
+    {
+      CONNECTOR_SHARED_SECRET: undefined,
+      CONNECTOR_SECRET_STRICT: undefined,
+      DASHBOARD_URL: 'http://dashboard.test',
+    },
+    {
+      CONNECTOR_SHARED_SECRET: '',
+      CONNECTOR_SECRET_STRICT: undefined,
+      DASHBOARD_URL: 'http://dashboard.test',
+    },
+    {
+      CONNECTOR_SHARED_SECRET: PLACEHOLDER,
+      CONNECTOR_SECRET_STRICT: 'true',
+      DASHBOARD_URL: 'http://dashboard.test',
+    },
   ];
   for (const env of cases) {
     await withNotifier(env, async seen => {
@@ -119,7 +133,11 @@ test('el notifier del dashboard no envía nada sin clave, o con el placeholder s
 
 test('el notifier firma con una clave propia, y con el placeholder no estricto firma, envía y avisa una sola vez', async () => {
   await withNotifier(
-    { CONNECTOR_SHARED_SECRET: 'a-key-of-our-own', CONNECTOR_SECRET_STRICT: undefined },
+    {
+      CONNECTOR_SHARED_SECRET: 'a-key-of-our-own',
+      CONNECTOR_SECRET_STRICT: undefined,
+      DASHBOARD_URL: 'http://dashboard.test',
+    },
     async seen => {
       await notifyDashboard('/_connector/typing', { chatId: 'x' });
       assert.equal(seen.sent.length, 1);
@@ -129,7 +147,11 @@ test('el notifier firma con una clave propia, y con el placeholder no estricto f
   );
 
   await withNotifier(
-    { CONNECTOR_SHARED_SECRET: PLACEHOLDER, CONNECTOR_SECRET_STRICT: undefined },
+    {
+      CONNECTOR_SHARED_SECRET: PLACEHOLDER,
+      CONNECTOR_SECRET_STRICT: undefined,
+      DASHBOARD_URL: 'http://dashboard.test',
+    },
     async seen => {
       for (let i = 0; i < 4; i += 1) await notifyDashboard('/_connector/typing', { chatId: 'x' });
       assert.equal(seen.sent.length, 4);

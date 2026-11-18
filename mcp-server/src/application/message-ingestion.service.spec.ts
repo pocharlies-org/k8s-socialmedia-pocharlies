@@ -123,10 +123,12 @@ describe('a disabled account behaves as before the guard', () => {
   it('is refused by normalizeAccount, before any id is built or written', async () => {
     const { calls, service } = ingestion();
     await expect(service.handleMessageReceived(event('old'))).rejects.toThrow(
-      'Unknown or disabled account: old'
+      'Unknown or disabled whatsapp account: old'
     );
     expect(calls).toHaveLength(0);
-    expect(mockError).toHaveBeenCalledWith(expect.stringContaining('Unknown or disabled account'));
+    expect(mockError).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown or disabled whatsapp account')
+    );
   });
 });
 

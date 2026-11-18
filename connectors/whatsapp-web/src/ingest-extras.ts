@@ -19,7 +19,8 @@
  * - `0@s.whatsapp.net` is WhatsApp's own account (WhatsApp Business notices):
  *   it is named "WhatsApp" instead of its jid.
  */
-import type { WAMessage, proto } from '@whiskeysockets/baileys';
+import { normalizeMessageContent, type WAMessage, type proto } from '@whiskeysockets/baileys';
+import { businessMessageText } from './business-message-text';
 
 /** How old an `append` message can be and still get its media stored. */
 export const DEFAULT_APPEND_MEDIA_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -114,7 +115,7 @@ export function messageContextInfo(
   content: proto.IMessage | null | undefined
 ): proto.IContextInfo | undefined {
   if (!content) return undefined;
-  for (const value of Object.values(content)) {
+  for (const value of Object.values(normalizeMessageContent(content) || content)) {
     if (value && typeof value === 'object' && 'contextInfo' in value) {
       const ctx = (value as { contextInfo?: proto.IContextInfo | null }).contextInfo;
       if (ctx) return ctx;
@@ -133,12 +134,9 @@ export function quotedPreview(quoted: proto.IMessage | null | undefined): {
     String(s || '')
       .trim()
       .slice(0, MAX_REPLY_PREVIEW);
-  const inner =
-    quoted.ephemeralMessage?.message ||
-    quoted.viewOnceMessage?.message ||
-    quoted.viewOnceMessageV2?.message ||
-    quoted.documentWithCaptionMessage?.message ||
-    quoted;
+  const inner = normalizeMessageContent(quoted) || quoted;
+  const business = businessMessageText(inner);
+  if (business?.text) return { text: clip(business.text), type: business.type };
   if (inner.conversation) return { text: clip(inner.conversation), type: 'TEXT' };
   if (inner.extendedTextMessage)
     return { text: clip(inner.extendedTextMessage.text), type: 'TEXT' };

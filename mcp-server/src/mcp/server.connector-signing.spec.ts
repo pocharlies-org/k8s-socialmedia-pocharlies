@@ -3,59 +3,19 @@
  * the secret it was constructed with — providerGet included, which used to send
  * no credential at all — and never with an empty key read from the environment.
  *
- * `gated` stands in for the connector once /api/public/* sits behind
- * createHMACAuth: it verifies "<ts>:<JSON body>" with the same shared
- * verifyHMACSignature that scheme is built on, where a GET carries `{}`
- * (express.json leaves req.body = {} on a request with no body).
+ * `connector('gated')` (test-connector.ts) stands in for the connector once
+ * /api/public/* sits behind createHMACAuth.
  */
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { verifyHMACSignature } from '@mcp-socialmedia/shared';
 import { useTestAccounts } from '../domain/test-accounts';
 import { MCPServer } from './server';
-
-const SECRET = 'connector-secret-under-test';
-
-interface Seen {
-  method: string;
-  url: string;
-  headers: http.IncomingHttpHeaders;
-  signatureOk: boolean;
-}
-
-async function connector(mode: 'gated' | 'open') {
-  const seen: Seen[] = [];
-  const server = http.createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on('data', c => chunks.push(c));
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8');
-      const body = raw ? JSON.parse(raw) : {};
-      const signatureOk = verifyHMACSignature(
-        body,
-        Number(req.headers['x-connector-timestamp']),
-        String(req.headers['x-connector-signature'] ?? ''),
-        SECRET
-      );
-      seen.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, signatureOk });
-      if (mode === 'gated' && !signatureOk) {
-        res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Invalid signature"}');
-        return;
-      }
-      res.writeHead(200, { 'content-type': 'application/json' }).end('{"chats":[],"messageId":"m1"}');
-    });
-  });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const close = () => new Promise<void>(resolve => server.close(() => resolve()));
-  return { url, seen, close };
-}
+import { connector, TEST_CONNECTOR_SECRET as SECRET } from './test-connector';
 
 function serverWithSecret(connectorUrl: string, secret = SECRET) {
-  useTestAccounts({ whatsapp: { personal: connectorUrl } });
+  process.env.TEST_CONNECTOR_SECRET = secret;
+  useTestAccounts({ whatsapp: { personal: connectorUrl }, secretEnv: 'TEST_CONNECTOR_SECRET' });
   const server = Object.create(MCPServer.prototype) as MCPServer;
   Object.assign(server as unknown as Record<string, unknown>, {
-    connectorSecret: secret,
+    connectorSecret: 'unused-constructor-secret',
     logger: { error: jest.fn() },
   });
   return server as unknown as Record<string, (...a: unknown[]) => Promise<any>>;
@@ -152,7 +112,10 @@ describe('the inline signers use the constructed secret, never an empty one from
           markAsSent: async () => undefined,
         },
       });
-      await server.handleSendApprovedReply({ sendToken: 'send-d1-1700000000', account: 'personal' });
+      await server.handleSendApprovedReply({
+        sendToken: 'send-d1-1700000000',
+        account: 'personal',
+      });
       expect(wa.seen.map(s => [s.method, s.url, s.signatureOk])).toEqual([
         ['POST', '/api/v1/messages/send', true],
       ]);

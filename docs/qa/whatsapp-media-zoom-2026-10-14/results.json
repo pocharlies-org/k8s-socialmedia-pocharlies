@@ -1,0 +1,112 @@
+{
+  "browser": "Chromium CDP touch (not native iPhone Safari)",
+  "chromiumVersion": "155.0.8059.12",
+  "report": [
+    {
+      "label": "desktop-1280",
+      "passed": true,
+      "fitted": {
+        "app": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 900
+        },
+        "pageScale": 1,
+        "viewportWidth": 1280,
+        "image": {
+          "x": 178.671875,
+          "y": 64,
+          "width": 922.65625,
+          "height": 691.984375
+        },
+        "stage": {
+          "x": 48,
+          "y": 64,
+          "width": 1184,
+          "height": 692
+        },
+        "zoom": 1,
+        "transform": "matrix(1, 0, 0, 1, 0, 0)"
+      },
+      "zoomed": {
+        "app": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 900
+        },
+        "pageScale": 1,
+        "viewportWidth": 1280,
+        "image": {
+          "x": -329.5411376953125,
+          "y": 64.013427734375,
+          "width": 2508.03955078125,
+          "height": 1881.008544921875
+        },
+        "stage": {
+          "x": 48,
+          "y": 64,
+          "width": 1184,
+          "height": 692
+        },
+        "zoom": 2.718281828459045,
+        "transform": "matrix(2.71828, 0, 0, 2.71828, 284.479, 594.526)"
+      },
+      "errors": []
+    },
+    {
+      "label": "mobile-390",
+      "passed": true,
+      "fitted": {
+        "app": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844
+        },
+        "pageScale": 1,
+        "viewportWidth": 390,
+        "image": {
+          "x": 12,
+          "y": 250.75,
+          "width": 366,
+          "height": 274.5
+        },
+        "stage": {
+          "x": 12,
+          "y": 64,
+          "width": 366,
+          "height": 648
+        },
+        "zoom": 1,
+        "transform": "matrix(1, 0, 0, 1, 0, 0)"
+      },
+      "zoomed": {
+        "app": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844
+        },
+        "pageScale": 1,
+        "viewportWidth": 390,
+        "image": {
+          "x": -267.857177734375,
+          "y": 15.857147216796875,
+          "width": 1045.71435546875,
+          "height": 784.28564453125
+        },
+        "stage": {
+          "x": 12,
+          "y": 64,
+          "width": 366,
+          "height": 648
+        },
+        "zoom": 2.857142857142857,
+        "transform": "matrix(2.85714, 0, 0, 2.85714, 60, 20)"
+      },
+      "errors": []
+    }
+  ]
+}

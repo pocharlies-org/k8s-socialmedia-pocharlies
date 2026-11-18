@@ -1,0 +1,3 @@
+PASS uuid_timestamp: remote revoke/status/durable, local deletion, replay, provenance, scope, content and media retention
+PASS uuid_timestamptz: remote revoke/status/durable, local deletion, replay, provenance, scope, content and media retention
+PASS bigint_metadata: remote revoke/status/durable, local deletion, replay, provenance, scope, content and media retention

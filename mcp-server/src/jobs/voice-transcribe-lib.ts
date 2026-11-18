@@ -3,14 +3,14 @@
  *
  * WhatsApp AUDIO/PTT rows land with `content = NULL` (convertMessage sets the
  * body to null for audioMessage; the bytes ride separately to MinIO via the
- * connector's downloadAndStoreMedia). The brain only embeds `content`, so those
- * ~4.5k voice notes are invisible to it. This lib closes the gap the same way
+ * connector's downloadAndStoreMedia). The semantic index only reads `content`,
+ * so those ~4.5k voice notes were invisible to it. This lib closes the gap the same way
  * Telegram does (connectors/telegram-sync/sync/db.py): the worker picks pending
  * voice rows, fetches the stored audio from MinIO, POSTs it to the in-cluster
  * Whisper service and writes the text into `content`, tracking
  * `metadata.transcription_status` (pending → processing → done/failed),
  * `transcription_attempts` and `transcription_error` with the SAME key names
- * the Telegram sync uses, so consumers (window builder, brain) see one shape.
+ * the Telegram sync uses, so consumers (window builder, Hindsight) see one shape.
  *
  * Unlike telegram-sync (which runs faster-whisper in-process on CPU), this
  * worker is a thin client of `stt-turbo` (ns `llm`, whisper-large-v3,
@@ -26,6 +26,7 @@
  * transcription) are terminal `failed` with the reason in transcription_error.
  */
 import { Pool } from 'pg';
+import { MinIOClient } from '../infrastructure/storage/minio-client';
 
 /** WhatsApp message types that carry voice audio. */
 export const VOICE_MESSAGE_TYPES = ['AUDIO', 'PTT'] as const;
@@ -105,10 +106,42 @@ WHERE m.platform = 'whatsapp'
 }
 
 /**
+ * DGX-1640: fetch one AUDIO/PTT row by its event ids (row id, falling back to
+ * the raw wa_message_id for an event that names only that). Used by
+ * the event worker — the event names the row, so no queue query is needed.
+ * Returns null when no live AUDIO/PTT row matches (stale/foreign event → ack).
+ */
+export async function selectVoiceRowById(
+  pool: Pool,
+  messageId: string,
+  waMessageId: string
+): Promise<VoiceRow | null> {
+  const res = await pool.query(
+    `SELECT m.id, m.account, m.message_type, m.created_at, m.wa_timestamp,
+            m.metadata->>'transcription_status' AS status,
+            COALESCE((m.metadata->>'transcription_attempts')::int, 0) AS attempts,
+            a.id AS attachment_id, a.file_url, a.mime_type
+       FROM messages m
+       LEFT JOIN LATERAL (
+         SELECT id, file_url, mime_type FROM attachments
+          WHERE message_id = m.id AND file_type IN ('AUDIO','PTT')
+          ORDER BY id DESC LIMIT 1
+       ) a ON TRUE
+      WHERE m.platform = 'whatsapp'
+        AND m.is_deleted = false
+        AND m.message_type IN ('AUDIO','PTT')
+        AND (m.id = $1 OR m.wa_message_id = $2)
+      LIMIT 1`,
+    [messageId, waMessageId]
+  );
+  return (res.rows[0] as VoiceRow | undefined) ?? null;
+}
+
+/**
  * Optimistic claim: flip a row to `processing` ONLY while it is still
  * claimable (empty content, status pending or unmarked). Returns true when this
- * worker won the claim — false means another pass (a racing CronJob overlap or
- * a manual backfill Job) already took the row, and the caller must skip it.
+ * worker won the claim — false means another pass (the event worker, a manual
+ * voice-transcribe.ts run or a backfill Job) already took the row, and the caller must skip it.
  * Postgres serializes the two UPDATEs on the row, so exactly one worker sees
  * rowCount 1. The claim instant rides in metadata so crash recovery can tell
  * "being worked on" from "abandoned" without a schema change (messages has no
@@ -301,6 +334,40 @@ export interface VoiceDeps {
   stt: SttConfig;
   now: () => Date;
   logger?: { info(msg: string, meta?: unknown): void; warn(msg: string, meta?: unknown): void };
+}
+
+/**
+ * Build the Pool + MinIO-backed VoiceDeps from process.env. Shared by the event
+ * worker and the manual voice-transcribe.ts pass so the wiring lives in one place
+ * (DGX-1640: the worker replaced the CronJob's trigger, not its machinery). Throws if
+ * DATABASE_URL is unset (SC-1239 C2: no fallback).
+ */
+export function buildVoiceDeps(logger?: VoiceDeps['logger']): { pool: Pool; deps: VoiceDeps } {
+  const DATABASE_URL = process.env.DATABASE_URL;
+  if (!DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL is unset: refusing to start the voice worker without an explicit database connection'
+    );
+  }
+  const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
+  const minio = new MinIOClient(
+    process.env.MINIO_ENDPOINT || 'whatsapp-mcp-minio.whatsapp-mcp.svc.cluster.local',
+    process.env.MINIO_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '',
+    process.env.MINIO_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '',
+    process.env.MINIO_BUCKET || 'socialmedia-media',
+    (process.env.MINIO_USE_SSL || 'false').toLowerCase() === 'true'
+  );
+  const deps: VoiceDeps = {
+    pool,
+    download: url => minio.downloadFile(url),
+    stt: {
+      url: process.env.VOICE_STT_URL || 'http://stt-turbo.llm.svc.cluster.local:8000',
+      timeoutMs: parseInt(process.env.VOICE_STT_TIMEOUT_MS || '120000', 10),
+    },
+    now: () => new Date(),
+    logger,
+  };
+  return { pool, deps };
 }
 
 export interface VoiceRunOptions {

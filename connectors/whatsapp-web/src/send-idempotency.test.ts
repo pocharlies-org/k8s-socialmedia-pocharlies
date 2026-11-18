@@ -113,7 +113,7 @@ function stubAttempts(options: { missing?: boolean } = {}): {
       return done([{ updated_at: row.updated_at }]);
     }
     if (/SET status = 'failed'/.test(sql)) {
-      if (!row || row.status !== 'prepared') return done([]);
+      if (!row || row.status !== params[3]) return done([]);
       Object.assign(row, { status: 'failed', error: params[2], updated_at: now() });
       return done([]);
     }
@@ -389,6 +389,23 @@ test('a failure before the claim is retryable; after it the row stays pending', 
     assert.equal(post.status, 'pending');
     assert.match(post.error || '', /timeout/);
     assert.equal((await reserveSend('post', 'h')).state, 'pending');
+  } finally {
+    restore();
+    undo();
+  }
+});
+
+test('un fallo de subida de medios tras el claim es previo a la red: failed y reintentable (QA #49)', async () => {
+  const undo = useAccount('personal');
+  const { rows, restore } = stubAttempts();
+  try {
+    await reserveSend('upload', 'h');
+    await claimSendAttempt('upload', 'h');
+    await recordSendFailure('upload', true, new Error('Media upload failed on all hosts'));
+    const row = rows.get(`personal|${idempotencyKeyHash('upload')}`)!;
+    assert.equal(row.status, 'failed');
+    assert.match(row.error || '', /upload failed/);
+    assert.equal((await reserveSend('upload', 'h')).state, 'retry');
   } finally {
     restore();
     undo();

@@ -14,7 +14,12 @@ type UrlMap = Record<string, string>;
 export function useTestAccounts(maps: {
   whatsapp?: UrlMap;
   telegram?: UrlMap;
+  instagram?: UrlMap;
+  secretEnv?: string;
   bridge?: UrlMap;
+  requireInboundBeforeSend?: Record<string, boolean>;
+  /** Per-namespace brain instance override (e.g. { leila: 'leila' } for INFRA-554 routing). */
+  brainInstance?: Record<string, string>;
 }): void {
   state = {
     whatsapp: maps.whatsapp ?? state.whatsapp,
@@ -26,7 +31,7 @@ export function useTestAccounts(maps: {
   const entries: unknown[] = [];
   // Same brain routing as prod: the professional namespace feeds 'skirmshop'.
   const brain = (ns: string) => ({
-    brainInstance: ns === 'professional' ? 'skirmshop' : 'personal',
+    brainInstance: maps.brainInstance?.[ns] ?? (ns === 'professional' ? 'skirmshop' : 'personal'),
   });
   const wa = { personal: 'http://wa-personal', ...state.whatsapp };
   for (const [accountId, connectorUrl] of Object.entries(wa)) {
@@ -35,7 +40,11 @@ export function useTestAccounts(maps: {
       channel: 'whatsapp',
       accountId,
       connectorUrl,
+      ...(maps.secretEnv ? { secretEnv: maps.secretEnv } : {}),
       ...brain(accountId),
+      ...(maps.requireInboundBeforeSend?.[accountId] !== undefined
+        ? { requireInboundBeforeSend: maps.requireInboundBeforeSend[accountId] }
+        : {}),
     });
   }
   for (const [accountId, connectorUrl] of Object.entries(state.telegram)) {
@@ -43,6 +52,7 @@ export function useTestAccounts(maps: {
       channel: 'telegram',
       accountId,
       connectorUrl,
+      ...(maps.secretEnv ? { secretEnv: maps.secretEnv } : {}),
       ...brain(accountId),
       ...(state.bridge[accountId] ? { bridgeUrl: state.bridge[accountId] } : {}),
     });
@@ -55,7 +65,29 @@ export function useTestAccounts(maps: {
       ...brain('professional'),
     });
   }
-  entries.push({ channel: 'instagram', accountId: 'barbelpapis', namespace: 'personal' });
+  entries.push({
+    channel: 'instagram',
+    accountId: 'barbelpapis',
+    namespace: 'personal',
+    brainInstance: 'personal',
+  });
+  for (const [accountId, connectorUrl] of Object.entries(maps.instagram ?? {})) {
+    const existing = entries.findIndex(
+      (entry: any) => entry.channel === 'instagram' && entry.accountId === accountId
+    );
+    const entry = {
+      channel: 'instagram',
+      accountId,
+      connectorUrl,
+      namespace:
+        accountId === 'skirmshop' && namespaces.has('professional') ? 'professional' : 'personal',
+      brainInstance:
+        accountId === 'skirmshop' && namespaces.has('professional') ? 'skirmshop' : 'personal',
+      ...(maps.secretEnv ? { secretEnv: maps.secretEnv } : {}),
+    };
+    if (existing >= 0) entries[existing] = entry;
+    else entries.push(entry);
+  }
   if (!file) {
     file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'test-accounts-')), 'accounts.json');
   }

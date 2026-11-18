@@ -246,7 +246,7 @@ test('E2E: socket drops, a message arrives during the outage, the reconnect back
     assert.ok(fetch.count <= 50, `batch stays <= 50 (got ${fetch.count})`);
     assert.equal(fetch.key.id, 'MSG-OLD', 'wire key is bare, no account prefix');
     assert.equal(fetch.key.remoteJid, '34600@s.whatsapp.net');
-    assert.equal(fetch.oldestTimestamp, Math.floor(anchorTsMs / 1000));
+    assert.equal(fetch.oldestTimestamp, anchorTsMs);
     const anchorQuery = calls.find(c => isAnchorSelect(c.sql))!;
     assert.ok(
       Math.abs((anchorQuery.params[0] as number) - (beforeOpen - 6 * 60 * 60 * 1000)) < 10_000,

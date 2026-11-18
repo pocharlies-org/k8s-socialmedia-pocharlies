@@ -4,9 +4,18 @@ import {
   TelegramMessageEdit,
   isTelegramDownloadTimeout,
   telegramRetryAfter,
+  telegramDownloadRetryAfter,
 } from '../telegram-client';
 import { MessageMutationError, classifyEditError, sendingDisabledReason } from '../message-edit';
+import {
+  ADMIN_RIGHT_NAMES,
+  ModerationError,
+  classifyModerationError,
+  isRestriction,
+  requireNumericTarget,
+} from '../moderation';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
+import { readIdempotencyKey, sendOnce } from '../send-idempotency';
 import pino from 'pino';
 
 const logger = pino({
@@ -44,6 +53,12 @@ function downloadRoute(
         });
       } catch (error) {
         if (respondRateLimit(res, error)) return;
+        const retryAfter = telegramDownloadRetryAfter(error);
+        if (retryAfter !== null) {
+          res.set('Retry-After', String(retryAfter));
+          res.status(503).json({ error: 'Telegram media temporarily unavailable', retryAfter });
+          return;
+        }
         res.status(isTelegramDownloadTimeout(error) ? 504 : 502).json({ error: String(error) });
       }
     })();
@@ -113,6 +128,58 @@ export function requireSending(req: Request, res: Response, next: NextFunction):
   const disabled = sendingDisabledReason();
   if (disabled) {
     res.status(403).json({ error: disabled, failureClass: 'disabled_sending' });
+    return;
+  }
+  next();
+}
+
+/** Error of a moderation route → status + canonical failureClass (INFRA-218), never an opaque 500. */
+function moderationErrorResponse(res: Response, error: unknown, action: string): void {
+  const e = error instanceof ModerationError ? error : classifyModerationError(error, action);
+  if (e.status >= 500) logger.error(`Error in Telegram ${action}: ${e.message}`);
+  if (e.retryAfterSeconds) res.setHeader('Retry-After', String(e.retryAfterSeconds));
+  res.status(e.status).json({
+    error: e.message,
+    failureClass: e.failureClass,
+    ...(e.code ? { code: e.code } : {}),
+    ...(e.retryAfterSeconds ? { retry_after_s: e.retryAfterSeconds } : {}),
+    ...(e.missingRight ? { missing_right: e.missingRight } : {}),
+  });
+}
+
+/** Optional ISO-8601 `until` of a moderation body → Date (undefined = no end). */
+function untilFromBody(value: unknown): Date | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const date = typeof value === 'string' ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime()) || !/^\d{4}-\d{2}-\d{2}/.test(value as string)) {
+    throw new ModerationError('invalid_request', 'until debe ser una fecha ISO-8601');
+  }
+  return date;
+}
+
+/**
+ * Validation of the moderation bodies (INFRA-746), a middleware so it answers
+ * 400 BEFORE the sending gate's 403 (an invalid request is invalid with the
+ * door open or closed). The participant is a numeric Telegram id: the bot
+ * works with the ids the participants route gives it, never usernames.
+ */
+function moderationBody(req: Request, res: Response, next: NextFunction): void {
+  const { userId } = (req.body ?? {}) as { userId?: unknown };
+  if (typeof userId !== 'string' && typeof userId !== 'number') {
+    res.status(400).json({ error: 'userId is required (numeric Telegram id)' });
+    return;
+  }
+  if (!/^\d{1,20}$/.test(String(userId))) {
+    res.status(400).json({ error: 'userId must be a numeric Telegram id' });
+    return;
+  }
+  next();
+}
+
+/** Chat param of a moderation route: a numeric chat id or a @username. */
+function chatParam(req: Request, res: Response, next: NextFunction): void {
+  if (!TELEGRAM_PEER_RE.test(req.params.id)) {
+    res.status(400).json({ error: 'invalid chat id' });
     return;
   }
   next();
@@ -212,15 +279,23 @@ export function createRouter(
   });
 
   /**
-   * GET /chats/:id/participants - Get chat participants
+   * GET /chats/:id/participants - Get ONE page of chat participants.
+   *
+   * v2 (INFRA-745): optional `offset` pages past MTProto's 200-per-call cap
+   * (the bot sauvage-verificacion sweeps a ~350-member group with it), and
+   * the 200 gains `total` — the real member count Telegram reports, not the
+   * page length. v1 stays intact for callers that pass no `offset`: they get
+   * the same `participants` array as always.
    */
   // CONTRACT: http.telegram-connector.chats-participants.v1
+  // CONTRACT: http.telegram-connector.chats-participants.v2
   router.get('/chats/:id/participants', (req: Request, res: Response): void => {
     void (async () => {
       try {
         const limit = parseInt(req.query.limit as string) || 100;
-        const participants = await client.getParticipants(req.params.id, limit);
-        res.json({ participants });
+        const offset = parseInt(req.query.offset as string) || 0;
+        const { participants, total } = await client.getParticipants(req.params.id, limit, offset);
+        res.json({ participants, total });
       } catch (e) {
         res.status(500).json({ error: String(e) });
       }
@@ -308,24 +383,8 @@ export function createRouter(
           res.status(400).json({ error: 'rights must be an object of boolean permissions' });
           return;
         }
-        const allowedRights = new Set([
-          'changeInfo',
-          'postMessages',
-          'editMessages',
-          'deleteMessages',
-          'banUsers',
-          'inviteUsers',
-          'pinMessages',
-          'addAdmins',
-          'anonymous',
-          'manageCall',
-          'other',
-          'manageTopics',
-          'postStories',
-          'editStories',
-          'deleteStories',
-          'manageDirectMessages',
-        ]);
+        // Same 16 right names getChatMember reports (moderation.ts); one source.
+        const allowedRights = new Set<string>(ADMIN_RIGHT_NAMES);
         if (
           Object.entries(rights).some(
             ([name, value]) => !allowedRights.has(name) || typeof value !== 'boolean'
@@ -348,6 +407,133 @@ export function createRouter(
       } catch (e) {
         logger.error(`Error setting Telegram admin permissions: ${String(e)}`);
         res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * POST /chats/:id/ban - Ban a member from a group, supergroup or channel
+   * (bot Sauvage verificacion, INFRA-746). Validation answers 400 before the
+   * sending gate's 403; the ban itself only after the gate.
+   */
+  // CONTRACT: http.telegram-connector.chats-ban.v1
+  router.post(
+    '/chats/:id/ban',
+    chatParam,
+    moderationBody,
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          const result = await client.banManagedChatMember(req.params.id, String(req.body.userId));
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error banning Telegram chat member: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
+
+  /**
+   * POST /chats/:id/unban - Lift a member's ban. Does NOT re-add them: the
+   * add is POST /chats/:id/members (chats-members.v1).
+   */
+  // CONTRACT: http.telegram-connector.chats-unban.v1
+  router.post(
+    '/chats/:id/unban',
+    chatParam,
+    moderationBody,
+    requireSending,
+    (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          const result = await client.unbanManagedChatMember(
+            req.params.id,
+            String(req.body.userId)
+          );
+          res.json(result);
+        } catch (e) {
+          logger.error(`Error unbanning Telegram chat member: ${String(e)}`);
+          res.status(500).json({ error: String(e) });
+        }
+      })();
+    }
+  );
+
+  /**
+   * POST /chats/:id/invite-export - Export the primary invite link of a
+   * channel/supergroup (fallback when the add is refused by the target's
+   * privacy: chats-members answers with `missing`). Telegram rotates the
+   * primary link on every export.
+   */
+  // CONTRACT: http.telegram-connector.chats-invite-export.v1
+  router.post('/chats/:id/invite-export', chatParam, requireSending, (req, res): void => {
+    void (async () => {
+      try {
+        const result = await client.exportManagedChatInvite(req.params.id);
+        res.json(result);
+      } catch (e) {
+        logger.error(`Error exporting Telegram chat invite: ${String(e)}`);
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
+   * Member moderation (INFRA-218 / INFRA-344). Ids are numeric, in the path
+   * (chat) and the body (`user_id`); failures answer {error, failureClass,
+   * code?, retry_after_s?, missing_right?}, never a 500 nor outcome_unknown.
+   * POST /chats/:id/moderation/{ban|unban|kick|restrict|unrestrict}
+   * GET  /chats/:id/moderation/admin-rights   (this account's own rights)
+   */
+  // CONTRACT: http.telegram-connector.moderation.v1
+  const moderationRoute = (
+    action: 'ban' | 'unban' | 'kick' | 'restrict' | 'unrestrict',
+    run: (chatId: string, userId: string, body: Record<string, unknown>) => Promise<unknown>
+  ): void => {
+    router.post(
+      `/chats/:id/moderation/${action}`,
+      requireSending,
+      (req: Request, res: Response): void => {
+        void (async () => {
+          try {
+            const body = (req.body ?? {}) as Record<string, unknown>;
+            const chatId = requireNumericTarget('chat_id', req.params.id);
+            const userId = requireNumericTarget('user_id', body.user_id);
+            res.json(await run(chatId, userId, body));
+          } catch (e) {
+            moderationErrorResponse(res, e, action);
+          }
+        })();
+      }
+    );
+  };
+
+  moderationRoute('ban', (chat, user, body) =>
+    client.banChatMember(chat, user, untilFromBody(body.until))
+  );
+  moderationRoute('unban', (chat, user) => client.unbanChatMember(chat, user));
+  moderationRoute('kick', (chat, user) => client.kickChatMember(chat, user));
+  moderationRoute('restrict', (chat, user, body) => {
+    if (!isRestriction(body.restriction)) {
+      throw new ModerationError(
+        'invalid_request',
+        'restriction debe ser uno de: mute, no_media, no_invite, read_only'
+      );
+    }
+    return client.restrictChatMember(chat, user, body.restriction, untilFromBody(body.until));
+  });
+  moderationRoute('unrestrict', (chat, user) => client.unrestrictChatMember(chat, user));
+
+  router.get('/chats/:id/moderation/admin-rights', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        res.json(
+          await client.getOwnChatAdminRights(requireNumericTarget('chat_id', req.params.id))
+        );
+      } catch (e) {
+        moderationErrorResponse(res, e, 'get_admin_rights');
       }
     })();
   });
@@ -702,6 +888,7 @@ export function createRouter(
         const messages = await client.getMessages(chatId, limit, offsetId);
         res.json({ messages });
       } catch (error) {
+        if (respondRateLimit(res, error)) return;
         logger.error(`Error getting messages: ${String(error)}`);
         res.status(500).json({ error: 'Failed to get messages' });
       }
@@ -709,8 +896,7 @@ export function createRouter(
   });
 
   /**
-   * GET /messages/single/:chatId/:msgId - Fetch the exact message when repairing
-   * a previously failed media download (telegram-sync media recovery).
+   * Fetch the exact message when repairing a previously failed media download.
    */
   // CONTRACT: http.telegram-connector.messages-single.v1
   router.get('/messages/single/:chatId/:msgId', (req: Request, res: Response): void => {
@@ -1144,14 +1330,10 @@ export function createRouter(
    */
   // CONTRACT: http.telegram-connector.messages-read.v1
   router.post('/messages/read/:chatId', (req: Request, res: Response): void => {
-    void (async () => {
-      try {
-        await client.markAsRead(req.params.chatId);
-        res.json({ markedAsRead: true });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
-    })();
+    client
+      .markAsRead(req.params.chatId)
+      .then(() => res.json({ markedAsRead: true }))
+      .catch(error => res.status(500).json({ error: String(error) }));
   });
 
   /**
@@ -1166,10 +1348,7 @@ export function createRouter(
     )
   );
 
-  /**
-   * GET /peers/:id/photo - Download a peer's profile photo (big size).
-   * Returns {data: base64, size, contentType: 'image/jpeg'} or 404 if no photo.
-   */
+  /** GET /peers/:id/photo - Download a peer's profile photo. */
   // CONTRACT: http.telegram-connector.peers-photo.v1
   router.get('/peers/:id/photo', (req: Request, res: Response): void => {
     if (!client.isClientConnected()) {
@@ -1221,6 +1400,20 @@ export function createRouter(
         if (body.replyTo !== undefined && body.replyTo !== null) {
           const n = Number(body.replyTo);
           if (Number.isInteger(n) && n > 0) replyTo = n;
+        }
+
+        // CONTRACT: http.telegram-connector.send-idempotency.v1 — opt-in Idempotency-Key, replay + deduplicated, 409 idempotency_key_reused / send_outcome_uncertain, 503 idempotency_unavailable
+        const { key, error: keyError } = readIdempotencyKey(req.headers, req.body);
+        if (keyError) {
+          res.status(400).json({ error: keyError, failureClass: 'invalid_request' });
+          return;
+        }
+        if (key) {
+          const outcome = await sendOnce(key, { chatId, text, topicId: tid, replyTo }, randomId =>
+            client.sendMessage(chatId, text, tid, replyTo, randomId)
+          );
+          res.status(outcome.status).json(outcome.body);
+          return;
         }
 
         const messageId = await client.sendMessage(chatId, text, tid, replyTo);

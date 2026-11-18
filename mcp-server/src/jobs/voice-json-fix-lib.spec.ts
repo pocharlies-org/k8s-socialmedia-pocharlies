@@ -1,4 +1,10 @@
-import { FIX_UPDATE_SQL, asrTextOf, fixCandidatesQuery, fixCountQuery, unwrapAsrJson } from './voice-json-fix-lib';
+import {
+  FIX_UPDATE_SQL,
+  asrTextOf,
+  fixCandidatesQuery,
+  fixCountQuery,
+  unwrapAsrJson,
+} from './voice-json-fix-lib';
 
 describe('unwrapAsrJson', () => {
   it('unwraps the prod echo shape: marker + quoted raw body (unescaped inner quotes)', () => {

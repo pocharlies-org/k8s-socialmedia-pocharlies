@@ -1,0 +1,182 @@
+@media (max-width: 760px), (max-width: 1024px) and (max-height: 500px) and (pointer: coarse) {
+  :root {
+    --mobile-safe-area-top: env(safe-area-inset-top, 0px);
+    --mobile-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --mobile-safe-area-left: env(safe-area-inset-left, 0px);
+    --mobile-safe-area-right: env(safe-area-inset-right, 0px);
+  }
+
+  html, body {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  /* Share measured bounds without a composited root layer extending beyond
+     iOS's drawable canvas. Only the content panes scroll. */
+  body {
+    position: fixed;
+    inset: var(--mobile-viewport-top, 0px) var(--mobile-safe-area-right) auto var(--mobile-safe-area-left);
+    width: auto;
+    height: var(--mobile-viewport-height, 100dvh);
+  }
+
+  .app-shell {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    touch-action: pan-x pan-y;
+    overscroll-behavior: none;
+    flex-direction: column;
+  }
+
+  .app-rail {
+    order: 2;
+    flex: 0 0 auto;
+    flex-direction: row;
+    width: 100%;
+    height: calc(60px + var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom)));
+    min-height: 0;
+    padding: 0 10px var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom));
+    border-top: 1px solid var(--line);
+    border-right: 0;
+  }
+
+  .rail-top, .rail-bottom {
+    flex-direction: row;
+    width: auto;
+    gap: 4px;
+  }
+
+  .rail-accounts {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .rail-account {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+  }
+
+  .rail-bottom { flex: 0 0 auto; }
+
+  .chat-sidebar, .conversation {
+    order: 1;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    border-right: 0;
+  }
+
+  .chat-sidebar-header, .conversation-header, .ai-panel-header, .feature-archive-title {
+    flex: 0 0 calc(64px + var(--mobile-safe-area-top));
+    padding-top: var(--mobile-safe-area-top);
+    padding-bottom: 0;
+  }
+
+  .feature-archive-back { width: 44px; height: 44px; flex: 0 0 44px; }
+
+  .conversation { display: none; }
+  body.chat-open .app-rail, body.chat-open .chat-sidebar { display: none; }
+  body.chat-open .conversation { display: flex; }
+  .mobile-back { display: grid; flex: 0 0 44px; height: 44px; }
+
+  .chat-sidebar-header { padding-left: 18px; }
+
+  .conversation-header { padding-right: 8px; }
+
+  .conversation-contact { flex: 1 1 auto; }
+
+  .conversation-contact-copy { max-width: none; }
+
+  .composer {
+    min-width: 0;
+    padding-bottom: max(12px, var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom)));
+  }
+
+  .composer::before { bottom: max(12px, var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom))); }
+  .ai-composer { padding-bottom: max(10px, var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom))); }
+  .ai-composer::before { bottom: max(10px, var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom))); }
+
+  .message-input textarea::placeholder {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .ai-panel, body.chat-open .ai-panel {
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .rail-settings .rail-popover {
+    inset: var(--mobile-viewport-top, 0px) var(--mobile-safe-area-right) auto var(--mobile-safe-area-left);
+    width: auto;
+    max-width: 100%;
+    height: var(--mobile-viewport-height, 100dvh);
+  }
+
+  .feature-modal, .novedades-overlay, .media-library-overlay, .contact-directory-overlay,
+  .profile-panel, .media-viewer, .camera-overlay, .photo-editor-overlay {
+    inset: var(--mobile-viewport-top, 0px) var(--mobile-safe-area-right) auto var(--mobile-safe-area-left);
+    height: var(--mobile-viewport-height, 100dvh);
+  }
+  .communities-shade { inset: 0; }
+
+  .feature-modal-panel .feature-dialog, .novedades-panel, .media-library-modal {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+  }
+  .profile-panel { width: auto; max-width: 100%; }
+  .contact-directory-panel, .communities-panel { width: 100%; }
+  .communities-master { flex-basis: 100%; }
+  .communities-detail { display: none; }
+  .communities-panel:has(.communities-detail[data-selected="true"]) .communities-master { display: none; }
+  .communities-panel:has(.communities-detail[data-selected="true"]) .communities-detail { display: block; }
+
+  .feature-modal .feature-dialog { max-height: min(92%, calc(var(--mobile-viewport-height, 100dvh) - var(--mobile-safe-area-top))); }
+  .feature-modal-panel .feature-dialog { max-height: 100%; }
+  .feature-modal-menu .feature-dialog {
+    position: absolute;
+    top: max(var(--mobile-safe-area-top), var(--menu-top, 80px));
+    max-height: calc(var(--mobile-viewport-height, 100dvh) - max(var(--mobile-safe-area-top), var(--menu-top, 80px)) - var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom)) - 12px);
+  }
+  .feature-attach-menu { max-height: calc(var(--mobile-viewport-height, 100dvh) - var(--mobile-safe-area-top) - 100px); }
+
+  .feature-modal-panel .feature-dialog-header, .novedades-header, .settings-header,
+  .profile-header, .contact-directory-header, .media-library-header-top, .communities-header {
+    flex-shrink: 0;
+    padding-top: calc(16px + var(--mobile-safe-area-top));
+  }
+
+  .media-viewer {
+    padding: calc(48px + var(--mobile-safe-area-top)) 12px calc(16px + var(--mobile-safe-area-bottom));
+  }
+  .media-viewer-close { top: calc(8px + var(--mobile-safe-area-top)); }
+  .media-viewer-counter { top: calc(16px + var(--mobile-safe-area-top)); }
+  .media-viewer-image { max-height: calc(var(--mobile-viewport-height, 100dvh) - var(--mobile-safe-area-top) - var(--mobile-safe-area-bottom) - 136px); }
+
+  .settings-scroll, .profile-scroll, .novedades-body, .contact-directory-panel, .media-library-body,
+  .feature-modal-panel .feature-dialog-body, .communities-list, .communities-detail {
+    padding-bottom: var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom));
+  }
+
+  .feature-modal:not(.feature-modal-panel):not(.feature-modal-menu) .feature-dialog {
+    padding-bottom: var(--mobile-viewport-bottom-inset, var(--mobile-safe-area-bottom));
+  }
+
+  .app-shell :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select),
+  .feature-modal :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select),
+  .novedades-overlay :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select) {
+    font-size: 16px;
+  }
+
+  button, summary { touch-action: manipulation; }
+}

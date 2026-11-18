@@ -61,14 +61,14 @@ migración rota no se arrastra a la siguiente ejecución. Al terminar, `down`.
 
 ## Qué hace exactamente
 
-1. Lecturas de producción, solo `pg_dump` vía `kubectl -n databases exec postgres-shared-2`:
+1. Lecturas de producción, solo `pg_dump` vía `kubectl -n databases exec <pod de postgres-shared-rw>` (descubierto por el selector del Service `postgres-shared-rw`, el mismo host del `DATABASE_URL` de la app: el clúster CNPG detrás cambia de nombre, p. ej. `postgres-shared-nvme`; `KUBE_POD` lo fija):
    - `--schema-only --no-owner --no-privileges` → `/tmp/qa-schema-whatsappmcp.sql`
      (esquema puro, ~88 KB);
    - `--data-only -t _migrations` → `/tmp/qa-schema-whatsappmcp-ledger.sql`: las 20
      filas del ledger (nombre de fichero, fecha y flag `baseline`), ningún dato de
      mensajes. Sin él el runner re-ejecutaría 002, 005, 012, 014, 015 y 017, que prod
      ya tiene aplicadas.
-   Los volcados no salen del x86 y se borran al terminar.
+     Los volcados no salen del x86 y se borran al terminar.
 2. Levanta `pgvector/pgvector:pg16` como contenedor desechable (prefijo de nombre
    `qa-schema-`/`skirm89-`). Se publica con `-p 127.0.0.1::5432`: puerto aleatorio
    **solo en loopback**. Si `docker port` no devuelve `127.0.0.1:NNNN`, el script se
@@ -80,6 +80,61 @@ migración rota no se arrastra a la siguiente ejecución. Al terminar, `down`.
    `_migrations` (20 tras `up`) y `conversations.id` de tipo `text` (si saliera
    `uuid`, el esquema restaurado es falso y el script falla).
 
+### Con los datos de producción (`SANDBOX_DATA=1`, SKIRM-261)
+
+Una migración puede pasar contra el esquema y fallar contra los datos: la 039
+pasaba en el sandbox de esquema (SKIRM-257) y en prod abortó con `duplicate key
+value violates unique constraint "whatsapp_contacts_compat_materialized_pkey"`
+por una sola fila de `participants` mal archivada. Para probar con los datos:
+
+```bash
+SANDBOX_DATA=1 scripts/qa-schema-sandbox.sh up
+```
+
+Además del esquema y el ledger, copia los datos de todas las tablas de `public`
+(salvo el ledger, que va aparte) **tabla a tabla y en trozos** por rango de
+páginas (`ctid`) de unos `DATA_CHUNK_MB` megas (40 por defecto, calculados por tabla con su tamaño real, TOAST incluido), con `COPY` de prod
+directamente al psql del sandbox y `session_replication_role = replica`; luego
+fija las secuencias con el valor de prod. Un único `pg_dump --data-only` de
+~3,6 GB por `kubectl exec` lo corta la API con `i/o timeout` (el stream muere
+a los ~70 s; medido el 23-10). Cada trozo es atómico y se reintenta entero. Ningún fichero con datos
+queda en disco; el contenedor se borra con `down`. Después aplica las migraciones con el
+runner real (con `EMBEDDING_DIMENSION=1024`, como el Job `whatsapp-mcp-migrate`)
+y hace una **segunda pasada**, que debe no aplicar nada. Tarda varios minutos
+(`messages` y `message_embeddings` son ~3,6 GB). Son datos de clientes: solo en
+el x86, solo en loopback, y `down` al terminar.
+
+### Sin restos en prod (SKIRM-261, 23-10)
+
+Un stream de `kubectl exec` cortado no mata el `psql` del pod: su backend se
+queda en `ClientWrite` escribiendo a nadie, con el `AccessShareLock` de la tabla
+puesto. El 23-10 quedaron así cinco `COPY` de este script 1 h 45 min sobre
+`messages`; la migración de prod se puso en cola detrás pidiendo su lock y los
+INSERT de la ingesta, detrás de ella, ~20 min. Un backend bloqueado escribiendo
+al cliente no atiende `statement_timeout`, solo la terminación, así que:
+
+- cada sesión de prod del script se llama `qa-schema-sandbox-<pid>`
+  (`application_name`) y lleva `statement_timeout` (`PROD_STATEMENT_TIMEOUT`,
+  120 s) e `idle_in_transaction_session_timeout` de 60 s;
+- el script termina con `pg_terminate_backend` las suyas al salir (`trap`), tras
+  cada trozo que falla y antes de migrar; al empezar, también las de ejecuciones
+  anteriores (`qa-schema-sandbox-%`).
+
+Comprobado: con el `kubectl` local muerto, el backend sigue en `ClientWrite`; la
+limpieza lo termina.
+
+### Medir duración y locks (`QA_SANDBOX_PROFILE=1`)
+
+```bash
+SANDBOX_DATA=1 QA_SANDBOX_PROFILE=1 scripts/qa-schema-sandbox.sh up
+```
+
+El runner informa de cuánto tarda cada migración y, por tabla, de la primera
+migración que toma un lock que bloquea escrituras (y la que toma
+`AccessExclusiveLock`, que bloquea también lecturas), con los milisegundos que
+lo tendría hasta el `COMMIT`. El runner aplica **todo en una transacción**: un
+lock tomado al principio se mantiene hasta el final.
+
 ## Notas
 
 - La producción corre PostgreSQL 17.5 (CNPG `postgres-shared`); el sandbox usa
@@ -87,5 +142,5 @@ migración rota no se arrastra a la siguiente ejecución. Al terminar, `down`.
   `SET transaction_timeout = 0;` (inexistente en 16) y el script lo filtra; por lo
   demás la restauración es compatible. Si alguna vez el volcado de 17 no restaura
   en 16, lanza con `PG_IMAGE=pgvector/pgvector:pg17` (mismo procedimiento).
-- Nunca escribas en la BD de producción: la herramienta solo hace `pg_dump`.
+- Nunca escribas en la BD de producción: la herramienta solo lee (`pg_dump` y `COPY ... TO STDOUT`) y, para no dejar restos, termina sus propias sesiones de lectura.
 - El contenedor es efímero: `down` lo borra todo; no hay estado que conservar.

@@ -368,10 +368,16 @@ test('not indexed: sender-key noise, a status without time, chats and channel po
       { source: 'live', publishEvent: false }
     );
     assert.equal(calls.filter(c => isStatusInsert(c.sql)).length, 0);
-    const posts = calls.filter(c => isMessageInsert(c.sql));
+    const posts = calls.filter(c => /INSERT INTO whatsapp_novedades_messages/.test(c.sql));
     assert.ok(
       posts.some(c => c.params.includes('120363400253693272@newsletter')),
-      'a channel post stays a messages row of its channel conversation'
+      'a channel post is stored with its channel scope'
+    );
+    assert.equal(
+      calls.filter(
+        c => isMessageInsert(c.sql) && c.params.includes('120363400253693272@newsletter')
+      ).length,
+      0
     );
   } finally {
     restore();
@@ -586,7 +592,7 @@ test('channel posts: channels from conversations, posts from messages, names onl
       ['professional:111@newsletter', 'professional:222@newsletter'],
       2,
     ]);
-    assert.match(posts.sql, /ORDER BY m\.wa_timestamp DESC, m\.wa_message_id DESC/);
+    assert.match(posts.sql, /ORDER BY m\.wa_timestamp DESC, m\.wa_message_id COLLATE "C" DESC/);
     assert.equal(list.channels, 2);
     assert.deepEqual(list.posts, [
       {
@@ -620,7 +626,11 @@ test('channel posts: channels from conversations, posts from messages, names onl
       nextCursor: null,
       channels: 0,
     });
-    assert.equal(none.calls.length, 1, 'no channel, no messages query');
+    assert.equal(
+      none.calls.filter(call => /FROM messages m/.test(call.sql)).length,
+      0,
+      'no legacy channel, no messages query'
+    );
   } finally {
     none.restore();
   }
@@ -649,82 +659,27 @@ function holderOf(conversation?: string) {
     isHolderLookup(sql) && conversation ? [{ conversation_id: conversation }] : [];
 }
 
-test('a channel post whose id another channel holds is stored under <channel>:<id>, not dropped', async () => {
-  useAccount('professional');
-  const { calls, restore } = stubPool(holderOf(`professional:${CHANNEL_A}`));
-  try {
-    const { client } = makeClient();
-    const result = await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    assert.equal(
-      calls.find(c => isMessageInsert(c.sql))!.params[0],
-      `professional:${CHANNEL_B}:SAME`
-    );
-    assert.equal(calls.find(c => isKeyInsert(c.sql))!.params[0], `professional:${CHANNEL_B}:SAME`);
-    assert.equal(result.waMessage.waMessageId, `${CHANNEL_B}:SAME`);
-  } finally {
-    restore();
-  }
-});
-
-test('a channel post keeps its bare id when nobody holds it or its own channel does (a replay)', async () => {
-  for (const [account, holder, expected] of [
-    ['professional', undefined, 'professional:SAME'],
-    ['professional', `professional:${CHANNEL_B}`, 'professional:SAME'],
-    ['personal', undefined, 'SAME'],
-    ['personal', CHANNEL_B, 'SAME'],
-  ] as const) {
-    useAccount(account);
-    const { calls, restore } = stubPool(holderOf(holder));
-    try {
-      const { client } = makeClient();
-      await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
-        source: 'live',
-        publishEvent: false,
-      });
-      assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], expected);
-    } finally {
-      restore();
+test('channel posts retain native IDs in the isolated store, regardless of legacy holders', async () => {
+  for (const account of ['personal', 'professional']) {
+    for (const holder of [undefined, `${account}:${CHANNEL_A}`, `${account}:${CHANNEL_B}`]) {
+      useAccount(account);
+      const { calls, restore } = stubPool(holderOf(holder));
+      try {
+        const { client } = makeClient();
+        for (const channel of [CHANNEL_A, CHANNEL_B]) {
+          await priv(client).ingestMessage(channelPost(channel, 'SAME'), {
+            source: 'live', publishEvent: false,
+          });
+        }
+        const posts = calls.filter(c => /INSERT INTO whatsapp_novedades_messages/.test(c.sql));
+        assert.deepEqual(posts.map(c => c.params.slice(0, 3)), [
+          [account, CHANNEL_A, 'SAME'], [account, CHANNEL_B, 'SAME'],
+        ]);
+        assert.equal(calls.filter(c => isMessageInsert(c.sql) || isKeyInsert(c.sql) || isHolderLookup(c.sql)).length, 0);
+      } finally {
+        restore();
+      }
     }
-  }
-});
-
-test('a clash on the personal account composes the id without a prefix; chats pay no lookup', async () => {
-  useAccount('personal');
-  const { calls, restore } = stubPool(holderOf(CHANNEL_A));
-  try {
-    const { client } = makeClient();
-    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], `${CHANNEL_B}:SAME`);
-    calls.length = 0;
-    await priv(client).ingestMessage(channelPost('34600@s.whatsapp.net', 'SAME'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    assert.equal(calls.filter(c => isHolderLookup(c.sql)).length, 0);
-    assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], 'SAME');
-  } finally {
-    restore();
-  }
-});
-
-test('an unreadable holder lookup never stops the ingest: the bare id, as before', async () => {
-  useAccount('professional');
-  const { calls, restore } = stubPool(sql => (isHolderLookup(sql) ? new Error('db down') : []));
-  try {
-    const { client } = makeClient();
-    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    assert.equal(calls.find(c => isMessageInsert(c.sql))!.params[0], 'professional:SAME');
-  } finally {
-    restore();
   }
 });
 
@@ -796,7 +751,6 @@ function statusPost(id: string): WAMessage {
 
 test('a revoke that finds no post is remembered: the post is stored and marked deleted when it arrives', async () => {
   for (const [chat, post] of [
-    [CHANNEL_B, channelPost(CHANNEL_B, 'REV')],
     ['status@broadcast', statusPost('REV')],
   ] as const) {
     useAccount('professional');
@@ -824,8 +778,8 @@ test('a revoke that found its row remembers nothing; a remembered one is used up
   const found = storingPool({ found: true });
   try {
     const { client } = makeClient();
-    await priv(client).handleInboundMutation(revokeOf(CHANNEL_B, 'REV'));
-    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'REV'), {
+    await priv(client).handleInboundMutation(revokeOf('status@broadcast', 'REV'));
+    await priv(client).ingestMessage(statusPost('REV'), {
       source: 'live',
       publishEvent: false,
     });
@@ -837,9 +791,9 @@ test('a revoke that found its row remembers nothing; a remembered one is used up
   const none = storingPool();
   try {
     const { client } = makeClient();
-    await priv(client).handleInboundMutation(revokeOf(CHANNEL_B, 'REV'));
+    await priv(client).handleInboundMutation(revokeOf('status@broadcast', 'REV'));
     for (let times = 0; times < 2; times++) {
-      await priv(client).ingestMessage(channelPost(CHANNEL_B, 'REV'), {
+      await priv(client).ingestMessage(statusPost('REV'), {
         source: 'live',
         publishEvent: false,
       });
@@ -851,56 +805,6 @@ test('a revoke that found its row remembers nothing; a remembered one is used up
     );
   } finally {
     none.restore();
-  }
-});
-
-test('the same id in another channel is not marked; a chat that is neither a channel nor a status remembers nothing', async () => {
-  useAccount('professional');
-  const { calls, restore } = storingPool();
-  try {
-    const { client } = makeClient();
-    await priv(client).handleInboundMutation(revokeOf(CHANNEL_A, 'X'));
-    await priv(client).handleInboundMutation(revokeOf('34600@s.whatsapp.net', 'C1'));
-    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'X'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    await priv(client).ingestMessage(channelPost('34600@s.whatsapp.net', 'C1'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    assert.equal(calls.filter(c => isRevokeUpdate(c.sql)).length, 2, 'only the two revokes');
-    await priv(client).ingestMessage(channelPost(CHANNEL_A, 'X'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    assert.equal(calls.filter(c => isRevokeUpdate(c.sql)).length, 3, 'its own channel is marked');
-  } finally {
-    restore();
-  }
-});
-
-test('channel A holds the bare id: the revoke of channel B finds no row, and B post (composed) is marked, not A', async () => {
-  useAccount('professional');
-  const { calls, restore } = storingPool({ holder: `professional:${CHANNEL_A}` });
-  try {
-    const { client } = makeClient();
-    await priv(client).handleInboundMutation(revokeOf(CHANNEL_B, 'SAME'));
-    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
-      source: 'live',
-      publishEvent: false,
-    });
-    const updates = calls.filter(c => isRevokeUpdate(c.sql));
-    assert.deepEqual(
-      updates.map(c => c.params[0]),
-      [`professional:${CHANNEL_B}:SAME`, `professional:${CHANNEL_B}:SAME`]
-    );
-    assert.equal(
-      calls.find(c => isMessageInsert(c.sql))!.params[0],
-      `professional:${CHANNEL_B}:SAME`
-    );
-  } finally {
-    restore();
   }
 });
 
@@ -928,30 +832,150 @@ test('remembered revokes: used up once, forgotten after 24 h, at most 2000 (the 
   }
 });
 
-test('a channel post under a composed id does not touch the first channel payload; one with its bare id still writes it', async () => {
-  for (const [holder, payloads] of [
-    [`professional:${CHANNEL_A}`, 0],
-    [undefined, 1],
-    [`professional:${CHANNEL_B}`, 1],
-  ] as const) {
-    useAccount('professional');
-    const { calls, restore } = storingPool({ holder });
-    try {
-      const { client } = makeClient();
-      await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
-        source: 'live',
-        publishEvent: false,
-      });
-      assert.equal(calls.filter(c => isPayloadInsert(c.sql)).length, payloads, `holder ${holder}`);
-    } finally {
-      restore();
-    }
+test('isolated channel posts never overwrite a legacy retry payload', async () => {
+  useAccount('professional');
+  const { calls, restore } = storingPool();
+  try {
+    const { client } = makeClient();
+    await priv(client).ingestMessage(channelPost(CHANNEL_B, 'SAME'), {
+      source: 'live', publishEvent: false,
+    });
+    assert.equal(calls.filter(c => isPayloadInsert(c.sql)).length, 0);
+    assert.equal(calls.filter(c => /INSERT INTO whatsapp_novedades_messages/.test(c.sql)).length, 1);
+  } finally {
+    restore();
   }
 });
 
 // ---------------------------------------------------------------------------
 // Publish
 // ---------------------------------------------------------------------------
+
+test('channel feed merges isolated posts and legacy rows, preserving scope and paging equal provider IDs', async () => {
+  useAccount('professional');
+  const { calls, restore } = stubPool((sql, params) => {
+    if (/FROM conversations\s+WHERE account_id/.test(sql))
+      return [{ id: 'professional:111@newsletter' }];
+    if (/FROM messages m\s+JOIN conversations c/.test(sql))
+      return [
+        {
+          wa_message_id: 'professional:OLD',
+          conversation_id: 'professional:111@newsletter',
+          external_id: '111@newsletter',
+          channel_name: 'Legacy',
+          message_type: 'TEXT',
+          content: 'older',
+          wa_timestamp: new Date(NOW_MS - 1000),
+          has_media: false,
+        },
+      ];
+    if (/SELECT DISTINCT channel_jid/.test(sql))
+      return [{ channel_jid: '111@newsletter' }, { channel_jid: '222@newsletter' }];
+    if (/FROM whatsapp_novedades_messages n/.test(sql)) {
+      assert.equal(params[0], 'professional');
+      assert.match(sql, /NOT n\.is_deleted AND n\.superseded_by IS NULL/);
+      return ['222@newsletter', '111@newsletter']
+        .filter(channel => params[2] == null || channel < String(params[4]))
+        .map(channel => ({
+          channel_jid: channel,
+          message_id: 'SAME',
+          message_timestamp_ms: NOW_MS,
+          message_type: 'conversation',
+          message_payload: { conversation: channel, secret: 'never-returned' },
+          channel_name: channel === '222@newsletter' ? 'New' : 'Legacy',
+        }));
+    }
+    return [];
+  });
+  try {
+    const { client } = makeClient();
+    const first = await client.listChannelPosts({ limit: 1 });
+    assert.deepEqual(Object.keys(first).sort(), ['channels', 'nextCursor', 'posts']);
+    assert.equal(first.channels, 2);
+    assert.equal(first.posts[0].channelId, '222@newsletter');
+    assert.equal(first.posts[0].messageId, 'SAME');
+    assert.equal(first.posts[0].messageType, 'TEXT');
+    assert.doesNotMatch(JSON.stringify(first), /never-returned|message_payload/);
+    assert.ok(first.nextCursor);
+    const second = await client.listChannelPosts(
+      parseChannelPostsQuery({ limit: 1, cursor: first.nextCursor })
+    );
+    assert.equal(second.posts[0].channelId, '111@newsletter');
+    assert.equal(second.posts[0].messageId, 'SAME');
+    const source = calls
+      .filter(call => /FROM whatsapp_novedades_messages n/.test(call.sql))
+      .at(-1)!;
+    assert.deepEqual(source.params, ['professional', null, NOW_MS, 'SAME', '222@newsletter', 2]);
+    assert.ok(second.nextCursor);
+  } finally {
+    restore();
+  }
+});
+
+test('channel feed filters authoritative isolated tombstones before limiting legacy rows', async () => {
+  useAccount('professional');
+  const { restore } = stubPool(sql => {
+    if (/FROM conversations\s+WHERE account_id/.test(sql))
+      return [{ id: 'professional:111@newsletter' }];
+    if (/FROM messages m\s+JOIN conversations c/.test(sql)) {
+      assert.match(sql, /NOT EXISTS \(\s+SELECT 1 FROM whatsapp_novedades_messages n/);
+      assert.match(sql, /n\.account = c\.account AND n\.channel_jid = c\.external_id/);
+      assert.match(sql, /regexp_replace\(m\.wa_message_id.* IN/);
+      return [
+        {
+          wa_message_id: 'professional:OLDER',
+          external_id: '111@newsletter',
+          content: 'older visible post',
+          wa_timestamp: new Date(NOW_MS - 1000),
+          message_type: 'TEXT',
+        },
+      ];
+    }
+    return [];
+  });
+  try {
+    const { client } = makeClient();
+    const result = await client.listChannelPosts({ limit: 1 });
+    assert.equal(result.posts[0].messageId, 'OLDER');
+    assert.equal(result.nextCursor, null);
+  } finally {
+    restore();
+  }
+});
+
+test('channel feed falls back to legacy rows when isolated tables are not migrated', async () => {
+  useAccount('professional');
+  const { restore } = stubPool(sql => {
+    if (/FROM conversations\s+WHERE account_id/.test(sql))
+      return [{ id: 'professional:111@newsletter' }];
+    if (/FROM messages m\s+JOIN conversations c/.test(sql)) {
+      if (/NOT EXISTS/.test(sql))
+        return Object.assign(new Error('table missing'), { code: '42P01' });
+      return [
+        {
+          wa_message_id: 'professional:OLD',
+          external_id: '111@newsletter',
+          content: 'legacy',
+          wa_timestamp: new Date(NOW_MS),
+          message_type: 'TEXT',
+          has_media: false,
+        },
+      ];
+    }
+    if (/whatsapp_novedades_messages/.test(sql))
+      return Object.assign(new Error('table missing'), { code: '42P01' });
+    return [];
+  });
+  try {
+    const { client } = makeClient();
+    const result = await client.listChannelPosts({ limit: 5 });
+    assert.equal(result.channels, 1);
+    assert.equal(result.posts[0].text, 'legacy');
+    assert.equal(result.nextCursor, null);
+  } finally {
+    restore();
+  }
+});
 
 async function withImageServer(
   body: Buffer,

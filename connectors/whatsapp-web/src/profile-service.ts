@@ -752,13 +752,18 @@ function photoConfirmation(
   };
 }
 
-export async function setOwnProfilePhoto(
+/**
+ * Writes the picture of ANY jid (own account or group — Baileys points the
+ * `w:profile:picture` IQ at `target` for anyone but us) and confirms it by
+ * picture identity, exactly like the own-profile write.
+ */
+export async function setPhotoForJid(
   provider: OwnProfileProvider,
+  jid: string,
   input: { imageBase64?: unknown; mimeType?: unknown },
   io: ProfileIo = {}
 ): Promise<{ photo: ProfilePhotoOutcome; mimeType: string; bytes: number }> {
   const timeoutMs = io.timeoutMs || PROVIDER_WRITE_TIMEOUT_MS;
-  const jid = requireOwnJid(provider);
   const { bytes, mimeType } = decodeProfilePhoto(input);
   const write = requireMethod(provider, 'updateProfilePicture', 'set the profile photo');
   const before = await readPhotoState(provider, jid);
@@ -776,6 +781,14 @@ export async function setOwnProfilePhoto(
     mimeType,
     bytes: bytes.length,
   };
+}
+
+export async function setOwnProfilePhoto(
+  provider: OwnProfileProvider,
+  input: { imageBase64?: unknown; mimeType?: unknown },
+  io: ProfileIo = {}
+): Promise<{ photo: ProfilePhotoOutcome; mimeType: string; bytes: number }> {
+  return setPhotoForJid(provider, requireOwnJid(provider), input, io);
 }
 
 export async function removeOwnProfilePhoto(

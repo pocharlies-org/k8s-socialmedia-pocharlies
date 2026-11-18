@@ -5,6 +5,7 @@ type Row = Record<string, unknown>;
 function fakeClient(opts: { missingAfter?: number; invalidIndex?: string } = {}) {
   const sql: string[] = [];
   let backfilled = false;
+  const messageBatchSizes = [20, 20, 5];
   const client: BackfillClient = {
     query: jest.fn(async (text: string, params?: unknown[]) => {
       sql.push(text);
@@ -12,10 +13,9 @@ function fakeClient(opts: { missingAfter?: number; invalidIndex?: string } = {})
       if (text.startsWith('SELECT count(*) AS n')) {
         return rows([{ n: backfilled ? (opts.missingAfter ?? 0) : 10 }]);
       }
-      if (text.includes('min(id) AS lo')) return rows([{ lo: 1, hi: 45 }]);
-      if (text.startsWith('UPDATE messages')) {
+      if (text.startsWith('WITH batch AS')) {
         backfilled = true;
-        return { rows: [], rowCount: 20 };
+        return { rows: [], rowCount: messageBatchSizes.shift() ?? 0 };
       }
       if (text.includes('indisvalid')) {
         return rows([{ valid: params?.[0] !== opts.invalidIndex }]);
@@ -37,10 +37,12 @@ describe('multiaccount backfill', () => {
     expect(sql.some(s => /UPDATE|CREATE|merge/.test(s))).toBe(false);
   });
 
-  it('batches messages by id range, builds the indexes, then merges', async () => {
+  it('batches messages without assuming numeric ids, builds indexes, then merges', async () => {
     const { client, sql } = fakeClient();
     await runBackfill(client, run);
-    expect(sql.filter(s => s.startsWith('UPDATE messages'))).toHaveLength(3); // 1..45 by 20
+    expect(sql.filter(s => s.startsWith('WITH batch AS'))).toHaveLength(3);
+    expect(sql.some(s => s.includes('min(id)') || s.includes('m.id >= $1'))).toBe(false);
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining('WITH batch AS'), [20]);
     expect(sql.filter(s => s.includes('CREATE UNIQUE INDEX CONCURRENTLY'))).toHaveLength(3);
     expect(sql[sql.length - 1]).toContain('social_merge_contact_aliases');
   });

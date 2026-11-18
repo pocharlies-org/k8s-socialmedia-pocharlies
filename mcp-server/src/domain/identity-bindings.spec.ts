@@ -8,6 +8,7 @@ import {
   resolveBoundAccount,
   IdentityBindingError,
 } from './identity-bindings';
+import { resetAccountRegistryCache } from './account-registry';
 
 const DANIEL = 'e51253a7-c137-4c6c-9fb9-af9cecd3b147';
 const LEILA = '66ec6f4f-5f2c-44f6-a3db-0dccba6e1748';
@@ -27,8 +28,11 @@ const TABLE = `bindings:
 
 let dir: string;
 let file: string;
+const previousAccountsFile = process.env.SOCIAL_ACCOUNTS_FILE;
 
 beforeEach(() => {
+  delete process.env.SOCIAL_ACCOUNTS_FILE;
+  resetAccountRegistryCache();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'social-bindings-'));
   file = path.join(dir, 'social-identity-bindings.yaml');
   fs.writeFileSync(file, TABLE);
@@ -38,6 +42,9 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
   resetIdentityBindingsCache();
+  if (previousAccountsFile === undefined) delete process.env.SOCIAL_ACCOUNTS_FILE;
+  else process.env.SOCIAL_ACCOUNTS_FILE = previousAccountsFile;
+  resetAccountRegistryCache();
 });
 
 describe('SOCIAL_IDENTITY_BINDING flag', () => {

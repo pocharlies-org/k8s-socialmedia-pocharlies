@@ -1,4 +1,4 @@
-FROM harbor.lan.e-dani.com/cache/library/node:22-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Debian security updates. The release pipeline refuses any image that still
 # carries a fixable HIGH/CRITICAL finding.

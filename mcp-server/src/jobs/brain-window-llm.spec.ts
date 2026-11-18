@@ -19,7 +19,10 @@ const CFG: LlmConfig = {
   maxTokens: 1200,
 };
 
-const WINDOW = { header: '[WhatsApp · chat «Ana» · 2026-03-14 18:02–18:47]', transcript: '18:02 Ana: hola' };
+const WINDOW = {
+  header: '[WhatsApp · chat «Ana» · 2026-03-14 18:02–18:47]',
+  transcript: '18:02 Ana: hola',
+};
 
 const GOOD = {
   summary: 'Ana y Dani cierran el presupuesto de la reforma.',
@@ -34,7 +37,11 @@ const GOOD = {
 
 function llmResponse(content: unknown) {
   return new Response(
-    JSON.stringify({ choices: [{ message: { content: typeof content === 'string' ? content : JSON.stringify(content) } }] }),
+    JSON.stringify({
+      choices: [
+        { message: { content: typeof content === 'string' ? content : JSON.stringify(content) } },
+      ],
+    }),
     { status: 200 }
   );
 }
@@ -43,7 +50,9 @@ describe('extraction schema (ADR 0002 §5)', () => {
   it('accepts the ADR example shape and rejects bad enums', () => {
     expect(EXTRACTION_SCHEMA.safeParse(GOOD).success).toBe(true);
     expect(EXTRACTION_SCHEMA.safeParse({ ...GOOD, sentiment: 'meh' }).success).toBe(false);
-    expect(EXTRACTION_SCHEMA.safeParse({ ...GOOD, entities: [{ name: 'x', type: 'alien' }] }).success).toBe(false);
+    expect(
+      EXTRACTION_SCHEMA.safeParse({ ...GOOD, entities: [{ name: 'x', type: 'alien' }] }).success
+    ).toBe(false);
     expect(EXTRACTION_SCHEMA.safeParse({ ...GOOD, summary: 'x'.repeat(2000) }).success).toBe(false);
   });
 });
@@ -65,7 +74,8 @@ describe('extractWindow', () => {
   });
 
   it('posts JSON-mode params to LiteLLM and returns the validated extraction', async () => {
-    const calls: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
+    const calls: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] =
+      [];
     global.fetch = jest.fn(async (url: string, init: RequestInit) => {
       calls.push({
         url,
@@ -87,7 +97,9 @@ describe('extractWindow', () => {
   });
 
   it('tolerates a markdown-fenced JSON answer', async () => {
-    global.fetch = jest.fn(async () => llmResponse('```json\n' + JSON.stringify(GOOD) + '\n```')) as unknown as typeof fetch;
+    global.fetch = jest.fn(async () =>
+      llmResponse('```json\n' + JSON.stringify(GOOD) + '\n```')
+    ) as unknown as typeof fetch;
     await expect(extractWindow(CFG, WINDOW, null)).resolves.toBeDefined();
   });
 
@@ -99,9 +111,9 @@ describe('extractWindow', () => {
       // No summary: the one miss normalizeExtraction does not paper over.
       return llmResponse({ topics: ['sin resumen'] });
     }) as unknown as typeof fetch;
-    await expect(
-      extractWindow(CFG, WINDOW, null, { sleep: async () => {} })
-    ).rejects.toThrow(/failed after 3 attempts/);
+    await expect(extractWindow(CFG, WINDOW, null, { sleep: async () => {} })).rejects.toThrow(
+      /failed after 3 attempts/
+    );
     expect(n).toBe(3); // retries: 2
   });
 
@@ -111,7 +123,9 @@ describe('extractWindow', () => {
       n++;
       return new Response('no key', { status: 401 });
     }) as unknown as typeof fetch;
-    await expect(extractWindow(CFG, WINDOW, null, { sleep: async () => {} })).rejects.toThrow(/401/);
+    await expect(extractWindow(CFG, WINDOW, null, { sleep: async () => {} })).rejects.toThrow(
+      /401/
+    );
     expect(n).toBe(1);
   });
 
@@ -128,7 +142,9 @@ describe('extractWindow', () => {
   });
 
   it('requires a base url', async () => {
-    await expect(extractWindow({ ...CFG, baseUrl: '' }, WINDOW, null)).rejects.toThrow(/LLM_BASE_URL/);
+    await expect(extractWindow({ ...CFG, baseUrl: '' }, WINDOW, null)).rejects.toThrow(
+      /LLM_BASE_URL/
+    );
   });
 });
 
@@ -167,7 +183,9 @@ describe('concurrency (ADR 0002 §5: exactly 2)', () => {
 
 describe('llmConfigFromEnv', () => {
   it('prefers the dedicated low-priority key and falls back to OPENAI_API_KEY', () => {
-    expect(llmConfigFromEnv({ LLM_API_KEY: 'sk-batch', OPENAI_API_KEY: 'sk-old' }).apiKey).toBe('sk-batch');
+    expect(llmConfigFromEnv({ LLM_API_KEY: 'sk-batch', OPENAI_API_KEY: 'sk-old' }).apiKey).toBe(
+      'sk-batch'
+    );
     expect(llmConfigFromEnv({ OPENAI_API_KEY: 'sk-old' }).apiKey).toBe('sk-old');
     const c = llmConfigFromEnv({ LLM_BASE_URL: 'http://x/v1', LLM_CHAT_MODEL: 'tooling' });
     expect(c.model).toBe('tooling');

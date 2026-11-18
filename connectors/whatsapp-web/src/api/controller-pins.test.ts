@@ -1,11 +1,12 @@
 import '../test-env';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import express from 'express';
 import { createRouter } from './controller';
 import { generateHMACSignature } from './auth';
 
-test('pin history requires HMAC and a string conversationId, independently of sending', async () => {
+test('pin history requires HMAC and strict chat scope, independently of sending', async () => {
   const secret = 'pin-fixture';
   const calls: string[] = [];
   const app = express();
@@ -45,7 +46,8 @@ test('pin history requires HMAC and a string conversationId, independently of se
   };
   try {
     assert.equal((await post({ conversationId: '123@g.us' }, false)).status, 401);
-    for (const conversationId of ['', [], ['123@g.us'], 7, {}]) {
+    for (const conversationId of ['', [], ['123@g.us'], 'status@broadcast', '12@newsletter', 7, {}]) {
+
       assert.equal((await post({ conversationId })).status, 400);
     }
     assert.deepEqual(calls, []);

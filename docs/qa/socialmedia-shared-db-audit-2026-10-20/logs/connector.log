@@ -1,0 +1,1411 @@
+✔ connector access protects pairing and history without giving UI sending privileges (402.685848ms)
+✔ missing configuration fails closed (43.683958ms)
+✔ event results require signed requests, reject malformed scope and remain available without sending (411.467819ms)
+✔ status publishing is authenticated, sending-gated and validated before any send (1184.805055ms)
+✔ media over ten megabytes is rejected without reaching the client (1565.751078ms)
+✔ an uncertain or id-less send is reported honestly and never retried (62.49159ms)
+✔ a direct connector call arrives with a canonical audience and caption within the shared cap (24.830681ms)
+✔ pin history requires HMAC and strict chat scope, independently of sending (560.615551ms)
+✔ authenticated presence stream forwards only its chat and releases its listener (462.880593ms)
+✔ disconnect during the initial presence lookup releases its listener (371.289166ms)
+✔ the profile read is authenticated and preserves the production envelope (359.166251ms)
+WhatsApp profile update blocked code=SENDING_DISABLED account=personal
+WhatsApp profile update blocked code=EMERGENCY_DISABLE_SENDING account=personal
+✔ a blocked sending switch refuses profile writes before the provider (242.650673ms)
+[profile] update name
+✔ profile writes run when sending is enabled and answer with per-field outcomes (84.019765ms)
+✔ invalid profile input becomes a 400 before calling the provider (40.098608ms)
+[profile] photo set
+✔ a missing image library surfaces as 501 instead of a fake photo success (30.330203ms)
+✔ the own photo is served as base64 or as an honest 404 (43.417698ms)
+✔ emergency sending lock blocks forward and delete before provider mutation (550.196907ms)
+✔ parameterized chat mutations validate input and enforce both sending locks (620.202168ms)
+✔ photo lookup timeout returns 504 rather than a false missing-photo 404 (31.358008ms)
+✔ archive snapshot apply requires connector authentication (113.750599ms)
+✔ archive sync shares one request per socket and starts fresh after reconnect (10.449386ms)
+✔ looks up only unnamed archived groups with bounded concurrency and tolerates errors (39.416759ms)
+✔ stops enrichment if the socket changes (5.087806ms)
+✔ archive snapshot scopes updates, resolves aliases and creates missing groups (9.387616ms)
+✔ archive snapshot rolls back on a failed write (1.366662ms)
+✔ updates an existing placeholder group title but keeps a useful title (0.846478ms)
+✔ archive bootstrap requests a read-only snapshot and keeps current archive decisions (8.790601ms)
+✔ archive bootstrap refuses partial snapshots (1.498749ms)
+✔ later archive patch overrides the snapshot state (4.711502ms)
+✔ rejects a snapshot whose decoder skipped records (0.718409ms)
+✔ rejects a snapshot after decoder reports a MAC warning (3.398737ms)
+✔ refuses to persist a snapshot read from a replaced socket (0.81647ms)
+✔ success: returns the audio.py-compatible attachment shape (2.512219ms)
+✔ success without duration: seconds key omitted (never invented) (0.455798ms)
+✔ timeout: emits without attachments while the store keeps running (30.174954ms)
+✔ timeout + late store REJECTION never becomes an unhandled rejection (60.06554ms)
+✔ store failure (rejects in time): undefined, logged, no throw (3.338172ms)
+✔ store resolves null (empty download): undefined (0.428653ms)
+✔ presign unavailable (null): undefined, logged (6.889307ms)
+✔ presign throwing: undefined, logged, no throw (8.402564ms)
+✔ provider blocklist keeps direct contacts and drops every unusable entry (13.687679ms)
+✔ a blocklist that is not a list is refused instead of reported as empty (1.124287ms)
+✔ reading the blocklist asks the provider once and never touches a contact (0.568769ms)
+✔ the blocked list refuses a disconnected provider (0.869413ms)
+✔ GET /contacts/blocklist is authenticated, account-scoped and read-only (226.438258ms)
+✔ an address the list shows is the same address the block read confirms (2.195927ms)
+✔ a cleared address leaves the list that the browser reloads (1.583742ms)
+✔ hydrated business template keeps visible title/body/footer/buttons and quoted variants (22.261024ms)
+✔ buttons and native-flow messages preserve visible labels, never arbitrary routing values (10.054959ms)
+✔ list body and choices use labels; replies use displayed selection text only (19.593995ms)
+✔ missing labels, malformed/oversized JSON and HSM identifiers never masquerade as body (13.26687ms)
+✔ client projects original business type with text and distinguishes real provider placeholders (41.670637ms)
+✔ forward uses the durable original WAMessage after an in-memory restart (45.500655ms)
+✔ markAsRead sends every unread key returned for the chat (12.879653ms)
+✔ delete for me uses the durable key and only persists after provider ack (13.304206ms)
+✔ start chat validates recipient and persists an empty conversation without sending or saving contact (12.857515ms)
+✔ group capabilities follow the account participant admin role and restrict setting (12.933755ms)
+✔ group info and participants reject direct JIDs before querying Baileys (7.606991ms)
+✔ group info survives an optional photo lookup failure without claiming the photo is absent (5.361061ms)
+✔ profile picture provider timeout stays distinct from private or missing photos (5.092377ms)
+[22:08:59.780] [32mINFO[39m (1898701): [36mForwarded old to 34699@s.whatsapp.net id=new[39m
+✔ profile picture lookup deadline also bounds token preparation before Baileys IQ (8055.957481ms)
+✔ patched Baileys nests timestamped tc token inside the picture query (15.72316ms)
+✔ profile picture stream stops above 10 MB and reports download failure (539.790394ms)
+✔ photo CDN network failure is not misreported as a missing private photo (34.107748ms)
+✔ presence read remains unknown when provider has not emitted state (64.201388ms)
+✔ provider calls strip the connector account prefix before building a WhatsApp jid (25.255536ms)
+✔ disappearing mode reads the Baileys USync duration field (12.102043ms)
+✔ received capability metadata is structured without raw provider payloads (51.127213ms)
+✔ control-only WhatsApp envelopes do not become empty chat bubbles (6.343575ms)
+✔ media replies preserve the quoted message ID (28.11714ms)
+✔ normalizes Baileys pinned timestamps and explicit unpin deltas (4.556671ms)
+✔ pin snapshot writes only the connector account and protects newer state (12.576788ms)
+(node:1899516) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ chat modifications use the Baileys lastMessages contract (17.390078ms)
+✔ action spellings normalise; star is not a chat action (1.37889ms)
+✔ pin / mute of Baileys chat objects: sync actions vs snapshots (0.774983ms)
+✔ archive after a restart takes lastMessages from the durable keys and goes to the key’s jid (14.478858ms)
+✔ the durable payload key wins (group message of a contact keeps its participant) (10.04513ms)
+✔ each action writes its own columns on the canonical row (68.82271ms)
+✔ markRead sends the read receipts, then the app-state mark, and clears the badge (16.176626ms)
+✔ a tombstone with no row of its own resolves through social_contact_aliases (33.269355ms)
+✔ an unknown conversation is 404 conversation_unavailable; archive without a message is 404 message_unavailable (2.634996ms)
+✔ a WhatsApp refusal of the patch is 422 rejected_by_whatsapp and writes nothing (17.265411ms)
+✔ with ingest off nothing is read or written (the pairing pool) (11.923432ms)
+✔ without migration 012: pin reaches WhatsApp unrecorded, archive still records, re-probe waits (106.76836ms)
+✔ chats.update from the phone: pin / mute on the canonical row, marked-unread keeps a badge (26.991055ms)
+[22:09:02.733] [32mINFO[39m (1899516): [36mChat archive 111@lid[39m
+✔ history / chats.upsert snapshots record only the pins and mutes they carry (395.785541ms)
+✔ ingest off binds no chat handlers at all (2.317094ms)
+✔ HTTP: the sending gate blocks every chat action before WhatsApp (654.220024ms)
+✔ HTTP: 200 shape, mute parameters and the actor (65.809812ms)
+[22:09:02.903] [32mINFO[39m (1899516): [36mChat pin 111@lid (not recorded)[39m
+[22:09:02.903] [32mINFO[39m (1899516): [36mChat unpin 111@lid (not recorded)[39m
+[22:09:03.004] [32mINFO[39m (1899516): [36mChat archive 111@lid[39m
+[22:09:02.768] [32mINFO[39m (1899516): [36mChat unpin 111@lid[39m
+[22:09:02.779] [32mINFO[39m (1899516): [36mChat mute 111@lid[39m
+✔ HTTP: 400 on bad input, 503 when disconnected, errors mapped with failureClass (573.704835ms)
+[22:09:02.808] [32mINFO[39m (1899516): [36mChat unmute 111@lid[39m
+[22:09:02.756] [32mINFO[39m (1899516): [36mChat unarchive 111@lid[39m
+[22:09:02.815] [32mINFO[39m (1899516): [36mChat markUnread 111@lid[39m
+[22:09:02.760] [32mINFO[39m (1899516): [36mChat pin 111@lid[39m
+[22:09:02.792] [32mINFO[39m (1899516): [36mChat mute 111@lid[39m
+[22:09:02.744] [32mINFO[39m (1899516): [36mChat markUnread 120363000@g.us[39m
+[22:09:02.897] [32mINFO[39m (1899516): [36mChat mute 34600@s.whatsapp.net (not recorded)[39m
+[22:09:02.840] [32mINFO[39m (1899516): [36mChat pin 111@lid[39m
+[22:09:02.832] [32mINFO[39m (1899516): [36mChat markRead 111@lid[39m
+(node:1899683) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ community inputs: jids (account prefix stripped), link | unlink, never itself; leave needs confirm (5.619556ms)
+✔ channel inputs: jid, its digits, a share link (with or without https) or the bare code (1.956337ms)
+✔ channel view: rc13's raw WMex answer, only public fields (no picture handles) (1.457522ms)
+✔ community view: announcement group apart, every linked group (joined or not), fallback to joined ones (1.806198ms)
+✔ one write per key at a time; other keys do not wait (1.986218ms)
+✔ list: communities from the group parser, their groups from <sub_groups>, a parent reached via a group (90.403978ms)
+✔ state: a group of a community → 422 not_a_community with its community; not a member → 403 (26.688787ms)
+✔ create: the new community; a null answer is found by reading back, never created twice (122.416523ms)
+✔ link: community admin and group admin, ordinary group, read back; already linked sends nothing (214.420749ms)
+✔ link: WhatsApp 403 → not_community_admin; a lost answer that landed is success; one that did not → 409 (124.584662ms)
+✔ unlink: by the group or, outside it, by the community list; never the announcement group (95.790988ms)
+✔ leave: members only, proven by the participating groups; an ignored leave → 409 (225.640896ms)
+✔ a community in the group routes stays 422 community_unsupported, pointing to the community routes (132.052142ms)
+✔ offline: every community and channel call refuses before touching WhatsApp (3.869001ms)
+✔ lookup: by jid or invite; none → 404 channel_unavailable; a GraphQL refusal keeps its meaning (161.882107ms)
+✔ subscription: follow / unfollow / mute / unmute proven by the viewer metadata; equal state sends nothing (205.511758ms)
+✔ subscription: a lost answer that landed is success, one that did not → 409; refusals are 422 (99.076787ms)
+✔ subscription: two concurrent follows of one channel write once (15.993943ms)
+✔ followed list: known chats, ingested channel conversations and this process, each confirmed (267.468351ms)
+[22:09:03.008] [33mWARN[39m (1899683): [36mlinked groups of 120363000000000100@g.us unavailable: timeout[39m
+[22:09:03.232] [32mINFO[39m (1899683): [36mCommunity 120363000000000100@g.us link 120363000000000104@g.us by dani[39m
+[22:09:03.236] [32mINFO[39m (1899683): [36mCommunity 120363000000000100@g.us link 120363000000000104@g.us (already)[39m
+[22:09:04.495] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter follow[39m
+[22:09:03.102] [32mINFO[39m (1899683): [36mCommunity created 120363000000000200@g.us[39m
+[22:09:03.671] [32mINFO[39m (1899683): [36mCommunity 120363000000000100@g.us unlink 120363000000000102@g.us[39m
+[22:09:03.671] [32mINFO[39m (1899683): [36mCommunity 120363000000000100@g.us unlink 120363000000000103@g.us[39m
+[22:09:03.672] [32mINFO[39m (1899683): [36mCommunity 120363000000000100@g.us unlink 120363000000000103@g.us (already)[39m
+[22:09:04.864] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter follow[39m
+[22:09:03.053] [32mINFO[39m (1899683): [36mCommunity created 120363000000000200@g.us by dani[39m
+[22:09:04.347] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter follow by dani[39m
+[22:09:04.416] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter mute[39m
+[22:09:04.417] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter mute (already)[39m
+[22:09:04.417] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter unmute[39m
+[22:09:04.481] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter unfollow[39m
+[22:09:04.481] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter unfollow (already)[39m
+[22:09:03.752] [33mWARN[39m (1899683): [36mlinked groups of 120363000000000100@g.us unavailable: timeout[39m
+[22:09:03.418] [32mINFO[39m (1899683): [36mCommunity 120363000000000100@g.us link 120363000000000104@g.us[39m
+[22:09:04.596] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter follow[39m
+[22:09:03.820] [32mINFO[39m (1899683): [36mLeft community 120363000000000100@g.us by dani[39m
+[22:09:04.596] [32mINFO[39m (1899683): [36mChannel 120363400000000002@newsletter follow (already)[39m
+✔ HTTP: 400s first, then the sending gate on the four writes; reads are not gated (3670.060305ms)
+✔ HTTP: answers with the actor recorded; 503 offline; unsigned 401 (245.957385ms)
+[22:09:04.640] [33mWARN[39m (1899683): [36mchannel 120363499999999999@newsletter unreadable: WhatsApp has no channel 120363499999999999@newsletter[39m
+✔ HTTP: client errors keep their status, failureClass and details (242.899169ms)
+✔ provider spellings: devices dropped, @c.us → @s.whatsapp.net, LID kept, junk and groups out (23.801172ms)
+✔ block input: one target (phone | conversationId), block|unblock, confirm: true, groups refused (13.670783ms)
+✔ block then unblock: confirmed by re-reading the blocklist, idempotent across PN / LID (8.575194ms)
+✔ every spelling the provider stores is read back and unblocked as the same contact (28.050331ms)
+✔ a contact blocked under both identities is fully unblocked (LID first), then confirmed (2.746977ms)
+✔ an unblock the provider did not carry out is 409 block_not_confirmed, never "done" (3.597912ms)
+✔ Baileys cannot map PN ↔ LID → 422 identity_unresolved; other refusals 422 rejected_by_whatsapp (9.52555ms)
+✔ an unusable blocklist answer is 502 on the read and on the write (3.955568ms)
+✔ cache: fresh within its TTL, patched by blocklist.update, an add on an unknown list ignored (6.400339ms)
+✔ grouping: PN and LID of one person are one entry, whatever order they come in (0.969406ms)
+✔ client: a merged phone conversation blocks its canonical LID; a phone resolves through the alias (44.30416ms)
+✔ client: a group conversation is 400; a pairing client (ingest off) never touches the DB (46.994391ms)
+✔ client: the list collapses PN + LID per person, names it, and serves the cache until it expires (23.019276ms)
+✔ client: a disconnected socket refuses the list and the change (16.064279ms)
+✔ HTTP: 400s (confirm included) first, then the sending gate; the list is not gated (2605.900105ms)
+✔ HTTP: block answers the confirmed state with the actor recorded; 503 offline; unsigned 401 (365.870083ms)
+[22:09:06.448] [32mINFO[39m (1899690): [36mContact 111@lid block by dani[39m
+[22:09:06.449] [32mINFO[39m (1899690): [36mContact 111@lid unblock[39m
+✔ HTTP: provider outcomes keep their status and failureClass (79.561916ms)
+✔ credentialSessionKeyFromEnv: flag off or key unset → null (legacy path) (1.882786ms)
+✔ credentialSessionKeyFromEnv: sub and sub:account accepted, traversal rejected (1.122124ms)
+✔ sessionPathForSub indexes the session dir by sub (0.300929ms)
+credential-store: no whatsapp row for sub-1 yet — fresh pairing expected
+credential-store: loaded whatsapp session for sub-2 (1 auth files)
+✔ loadCredentialSession: no row → fresh; row → applied into the auth dir (46.740258ms)
+✔ write-back: saveCreds bursts coalesce into serialized puts of the auth dir (8.285589ms)
+✔ write-back: a put scheduled mid-flight runs a trailing put (last saveCreds lands) (13.513519ms)
+✔ write-back: store failures log and never throw into the socket handler (5.605323ms)
+✔ write-back: empty auth dir still round-trips through serialize (fresh pairing dir) (6.808833ms)
+✔ attachCredentialSession (default = SC-705 main.ts path): load, every saveCreds put, loggedOut deletes (15.341409ms)
+✔ attachCredentialSession writeAfterFirstOpen: nothing is written before the first connection open (9.520392ms)
+✔ professional: new-conversation ingest uses consistent namespaced ids across all FK tables (56.342345ms)
+✔ personal: ids stay bare (no prefix) and remain mutually consistent (0.720973ms)
+✔ accountKey is idempotent and never double-prefixes (1.224925ms)
+✔ PN aliases resolve only to one LID in the connector account (2.986761ms)
+✔ name writers preserve useful contact/group names over JID placeholders (2.646952ms)
+✔ push fallback name writer is explicitly non-authoritative (0.741485ms)
+✔ linkParticipantToConversation surfaces FK failures with full context (3.528498ms)
+✔ withVoiceTranscriptionMetadata marks AUDIO/PTT pending, leaves others alone (0.541586ms)
+✔ storeMessage persists pending transcription metadata for voice rows only (1.942325ms)
+✔ regression: an expired tctoken (aged out of the 4 weekly buckets) still sends text (28.625412ms)
+✔ regression: a record Baileys emptied (only senderTimestamp left, as Dani 01-10) sends (502.26814ms)
+✔ no tctoken record at all but an INBOUND message in the DB: sends, looked up by LID and PN (267.072786ms)
+✔ a fresh tctoken sends without touching the DB (16.514802ms)
+✔ a failed canonical phone lookup preserves the raw recipient and direct-send guard (21.368718ms)
+✔ never contacted (no record, no inbound, no salt): text refused before reaching WhatsApp (139.402811ms)
+(node:1899856) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a failed history lookup counts as no history: a stranger stays refused (70.407547ms)
+✔ with ingest off (pairing pool) only the tctoken store counts (24.528696ms)
+✔ WA_DIRECT_PRIVACY_PREFLIGHT=false skips the guard (99.179156ms)
+✔ poll: same policy as text — known contact sends, first contact refused (30.124386ms)
+✔ event: same policy as text — known contact sends, first contact refused (24.520876ms)
+✔ contact card: same policy as text — known contact sends, first contact refused (84.853398ms)
+✔ voice: same policy as text — known contact sends, first contact refused (3.660977ms)
+✔ forward: same policy as text — known contact sends, first contact refused (257.054248ms)
+✔ file and sticker/GIF: a first contact is refused before the file is fetched (53.585063ms)
+✔ groups never go through the 1:1 guard (2.015359ms)
+✔ hasInboundHistory: canonical conversation of the PN or LID, merged twins included (1.090745ms)
+✔ hasInboundHistory: no conversation for the number is false, without a messages query (0.326018ms)
+[22:09:03.932] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=174869610295503@lid normalizedJid=174869610295503@lid type=direct[39m
+[22:09:03.933] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+[22:09:03.934] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=174869610295503@lid normalizedJid=174869610295503@lid elapsedMs=6 id=M1[39m
+[22:09:03.942] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=174869610295503@lid normalizedJid=174869610295503@lid type=direct[39m
+[22:09:03.942] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+[22:09:03.943] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=174869610295503@lid normalizedJid=174869610295503@lid elapsedMs=1 id=M1[39m
+[22:09:04.422] [33mWARN[39m (1899856): [36msend conversation lookup failed for 34659695630@c.us: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:04.422] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us type=direct[39m
+[22:09:04.422] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us[39m
+[22:09:04.422] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us elapsedMs=479 id=M2[39m
+✔ POST /messages/forward and /messages/media/send: a refused first contact is 403 account_restricted (1331.421693ms)
+[22:09:04.735] [33mWARN[39m (1899856): [36msend conversation lookup failed for 34659695630@s.whatsapp.net: fixture database unavailable[39m
+[22:09:04.721] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=174869610295503@lid normalizedJid=174869610295503@lid type=direct[39m
+[22:09:04.723] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=174869610295503@lid normalizedJid=174869610295503@lid elapsedMs=2 id=M1[39m
+[22:09:04.736] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us type=direct[39m
+[22:09:04.736] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us elapsedMs=5 id=M1[39m
+[22:09:04.884] [33mWARN[39m (1899856): [36msend conversation lookup failed for 34610729350@c.us: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:04.884] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=34610729350@s.whatsapp.net normalizedJid=34610729350@c.us type=direct[39m
+[22:09:04.447] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=174869610295503@lid normalizedJid=174869610295503@lid type=direct[39m
+[22:09:04.487] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=inbound_history rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+[22:09:04.487] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=174869610295503@lid normalizedJid=174869610295503@lid elapsedMs=40 id=M1[39m
+[22:09:04.634] [33mWARN[39m (1899856): [36msend conversation lookup failed for 34659695630@s.whatsapp.net: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:04.634] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us type=direct[39m
+[22:09:04.634] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=inbound_history rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us[39m
+[22:09:04.634] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=34659695630@s.whatsapp.net normalizedJid=34659695630@c.us elapsedMs=147 id=M2[39m
+[22:09:04.740] [33mWARN[39m (1899856): [36msend conversation lookup failed for 34610729350@c.us: fixture database unavailable[39m
+[22:09:04.740] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=34610729350@s.whatsapp.net normalizedJid=34610729350@c.us type=direct[39m
+[22:09:05.079] [33mWARN[39m (1899856): [36msend conversation lookup failed for 34610729350@c.us: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:05.079] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=34610729350@s.whatsapp.net normalizedJid=34610729350@c.us type=direct[39m
+[22:09:05.079] [32mINFO[39m (1899856): [36mWhatsApp message sent rawJid=34610729350@s.whatsapp.net normalizedJid=34610729350@c.us elapsedMs=92 id=M1[39m
+[22:09:05.132] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+[22:09:05.451] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+[22:09:05.535] [33mWARN[39m (1899856): [36mRecipient snapshot unavailable: sock.groupMetadata is not a function[39m
+[22:09:05.221] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+[22:09:04.971] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=174869610295503@lid normalizedJid=174869610295503@lid type=direct[39m
+[22:09:05.451] [32mINFO[39m (1899856): [36mForwarded ORIG to 174869610295503@lid id=M1[39m
+[22:09:05.193] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+[22:09:05.217] [32mINFO[39m (1899856): [36mContact card M1 (1) sent to 174869610295503@lid[39m
+[22:09:04.947] [33mWARN[39m (1899856): [36msend conversation lookup failed for 34610729350@c.us: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:04.948] [32mINFO[39m (1899856): [36mSending WhatsApp message rawJid=34610729350@s.whatsapp.net normalizedJid=34610729350@c.us type=direct[39m
+[22:09:04.948] [33mWARN[39m (1899856): [36mWhatsApp direct send: inbound history lookup failed rawJid=34610729350@s.whatsapp.net: connection refused[39m
+[22:09:05.107] [32mINFO[39m (1899856): [36mWhatsApp direct send to a known contact without a fresh trusted-contact token evidence=token_record rawJid=174869610295503@lid normalizedJid=174869610295503@lid[39m
+✔ close event arriving after disconnect() does not schedule a reconnect (13.112365ms)
+✔ scheduleReconnect, reconnectNow and the watchdog are inert after disconnect() (3.233868ms)
+✔ a later real connect() re-arms reconnection (renewQR / new start keep working) (25.410901ms)
+durable payload for BIG skipped: 519 bytes over cap
+durable payload lookup failed for missing: connection reset
+✔ durable table bootstrap holds one transaction advisory lock on a dedicated client (3.91998ms)
+✔ payload partial indexes key on the C collation and reuse the read predicates (0.641008ms)
+✔ raw chat storage ignores Novedades IDs that may collide with chat messages (0.904271ms)
+✔ raw WAMessage persistence is account-scoped and durable (20.112944ms)
+✔ PN echo payload indexes under its verified LID while preserving the provider key (1.209342ms)
+✔ message mutations persist edit and delete flags without claiming delivery (0.729468ms)
+✔ read keys select every unread inbound message for one account and chat (2.203269ms)
+✔ chat state and contacts retain account isolation (2.137573ms)
+✔ raw message lookup returns undefined when no durable row exists (2.876364ms)
+✔ raw message lookup uses the same normalized, account-scoped chat key it stores (1.832913ms)
+✔ read-key lookup normalizes a native Baileys user jid to the stored chat id (0.536938ms)
+✔ reactions use an account-scoped target and explicit removal state (0.410671ms)
+✔ reactions record the author side and never invent one on re-ingest (0.693817ms)
+✔ RSVP ciphertext pages bind account, event and canonical chat with an explicit continuation (3.082104ms)
+✔ first RSVP page omits the keyset bound and still scans only matching payloads (0.607332ms)
+✔ RSVP ciphertext empty pages terminate and invalid limits do not silently truncate (1.496785ms)
+✔ media payload round-trips Buffers, 64-bit ints and enums through JSONB (7.743997ms)
+✔ thumbnails, nested thumbnails and Signal key material are stripped; media refs kept (2.690968ms)
+✔ large inline blobs go unless their object carries a mediaKey (3.11993ms)
+✔ protocol messages (key shares, revokes) are never stored (0.333489ms)
+✔ BufferJSON helpers accept both the text and the parsed JSONB value (0.371246ms)
+✔ unixSeconds reads number, string and Long timestamps (0.231391ms)
+✔ history sync is stored only inside DURABLE_PAYLOAD_HISTORY_DAYS (default 7) (0.702626ms)
+✔ an old history-sync message issues no INSERT; a recent one does (1.17687ms)
+✔ professional payload rows use the namespaced ids messages uses (1.138831ms)
+✔ personal payload rows keep bare ids (1.38076ms)
+✔ a payload over DURABLE_PAYLOAD_MAX_BYTES is skipped (1.534089ms)
+✔ lookup is account-scoped, accepts a namespaced id and revives the message (1.377737ms)
+✔ lookup returns undefined when no durable row exists or the DB errors (1.475839ms)
+✔ missing table (42P01): logged once, no throw, later calls skip the DB (0.952984ms)
+✔ the table is re-probed after the back-off, so no restart is needed once 009 lands (1.345237ms)
+✔ timestamp shape probe supports the legacy, fresh-migration, and expanded NAS tables (3.233071ms)
+✔ expanded-table reads return the old NAS millisecond timestamp after migration backfill (2.391015ms)
+✔ poll scans fall back to migration timestamp without corrupting the order clause (1.43022ms)
+(node:1900048) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ forward sends a real { forward: WAMessage } built from the durable original (180.090235ms)
+✔ forward prefers the in-memory original (no DB read) (5.958494ms)
+✔ forward of an unknown original is a 404 MessageUnavailableError and sends nothing (6.301954ms)
+✔ text reply quotes the durable original (restart-proof) with the target chat jid (14.025753ms)
+✔ text reply whose quote is unknown still sends, unquoted (unchanged behaviour) (12.28198ms)
+✔ media reply whose quote is unknown is a 422, rejected before the file is fetched (47.836754ms)
+✔ media reply with a durable quote sends quoted and stores the sent payload (462.977528ms)
+✔ getMessage retry uses the durable copy when memory is cold (243.485876ms)
+✔ ingest stores live payloads and only recent history payloads (146.819015ms)
+✔ with ingest off nothing is written or read from whatsapp_message_payloads (89.876187ms)
+✔ markAsRead sends receipts for every unread key and records them as read (74.38149ms)
+✔ markAsRead with nothing pending falls back to the latest message key (2.502444ms)
+✔ POST /messages/forward: 200 with the new messageId, 404 when the original is unknown (321.936233ms)
+✔ POST /messages/media/send maps an unknown quoted message to 422 (20.3173ms)
+[22:09:08.110] [32mINFO[39m (1900048): [36mForwarded MEM to 34611@s.whatsapp.net id=SENT1[39m
+[22:09:09.010] [32mINFO[39m (1900048): [36mStored message LIVE from 34600@c.us[39m
+[22:09:09.043] [32mINFO[39m (1900048): [36mStored message OLD from 34600@c.us[39m
+[22:09:09.044] [32mINFO[39m (1900048): [36mStored message RECENT from 34600@c.us[39m
+[22:09:08.095] [32mINFO[39m (1900048): [36mForwarded ORIG to 34611@s.whatsapp.net id=SENT1[39m
+[22:09:08.139] [32mINFO[39m (1900048): [36mSending WhatsApp message rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us type=direct[39m
+[22:09:08.139] [32mINFO[39m (1900048): [36mWhatsApp message sent rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us elapsedMs=0 id=SENT1[39m
+[22:09:09.358] [32mINFO[39m (1900048): [36mSending WhatsApp message rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us type=direct[39m
+[22:09:08.125] [32mINFO[39m (1900048): [36mSending WhatsApp message rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us type=direct[39m
+[22:09:08.129] [32mINFO[39m (1900048): [36mWhatsApp message sent rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us elapsedMs=7 id=SENT1[39m
+[22:09:09.358] [32mINFO[39m (1900048): [36mWhatsApp message sent rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us elapsedMs=0 id=SENT2[39m
+[22:09:09.358] [33mWARN[39m (1900048): [36mWhatsApp retry requested but message content is unavailable remoteJid=34600@s.whatsapp.net messageId=ORIG[39m
+[22:09:08.654] [31mERROR[39m (1900048): [36mMEDIA_PERSIST_PENDING provider_message_id=SENT1 error=Error[39m
+✔ E2E: socket drops, a message arrives during the outage, the reconnect backfill ingests it as baileys_history_sync (5093.570608ms)
+✔ E2E: a reconnect flap inside the 60s cooldown asks for history once, never twice (107.986807ms)
+[22:09:07.827] [32mINFO[39m (1900081): [36mSubscribed to presence for 0 active chats[39m
+[22:09:07.851] [32mINFO[39m (1900081): [36mresyncAppState (connection-open)[39m
+[22:09:07.851] [33mWARN[39m (1900081): [36mresyncAppState failed: this.sock.resyncAppState is not a function[39m
+[22:09:07.858] [33mWARN[39m (1900081): [36mArchive snapshot sync failed: socket.query is not a function[39m
+[22:09:07.858] [32mINFO[39m (1900081): [36mreconnect backfill requested=50 chats=1[39m
+[22:09:07.858] [33mWARN[39m (1900081): [36mWhatsApp socket closed: flap[39m
+[22:09:07.858] [33mWARN[39m (1900081): [36mScheduling WhatsApp reconnect in 5000ms (flap)[39m
+[22:09:07.858] [32mINFO[39m (1900081): [36mWhatsApp marked connected via connection.update open[39m
+[22:09:07.858] [32mINFO[39m (1900081): [36mSubscribed to presence for 0 active chats[39m
+[22:09:07.858] [32mINFO[39m (1900081): [36mresyncAppState (connection-open)[39m
+[22:09:07.898] [33mWARN[39m (1900081): [36mresyncAppState failed: this.sock.resyncAppState is not a function[39m
+[22:09:07.900] [33mWARN[39m (1900081): [36mArchive snapshot sync failed: socket.query is not a function[39m
+[22:09:07.900] [32mINFO[39m (1900081): [36mreconnect backfill requested=50 chats=1[39m
+✔ withEditedText: text, extended text (context kept), captions, wrappers; nothing to change → undefined (3.369942ms)
+✔ forward of an edited message sends its current text (durable copy is the original) (17.187338ms)
+✔ forward from the in-memory copy (an edited caption) uses the current text too (3.930722ms)
+✔ never edited, or the row unreadable: the stored copy goes as it is (9.0634ms)
+✔ a reply quotes the current text of an edited message (7.495984ms)
+✔ ingest off (the pairing pool): no messages row is read (2.915664ms)
+[22:09:06.800] [33mWARN[39m (1900550): [36mcurrent text of ORIG unreadable, using its stored copy: connection terminated[39m
+[22:09:06.801] [32mINFO[39m (1900550): [36mForwarded ORIG to 34611@s.whatsapp.net id=SENT1[39m
+[22:09:06.806] [32mINFO[39m (1900550): [36mSending WhatsApp message rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us type=direct[39m
+[22:09:06.808] [32mINFO[39m (1900550): [36mWhatsApp message sent rawJid=34600@s.whatsapp.net normalizedJid=34600@c.us elapsedMs=4 id=SENT1[39m
+[22:09:06.797] [32mINFO[39m (1900550): [36mForwarded ORIG to 34611@s.whatsapp.net id=SENT1[39m
+[22:09:06.785] [32mINFO[39m (1900550): [36mForwarded ORIG to 34611@s.whatsapp.net id=SENT1[39m
+[22:09:06.791] [32mINFO[39m (1900550): [36mForwarded ORIG to 34611@s.whatsapp.net id=SENT1[39m
+[22:09:06.811] [32mINFO[39m (1900550): [36mForwarded ORIG to 34611@s.whatsapp.net id=SENT1[39m
+✔ RSVP relays only after claiming and remains accepted if local persistence fails (85.812088ms)
+✔ incoming RSVP is stored as ciphertext without appearing as a chat message or changing its preview (48.618609ms)
+✔ unresolvable own or creator identity raises a typed 409 before the send token is claimed (224.080766ms)
+✔ RSVP resolves LID identities to phone numbers before encrypting the response (23.521212ms)
+[22:09:07.549] [32mINFO[39m (1900755): [36mEvent response reply for event skipped: event unknown[39m
+✔ rc13 runtime and protobuf persisted responses normalize to the same attendance (75.410702ms)
+✔ own response uses own account identity, and LID never becomes a phone (25.602069ms)
+✔ invalid enums, missing timestamps, unsafe integers and negative guests are not votes (0.483763ms)
+✔ out of order updates, duplicate delivery and attendance withdrawal yield one latest answer per responder (2.241372ms)
+✔ equal timestamps have deterministic ordering and non-going responses never count guests (7.657413ms)
+✔ encrypted RSVP round-trips with the installed rc13 decryptor and binds responder identity (88.155937ms)
+✔ RSVP refuses unresolved identities and missing secrets before constructing a send (2.995195ms)
+✔ RSVP rejects unknown attendance strings including inherited object properties (0.88328ms)
+✔ captured encrypted replies resolve LIDs and isolate the event and conversation (31.485111ms)
+✔ captured own RSVP uses the connector account identity and supports ephemeral envelopes (27.414044ms)
+✔ results traverse all pages and latest attendance wins across page boundaries (7.393762ms)
+✔ missing creation, key or identity are explicitly unavailable without querying replies (0.61784ms)
+✔ a failed or repeating page rejects instead of presenting incomplete counts as a finished read (1.234006ms)
+✔ concurrent event replies claim once and replay a completed response without relay (3.124564ms)
+✔ pending or conflicting tokens never call the sender (1.765071ms)
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+✔ after claiming, transport or confirmation failures remain uncertain and cannot be replayed automatically (86.852305ms)
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+✔ invalid attendance or guests fails before reservation, and preparation failure does not claim (12.648681ms)
+﹣ LIVE: 100 warm + 20 cold events across a real NATS pod deletion — published vs received (13.980907ms) # set INFRA290_LIVE=1 (plus INFRA290_NATS_URL and INFRA290_FAULT_CMD) to run against prod NATS
+✔ retainer: entry cap evicts the oldest events (FIFO) (3.052829ms)
+✔ retainer: items older than the declared window expire (0.546904ms)
+✔ retainer: the same event id is never queued twice (0.361297ms)
+✔ retainer: a failed drain requeues without duplicating ids (0.492485ms)
+[22:09:11.147] [33mWARN[39m (1903521): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:11.148] [33mWARN[39m (1903521): [36mScheduling NATS reconnect in 50ms[39m
+[22:09:11.148] [33mWARN[39m (1903521): [36mNATS not connected, event retained for republication[39m
+    pending: 1
+[22:09:11.199] [33mWARN[39m (1903521): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:11.199] [33mWARN[39m (1903521): [36mScheduling NATS reconnect in 100ms[39m
+[22:09:11.352] [32mINFO[39m (1903521): [36mConnected to NATS[39m
+[22:09:11.357] [32mINFO[39m (1903521): [36mRetained events republished[39m
+    republished: 54
+    pending: 0
+✔ publisher: 100 events at a constant rate survive a NATS outage with zero loss and zero duplicates (435.800317ms)
+[22:09:11.532] [32mINFO[39m (1903521): [36mNATS connection closed[39m
+[22:09:11.532] [32mINFO[39m (1903521): [36mDisconnected from NATS[39m
+✔ publisher: events published while connected go straight out and are not retained (85.628253ms)
+✔ publisher: subject and payload format are untouched by the retention path (114.439738ms)
+[22:09:11.587] [32mINFO[39m (1903521): [36mConnected to NATS[39m
+[22:09:11.615] [32mINFO[39m (1903521): [36mNATS connection closed[39m
+[22:09:11.618] [32mINFO[39m (1903521): [36mDisconnected from NATS[39m
+[22:09:11.627] [33mWARN[39m (1903521): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:11.627] [33mWARN[39m (1903521): [36mScheduling NATS reconnect in 50ms[39m
+[22:09:11.627] [33mWARN[39m (1903521): [36mNATS not connected, event retained for republication[39m
+    pending: 1
+[22:09:11.727] [32mINFO[39m (1903521): [36mConnected to NATS[39m
+[22:09:11.728] [32mINFO[39m (1903521): [36mRetained events republished[39m
+    republished: 1
+    pending: 0
+[22:09:11.733] [32mINFO[39m (1903521): [36mNATS connection closed[39m
+[22:09:11.733] [32mINFO[39m (1903521): [36mDisconnected from NATS[39m
+✔ publisher: a warm connection that is killed retains and republishes (status watcher) (305.366713ms)
+[22:09:11.785] [32mINFO[39m (1903521): [36mConnected to NATS[39m
+[22:09:11.810] [33mWARN[39m (1903521): [36mNATS transport disconnected, retaining events until it returns[39m
+[22:09:11.827] [33mWARN[39m (1903521): [36mNATS not connected, event retained for republication[39m
+    pending: 1
+[22:09:12.019] [32mINFO[39m (1903521): [36mNATS reconnected[39m
+[22:09:12.020] [32mINFO[39m (1903521): [36mRetained events republished[39m
+    republished: 40
+    pending: 0
+[22:09:12.035] [32mINFO[39m (1903521): [36mNATS connection closed[39m
+[22:09:12.035] [32mINFO[39m (1903521): [36mDisconnected from NATS[39m
+✔ publisher: MessageUpdated and ChatUpdated are retained too (115.844018ms)
+✔ publisher: a clean shutdown does not republish and clears the retainer (4.616357ms)
+[22:09:12.046] [33mWARN[39m (1903521): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:12.046] [33mWARN[39m (1903521): [36mScheduling NATS reconnect in 50ms[39m
+[22:09:12.046] [33mWARN[39m (1903521): [36mNATS not connected, event retained for republication[39m
+    pending: 1
+[22:09:12.144] [32mINFO[39m (1903521): [36mConnected to NATS[39m
+[22:09:12.145] [32mINFO[39m (1903521): [36mRetained events republished[39m
+    republished: 2
+    pending: 0
+[22:09:12.155] [32mINFO[39m (1903521): [36mNATS connection closed[39m
+[22:09:12.156] [32mINFO[39m (1903521): [36mDisconnected from NATS[39m
+[22:09:12.160] [33mWARN[39m (1903521): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:12.160] [33mWARN[39m (1903521): [36mScheduling NATS reconnect in 50ms[39m
+[22:09:12.161] [33mWARN[39m (1903521): [36mNATS not connected, event retained for republication[39m
+    pending: 1
+✔ failed initial connect schedules a reconnect (regression: connecting guard swallowed the retry) (26.23374ms)
+✔ scheduled retry actually re-attempts the connection (86.577567ms)
+[22:09:11.230] [33mWARN[39m (1903649): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:11.232] [33mWARN[39m (1903649): [36mScheduling NATS reconnect in 50ms[39m
+[22:09:11.243] [33mWARN[39m (1903649): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:11.243] [33mWARN[39m (1903649): [36mScheduling NATS reconnect in 50ms[39m
+[22:09:11.298] [33mWARN[39m (1903649): [36mNATS unavailable, retaining events until it returns: NatsError: CONNECTION_REFUSED[39m
+[22:09:11.298] [33mWARN[39m (1903649): [36mScheduling NATS reconnect in 100ms[39m
+✔ rejects raw GIF uploads with an HTTP failure before calling Baileys (104.188376ms)
+✔ sends transcoded MP4 as a GIF playback payload (2.872788ms)
+✔ add_request of a 403 answer; invite inputs: text and participant caps are 400 (21.022381ms)
+✔ add: a 403 is reported in inviteRequired (the private code kept, never returned) (26.000984ms)
+✔ add: all refused → 422 whose details carry inviteRequired; other actions have none (10.179898ms)
+✔ invite: admins only; a member already in is reported, not messaged; link code fetched once (50.275144ms)
+✔ invite: to the canonical chat with its timer; a failed send is reported; none sent → 422 (51.591529ms)
+[22:09:13.061] [33mWARN[39m (1903701): [36mInvite to 120363000000000001@g.us for 34655555555@s.whatsapp.net failed: socket closed[39m
+[22:09:13.061] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us invites=2 sent=1[39m
+[22:09:13.062] [33mWARN[39m (1903701): [36mInvite to 120363000000000001@g.us for 34655555555@s.whatsapp.net failed: socket closed[39m
+[22:09:13.062] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us invites=1 sent=0[39m
+[22:09:12.957] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us add participants=1 done=0[39m
+✔ HTTP /groups/invite: 400 first, then the sending gate (403), offline 503, 200 shape, errors (1625.977163ms)
+[22:09:13.065] [33mWARN[39m (1903701): [36minvite link of 120363000000000001@g.us unavailable: WhatsApp rejected the invite link of 120363000000000001@g.us: forbidden[39m
+[22:09:13.066] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us invites=1 sent=0[39m
+[22:09:12.963] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us promote participants=1 done=1[39m
+[22:09:12.945] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us add participants=2 done=1[39m
+[22:09:12.950] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us invites=1 sent=1 by dani[39m
+[22:09:12.953] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us invites=1 sent=1[39m
+[22:09:13.013] [32mINFO[39m (1903701): [36mGroup 120363000000000001@g.us invites=3 sent=2[39m
+(node:1903713) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ participants: phone numbers and PN / LID jids become Baileys jids; the rest is refused (3.929426ms)
+✔ group jids: only …@g.us, the account prefix stripped, a direct chat refused (0.572592ms)
+✔ updates: subject 1–100, description ≤ 2048 ("" removes it), settings booleans, something asked (0.690296ms)
+✔ WhatsApp per-participant codes read as reasons (0.286028ms)
+✔ group capabilities follow the account participant admin role and restrict setting (7.502737ms)
+✔ group state: our row found by LID or PN, participants with phone / lid, fresh metadata (5.816764ms)
+✔ group routes reject direct JIDs before querying Baileys (10.112029ms)
+✔ create: phones go as PN jids, each person reported, the conversation row namespaced + account_id (7.467262ms)
+✔ create: our own number is refused before WhatsApp; a PN answered as an unknown LID resolves by mapping (5.815033ms)
+✔ create with ingest off (the pairing pool) goes to WhatsApp and writes nothing (3.710621ms)
+✔ a WhatsApp refusal of the create is 422 rejected_by_whatsapp with its code; a timeout stays a timeout (5.300226ms)
+✔ update: not admin of a restricted group → 403 not_group_admin, nothing sent (3.669682ms)
+✔ update: a member may edit info of an unrestricted group but not its settings; not a member → 403 (32.119509ms)
+✔ update as admin: only what changes goes out, the subject lands on the canonical row (10.189132ms)
+✔ update: a failure after an earlier change says what was already applied (and records it) (18.091747ms)
+✔ metadata refusals: 403 = not a member, 404 = no such group (21.637897ms)
+✔ participants: partial results reported per person, never a pretended success (16.198802ms)
+✔ participants: nobody done → 422 with the results; answers under other ids pair in order (63.824851ms)
+✔ participants: admin role checked per action; our own row refused; superadmin answers reported (58.637795ms)
+✔ disconnected: group calls fail before WhatsApp (55.442284ms)
+✔ groups.upsert records the new group; groups.update a new subject on the canonical row (160.534762ms)
+✔ a failing group persist never throws out of the handler (65.475763ms)
+✔ participantsIncludeOwn: our PN (any device) or LID, as a jid or a participant object (0.844789ms)
+✔ added by someone to an existing group: fresh metadata, conversation row active as of now (84.173881ms)
+✔ someone else added, or us removed / promoted: no metadata fetch, no row (37.087066ms)
+✔ joined group: metadata refused still records the row; a DB failure never escapes (374.059675ms)
+✔ ingest off binds no group handlers at all (the pairing pool never writes) (31.574469ms)
+[22:09:12.626] [32mINFO[39m (1903713): [36mGroup created 120363000000000001@g.us participants=2 added=1 by dani[39m
+[22:09:12.808] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us add participants=1 done=0[39m
+[22:09:12.822] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us add participants=1 done=1[39m
+[22:09:12.866] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us demote participants=2 done=1[39m
+✔ HTTP: the sending gate blocks create / update / participants before WhatsApp (not the read) (753.066763ms)
+[22:09:13.178] [32mINFO[39m (1903713): [36mAdded to group 120363000000000001@g.us (conversation leila:120363000000000001@g.us)[39m
+[22:09:13.209] [32mINFO[39m (1903713): [36mAdded to group 120363000000000001@g.us (conversation leila:120363000000000001@g.us)[39m
+✔ HTTP: 200 shapes carry the ids from the signed body and the actor (226.099229ms)
+[22:09:12.744] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us add participants=4 done=1 by dani[39m
+[22:09:12.631] [32mINFO[39m (1903713): [36mGroup created 120363000000000001@g.us participants=1 added=1[39m
+[22:09:12.650] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us updated changed=subject[39m
+✔ HTTP: 400 on bad input before the gate, direct jids refused, 503 when disconnected (376.341832ms)
+✔ HTTP: unsigned or tampered bodies are 401 before anything runs (49.146955ms)
+✔ HTTP: group errors map to status + failureClass with their details (136.198895ms)
+✔ HTTP: the existing group reads are untouched (87.854905ms)
+[22:09:12.636] [32mINFO[39m (1903713): [36mGroup created 120363000000000001@g.us participants=1 added=1[39m
+[22:09:12.636] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us updated changed=subject[39m
+[22:09:12.687] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us updated changed=subject,announce by dani[39m
+[22:09:12.688] [32mINFO[39m (1903713): [36mGroup 120363000000000001@g.us updated changed=description[39m
+[22:09:13.308] [33mWARN[39m (1903713): [36mmetadata of joined group 120363000000000001@g.us unavailable: boom 403[39m
+[22:09:13.309] [32mINFO[39m (1903713): [36mAdded to group 120363000000000001@g.us (conversation leila:120363000000000001@g.us)[39m
+[22:09:13.437] [33mWARN[39m (1903713): [36mjoined group 120363000000000001@g.us not recorded: db down[39m
+(node:1903844) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ empty chat without a real provider key reports no_anchor and makes no request (57.244671ms)
+✔ empty chat recovers a real message carried in a chat snapshot and requests older history in milliseconds (7.937594ms)
+✔ persisted placeholders request the exact provider key and scope history to the current account (11.614936ms)
+✔ recovery restores a locally captured payload instead of asking the phone to resend it (18.337221ms)
+✔ concurrent recovery calls share a single phone request (7.386595ms)
+✔ captured genuine placeholder remains eligible for provider resend instead of false recovery (22.624392ms)
+✔ empty legacy business row reprojects its local payload without placeholder resend (45.700658ms)
+✔ foreign namespaces and disconnected sockets cannot trigger recovery (3.302926ms)
+✔ a failed request can be retried rather than entering the cooldown (4.345596ms)
+✔ encrypted and undecryptable payloads stay honest placeholders; pure control messages create no bubble (4.523631ms)
+✔ view-once image/video/audio wrappers retain the marker and their actual media kind (8.981893ms)
+✔ an encrypted/control replay cannot overwrite an already captured durable payload (1.297885ms)
+✔ view-once history captures available media before publishing the message (5.406715ms)
+✔ message recovery upsert only fills incomplete content and keeps deleted/edit flags and attachments (7.51321ms)
+✔ capability delete-for-me remains hidden while keeping the saved message and media (2.971417ms)
+✔ history recovery HTTP requires authentication and a chat, and returns the actual result (387.060598ms)
+[22:09:15.868] [32mINFO[39m (1903844): [36mStored message REAL from 123@lid[39m
+✔ pnJidToE164 derives +E164 from a phone-number jid (incl. device suffix) (3875.287978ms)
+✔ pnJidToE164 returns undefined for non-PN / non-numeric jids (never invents a number) (0.456779ms)
+✔ pnFromLidMessage extracts PN from key.remoteJidAlt (Baileys 7.x, 1:1 LID chat) (1.527913ms)
+✔ pnFromLidMessage extracts PN from key.participantAlt (group LID sender) (0.511007ms)
+✔ pnFromLidMessage extracts PN from key.senderPn / msg.senderPn (6.17.x variants) (0.56038ms)
+✔ pnFromLidMessage returns undefined for a LID chat with NO phone attached (0.41935ms)
+✔ pnFromLidMessage ignores an alt that is itself a LID (not a phone) (0.382148ms)
+✔ pnFromLidMessage returns undefined for a normal @s.whatsapp.net / @c.us chat (0.385984ms)
+✔ lidFromPnMessage accepts only a direct PN with Baileys LID alternate (0.948802ms)
+✔ contact identity keeps address-book name separate from push name and aliases (1.258045ms)
+✔ history contacts persist an emoji saved name for LID and PN aliases within one account (10.397163ms)
+✔ saved contact names outrank push names while later saved names replace them (0.373857ms)
+✔ conversation-name selection never uses a participant name as a group title (0.434112ms)
+✔ contact name priority survives push-only updates and allows saved renames (7.475729ms)
+✔ saved contact rename persists before chat hydration (3.918935ms)
+✔ LID + senderPn: storeMessage persists metadata.senderPnE164 (consumer key) (1.398608ms)
+✔ LID without senderPn: storeMessage omits the senderPnE164 key entirely (no fabrication) (0.577691ms)
+✔ normal @c.us message: storeMessage carries no senderPnE164 (unchanged behaviour) (0.453119ms)
+✔ professional setConversationWaChatId namespaces both the WHERE id and the stored value (1.915669ms)
+✔ personal setConversationWaChatId keeps both id and value bare (0.725616ms)
+✔ backfill frees only the matching PN alias before assigning its LID in one transaction (1.030458ms)
+✔ backfill leaves another account or unrelated owner untouched (1.233541ms)
+✔ LID ingest waits for alias backfill before durable payload and message writes (16.035074ms)
+✔ setConversationWaChatId is a no-op on empty inputs (never issues a query) (0.424592ms)
+✔ group sender PN never replaces a group conversation JID (0.466462ms)
+✔ ogg audio is the native voice note: ptt true, codecs=opus mimetype (14.862825ms)
+✔ other audio keeps the audio-message form and its own mimetype (0.326031ms)
+✔ no caption key: WhatsApp AudioMessage has no caption and baileys drops it (0.346523ms)
+✔ attachment lookup scopes both provider ID and UUID to WhatsApp and connector account (3547.321544ms)
+✔ newsletter media uses the isolated account/channel row and keeps the legacy response (10.044084ms)
+✔ deleted, hidden and superseded newsletter media never falls back to a legacy copy (8.27882ms)
+✔ newsletter legacy fallback scopes identical provider IDs to the requested channel (3.185603ms)
+[22:09:17.166] [33mWARN[39m (1904206): [36mdownloadMedia: no stored attachment for same-wa-ig-message[39m
+[22:09:17.192] [33mWARN[39m (1904206): [36mdownloadMedia: no stored attachment for same[39m
+[22:09:17.192] [33mWARN[39m (1904206): [36mdownloadMedia: no stored attachment for same[39m
+✔ committed media refreshes its account without invalidating the upload (hintFails=false) (4.520984ms)
+✔ committed media refreshes its account without invalidating the upload (hintFails=true) (0.908667ms)
+✔ an existing video attachment gains provider duration without redownloading (4.713984ms)
+✔ channel media persists original payload outside chats and keeps receipt on store failure (14.18422ms)
+✔ sent status keeps captured owner identity when connection changes during send (0.942577ms)
+✔ data uploads preserve a safe document filename and provider receipt (3.957371ms)
+✔ image send forwards caption and preserves provider receipt after storage failure (3.562566ms)
+✔ document and video sends persist the correct media type before receipt (2.490942ms)
+✔ missing quoted media is rejected before WhatsApp send (1.188769ms)
+✔ media reservation is claimed immediately before provider send with its stable ID (1.726138ms)
+✔ media persistence lock serializes competing echo and local writes (14.883196ms)
+✔ quality changes the bytes actually sent, preserves alpha and source, and never upscales (314.747443ms)
+✔ expanded alpha WebP exceeding the inline limit fails before token claim or provider send (11184.892383ms)
+✔ view-once travels in the Baileys payload for image and video only (3.611295ms)
+✔ view-once is refused for sticker, GIF, audio and document before the socket (4.131804ms)
+✔ view-once accepts only the proxy-aligned MIME set before the socket (11.965327ms)
+✔ media upload uses ASCII headers for "qa-ascii.jpg" (17.697811ms)
+✔ media upload uses ASCII headers for "qa-prueba-á.jpg" (1.974896ms)
+✔ media upload uses ASCII headers for "qa-📷.jpg" (0.816028ms)
+✔ media without a filename or MIME type uploads without optional metadata (0.859399ms)
+✔ edit of our text message sends { text, edit: key } and keeps the old text in edit_history (19.70188ms)
+✔ edit refuses someone else’s message, a non-text message and a deleted one (nothing sent) (13.238654ms)
+(node:1905043) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ an edit WhatsApp rejects (error ack) surfaces as 422 rejected_by_whatsapp and writes nothing (25.579218ms)
+✔ delete for everyone revokes with the stored key and flags the row, keeping its content (10.203188ms)
+✔ delete for everyone of a contact’s 1:1 message is refused; in a group it goes out as admin revoke (16.360978ms)
+✔ delete for me after a restart uses the durable key + timestamp and only persists after the provider ack (42.928651ms)
+✔ delete for me prefers the durable payload timestamp and key (50.308543ms)
+✔ edit / delete / delete-for-me of an unknown message are a 404 message_unavailable and send nothing (5.634023ms)
+✔ with ingest off nothing is read or written, even when the action goes out from memory (17.141005ms)
+✔ an inbound edit replaces the text, keeps the old one in edit_history and publishes EDITED (67.210747ms)
+✔ a replayed inbound edit (row already has that text) is not published again (5.514857ms)
+✔ an inbound revoke flags the row (content kept) and publishes DELETED once (6.526695ms)
+✔ the echo of our own edit/revoke is left to the explicit call (no second write or event) (9.93839ms)
+✔ a delete-for-me synced from our phone sets the flag; a whole-chat clear is ignored (24.1357ms)
+✔ HTTP: with ENABLE_SENDING off, edit / delete / delete-for-me are 403 and never reach WhatsApp (304.205269ms)
+✔ HTTP: the emergency sending lock blocks forward and every delete before any provider call (239.302835ms)
+✔ HTTP: 200 shapes of edit, delete for everyone, delete for me and the legacy DELETE (105.8494ms)
+✔ HTTP: 400 on missing fields, 503 when disconnected, 404 / 422 mapped with failureClass (119.742223ms)
+[22:09:18.477] [32mINFO[39m (1905043): [36mEdited M1 in 34600@s.whatsapp.net[39m
+[22:09:18.528] [32mINFO[39m (1905043): [36mDeleted M1 for everyone in 34600@s.whatsapp.net[39m
+[22:09:18.754] [32mINFO[39m (1905043): [36mEdited M1 in 34600@s.whatsapp.net[39m
+[22:09:18.754] [32mINFO[39m (1905043): [36mDeleted M1 for everyone in 34600@s.whatsapp.net[39m
+[22:09:18.541] [32mINFO[39m (1905043): [36mDeleted M1 for everyone in 120363@g.us[39m
+[22:09:18.641] [32mINFO[39m (1905043): [36mDeleted M1 for me in 34600@s.whatsapp.net[39m
+[22:09:18.671] [32mINFO[39m (1905043): [36mEdited MEM in 34600@s.whatsapp.net[39m
+[22:09:18.671] [32mINFO[39m (1905043): [36mDeleted MEM for everyone in 34600@s.whatsapp.net[39m
+[22:09:18.590] [32mINFO[39m (1905043): [36mDeleted M1 for me in 34600@lid[39m
+reaction store failed for T: connection reset
+(node:1905169) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ reactions use an account-scoped target and explicit removal state (4.283197ms)
+✔ reactions record the author side and never invent one on re-ingest (0.644842ms)
+✔ an older replayed reaction never overwrites a newer one (0.674746ms)
+✔ incomplete input and DB errors never throw (1.677203ms)
+✔ an inbound reaction is still ingested as a REACTION message AND recorded (18.640632ms)
+✔ a REACTION stores no whatsapp_message_keys row (its messages row never exists); a text does (10.141071ms)
+✔ history sync: reactions carried on a 1:1 message land like live ones (ours and theirs) (13.873132ms)
+✔ history sync in a group: the participant reacts; no participant → skipped; empty = removal (13.42144ms)
+✔ history sync with ingest off: carried reactions are never written (17.249878ms)
+✔ a reaction from our phone is ours; a removal from a group LID participant is a removal (14.944526ms)
+✔ with the table missing the REACTION message is still ingested; logged once, re-probed later (19.290886ms)
+✔ with ingest off (pairing pool) a reaction is never written (35.457918ms)
+✔ react after a restart uses the stored key and records our reaction (20.158037ms)
+✔ react prefers the durable payload key (group message of a contact keeps its participant) (11.436315ms)
+✔ react to an unknown message is a 404 message_unavailable and sends nothing (20.658266ms)
+✔ with the table missing a reaction still goes out (4.740072ms)
+✔ HTTP: ENABLE_SENDING off or the emergency lock → 403 disabled_sending, never reaches WhatsApp (778.813295ms)
+✔ HTTP: 200 keeps the old shape (+ reactionId); empty or null emoji removes (217.158377ms)
+✔ HTTP: 400 invalid, 503 disconnected, 404 message_unavailable with failureClass (240.203501ms)
+[22:09:20.743] [32mINFO[39m (1905169): [36mReacted with ❤️ to M1[39m
+[22:09:20.781] [32mINFO[39m (1905169): [36mReacted with 👍 to M1[39m
+[22:09:20.755] [32mINFO[39m (1905169): [36mReacted with (removed) to G1[39m
+[22:09:20.723] [32mINFO[39m (1905169): [36mReacted with 👍 to MEM[39m
+✔ receipt timestamps support rc13 seconds and history Long, reject invented values (10.584706ms)
+✔ PN/LID and replay receipts merge once with earliest evidence and monotonic fields (3.563499ms)
+✔ send captures real membership before transport and excludes owner aliases; historical read never queries groups (60.065309ms)
+✔ snapshot database latency cannot time out an accepted group transport (13.410572ms)
+✔ message info is authenticated read access, independent of connection and sending gate (638.614009ms)
+whatsapp_message_stars / whatsapp_message_pins do not exist yet (mcp-server migration 018 not applied): stars and pins go to WhatsApp but are not recorded
+(node:1905187) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ the star patch goes to regular_high and names the author of someone else’s group message (3.149139ms)
+✔ request bodies: star / pin / starred list validated, pins default to 7 days (1.820231ms)
+✔ a pin action: target, time, duration; an unpin; unknown types and durations are not applied (0.961919ms)
+✔ star after a restart: key from the stored row, the patch goes out, recorded once (echo skipped) (12.008334ms)
+✔ star refusals: unknown message 404, group author unknown 404, WhatsApp 4xx 422; nothing recorded (6.146533ms)
+✔ pin in a 1:1 chat: {pin: key, type, time} with our id, recorded at its own time, echo skipped (21.738697ms)
+✔ unpin: type UNPIN_FOR_ALL, no time; an Idempotency-Key id and its claim are used (4.048751ms)
+✔ pin in a group: members may, admins only when its info is admin-only; non-members never (54.238599ms)
+✔ a pin from someone in a group is recorded, no messages row; one we cannot apply only kept raw (46.303087ms)
+✔ stars from our phone (messages.update) replace the state; a history star only fills the unknown (58.997612ms)
+✔ with ingest off (pairing pool) stars and pins never touch the DB (8.358689ms)
+✔ pins of a chat: canonical conversation + its external ids, active only, newest 3 (17.466632ms)
+✔ starred list: account-wide or one chat, keyset cursor; tables missing = empty, persisted false (36.408579ms)
+[22:09:20.579] [32mINFO[39m (1905187): [36mPinned M1 in 34600@s.whatsapp.net for 2592000s by mcp[39m
+[22:09:20.550] [32mINFO[39m (1905187): [36mStarred M1 in 34600@s.whatsapp.net[39m
+✔ HTTP: star / pin are gated (403) after validation; the lists are not (700.699573ms)
+[22:09:20.612] [32mINFO[39m (1905187): [36mUnpinned G1 in 120363000@g.us[39m
+[22:09:20.598] [32mINFO[39m (1905187): [36mPinned G1 in 120363000@g.us for 86400s[39m
+[22:09:20.687] [33mWARN[39m (1905187): [36mPin action PIN1 not applied: unknown type or duration[39m
+[22:09:20.583] [32mINFO[39m (1905187): [36mUnpinned M1 in 34600@s.whatsapp.net[39m
+✔ HTTP: 200 shapes with ids from the signed body; 400s; 503 disconnected; errors mapped (725.200932ms)
+✔ star is disabled unless WA_STAR_ENABLED=true: refused before touching WhatsApp (4.471686ms)
+✔ lookup accepts only a bare newsletter JID or a WhatsApp channel link (5.00236ms)
+✔ rc13 nested metadata projects only public fields and maps the viewer role (1.003609ms)
+✔ guest viewers are unsubscribed and unknown roles stay unknown (0.513733ms)
+✔ incomplete provider metadata is rejected instead of guessed (0.739559ms)
+✔ the follow read-back decides confirmed, unchanged and uncertain only from viewer role (0.544773ms)
+✔ subscription errors distinguish an uncertain provider answer from a refusal (0.357196ms)
+✔ lookup of a JID rejects metadata for a different channel instead of returning it (2.1129ms)
+✔ a pre-read naming another channel never reaches the socket with a write (1.24253ms)
+✔ a post-write read failure stays uncertain with exactly one write and no retry (2.840761ms)
+✔ post-write metadata that is malformed or names another channel is uncertain (4.429983ms)
+✔ two concurrent follows of one channel produce exactly one provider write (3.212899ms)
+✔ the per-channel lock does not hold a different channel behind it (2.139123ms)
+✔ the socket is resolved per call, so a reconnect is not pinned to a dead handle (0.963165ms)
+✔ a session without a live socket answers 503 instead of a stale write (1.054445ms)
+✔ BaileysClient hands out only the newsletter port, never the socket (1092.33641ms)
+✔ installed group parser reads real parent, subgroup and announcement wire nodes (6.915215ms)
+✔ listing includes only explicit communities and exposes safe metadata (1.270949ms)
+✔ ordinary group without linkedParent is not accepted as community (0.616436ms)
+✔ invalid JIDs and action payloads fail before mutations (1.502344ms)
+✔ create supports omitted description but rejects null provider result (1.718912ms)
+✔ non-admin cannot edit or link but member may leave (4.182704ms)
+✔ link rejects foreign parent, announcements and non-admin group (1.225353ms)
+✔ unlink requires matching parent and forwards provider failures (1.051833ms)
+✔ detail rejects partial linked-group response instead of showing empty list (0.607432ms)
+✔ detail projects linked groups without provider owner or participant data (2.645711ms)
+✔ failed post-write metadata refresh reports uncertain result and does not repeat write (0.949676ms)
+✔ instance account identity resolves PN and LID without shared state (0.678409ms)
+✔ provider acknowledgement without applied link is not success (3.931752ms)
+✔ leave acknowledgement with unchanged membership is not success (0.682072ms)
+✔ confirmed link and subject changes call the verified provider signatures (2.854649ms)
+✔ all community routes require HMAC and never reach provider anonymously (106.765937ms)
+✔ community mutations respect enable and emergency gates (106.815371ms)
+✔ community input and provider errors preserve honest HTTP error contract (22.303304ms)
+✔ channel lookup resolves only the supplied newsletter JID or WhatsApp invite link (39.834389ms)
+✔ following and unfollowing are gated, state-verified, and idempotent (57.436844ms)
+✔ a subscription without provider read-back confirmation is reported uncertain once (26.349282ms)
+✔ the channel routes use only the public newsletter port of the client (9.631011ms)
+✔ a client build without the newsletter port answers 501 instead of guessing (8.786099ms)
+✔ two concurrent subscription requests for one channel write to WhatsApp once (17.590103ms)
+✔ ordinary hearts stay in chats; channels and statuses are intercepted (4.292423ms)
+✔ own statuses use a fallback author while retaining the exact provider key (0.566083ms)
+✔ status without a timestamp is not revived as a fresh update (1.398768ms)
+✔ channel revoke targets only its own channel and never the outer event ID (0.650063ms)
+✔ Novedades acknowledgement/deletion events do not update ordinary messages with the same ID (0.752939ms)
+✔ a persistence failure cannot fall through to generic ingestion (0.562244ms)
+✔ stub-only channel events retain their key and metadata without pretending to be a post (0.914943ms)
+✔ status revoke stubs are routed to soft deletion even without a content payload (0.560554ms)
+✔ a tied-timestamp status page still advances: 200 identical stamps at limit 50 (17.688977ms)
+✔ a tied-timestamp post page still advances: 120 identical stamps at limit 50 (6.709196ms)
+✔ statuses without a posting timestamp form a reachable tail, not a hole (7.5175ms)
+✔ channel paging advances across duplicated names (2.596218ms)
+✔ no field outside the whitelist reaches the JSON view (3.243865ms)
+✔ channel roles decide `subscribed` and unknown roles stay unknown (0.919741ms)
+✔ the account is recognized from a device JID including its realm (14.030438ms)
+✔ two statuses in the same second stay distinguishable when ids arrive reversed (2.703185ms)
+✔ an injected store without the identity columns reads as null instead of crashing (1.800494ms)
+✔ author summaries declare what the store cannot know (1.767854ms)
+✔ avatar hosts are matched dot-bounded so look-alikes fail (0.827504ms)
+✔ cursors are opaque, scoped, and refused when tampered with (5.832154ms)
+✔ input validation fails before the store is asked (2.840433ms)
+✔ listing pages report the real window instead of hiding a truncation (9.553412ms)
+✔ an exactly-full final page reports no next page (0.687997ms)
+✔ post pages carry the stored channel as an object, or null when unknown (0.680954ms)
+✔ media reads exactly one row and never scans a listing (1.139083ms)
+✔ media says honestly when it cannot deliver instead of inventing bytes (17.87009ms)
+✔ avatar bytes come from the stored reference only, with the size cap applied (18.088949ms)
+✔ the reader only ever calls reads and leaves stored rows untouched (2.06782ms)
+✔ errors become a bounded envelope with the code the caller can act on (0.986694ms)
+✔ Range parsing covers single, suffix, open and rejected ranges (2.946463ms)
+✔ connector uses rc13 fileLength number/Long and refuses disconnected media before fetch (20.194552ms)
+✔ avatar redirects validate the next host before fetching and cap actual bytes (81.413125ms)
+✔ connector decrypts rc13 media fixtures and rejects actual bytes beyond a false declared length (203.483139ms)
+✔ stream download accepts the exact cap and destroys on actual byte overflow (3.554092ms)
+✔ stream deadline destroys an active stream and a stream returned after expiry (34.797428ms)
+✔ stream provider errors clean up without returning partial bytes (5.071756ms)
+✔ every Novedades read route requires HMAC before touching the store (114.535774ms)
+✔ the live wiring reports media as unwired until the connector can download (40.343095ms)
+✔ list routes return the documented success envelope (55.96519ms)
+✔ media answers JSON by default and binary with ranges on request (52.128445ms)
+✔ a connector that cannot download answers 501 instead of an empty body (15.740827ms)
+✔ a disconnected session reports 503 and never calls the downloader (9.326264ms)
+✔ text status relays the exact audience and text style to the socket once (5.678912ms)
+✔ image and video statuses send decoded bytes with caption and matching MIME only (1.115527ms)
+✔ invalid status input is rejected before the socket is touched (4.89294ms)
+✔ a send without a provider id is uncertain, never retried and never persisted (0.817387ms)
+✔ a persistence failure keeps the provider receipt and logs it as pending (2.792336ms)
+✔ device-suffixed and repeated recipients reach the socket as canonical bare user JIDs (3.288959ms)
+✔ media captions honor the same 1024 character cap as the app composer (8.897579ms)
+✔ bootstrap holds one advisory-locked transaction and only creates Novedades tables (6.598458ms)
+✔ bootstrap columns keep visibility, soft-delete and honest freshness (8.055652ms)
+✔ novedadesKind routes channel, status and null without heuristics (0.45107ms)
+✔ identity resolution honors rc13 key.server_id and identityKind (1.339648ms)
+✔ store rejects non-channel JIDs, mismatched keys and blank ids before any query (3.309733ms)
+✔ channel posts store raw ids with the account in its own column and visible classification (1.575ms)
+✔ key.server_id becomes canonical id while key.id is kept as client_id (5.178881ms)
+✔ identityKind client stores the id under client_id until reconciled (0.644864ms)
+✔ redelivery merges keys and never loses from_me/visibility on payload-less ACKs (11.922459ms)
+✔ status upsert protects richer stored key and invented freshness stays impossible (19.515847ms)
+✔ status without its timestamp is refused, or stored as freshness-unknown on request (1.179671ms)
+✔ own status author fallback requires fromMe and never mutates the stored key (0.976276ms)
+✔ visibility classification: whitelist visible, three event kinds, unknown never visible (1.646058ms)
+✔ store converts a server-id collision into an in-place live refresh (1.260068ms)
+✔ store reports an honest identity conflict when no live row can absorb the id (0.705918ms)
+✔ a client id confirmed by the server collapses the duplicate atomically (2.787225ms)
+✔ a mid-flight claim collision is retried once and never escapes as a raw 23505 (2.444949ms)
+✔ reads scope to account+channel, live rows and visible content by default (0.983563ms)
+✔ getNovedadesMessage resolves any known id and revives nothing physically (1.830974ms)
+✔ channel revokes soft-delete or insert an honest tombstone but never delete (1.208913ms)
+✔ status deletion hides, tombstones unknown status ids, and never deletes rows (1.921186ms)
+✔ status reads hide expired/unknown/event/seen states behind explicit options (1.079655ms)
+✔ author rollup names the newest status and keeps its arrival watermark exact (1.190363ms)
+✔ prune only clears expired known-freshness statuses with an explicit now (0.913016ms)
+✔ reconcile early-returns equal ids and reports not_found with row locks (0.876193ms)
+✔ reconcile moves a lone client row to the server id and keeps client_id (5.624748ms)
+✔ reconcile archives the client duplicate without losing payload or flags (0.923646ms)
+✔ channel directory stores normalized metadata and preserves the provider object (13.019936ms)
+✔ status paging keys on exact epoch milliseconds with an id tie-breaker (3.605137ms)
+✔ post paging keys on the same timestamp column the page is sorted by (0.525656ms)
+✔ channel paging sorts by name then jid so equal names still advance (0.339045ms)
+✔ one channel is read exactly by account and jid, never by scanning a page (0.779522ms)
+✔ one status is read exactly by account, author and id with conservative defaults (2.618648ms)
+✔ flag off → todo 404 salvo /health (271.225652ms)
+✔ sin firma HMAC válida → 401 (sin cabeceras, firma de otro secreto, cuerpo alterado) (73.865164ms)
+✔ store apagado → 503 pairing_unavailable (tras la firma) (70.172827ms)
+✔ sin secreto compartido → 503 pairing_unavailable (no se puede verificar) (12.919461ms)
+✔ ruta firmada: start → state con QR → segundo start 429 con Retry-After; me 404 hasta emparejar (197.330387ms)
+✔ sessionKey ausente o malformado → 400 invalid_session_key (34.514579ms)
+✔ banderas de entorno: SOCIAL_PAIRING_API off por defecto; store = flag + clave maestra válida (1.005584ms)
+✔ quietQr: el QR no sale por stdout ni se escribe qr.png; solo el evento qr en memoria (508.604278ms)
+✔ control (opciones por defecto, conectores de la casa): el QR sí se pinta y se escribe qr.png (331.9876ms)
+[22:09:26.818] [33mWARN[39m (1906979): [36mWhatsApp requires QR scan at http://localhost:3001/qr/page[39m
+✔ criterio 1a: iniciar sesión para sub A emite QR con caducidad (93.504759ms)
+✔ criterio 1b: sub A no ve el QR/estado de sub B (24.217853ms)
+✔ criterio 1c: sexto QR del arranque → 429 qr_limit y el socket se cierra (16.759925ms)
+✔ criterio 1c: segundo arranque en <60 s → 429 start_interval con Retry-After (4.513938ms)
+✔ tope diario: 10 arranques al día por sub, el 11.º → 429 daily_starts (11.21854ms)
+✔ tope de 10 sesiones vivas: la 11.ª → 429 pool_full; el desalojo por inactividad libera sitio (8.281448ms)
+✔ SC-1243: sondear con status() no renueva lastTouched — la sesión a medias caduca por inactividad (10.095126ms)
+✔ criterio 1d: tras connection open simulado hay exactamente 1 fila para A y 0 para un sub inventado (60.118626ms)
+✔ criterio 1e: reinicio del pool (instancia nueva) → me de A sale de la fila sin QR (31.151893ms)
+✔ criterio 1f: loggedOut → fila borrada, estado expired (56.965903ms)
+✔ arranque con fila existente: la sesión se carga en el auth dir antes de connect() (63.95553ms)
+✔ sessionKey malformado → InvalidSessionKeyError (nunca toca disco ni store) (1.772323ms)
+✔ pairingMeFromCreds: sin me → null; id con dispositivo → jid sin dispositivo (0.351361ms)
+durable payload store failed for stable-pin: offline storage
+✔ pin relay uses stored target, correct duration and stable ID after claim, tolerating storage failure (24.21031ms)
+✔ outgoing pin persistence uses the verified LID conversation for a phone alias (15.776144ms)
+✔ incoming pin envelopes do not become standalone messages or previews (14.143135ms)
+✔ installed generator accepts flat pin contract and correct unpin enum (11.185222ms)
+✔ wrapped protobuf actions preserve duration and timestamp (4.745468ms)
+✔ legacy group IDs and normalized phone realms remain valid (0.509075ms)
+✔ later expired or unpinned actions never resurrect old pins (1.021461ms)
+✔ equal timestamp unpin wins and only three newest active pins remain (0.749353ms)
+✔ rejects foreign chats, unknown types, missing duration and invalid timestamps (0.779896ms)
+✔ concurrent pin actions claim once and replay a completed response without relay (10.185199ms)
+✔ pending or conflicting tokens never call the sender (3.973287ms)
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+✔ after claiming, transport or confirmation failures remain uncertain and cannot be replayed automatically (69.103629ms)
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+✔ invalid duration fails before reservation, and preparation failure does not claim (19.284091ms)
+✔ pin pages bind account, chat and cursor and use stable keyset ordering (5.305435ms)
+✔ a later-page unpin overrides earlier pages and result exposes only public fields (3.005432ms)
+✔ repeated cursors and failed later pages fail instead of reporting partial success (1.597837ms)
+✔ verified LID and phone aliases are visible without admitting another contact (1.526081ms)
+✔ pin scan repeats the partial index predicate and binds the keyset only when paginating (2.095179ms)
+✔ buildPollVoteContent output is readable by Baileys own decryptPollVote (28.081098ms)
+✔ multi-option vote round-trips and keeps creation key identity in payload (1.925955ms)
+✔ aggregation keeps only the latest vote per voter and never invents options (1.727036ms)
+✔ voter identities move with changes, retract, and never repeat within an option (1.555004ms)
+✔ option validation is exact, deduplicated and honours selectableCount semantics (9.047743ms)
+✔ poll creation parsing covers V1/V3/V5 variants and unlimited counts (1.091148ms)
+✔ poll encKey is read from top-level and nested messageContextInfo only when 32 bytes (0.923934ms)
+✔ captured votes decrypt through ephemeral wrappers and count failures honestly (12.402118ms)
+✔ captured group votes use the encrypted LID even when a PN alias is present (4.227622ms)
+✔ getPollResults echoes unprefixed ids, keeps local voters and caps to local_partial (298.016208ms)
+✔ sendPollVote relays first, replacement and withdrawal votes as complete selections (255.808463ms)
+✔ withdrawal supersedes an earlier vote without leaving a selected option or voter (9.84916ms)
+✔ sendPollVote only reports a vote after transport resolves, even if persistence fails (40.544373ms)
+✔ sendPollVote claims its stable message ID before relaying (12.106622ms)
+WhatsApp send replayed messageId=3EB04EDD8DE20732FB3A1F
+✔ poll vote API retries a lost response without another relay and accepts a new choice token (1057.558809ms)
+✔ sendPollVote rejects unknown options, missing polls and missing encKeys with contract codes (44.065118ms)
+✔ poll input: 2..12 trimmed, non-repeated options; selectableCount 0 (any) .. n (6.710339ms)
+✔ poll definitions from every creation variant; the secret from messageContextInfo (2.344704ms)
+✔ vote selection: exact names, no repeats, at most selectableCount; [] retracts (1.565297ms)
+✔ identities: author candidates by key, the whatsmeow rule for our vote (2.790725ms)
+✔ our vote is readable by Baileys' own decryptPollVote (and carries the creation key) (4.255642ms)
+✔ decrypting tries every identity pair; a wrong secret or identity yields null (4.395285ms)
+✔ hashes map back to option names; unknown hashes are kept apart (0.842133ms)
+✔ aggregation: counts per option, voters, our vote; unknown options ignored (1.097534ms)
+✔ event input: name, ISO / epoch-ms times, end after start, place, call, guests (2.822724ms)
+✔ event responses: going/not_going/maybe; extra guests only when going (1.247333ms)
+✔ event definitions read the proto fields (seconds → ms) (0.934298ms)
+✔ our response is readable by Baileys' decryptEventResponse; inbound tries every pair (4.370239ms)
+✔ event aggregation: counts, extra guests of the ones going, our answer (1.728821ms)
+whatsapp_poll_votes does not exist yet (mcp-server migration 013 not applied): poll votes / event responses are not recorded; sending still works
+(node:1907756) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a poll is ingested as a POLL row (question, metadata.poll) and its payload kept at any age (24.505486ms)
+✔ an event is ingested as an EVENT row with metadata.event (7.270337ms)
+✔ an inbound vote is decrypted into whatsapp_poll_votes; no messages row (13.239023ms)
+✔ PN-signed votes of a LID participant decrypt (alt jid or Baileys mapping); a change and a retract (37.473176ms)
+✔ a vote from our phone is ours; an unknown poll or a bad ciphertext is skipped, never a crash (31.122799ms)
+✔ history batches put votes after polls (1.020938ms)
+✔ an inbound event response is decrypted into whatsapp_event_responses (20.434126ms)
+✔ with ingest off (pairing pool) votes and responses never touch the DB (18.553476ms)
+✔ our vote after a restart: poll from its payload, whatsmeow identities, recorded as ours (35.592535ms)
+✔ retract ([]), our own poll in a phone chat, invalid options never reach WhatsApp (18.611704ms)
+✔ vote refusals: unknown message 404, not a poll 422, poll without secret 422 (11.65726ms)
+✔ with the votes table missing the vote still goes out; logged once, re-probed later (247.269353ms)
+✔ our event response: phone identities (from the key alternate), cancelled / guests refused (46.994875ms)
+✔ sending a poll / an event: canonical chat, payload kept, only chat jids (58.970187ms)
+✔ results after a restart: definition from the payload, votes from the table (67.562629ms)
+✔ results from the row metadata alone; 404 unknown, 422 not a poll, table missing = persisted false (68.634821ms)
+✔ HTTP: the four sends are gated (403) after validation; results are not (780.455824ms)
+✔ HTTP: 200 shapes; ids in the signed body; a tampered or unsigned body is 401 (110.94656ms)
+✔ HTTP: 400 invalid requests (option counts, shapes), 503 disconnected, client errors mapped (159.556681ms)
+WhatsApp send replayed messageId=3EB020D399E0EE87D8FFF5
+✔ HTTP: opt-in Idempotency-Key on a poll: derived id, claim before the send, replay deduplicated (79.40108ms)
+[22:09:30.561] [32mINFO[39m (1907756): [36mPoll vote 3EB0AAA972FC2C33DA0A7D on POLL1 (1 option(s))[39m
+[22:09:30.792] [32mINFO[39m (1907756): [36mPoll vote 3EB0BDE45878DB4450A679 on POLL1 (1 option(s))[39m
+[22:09:30.509] [32mINFO[39m (1907756): [36mPoll vote 3EB03FDE9CCE445D11580A on POLL1 (1 option(s)) by dani[39m
+[22:09:30.805] [32mINFO[39m (1907756): [36mEvent response 3EB0C7183E185E77FF503F on EV1 (maybe)[39m
+[22:09:30.526] [32mINFO[39m (1907756): [36mPoll vote 3EB05DF45399757206CD1F on MYPOLL (retracted)[39m
+[22:09:30.869] [32mINFO[39m (1907756): [36mPoll SENT1 sent to 1111@lid[39m
+[22:09:30.898] [32mINFO[39m (1907756): [36mEvent SENT2 sent to 120363000@g.us[39m
+[22:09:30.477] [32mINFO[39m (1907756): [36mPoll vote 3EB074A570F959376659D0 on POLL1 (1 option(s))[39m
+✔ presence expires instead of showing a stale online status (46.924795ms)
+✔ the capability presence alias respects the account availability gate (14.752149ms)
+✔ capability presence resolves PN/LID aliases and selects the newest observation (19.236351ms)
+✔ capability presence does not leak another participant into a requested group member (12.353781ms)
+✔ presence expires instead of showing a stale online status (fork presence-cache.test) (3.361423ms)
+✔ offline carries its last seen; typing keeps it; unknown values are not kept (1.699757ms)
+✔ a group lists each fresh participant; typing wins the header (0.768615ms)
+✔ the send throttle skips the same state to the same chat for a few seconds (0.580272ms)
+✔ presence requests: chat-states need the chat, account-wide states refuse one (1.371142ms)
+✔ presence.update is kept for reads AND still lights the dashboard typing indicator (193.269477ms)
+✔ reconnect forgets presence and subscriptions (the old socket said nothing about now) (76.751734ms)
+✔ presence read remains unknown when WhatsApp has not said anything, and re-subscribes once (52.380959ms)
+✔ presence read finds the contact under its LID too, and a group participant by phone (134.990288ms)
+✔ typing goes as a chat-state to the canonical chat, throttled; unknown chats are 404 (26.580938ms)
+✔ NEVER available by default: 403 unless WA_PRESENCE_ALLOW_AVAILABLE; unavailable is account-wide (79.580959ms)
+(node:1907932) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ nothing the connector does on its own sends available (connect, reads, typing, handlers) (76.734725ms)
+✔ ingest off (the pairing pool) binds no presence handler (28.761457ms)
+✔ a WhatsApp refusal of a presence is 422 rejected_by_whatsapp; a timeout stays a timeout (6.882551ms)
+✔ HTTP: the sending gate blocks our presence (not the read); 400 comes first (1574.504001ms)
+✔ HTTP: available is 403 presence_available_disabled even with sending on (unless opted in) (111.179367ms)
+[22:09:33.274] [33mWARN[39m (1907932): [36mWhatsApp socket closed: close (unknown)[39m
+[22:09:33.303] [33mWARN[39m (1907932): [36mScheduling WhatsApp reconnect in 5000ms (close (unknown))[39m
+[22:09:33.303] [32mINFO[39m (1907932): [36mWhatsApp marked connected via connection.update open[39m
+✔ HTTP: 200 shapes carry the ids of the signed body; 503 when disconnected; errors mapped (202.685898ms)
+✔ HTTP: unsigned bodies are 401 before anything runs (47.296543ms)
+[22:09:33.773] [32mINFO[39m (1907932): [36mSubscribed to presence for 0 active chats[39m
+[22:09:33.776] [32mINFO[39m (1907932): [36mresyncAppState (connection-open)[39m
+[22:09:33.776] [33mWARN[39m (1907932): [36mresyncAppState failed: this.sock.resyncAppState is not a function[39m
+[22:09:33.780] [33mWARN[39m (1907932): [36mArchive snapshot sync failed: socket.query is not a function[39m
+[22:09:33.669] [32mINFO[39m (1907932): [36mPresence unavailable (account-wide)[39m
+[22:09:33.669] [32mINFO[39m (1907932): [36mPresence available (account-wide)[39m
+conversations.ephemeral_expiration / ephemeral_setting_at do not exist yet (mcp-server migration 014 not applied): disappearing timers go to WhatsApp but are not recorded
+(node:1907939) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ privacy update validates only provider-supported values (fork whatsapp-capabilities.test) (20.264077ms)
+✔ a privacy change needs confirm: true (after the setting and value are checked) (0.78386ms)
+✔ privacy view: WhatsApp categories under API names; unknown ones apart; allowed values (13.090046ms)
+✔ disappearing: only off / 24h / 7d / 90d, in seconds or by label (2.896373ms)
+✔ Baileys chat objects: a change with null is off; a snapshot without the field says nothing (2.14272ms)
+✔ privacy read is fresh from WhatsApp; a change reads first and skips an equal value (27.697024ms)
+✔ a WhatsApp refusal of a privacy change is 422 rejected_by_whatsapp with its code (12.85757ms)
+✔ group timer: not admin of a restricted group → 403 not_group_admin, nothing sent (58.257178ms)
+✔ group timer: a member may change it when the group is not restricted; admins always (92.203708ms)
+✔ group timer: not a member → 403 not_group_member; a community → 422 (50.983224ms)
+✔ direct timer: the timer message goes to the canonical chat and lands on its row (39.412838ms)
+✔ direct timer: a known equal timer is not re-sent; without 014 it still goes out, persisted false (33.30983ms)
+✔ disappearing read: stored timer of a direct chat; USync default reported apart (fork "disappearing mode reads USync") (59.66611ms)
+✔ inbound: a timer change lands on the canonical row; a snapshot only fills an unknown one (89.055864ms)
+✔ ingest off (the pairing pool): no chat handlers, no DB, a timer read is unknown (5.954018ms)
+[22:09:32.391] [32mINFO[39m (1907939): [36mDisappearing 120363000000000001@g.us 86400 -> 0[39m
+✔ HTTP: the sending gate blocks privacy / timer changes, not the reads; 400s come first (1968.775321ms)
+[22:09:32.505] [32mINFO[39m (1907939): [36mDisappearing 111@lid null -> 7776000 by dani[39m
+[22:09:32.535] [32mINFO[39m (1907939): [36mDisappearing 111@lid null -> 86400[39m
+✔ HTTP: confirm missing is 400 confirm_required, never reaching the client (433.312106ms)
+[22:09:32.249] [32mINFO[39m (1907939): [36mPrivacy lastSeen contacts -> none by dani[39m
+[22:09:32.250] [32mINFO[39m (1907939): [36mPrivacy defaultDisappearing null -> 86400[39m
+[22:09:32.694] [32mINFO[39m (1907939): [36mDisappearing 34611111111@s.whatsapp.net null -> 86400[39m
+[22:09:32.375] [32mINFO[39m (1907939): [36mDisappearing 120363000000000001@g.us 0 -> 604800 by dani[39m
+✔ HTTP: 200 shapes carry the body values and the actor; 503 when disconnected (393.261729ms)
+✔ HTTP: group refusals map to status + failureClass (56.774035ms)
+✔ patched Baileys nests the timestamped tctoken inside the picture query (37.153524ms)
+✔ patched WAProto decodes the NCT salt from app-state (field 80) and history sync (field 19) (21.53353ms)
+✔ patched processSyncAction stores the salt in creds; computeCsToken is HMAC-SHA256(salt, lid) (29.215547ms)
+✔ patched relayMessage attaches <cstoken> only as the no-tctoken fallback (132.923234ms)
+✔ the next pairing keeps the NCT salt of its INITIAL_BOOTSTRAP history sync (60.093913ms)
+✔ the connector logs the NCT salt when it arrives (the Baileys logger runs at warn) (75.208889ms)
+✔ canAttachCsToken: own LID, a salt and a LID recipient (51.467256ms)
+✔ first message without tctoken goes out when a cstoken can be attached (249.873976ms)
+✔ first message without tctoken and without salt is still refused before reaching WhatsApp (73.428849ms)
+(node:1907943) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a phone recipient with no LID mapping cannot carry a cstoken: refused (76.471841ms)
+✔ a session without salt re-snapshots regular_high once; with salt or the marker it does not (95.962078ms)
+✔ profile picture provider timeout stays distinct from private or missing photos (3.767979ms)
+[22:09:35.145] [32mINFO[39m (1907943): [36mSending WhatsApp message rawJid=68642335125543@lid normalizedJid=68642335125543@lid type=direct[39m
+[22:09:35.311] [33mWARN[39m (1907943): [36mWhatsApp direct send: inbound history lookup failed rawJid=68642335125543@lid: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:35.312] [32mINFO[39m (1907943): [36mWhatsApp direct preflight: no trusted-contact token, sending with cstoken rawJid=68642335125543@lid normalizedJid=68642335125543@lid[39m
+[22:09:35.359] [33mWARN[39m (1907943): [36mdisappearing timer of 68642335125543@lid unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:35.359] [32mINFO[39m (1907943): [36mWhatsApp message sent rawJid=68642335125543@lid normalizedJid=68642335125543@lid elapsedMs=215 id=M1[39m
+[22:09:35.400] [32mINFO[39m (1907943): [36mSending WhatsApp message rawJid=68642335125543@lid normalizedJid=68642335125543@lid type=direct[39m
+[22:09:35.437] [33mWARN[39m (1907943): [36mWhatsApp direct send: inbound history lookup failed rawJid=68642335125543@lid: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:35.567] [32mINFO[39m (1907943): [36mresyncAppState (connection-open)[39m
+[22:09:35.588] [32mINFO[39m (1907943): [36mresyncAppState (connection-open)[39m
+[22:09:35.546] [32mINFO[39m (1907943): [36mno NCT salt stored: re-snapshotting regular_high once to read it[39m
+[22:09:35.491] [33mWARN[39m (1907943): [36msend conversation lookup failed for 34677431173@c.us: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:35.546] [32mINFO[39m (1907943): [36mresyncAppState (connection-open)[39m
+[22:09:35.491] [32mINFO[39m (1907943): [36mSending WhatsApp message rawJid=34677431173@s.whatsapp.net normalizedJid=34677431173@c.us type=direct[39m
+[22:09:35.515] [33mWARN[39m (1907943): [36mWhatsApp direct send: inbound history lookup failed rawJid=34677431173@s.whatsapp.net: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:35.605] [32mINFO[39m (1907943): [36mresyncAppState (connection-open)[39m
+[22:09:35.607] [32mINFO[39m (1907943): [36mno NCT salt stored: re-snapshotting regular_high once to read it[39m
+[22:09:35.607] [32mINFO[39m (1907943): [36mresyncAppState (connection-open)[39m
+[22:09:35.611] [32mINFO[39m (1907943): [36mresyncAppState (manual)[39m
+[22:09:35.609] [32mINFO[39m (1907943): [36mresyncAppState (connection-open)[39m
+✔ profile picture lookup that never answers is cut at the deadline (8009.985555ms)
+✔ profile picture download: off-CDN URL, >10 MB stream and network failure are download errors (191.016716ms)
+✔ GET /chats/:jid/photo: timeout 504, download failure 502, none 404 (566.671863ms)
+✔ media options: quality source|standard|hd, viewOnce boolean; absent = source / false (2.930637ms)
+✔ media options: viewOnce only for JPEG/PNG photos and MP4 videos; quality only for still images (0.75771ms)
+✔ quality: hd caps the long edge at 2560, standard at 1600, never enlarges; alpha stays PNG (2416.244114ms)
+✔ idempotency hash: a plain media send hashes as before; viewOnce / quality change it (3.091106ms)
+✔ profile requests: name ≤ 25 / about ≤ 139, one field at least, confirm: true last (8.536404ms)
+✔ photo by URL: fetched bounded (8 MB, streamed and Content-Length), bad status is 400 (279.308475ms)
+✔ sendFile: viewOnce photo / video carry viewOnce; hd re-encodes; a plain send is unchanged (637.035654ms)
+✔ sendFile: a refused option never reaches the idempotency claim nor the socket (500.064578ms)
+[22:09:39.924] [31mERROR[39m (1907986): [36mMEDIA_PERSIST_PENDING provider_message_id=MF1 error=Error[39m
+[22:09:39.927] [31mERROR[39m (1907986): [36mMEDIA_PERSIST_PENDING provider_message_id=MF1 error=Error[39m
+[22:09:40.099] [31mERROR[39m (1907986): [36mMEDIA_PERSIST_PENDING provider_message_id=MF1 error=Error[39m
+[22:09:40.191] [31mERROR[39m (1907986): [36mMEDIA_PERSIST_PENDING provider_message_id=MF1 error=Error[39m
+✔ HTTP: the sending gate blocks profile changes, not the read; 400s come first (1329.017307ms)
+[profile] update name+about by mcp
+[profile] photo set
+[profile] photo set
+[profile] photo removed
+✔ HTTP: confirm missing is 400 confirm_required; 200 shapes; photo inline and by URL (180.74159ms)
+[profile] update name
+[profile] photo removed
+✔ HTTP: offline is 503 disconnected; a ProfileError keeps its status, failureClass and code (50.183524ms)
+✔ HTTP media send: viewOnce / quality are passed through; invalid values 400 before the client (30.574984ms)
+✔ own profile read exposes the name, the about and the live capabilities (22.443771ms)
+✔ the phone is only reported for a phone JID and never absorbs a device suffix (30.855612ms)
+✔ a photo lookup that cannot answer is unknown, not "no photo" (1.519183ms)
+✔ an unreadable about does not hide the rest of the profile (8.149638ms)
+✔ an unrecognised status payload is never read as an empty About (0.692329ms)
+✔ about readback tolerates the USync shapes Baileys actually returns (0.37875ms)
+✔ the real USync entry shape is parsed and a flat one still decodes (0.996447ms)
+✔ a cleared about is only confirmed by a readback that recognised the answer (16.416511ms)
+✔ an About lookup timeout preserves the profile and an accepted write (174.061426ms)
+✔ an About write timeout is still rejected without a readback (20.006588ms)
+✔ an about that the provider wrote differently is reported as different (10.213297ms)
+✔ a disconnected account refuses the read before touching the provider (11.619799ms)
+✔ the display name is accepted even while the session has not refreshed it (84.441202ms)
+✔ the display name is confirmed when the session refreshes within the readback window (3.356598ms)
+✔ a 26 character display name is rejected before the provider is called (0.456327ms)
+✔ a rejected name does not swallow an accepted about (2.680648ms)
+✔ when every field fails the first provider error decides the status (3.087755ms)
+✔ a name and an about written together are read back field by field (0.695949ms)
+✔ the photo decoder only accepts a real JPEG, PNG or WebP payload (378.028277ms)
+✔ a platform without an image library reports it instead of a fake success (5.762406ms)
+✔ an unchanged picture identity is not proof that a new photo is live (0.796654ms)
+✔ a photo is confirmed when its identity really changed or appeared (0.858653ms)
+✔ an identity provider that answers with nothing is unknown, not absent (30.862979ms)
+✔ a photo whose previous identity could not be read stays unconfirmed (0.795352ms)
+✔ a provider without the profile writers degrades to capabilities false and 501 (10.352264ms)
+✔ removing a photo reports the readback it actually observed (15.563499ms)
+✔ the adapter reads the own profile through the socket methods that exist (45.534218ms)
+✔ the photo identity ignores the rotating CDN token (18.636465ms)
+✔ the installed provider can really re-encode the fixture as a profile picture (190.859067ms)
+✔ a refused own-picture lookup stays unknown instead of proving absence (18.834912ms)
+✔ a socket without the profile writers cannot mutate the profile (17.584618ms)
+✔ own profile read exposes the name, the about and the live capabilities (12.375128ms)
+✔ the phone is only reported for a phone JID and never absorbs a device suffix (0.737346ms)
+✔ a photo lookup that cannot answer is unknown, not "no photo" (1.57152ms)
+✔ an unreadable about does not hide the rest of the profile (2.794547ms)
+✔ an unrecognised status payload is never read as an empty About (0.851699ms)
+✔ about readback tolerates the USync shapes Baileys actually returns (0.739319ms)
+✔ the real USync entry shape is parsed and a flat one still decodes (1.505515ms)
+✔ a cleared about is only confirmed by a readback that recognised the answer (3.673988ms)
+✔ an About lookup timeout preserves the profile and an accepted write (130.154694ms)
+✔ an About write timeout is still rejected without a readback (263.495577ms)
+✔ an about that the provider wrote differently is reported as different (6.436804ms)
+✔ a disconnected account refuses the read before touching the provider (0.849297ms)
+✔ the display name is accepted even while the session has not refreshed it (236.918514ms)
+✔ the display name is confirmed when the session refreshes within the readback window (0.707839ms)
+✔ a 26 character display name is rejected before the provider is called (0.437706ms)
+✔ a rejected name does not swallow an accepted about (5.605442ms)
+✔ when every field fails the first provider error decides the status (0.928763ms)
+✔ a name and an about written together are read back field by field (0.600103ms)
+✔ the photo decoder only accepts a real JPEG, PNG or WebP payload (118.756903ms)
+✔ a platform without an image library reports it instead of a fake success (3.911777ms)
+✔ an unchanged picture identity is not proof that a new photo is live (0.878454ms)
+✔ a photo is confirmed when its identity really changed or appeared (3.885818ms)
+✔ an identity provider that answers with nothing is unknown, not absent (0.635251ms)
+✔ a photo whose previous identity could not be read stays unconfirmed (5.235683ms)
+✔ a provider without the profile writers degrades to capabilities false and 501 (4.179275ms)
+✔ removing a photo reports the readback it actually observed (0.632551ms)
+✔ the adapter reads the own profile through the socket methods that exist (20.247037ms)
+✔ the photo identity ignores the rotating CDN token (13.218968ms)
+✔ the installed provider can really re-encode the fixture as a profile picture (393.450418ms)
+✔ a refused own-picture lookup stays unknown instead of proving absence (28.497351ms)
+✔ a socket without the profile writers cannot mutate the profile (3.938858ms)
+✔ appendMediaEligible: recent append yes, old or timeless no; env window (2.739954ms)
+✔ documentFileName: explicit name wins; URL path without the presigned query (0.793372ms)
+✔ quotedReply: any message kind, text or a label, author; never for a reaction (2.517255ms)
+✔ linksSenderToChat and the official WhatsApp jid (1.052646ms)
+✔ isUnavailableProfilePicture: 401 not-authorized (Boom 500 data 401), 403, 404; not others (1.802707ms)
+✔ media request hash: fileName only when set (old keys replay the same send) (1.046854ms)
+✔ our own media send (append upsert) is stored like live media; history and old appends are not (34.836843ms)
+✔ a 1:1 chat links only the other side; a group links us too (8.739467ms)
+✔ a reply stores its quote: preview, type, author id and name ("Tú" for us, DB name otherwise) (17.626871ms)
+✔ WhatsApp own account 0@s.whatsapp.net is named "WhatsApp" (13.046649ms)
+[22:09:38.382] [32mINFO[39m (1908188): [36mStored message R1 from 34999@c.us[39m
+[22:09:38.384] [32mINFO[39m (1908188): [36mStored message R2 from 2222@lid[39m
+[22:09:38.391] [32mINFO[39m (1908188): [36mStored message P1 from 2222@lid[39m
+[22:09:38.356] [32mINFO[39m (1908188): [36mStored message M1 from 34999@c.us[39m
+[22:09:38.359] [32mINFO[39m (1908188): [36mStored message OLD from 34999@c.us[39m
+[22:09:38.365] [32mINFO[39m (1908188): [36mStored message IN1 from 2222@lid[39m
+[22:09:39.045] [31mERROR[39m (1908188): [36mMEDIA_PERSIST_PENDING provider_message_id=SENT1 error=Error[39m
+[22:09:40.107] [31mERROR[39m (1908188): [36mMEDIA_PERSIST_PENDING provider_message_id=SENT1 error=Error[39m
+✔ POST /messages/media/send: fileName names the document; a non-string is 400 (1762.520944ms)
+✔ GET /chats/:jid/photo: a picture hidden by privacy (not-authorized) is 404 No photo (231.701075ms)
+[22:09:38.370] [32mINFO[39m (1908188): [36mStored message M1 from 34999@c.us[39m
+[22:09:38.372] [32mINFO[39m (1908188): [36mStored message M2 from 2222@lid[39m
+[22:09:38.374] [32mINFO[39m (1908188): [36mStored message M3 from 34999@c.us[39m
+[22:09:38.404] [32mINFO[39m (1908188): [36mStored message W1 from 0@c.us[39m
+✔ personal history backfill scopes all chats to WhatsApp account (6525.028789ms)
+✔ personal history backfill scopes one chat to WhatsApp account (5.583237ms)
+✔ professional history backfill scopes all chats to WhatsApp account (8.408332ms)
+✔ professional history backfill scopes one chat to WhatsApp account (10.023541ms)
+✔ history backfill sends bare keys and milliseconds, and stops at an unchanged cursor (17.85542ms)
+✔ stripAccountKey is the inverse of accountKey and round-trips per account (3.430576ms)
+✔ professional fetchChatHistory queries with the namespaced conversation id written by ingest (5.618403ms)
+✔ personal fetchChatHistory keeps the conversation id bare (22.12729ms)
+✔ professional setConversationState UPDATEs the namespaced conversation row (16.801792ms)
+✔ LID state events include only uniquely mapped PN rows and keep unread on canonical row (20.309435ms)
+✔ professional setMessageStatus UPDATEs the namespaced message row (0.918741ms)
+✔ professional avatar get/set helpers target the namespaced row (0.926921ms)
+✔ professional recordHistorySyncProgress namespaces the sync_state FK (idempotent for namespaced callers) (0.578623ms)
+✔ professional message-retry reconstruction queries with the namespaced wa_message_id (13.390324ms)
+✔ personal message-retry reconstruction keeps the wa_message_id bare (12.548257ms)
+✔ one bounded request coalesces polls, correlates session/chat/message/fromMe, and completes even without receipts (29.997304ms)
+✔ no successor is unsupported; errors fail; timeout is bounded and matching late evidence survives cooldown (21.755396ms)
+✔ history response arriving before fetch resolves is persisted only after matching returned session (7.742175ms)
+✔ bounded pending requests and stopped socket cannot trigger delayed network work (11.951351ms)
+✔ bounded cache preserves a recent completed message cooldown instead of evicting it (6.089733ms)
+✔ four unresolved provider requests time out and release capacity at the hard cooldown deadline (64.807268ms)
+✔ early own chunks without target stay isolated; a target arriving before delayed request ID survives timeout (14.397093ms)
+✔ real successor anchor query scopes both rows to account/chat and rejects a mismatched returned provider JID (10.111825ms)
+✔ real history socket handler claims receipt recovery before closed generic gate or enabled full history; offline read makes no request (28.154701ms)
+✔ recovery completing after the initial info read returns fresh receipts with complete (10.777689ms)
+✔ direct receipts reflect provider delivery, reading and playback evidence (1.454028ms)
+✔ one recipient never promotes the aggregate group or broadcast status (0.350945ms)
+✔ reconnect backfill caps total volume at MAX_MESSAGES in batches of <=50 and asks the configured window (24.391715ms)
+✔ reconnectBackfillLimitsFromEnv: CTO defaults, ceilings and 0/negative = OFF (0.478409ms)
+✔ with the flags at 0 (OFF) connection.open fetches nothing and the backfill is a no-op (11.412984ms)
+✔ messaging-history.set during the armed window ingests with source=baileys_history_sync and publishEvent=false, and with the window disarmed ingests nothing (10.84397ms)
+[22:09:42.587] [32mINFO[39m (1910001): [36mSubscribed to presence for 0 active chats[39m
+[22:09:42.589] [32mINFO[39m (1910001): [36mresyncAppState (connection-open)[39m
+[22:09:42.589] [33mWARN[39m (1910001): [36mresyncAppState failed: this.sock.resyncAppState is not a function[39m
+[22:09:42.591] [33mWARN[39m (1910001): [36mArchive snapshot sync failed: socket.query is not a function[39m
+[22:09:42.592] [32mINFO[39m (1910001): [36mreconnect backfill requested=120 chats=3[39m
+[22:09:42.608] [32mINFO[39m (1910001): [36mSubscribed to presence for 0 active chats[39m
+[22:09:42.609] [32mINFO[39m (1910001): [36mresyncAppState (connection-open)[39m
+[22:09:42.609] [33mWARN[39m (1910001): [36mresyncAppState failed: this.sock.resyncAppState is not a function[39m
+[22:09:42.611] [33mWARN[39m (1910001): [36mArchive snapshot sync failed: socket.query is not a function[39m
+[22:09:42.621] [32mINFO[39m (1910001): [36mhistory.set received chats=0 messages=1 isLatest=false[39m
+retention: purged 3 whatsapp_message_payloads rows older than 90d
+retention: purged 3 whatsapp_statuses rows older than 30d
+✔ purge SQL: batched by ctid, scoped to the account, parameterised age (5.521923ms)
+✔ retention windows: 7 days for send attempts, 90 for payloads, env-overridable (0.701638ms)
+✔ purgeTable loops while batches are full and stops at a short one (3.075662ms)
+✔ purgeTable is capped per run and 0 days disables it (1.089338ms)
+✔ runRetention purges the three tables and tolerates a missing one (42P01) (2.561036ms)
+✔ maybeRunRetention runs at most hourly and never overlaps (1.124777ms)
+✔ ingest off: BaileysClient never starts a purge (225.442307ms)
+✔ ingest on: the ingest path starts the hourly purge (72.627627ms)
+conversations.ephemeral_expiration / ephemeral_setting_at do not exist yet (mcp-server migration 014 not applied): disappearing timers go to WhatsApp but are not recorded
+✔ Baileys puts ephemeralExpiration on contextInfo.expiration, forwards included; none without it (8.154721ms)
+✔ withEphemeralExpiration: adds the timer when on; unknown / off leave the options as they were (2.537672ms)
+✔ text to a merged phone chat reads the canonical LID row and carries its timer (14.811146ms)
+✔ structured sends (poll, event, contact card, sticker) and voice / file / forward carry it (168.298068ms)
+✔ a group: its cached metadata timer wins, without a DB read (5.464251ms)
+✔ never learnt, off, 014 missing or a failing DB: sent exactly as before (50.891614ms)
+✔ ingest off (the pairing pool): no DB read, no timer (9.395896ms)
+[22:09:45.187] [32mINFO[39m (1910821): [36mSending WhatsApp message rawJid=34611111111@s.whatsapp.net normalizedJid=34611111111@c.us type=direct[39m
+[22:09:45.189] [32mINFO[39m (1910821): [36mWhatsApp message sent rawJid=34611111111@s.whatsapp.net normalizedJid=34611111111@c.us elapsedMs=4 id=SENT1[39m
+[22:09:45.387] [32mINFO[39m (1910821): [36mSending WhatsApp message rawJid=111@lid normalizedJid=111@lid type=direct[39m
+[22:09:45.388] [32mINFO[39m (1910821): [36mWhatsApp message sent rawJid=111@lid normalizedJid=111@lid elapsedMs=1 id=SENT1[39m
+[22:09:45.388] [32mINFO[39m (1910821): [36mContact card SENT2 (1) sent to 111@lid[39m
+[22:09:45.392] [32mINFO[39m (1910821): [36mForwarded ORIG to 111@lid id=SENT3[39m
+[22:09:45.370] [32mINFO[39m (1910821): [36mSending WhatsApp message rawJid=111@lid normalizedJid=111@lid type=direct[39m
+[22:09:45.373] [32mINFO[39m (1910821): [36mWhatsApp message sent rawJid=111@lid normalizedJid=111@lid elapsedMs=3 id=SENT1[39m
+[22:09:45.374] [32mINFO[39m (1910821): [36mContact card SENT2 (1) sent to 111@lid[39m
+[22:09:45.374] [32mINFO[39m (1910821): [36mForwarded ORIG to 111@lid id=SENT3[39m
+[22:09:45.377] [32mINFO[39m (1910821): [36mSending WhatsApp message rawJid=111@lid normalizedJid=111@lid type=direct[39m
+[22:09:45.377] [32mINFO[39m (1910821): [36mWhatsApp message sent rawJid=111@lid normalizedJid=111@lid elapsedMs=0 id=SENT1[39m
+[22:09:45.378] [32mINFO[39m (1910821): [36mContact card SENT2 (1) sent to 111@lid[39m
+[22:09:45.385] [32mINFO[39m (1910821): [36mForwarded ORIG to 111@lid id=SENT3[39m
+[22:09:45.409] [32mINFO[39m (1910821): [36mSending WhatsApp message rawJid=111@lid normalizedJid=111@lid type=direct[39m
+[22:09:45.410] [33mWARN[39m (1910821): [36mdisappearing timer of 111@lid unreadable, sent without: connection terminated[39m
+[22:09:45.410] [32mINFO[39m (1910821): [36mWhatsApp message sent rawJid=111@lid normalizedJid=111@lid elapsedMs=1 id=SENT1[39m
+[22:09:45.416] [33mWARN[39m (1910821): [36mdisappearing timer of 111@lid unreadable, sent without: connection terminated[39m
+[22:09:45.416] [32mINFO[39m (1910821): [36mContact card SENT2 (1) sent to 111@lid[39m
+[22:09:45.417] [33mWARN[39m (1910821): [36mdisappearing timer of 111@lid unreadable, sent without: connection terminated[39m
+[22:09:45.417] [32mINFO[39m (1910821): [36mForwarded ORIG to 111@lid id=SENT3[39m
+[22:09:45.395] [32mINFO[39m (1910821): [36mSending WhatsApp message rawJid=111@lid normalizedJid=111@lid type=direct[39m
+[22:09:45.363] [33mWARN[39m (1910821): [36mRecipient snapshot unavailable: sock.groupMetadata is not a function[39m
+[22:09:45.363] [32mINFO[39m (1910821): [36mPoll SENT1 sent to 120363000000000001@g.us[39m
+[22:09:45.364] [33mWARN[39m (1910821): [36mRecipient snapshot unavailable: sock.groupMetadata is not a function[39m
+[22:09:45.364] [32mINFO[39m (1910821): [36mPoll SENT2 sent to 120363000000000001@g.us[39m
+[22:09:45.396] [32mINFO[39m (1910821): [36mWhatsApp message sent rawJid=111@lid normalizedJid=111@lid elapsedMs=1 id=SENT1[39m
+[22:09:45.397] [32mINFO[39m (1910821): [36mContact card SENT2 (1) sent to 111@lid[39m
+[22:09:45.397] [32mINFO[39m (1910821): [36mForwarded ORIG to 111@lid id=SENT3[39m
+[22:09:45.194] [32mINFO[39m (1910821): [36mPoll SENT1 sent to 111@lid[39m
+[22:09:45.195] [32mINFO[39m (1910821): [36mEvent SENT2 sent to 111@lid[39m
+[22:09:45.200] [32mINFO[39m (1910821): [36mContact card SENT3 (1) sent to 111@lid[39m
+[22:09:45.319] [32mINFO[39m (1910821): [36msticker SENT5 sent to 111@lid[39m
+[22:09:45.352] [31mERROR[39m (1910821): [36mMEDIA_PERSIST_PENDING provider_message_id=SENT6 error=Error[39m
+[22:09:45.358] [32mINFO[39m (1910821): [36mForwarded ORIG to 111@lid id=SENT7[39m
+[22:09:45.422] [32mINFO[39m (1910821): [36mSending WhatsApp message rawJid=111@lid normalizedJid=111@lid type=direct[39m
+[22:09:45.427] [32mINFO[39m (1910821): [36mWhatsApp message sent rawJid=111@lid normalizedJid=111@lid elapsedMs=5 id=SENT1[39m
+WhatsApp send ok conversationId=111@s.whatsapp.net messageId=3EB0B55B66BA381667D09A
+WhatsApp send replayed messageId=3EB0B55B66BA381667D09A
+WhatsApp send failed failureClass=timeout conversationId= rawJid=: sendMessage timeout after 45000ms
+WhatsApp send failed failureClass=unknown conversationId= rawJid=: Preflight failed before send
+WhatsApp send ok conversationId=111@s.whatsapp.net messageId=3EB03F4E3796C266AD2C86
+WhatsApp send replayed messageId=3EB088D5B2D162123E51AD
+WhatsApp send replayed messageId=3EB088D5B2D162123E51AD
+WhatsApp send replayed messageId=3EB092B65AA6959FCE9025
+WhatsApp send replayed messageId=3EB0DDF33CC4126813B8E2
+WhatsApp voice sent conversationId=111@s.whatsapp.net messageId=3EB0421F40D0148886AE5B
+WhatsApp send replayed messageId=3EB0421F40D0148886AE5B
+WhatsApp voice sent conversationId=111@s.whatsapp.net messageId=legacy-voice
+WhatsApp voice sent conversationId=111@s.whatsapp.net messageId=3EB00F79145F9AC6A3506E
+WhatsApp voice sent conversationId=111@s.whatsapp.net messageId=3EB0C1348972677E4BEFF8
+WhatsApp send replayed messageId=3EB0C1348972677E4BEFF8
+✔ reserves one send per account and token across retries and rejects changed payloads (817.604192ms)
+✔ viewOnce joins the media fingerprint without touching normal-send hashes (4.200024ms)
+✔ the media route validates viewOnce before spending a token and echoes it back (126.526776ms)
+✔ readIdempotencyKey: header or body field, opt-in, validated (5.057752ms)
+✔ message id is Baileys-shaped and deterministic per (account, key) (1.547785ms)
+✔ request hashes change with every field that makes a different message (1.472177ms)
+✔ reserve → claim → confirm, replays, conflicts and account scope (11.94988ms)
+✔ a failure before the claim is retryable; after it the row stays pending (2.586188ms)
+✔ a missing table (42P01) is "unavailable", logged once and not re-queried for a while (2.993226ms)
+✔ any other DB error degrades to a send without idempotency, never throws (2.016387ms)
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=LEGACY1
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=LEGACY2
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=LEGACY3
+WhatsApp voice sent conversationId=34600000000@s.whatsapp.net messageId=VOICE6
+WhatsApp voice sent conversationId=34600000000@s.whatsapp.net messageId=VOICE7
+✔ no key: a constant sendToken sends twice, same shapes as before, zero DB queries (737.777216ms)
+WhatsApp send failed failureClass=timeout conversationId= rawJid=: sendMessage timeout after 45000ms
+WhatsApp send failed failureClass=timeout conversationId= rawJid=: sendMessage timeout after 45000ms
+WhatsApp send rejected failureClass=invalid_request conversationId=34600000000@s.whatsapp.net
+✔ no key: failures answer exactly what they answered before (41.623621ms)
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=3EB05AD55F8C956BE3496A
+WhatsApp send replayed messageId=3EB05AD55F8C956BE3496A
+WhatsApp send replayed messageId=3EB05AD55F8C956BE3496A
+✔ text with a key: replay answers the recorded outcome without a second send (36.433427ms)
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=3EB0ECD332593417FC6854
+✔ text with a key: same key, different request → 409 idempotency_key_reused (32.193208ms)
+WhatsApp send failed failureClass=timeout conversationId= rawJid=: sendMessage timeout after 45000ms
+✔ text with a key: an outcome lost after the send → 409 send_outcome_uncertain (15.991051ms)
+✔ text with a key: a crash between send and confirm (pending row) → 409 uncertain (11.64589ms)
+WhatsApp send failed failureClass=group_metadata conversationId= rawJid=: group metadata unavailable
+WhatsApp send failed failureClass=group_metadata conversationId= rawJid=: group metadata unavailable
+✔ text with a key: a failure before the network send is retried under the same id (13.03639ms)
+✔ text with a key: a claim lost to a concurrent request → 409 uncertain, no send (9.125048ms)
+✔ an invalid key is a 400 before anything is sent (10.473457ms)
+WhatsApp send replayed messageId=3EB08F517D9A6BBD419ECF
+WhatsApp voice sent conversationId=34600000000@s.whatsapp.net messageId=3EB0F151785F817CD912C2
+WhatsApp send replayed messageId=3EB0F151785F817CD912C2
+✔ media and audio with a key: replay, conflict, message id (55.044718ms)
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=LEGACY1
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=LEGACY2
+✔ table missing: a keyed send still goes out, on the legacy path (28.680914ms)
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=LEGACY1
+✔ ingest off (pairing pool): a key never touches the table (12.996011ms)
+✔ BaileysClient: isIngestEnabled mirrors the ingest option (13.072493ms)
+✔ BaileysClient: messageId reaches Baileys and beforeSend runs right before the send (6.611323ms)
+✔ BaileysClient.sendFile: claims after fetching the file and returns the id (6.790575ms)
+WhatsApp send ok conversationId=34600000000@s.whatsapp.net messageId=RANDOM1
+✔ a real ingest-off client behind the router ignores the key and never queries (43.788306ms)
+[22:09:47.604] [32mINFO[39m (1911731): [36mSending WhatsApp message rawJid=34600000000@s.whatsapp.net normalizedJid=34600000000@c.us type=direct[39m
+[22:09:47.604] [32mINFO[39m (1911731): [36mWhatsApp message sent rawJid=34600000000@s.whatsapp.net normalizedJid=34600000000@c.us elapsedMs=0 id=RANDOM1[39m
+[22:09:47.564] [32mINFO[39m (1911731): [36mSending WhatsApp message rawJid=34600000000@s.whatsapp.net normalizedJid=34600000000@c.us type=direct[39m
+[22:09:47.565] [32mINFO[39m (1911731): [36mWhatsApp message sent rawJid=34600000000@s.whatsapp.net normalizedJid=34600000000@c.us elapsedMs=1 id=3EB0AAAAAAAAAAAAAAAAAA[39m
+[22:09:47.566] [32mINFO[39m (1911731): [36mSending WhatsApp message rawJid=34600000000@s.whatsapp.net normalizedJid=34600000000@c.us type=direct[39m
+[22:09:47.566] [32mINFO[39m (1911731): [36mWhatsApp message sent rawJid=34600000000@s.whatsapp.net normalizedJid=34600000000@c.us elapsedMs=0 id=RANDOM3[39m
+[22:09:47.566] [32mINFO[39m (1911731): [36mSending WhatsApp message rawJid=34600000000@s.whatsapp.net normalizedJid=34600000000@c.us type=direct[39m
+[22:09:47.573] [31mERROR[39m (1911731): [36mMEDIA_PERSIST_PENDING provider_message_id=3EB0DDDDDDDDDDDDDDDDDD error=Error[39m
+[22:09:47.574] [31mERROR[39m (1911731): [36mMEDIA_PERSIST_PENDING provider_message_id=RANDOM2 error=Error[39m
+✔ scrubSignalSessionLogs installs and reports success (idempotent) (1.475806ms)
+✔ inspected SessionEntry redacts to the safe toString form (8.412473ms)
+✔ console formatting of a SessionEntry arg is redacted too (14.733386ms)
+✔ session crypto shape is untouched (serialize round-trip still works) (0.946733ms)
+(node:1912192) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ start chat input: a phone number (E.164 or 9 digits of the default country), message optional (13.945174ms)
+✔ create / share contact inputs: name and a phone number; share takes 1..5 cards (6.557325ms)
+✔ vCard: escaped like RFC 6350 (\ , ; newline), waid on the TEL line, one card or several (2.91998ms)
+✔ received vCards: names and numbers (waid first), folded lines, item prefixes, no raw vCard (1.575456ms)
+✔ an incoming contact message becomes a CONTACT row with metadata.contact (16.90039ms)
+✔ start chat: the phone jid already has a conversation → that one, WhatsApp not asked, nothing written (33.826146ms)
+✔ start chat: the phone is an alias of a LID conversation (merged twin) → the LID one (10.853394ms)
+✔ start chat: no alias, but WhatsApp’s LID for the number has a conversation → that one, no insert (12.833705ms)
+✔ start chat: nothing exists → ONE row under the LID, phone in wa_chat_id (008 records the alias) (34.391969ms)
+✔ start chat: no LID known → the row is the phone jid (@c.us), no wa_chat_id (13.94029ms)
+✔ start chat: wa_chat_id already taken by another row (UNIQUE) → the row without it (11.531749ms)
+✔ start chat: not on WhatsApp → 422 not_on_whatsapp, nothing written (8.885838ms)
+✔ start chat with ingest off (pairing pool): WhatsApp asked, the DB never touched (46.954585ms)
+✔ contact list rows: phone only from a phone jid (never LID digits), jid-like names dropped (0.863245ms)
+✔ contact list query: this account, aliases folded (blocked ignored), own jids out, search and limit bound (3.245764ms)
+✔ create contact: WhatsApp’s address-book mutation (PN index, LID, saveOnPrimaryAddressbook), name on existing rows only (63.436567ms)
+✔ create contact: not on WhatsApp → 422 before any mutation; ingest off never writes (52.697477ms)
+✔ share contact: a vCard to the chat’s canonical jid (the LID of a merged phone chat) (33.117289ms)
+[22:09:48.190] [32mINFO[39m (1912192): [36mChat started with 111@lid (new conversation)[39m
+[22:09:48.410] [32mINFO[39m (1912192): [36mContact saved for 111@lid[39m
+✔ HTTP: the sending gate blocks start / create / share, not the list; 400s come first (1366.798565ms)
+✔ HTTP: bad or missing signature is 401 before anything (24.65362ms)
+✔ HTTP: start chat answers the chat; the first message goes to the chat’s own jid (26.084741ms)
+[22:09:48.310] [32mINFO[39m (1912192): [36mContact saved for 111@lid by dani[39m
+[22:09:48.215] [32mINFO[39m (1912192): [36mChat started with 34611111111@c.us (new conversation)[39m
+✔ HTTP: not on WhatsApp is 422; a failed first message keeps the chat in the answer; 503 offline (200.804213ms)
+[22:09:48.226] [32mINFO[39m (1912192): [36mChat started with 111@lid (new conversation)[39m
+[22:09:48.282] [32mINFO[39m (1912192): [36mChat started with 111@lid[39m
+[22:09:48.444] [32mINFO[39m (1912192): [36mContact card X1 (1) sent to 111@lid[39m
+✔ HTTP: create contact and share answer their shapes (POST /contacts is create) (130.619191ms)
+whatsapp_statuses does not exist yet (mcp-server migration 019 not applied): statuses still land in messages but are not indexed
+(node:1912321) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ jid kinds and the publish flag (off unless exactly "true") (2.235006ms)
+✔ list queries: defaults, flags, limits, cursors; channel ids only @newsletter (2.837079ms)
+✔ publish request: confirm, explicit audience normalised + deduplicated, per-type fields (3.673307ms)
+✔ a contact status lands in messages as before and is indexed: author, +24 h, live/history (21.992016ms)
+✔ not indexed: sender-key noise, a status without time, chats and channel posts (26.557808ms)
+✔ ingest off (pairing pool): the lists answer empty without touching the DB (4.107241ms)
+✔ statuses of one contact: PN + LID through the aliases, active only, keyset cursor (15.143014ms)
+✔ status index missing (42P01): empty list, persisted false, writes false, re-probed later (9.707478ms)
+✔ channel posts: channels from conversations, posts from messages, names only when real (8.113759ms)
+✔ channel feed merges isolated posts and legacy rows, preserving scope and paging equal provider IDs (14.70166ms)
+✔ channel feed filters authoritative isolated tombstones before limiting legacy rows (9.804294ms)
+✔ channel feed falls back to legacy rows when isolated tables are not migrated (24.286612ms)
+✔ publish is refused while WA_STATUS_PUBLISH_ENABLED is off, before the socket (10.64804ms)
+✔ publish a text status: statusJidList without our own ids, style, indexed with audience + actor (5.825434ms)
+✔ publish an image status: fetched, JPEG / PNG only, a failed fetch is 422 (456.509115ms)
+✔ HTTP: publish needs the flag (403 status_publish_disabled), then the send gate; lists ungated (469.004464ms)
+✔ HTTP: 200 shapes, 400s, 503 disconnected for publish only (204.840632ms)
+[22:09:47.918] [32mINFO[39m (1912321): [36mStatus IDEM1 (text) published to 1 contacts by mcp:agent[39m
+[22:09:47.807] [33mWARN[39m (1912321): [36mNovedades message persistence failed: Status message is missing its original timestamp[39m
+[22:09:48.144] [32mINFO[39m (1912321): [36mStatus ST1 (image) published to 1 contacts[39m
+✔ request: ids and fileUrl required; a data: URL of the wrong type is 400 before the gate (4.506228ms)
+✔ bytes: WebP sticker (static / animated), MP4 GIF with gifPlayback; magic and size decide (11.399648ms)
+✔ fetch: the ceiling holds while streaming and against Content-Length; a bad URL is 400 (14.376967ms)
+✔ client: a sticker goes to the canonical jid (merged phone chat → its LID) as a WebP payload (16.196746ms)
+✔ client: an MP4 goes as a GIF (gifPlayback); a refused file never reaches the claim nor the socket (38.674014ms)
+✔ client with ingest off: sends, the DB never touched (10.422135ms)
+✔ HTTP: a raw GIF is refused 400 before Baileys (fork gif-send.test), the gate is 403, offline 503 (1387.914592ms)
+WhatsApp send replayed messageId=3EB0EC7070AED58F661473
+✔ HTTP: opt-in Idempotency-Key on a sticker: claimed before the send, replay deduplicated (105.196768ms)
+[22:09:48.654] [32mINFO[39m (1912558): [36msticker ST1 sent to 111@lid[39m
+[22:09:48.699] [32mINFO[39m (1912558): [36mgif ST1 sent to 111@lid[39m
+[22:09:49.595] [32mINFO[39m (1912558): [36msticker ST1 sent to 111@lid[39m
+[22:09:48.712] [32mINFO[39m (1912558): [36msticker ST1 sent to 111@lid[39m
+[22:09:50.162] [32mINFO[39m (1912558): [36msticker 3EB0EC7070AED58F661473 sent to 111@lid[39m
+✔ only an absent sendToken becomes a legacy id, a present broken one is refused (3.971001ms)
+✔ poll limits follow the provider and a rejected draft never reaches the sender (5.985267ms)
+✔ event validation keeps end after start and the location shape the creator typed (12.213879ms)
+✔ a retry token belongs to one account, chat, message type and payload (6.402972ms)
+✔ a poll is claimed before the relay, confirmed after, and a replay never relays again (17.314829ms)
+✔ two concurrent creators of the same poll relay exactly once (1.157861ms)
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+send idempotency failure record failed: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption
+✔ uncertain poll and event outcomes stay uncertain and are not replayed (72.535159ms)
+✔ a failure before the claim keeps the reservation usable for the next attempt (13.303262ms)
+WhatsApp send replayed messageId=3EB067A8C38D2029618672
+WhatsApp send replayed messageId=3EB0D3BAF161EE1C2BF6AE
+✔ the poll and event routes keep the token, the option text and the typed location (1127.161755ms)
+✔ the client claims before relaying, pins the reserved id and survives a persist failure (549.388329ms)
+(node:1912621) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+[22:09:49.438] [33mWARN[39m (1912621): [36mdisappearing timer of 111@s.whatsapp.net unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.423] [33mWARN[39m (1912621): [36mdisappearing timer of 111@s.whatsapp.net unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.471] [33mWARN[39m (1912621): [36mdisappearing timer of 111@s.whatsapp.net unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.316] [33mWARN[39m (1912621): [36mdisappearing timer of 111@s.whatsapp.net unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.533] [33mWARN[39m (1912621): [36mdisappearing timer of 123@g.us unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.388] [33mWARN[39m (1912621): [36mdisappearing timer of 123@g.us unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.534] [33mWARN[39m (1912621): [36mRecipient snapshot unavailable: sock.groupMetadata is not a function[39m
+[22:09:49.388] [33mWARN[39m (1912621): [36mRecipient snapshot unavailable: sock.groupMetadata is not a function[39m
+[22:09:49.512] [33mWARN[39m (1912621): [36mdisappearing timer of 123@g.us unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.512] [33mWARN[39m (1912621): [36mRecipient snapshot unavailable: sock.groupMetadata is not a function[39m
+[22:09:49.587] [33mWARN[39m (1912621): [36mdisappearing timer of 123@g.us unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.587] [33mWARN[39m (1912621): [36mRecipient snapshot unavailable: sock.groupMetadata is not a function[39m
+[22:09:49.712] [33mWARN[39m (1912621): [36mdisappearing timer of 111@s.whatsapp.net unreadable, sent without: no pg_hba.conf entry for host "127.0.0.1", user "test", database "test", no encryption[39m
+[22:09:49.712] [33mWARN[39m (1912621): [36mPoll relayed; local persistence is pending[39m
+✔ QR UI URLs preserve the configured account prefix (10.453923ms)
+✔ UI path rejects HTML, script, traversal and external URL prefixes (3.106207ms)
+✔ QR links honor public URL, compatibility fallback, and prefixed local route (3.341564ms)
+✔ dashboard absent or blank performs no fetch; configured dashboard preserves path prefix (55.326053ms)
+✔ provider socket override is validated and unsupported origin fails clearly (0.680516ms)
+✔ manual links honor provider base and encode message (0.635404ms)
+✔ chat modifications use the Baileys lastMessages contract (8.227763ms)
+✔ poll, event, and contact payloads preserve typed Baileys fields (2.406805ms)
+✔ presence snapshots omit unknown lastSeen instead of inventing a timestamp (0.442652ms)
+✔ privacy update validates only provider-supported values (0.640881ms)
+✔ durable JSON round-trip preserves byte arrays used by media and message secrets (1.775789ms)
+✔ action aliases stay explicit and do not silently become sends (0.399825ms)
+✔ poll limits match the published WhatsApp limits (0.425842ms)
+✔ buildPollMessage refuses what the provider would refuse instead of trimming it down (2.287045ms)
+✔ validatePollInput reports the offending field so the composer can show it (1.467306ms)
+✔ event location keeps a typed place separate from a map pin (1.908679ms)
+✔ buildEventMessage keeps one instant per field and drops blanks instead of sending them (1.32039ms)
+ℹ tests 930
+ℹ suites 0
+ℹ pass 929
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 59487.502499

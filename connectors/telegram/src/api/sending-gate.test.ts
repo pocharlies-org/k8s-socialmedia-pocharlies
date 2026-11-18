@@ -4,7 +4,8 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
 import { generateHMACSignature } from '@mcp-socialmedia/shared';
-import { createRouter, requireSending } from './controller';
+import { createRouter } from './controller';
+import { createPublicRouter } from './public-routes';
 import type { TelegramClientWrapper } from '../telegram-client';
 
 /**
@@ -55,10 +56,7 @@ async function serve() {
   const app = express();
   app.use(express.json());
   app.use('/api/v1', createRouter(client, SECRET));
-  app.post('/api/public/send/:chatId', requireSending, (_req, res) => {
-    calls.push('publicSend');
-    res.json({ success: true });
-  });
+  app.use('/api/public', createPublicRouter(client, SECRET, { log: () => {} }));
   const server: Server = await new Promise(resolve => {
     const s = app.listen(0, () => resolve(s));
   });
@@ -98,6 +96,9 @@ const OUTWARD: Array<[string, string, unknown?]> = [
   ['DELETE', `/api/v1/messages/${CHAT}/42`],
   ['POST', '/api/v1/groups', { title: 'g', type: 'group' }],
   ['POST', `/api/v1/chats/${CHAT}/members`, { members: ['123'] }],
+  ['POST', `/api/v1/chats/${CHAT}/ban`, { userId: '123' }],
+  ['POST', `/api/v1/chats/${CHAT}/unban`, { userId: '123' }],
+  ['POST', `/api/v1/chats/${CHAT}/invite-export`, {}],
   ['PUT', `/api/v1/chats/${CHAT}/admins/123`, { rights: { pinMessages: true } }],
   ['POST', `/api/v1/chats/${CHAT}/topics`, { title: 't' }],
   ['PATCH', `/api/v1/chats/${CHAT}/topics/5`, { title: 't2' }],
@@ -117,6 +118,8 @@ const READS: Array<[string, string, unknown?]> = [
   ['POST', `/api/v1/messages/read/${CHAT}`, {}],
   ['GET', `/api/v1/chats/${CHAT}/topics`],
   ['GET', '/api/v1/dialogs'],
+  ['GET', '/api/public/dialogs'],
+  ['GET', `/api/public/messages/${CHAT}`],
 ];
 
 for (const [env, value] of [
@@ -150,6 +153,8 @@ test('con la puerta cerrada las lecturas y el marcar leído siguen abiertos', as
     'markAsRead',
     'getForumTopics',
     'getDialogs',
+    'getDialogs',
+    'getMessages',
   ]);
 });
 

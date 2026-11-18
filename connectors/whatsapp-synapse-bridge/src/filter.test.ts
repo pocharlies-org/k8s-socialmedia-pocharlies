@@ -219,6 +219,23 @@ for (const c of cases) {
   });
 }
 
+test('tracking control filter drops every labels-owned surface without any env', () => {
+  for (const content of [
+    'Hola Skirmshop, quiero recibir seguimiento por WhatsApp del pedido ORD12345. Enlace: https://track.skirmshop.es/labels/track/abc',
+    'Hi Skirmshop, I want to receive tracking updates on WhatsApp for order ORD12345. Link: https://track.skirmshop.es/labels/track/abc',
+    'Hola Skirmshop, quiero recibir seguimiento por WhatsApp de mi pedido',
+    'ORD18504',
+    '#ORD18504',
+    'BAJA',
+  ]) {
+    assert.equal(
+      shouldForward(makeEvent({ content }), OWN_JID, neverSeen).reason,
+      'tracking-opt-in-control-message',
+      content
+    );
+  }
+});
+
 test('malformed event dropped', () => {
   const result = shouldForward(null as unknown as MessageReceivedEvent, OWN_JID, neverSeen);
   assert.equal(result.forward, false);

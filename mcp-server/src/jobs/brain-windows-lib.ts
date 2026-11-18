@@ -4,24 +4,59 @@
  * closes a window; the window is pushed as a parent `conversation_window`
  * document plus `conversation_chunk` children (small-to-big retrieval, ADR
  * §3/§4). Everything that decides bytes (sessionizing, splitting, formatting,
- * hashing, chunking, diffing) lives here as pure functions; the DB and HTTP
- * plumbing sits below them and is exercised with fakes in the specs.
+ * hashing, chunking, diffing) lives here as pure functions; the DB plumbing
+ * sits below them and is exercised with fakes in the specs.
  */
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { Pool } from 'pg';
-import {
-  BrainDoc,
-  BrainPushConfig,
-  adapterForPlatform,
-  instanceForAccount,
-  pushToBrain,
-} from './brain-ingest-lib';
+import { activeNamespaces, brainInstanceForNamespace } from '../domain/account-registry';
 import { unwrapAsrJson } from './voice-json-fix-lib';
 
-// CONTRACT: http.brain.push-ingest.conversation-window.v1
-// (the parent/child document shapes built here are the consumer contract;
-// the push itself goes through pushToBrain in brain-ingest-lib.ts)
+// (SC-5827: brain-ingest-lib.ts murio con el Brain; los helpers del registro
+// que seguian vivos — ingestNamespaces, instanceForAccount, adapterForPlatform
+// y el tipo BrainDoc — viven ahora aqui, que es su unico consumidor)
+
+/** A DB namespace of the account registry (the legacy `account` column). */
+export type Account = string;
+
+/**
+ * Namespaces to index: every namespace declared in the account registry
+ * (k8s/base/social-accounts.json), so a new account is covered without a code
+ * change. Each namespace carries its WhatsApp, Telegram and Instagram rows.
+ */
+export function ingestNamespaces(): Account[] {
+  return activeNamespaces();
+}
+
+export type Platform = 'whatsapp' | 'telegram' | 'instagram';
+
+/** The document shape of a window (parent) or a chunk (child). */
+export interface BrainDoc {
+  source_id: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}
+
+/** Brain instance of a namespace: the registry's `brainInstance`. */
+export function instanceForAccount(account: Account): string {
+  const instance = brainInstanceForNamespace(account);
+  if (!instance) throw new Error(`namespace '${account}' is not declared in the account registry`);
+  return instance;
+}
+
+export function adapterForPlatform(platform: string): string {
+  const normalized = (platform || '').toLowerCase();
+  if (normalized === 'telegram' || normalized === 'instagram') {
+    return normalized;
+  }
+  return 'whatsapp';
+}
+
+// CONTRACT: http.brain.push-ingest.conversation-window.v1 (deprecated, SC-5827)
+// (the parent/child document shapes built here are the contract; since
+// SC-5827 the only publisher is brain-windows-synapse.ts, which ships these
+// same documents as brain_window.* events for synapse-adapter-hindsight)
 
 // ── types ───────────────────────────────────────────────────────────────────
 
@@ -760,7 +795,8 @@ export function diffWindows(existing: StoredWindow[], built: BuiltWindow[]): Win
   return { toPush, toDelete };
 }
 
-// ── push / delete (ADR §3; push reuses brain-ingest-lib's budget) ─────────
+// ── instance routing y forma de los documentos (el push/delete al Brain murio
+// con el Brain, SC-5827; el unico sink es brain-windows-synapse.ts) ─────────
 
 export function instanceForNamespace(account: string): string {
   return instanceForAccount(account);
@@ -789,116 +825,20 @@ export function wellFormedDeep<T>(v: T): T {
 }
 
 /**
- * Where window documents go. The incremental cron publishes Synapse events
- * (brain-windows-synapse.ts); the backfill keeps calling push-ingest (httpSink).
+ * Where window documents go. The only implementation is brain-windows-synapse.ts
+ * (Synapse events, consumed by synapse-adapter-hindsight); the direct Brain
+ * push/delete (httpSink) was retired with the Brain (SC-5827).
  */
 export interface WindowSink {
   push(account: string, docs: BrainDoc[]): Promise<void>;
   remove(account: string, platform: string, sourceId: string, chunkCount: number): Promise<void>;
 }
 
-export function httpSink(
-  config: BrainPushConfig,
-  log: (msg: string, err?: unknown) => void = () => undefined
-): WindowSink {
-  return {
-    async push(account, docs) {
-      await pushWindowDocs(config, account, docs);
-    },
-    async remove(account, platform, sourceId, chunkCount) {
-      await deleteWindowFromBrain(config, account, platform, sourceId, chunkCount, log);
-    },
-  };
-}
-
-/** Push parents + children in batches of `batch` docs through pushToBrain. */
-export async function pushWindowDocs(
-  config: BrainPushConfig,
-  account: string,
-  docs: BrainDoc[],
-  batch = 25
-): Promise<number> {
-  let chunks = 0;
-  const adapter = adapterForPlatform(docsAdapterKey(docs));
-  const instance = instanceForNamespace(account);
-  for (let i = 0; i < docs.length; i += batch) {
-    chunks += await pushToBrain(
-      config,
-      instance,
-      adapter,
-      wellFormedDeep(docs.slice(i, i + batch))
-    );
-  }
-  return chunks;
-}
-
-function docsAdapterKey(docs: BrainDoc[]): string {
-  const p = docs[0]?.metadata?.platform;
-  return typeof p === 'string' ? p : 'whatsapp';
-}
-
-/**
- * Delete one document (parent or child) from the brain:
- * POST /instances/{instance}/delete-document {adapter, source_id}.
- * 404 counts as success (nothing there). Retries 5xx/network with the same
- * small budget as the push.
- */
-export async function deleteFromBrain(
-  config: BrainPushConfig,
-  instance: string,
-  adapter: string,
-  sourceId: string,
-  sleep: (ms: number) => Promise<void> = ms => new Promise(r => setTimeout(r, ms))
-): Promise<void> {
-  const url = `${config.brainUrl.replace(/\/$/, '')}/instances/${instance}/delete-document`;
-  let lastError = '';
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
-        },
-        body: JSON.stringify({ adapter, source_id: sourceId }),
-        signal: AbortSignal.timeout(30000),
-      });
-      if (resp.ok || resp.status === 404) return;
-      lastError = `${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 200)}`;
-      if (resp.status < 500) break; // 4xx other than 404: no retry
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-    }
-    if (attempt < 4) await sleep(1000 * 2 ** (attempt - 1));
-  }
-  throw new Error(`brain delete-document ${sourceId} failed: ${lastError}`);
-}
-
-/** Delete a window and its children from the brain (best effort per doc). */
-export async function deleteWindowFromBrain(
-  config: BrainPushConfig,
-  account: string,
-  platform: string,
-  sourceId: string,
-  chunkCount: number,
-  log: (msg: string, err?: unknown) => void
-): Promise<void> {
-  const instance = instanceForNamespace(account);
-  const adapter = adapterForPlatform(platform);
-  const ids = [sourceId, ...Array.from({ length: chunkCount }, (_, i) => `${sourceId}#c${i + 1}`)];
-  for (const id of ids) {
-    // A window whose delete fails propagates: the caller keeps the ledger row,
-    // so the next pass re-diffs and retries the delete.
-    log(`brain delete ${instance}/${adapter} ${id}`);
-    await deleteFromBrain(config, instance, adapter, id);
-  }
-}
-
 // ── Postgres plumbing ─────────────────────────────────────────────────────
 
 export async function ensureBrainWindowsTables(pool: Pool): Promise<void> {
   // Mirrors 016_brain_windows.sql so a job can run before the PreSync migrate
-  // Job lands (same posture as ensureLiveCursorTable in brain-ingest-lib).
+  // Job lands (same posture as the old ensureLiveCursorTable).
   await pool.query(`CREATE TABLE IF NOT EXISTS brain_windows (
     source_id        TEXT PRIMARY KEY,
     account          TEXT NOT NULL,
@@ -940,6 +880,12 @@ export async function ensureBrainWindowsTables(pool: Pool): Promise<void> {
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (run_id, phase)
   )`);
+  // 045 (SC-5926): backoff of a failed LLM window.
+  await pool.query(
+    `ALTER TABLE brain_windows
+       ADD COLUMN IF NOT EXISTS llm_attempts INTEGER NOT NULL DEFAULT 0,
+       ADD COLUMN IF NOT EXISTS llm_retry_after TIMESTAMPTZ`
+  );
 }
 
 /**
@@ -1146,27 +1092,28 @@ export async function sessionEndBound(
 }
 
 /**
- * Ledger windows of a chat. With `range`, only those starting inside it: the
- * incremental rebuilds just the affected sessions, so comparing against the
- * whole chat made every window outside the range look "vanished" and got it
- * deleted (02-10-2026: ~26k windows in four passes). The backfill rebuilds the
- * whole chat and calls this without a range.
+ * Ledger windows of a chat starting inside `range`: the incremental rebuilds
+ * just the affected sessions, so comparing against the whole chat made every
+ * window outside the range look "vanished" and got it deleted (02-10-2026:
+ * ~26k windows in four passes).
  */
 export async function loadStoredWindows(
   pool: Pool,
   chat: ChatRef,
-  range?: { from: Date; to: Date }
+  range: { from: Date; to: Date }
 ): Promise<StoredWindow[]> {
-  const params: unknown[] = [chat.account, chat.platform, chat.conversation_id];
-  let where = 'account = $1 AND platform = $2 AND conversation_id = $3';
-  if (range) {
-    params.push(range.from, range.to);
-    where += ' AND start_ts >= $4 AND start_ts <= $5';
-  }
+  const params: unknown[] = [
+    chat.account,
+    chat.platform,
+    chat.conversation_id,
+    range.from,
+    range.to,
+  ];
   const r = await pool.query(
     `SELECT source_id, content_hash, chunk_count, llm_status
        FROM brain_windows
-      WHERE ${where}`,
+      WHERE account = $1 AND platform = $2 AND conversation_id = $3
+        AND start_ts >= $4 AND start_ts <= $5`,
     params
   );
   return r.rows as StoredWindow[];
@@ -1179,7 +1126,7 @@ export interface UpsertWindowInput {
   llm_status: LlmStatus;
 }
 
-/** Record a window part after (or, in DRY_RUN, without) pushing it. */
+/** Record a window part after pushing it. */
 export async function upsertWindow(pool: Pool, input: UpsertWindowInput): Promise<void> {
   const { w } = input;
   await pool.query(
@@ -1248,18 +1195,23 @@ export async function setWindowLlmResult(
   pool: Pool,
   sourceId: string,
   status: LlmStatus,
-  inputHash: string | null,
   error: string | null
 ): Promise<void> {
   await pool.query(
     `UPDATE brain_windows
         SET llm_status = $2,
-            llm_input_hash = COALESCE($3, llm_input_hash),
             llm_done_at = CASE WHEN $2 = 'done' THEN now() ELSE llm_done_at END,
-            llm_error = CASE WHEN $2 = 'failed' THEN left($4, 2000) ELSE NULL END,
+            llm_error = CASE WHEN $2 = 'failed' THEN left($3, 2000) ELSE NULL END,
+            -- SC-5926: a failed window waits min(2^attempts × 10 min, 6 h) before
+            -- fetchPendingLlmWindows picks it again.
+            llm_retry_after = CASE WHEN $2 = 'failed'
+                                   THEN now() + least(interval '10 minutes' * power(2, llm_attempts),
+                                                      interval '6 hours')
+                                   ELSE NULL END,
+            llm_attempts = CASE WHEN $2 = 'failed' THEN llm_attempts + 1 ELSE 0 END,
             updated_at = now()
       WHERE source_id = $1`,
-    [sourceId, status, inputHash, error]
+    [sourceId, status, error]
   );
 }
 
@@ -1288,15 +1240,9 @@ export async function fetchPendingLlmWindows(
     accounts: string[];
     closedBefore: Date;
     limit: number;
-    after?: { end_ts: Date; source_id: string } | null;
   }
 ): Promise<PendingLlmWindow[]> {
   const params: unknown[] = [opts.accounts, opts.closedBefore, opts.limit];
-  let keyset = '';
-  if (opts.after) {
-    params.push(opts.after.end_ts, opts.after.source_id);
-    keyset = `AND (w.end_ts, w.source_id) < ($4::timestamptz, $5::text)`;
-  }
   const r = await pool.query(
     `SELECT w.source_id, w.account, w.platform, w.conversation_id, w.window_key, w.part,
             w.start_ts, w.end_ts, w.message_count, w.conv_kind, w.content_hash, w.llm_input_hash
@@ -1304,12 +1250,34 @@ export async function fetchPendingLlmWindows(
       WHERE w.account = ANY ($1::text[])
         AND w.llm_status IN ('pending','failed')
         AND w.end_ts <= $2::timestamptz
-        ${keyset}
+        AND (w.llm_status = 'pending' OR w.llm_retry_after IS NULL OR w.llm_retry_after <= now())
       ORDER BY w.end_ts DESC, w.source_id DESC
       LIMIT $3`,
     params
   );
   return r.rows as PendingLlmWindow[];
+}
+
+/**
+ * SC-5926: when the next window becomes LLM-ready — the earliest close
+ * (end_ts + gap) of a pending window, or the end of a failed one's backoff.
+ * In the past = something is ready now. null = nothing waits for the LLM.
+ */
+export async function nextLlmReadyAt(
+  pool: Pool,
+  accounts: string[],
+  gapSeconds: number
+): Promise<Date | null> {
+  const r = await pool.query(
+    `SELECT min(GREATEST(w.end_ts + make_interval(secs => $2),
+                         CASE WHEN w.llm_status = 'failed' THEN w.llm_retry_after END)) AS at
+       FROM brain_windows w
+      WHERE w.account = ANY ($1::text[])
+        AND w.llm_status IN ('pending','failed')`,
+    [accounts, gapSeconds]
+  );
+  const at = (r.rows[0] as { at: Date | null } | undefined)?.at;
+  return at ? new Date(at) : null;
 }
 
 /**
@@ -1383,52 +1351,6 @@ export async function loadWindowForLlm(
 
 // ── backfill plumbing ─────────────────────────────────────────────────────
 
-/** Every (account, platform, canonical conversation) with ingestable messages. */
-export interface ChatListItem {
-  account: string;
-  platform: string;
-  conversation_id: string;
-}
-
-export async function listChats(
-  pool: Pool,
-  opts: {
-    accounts: string[];
-    platform?: string;
-    after?: ChatListItem | null;
-    limit: number;
-  }
-): Promise<ChatListItem[]> {
-  const params: unknown[] = [opts.accounts];
-  let platformFilter = '';
-  if (opts.platform) {
-    params.push(opts.platform);
-    platformFilter = `AND m.platform = $${params.length}`;
-  }
-  let keyset = '';
-  if (opts.after) {
-    params.push(opts.after.account, opts.after.conversation_id);
-    const n = params.length;
-    keyset = `AND (m.account, COALESCE(c.merged_into, m.conversation_id)) >
-              (($${n - 1})::text, ($${n})::text)`;
-  }
-  params.push(opts.limit);
-  const r = await pool.query(
-    `SELECT DISTINCT m.account, m.platform, COALESCE(c.merged_into, m.conversation_id) AS conversation_id
-       FROM messages m
-       JOIN conversations c ON c.id = m.conversation_id
-      WHERE m.account = ANY ($1::text[])
-        AND ${INGESTABLE}
-        AND ${WINDOW_PLATFORMS}
-        ${platformFilter}
-        ${keyset}
-      ORDER BY 1, 3
-      LIMIT $${params.length}`,
-    params
-  );
-  return r.rows as ChatListItem[];
-}
-
 export interface BackfillCursor {
   last_account: string | null;
   last_platform: string | null;
@@ -1487,14 +1409,26 @@ export async function setBackfillCursor(
   );
 }
 
-/** Store the LLM summary on the ledger row (previous-window context). */
-export async function setWindowSummary(
+/**
+ * Record a successful extraction (status done + summary for the next window's
+ * context) only if the row still holds the content that was summarised. The
+ * resident worker (SC-5926) recomputes windows while an LLM call is in flight;
+ * false = the chat moved on, the caller must not push the stale summary.
+ */
+export async function commitLlmSummary(
   pool: Pool,
   sourceId: string,
+  contentHash: string,
+  inputHash: string,
   summary: string
-): Promise<void> {
-  await pool.query(
-    `UPDATE brain_windows SET llm_summary = $2, updated_at = now() WHERE source_id = $1`,
-    [sourceId, summary]
+): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE brain_windows
+        SET llm_status = 'done', llm_input_hash = $3, llm_done_at = now(), llm_error = NULL,
+            llm_summary = $4, llm_attempts = 0, llm_retry_after = NULL, updated_at = now()
+      WHERE source_id = $1 AND content_hash = $2
+  RETURNING source_id`,
+    [sourceId, contentHash, inputHash, summary]
   );
+  return r.rows.length > 0;
 }

@@ -18,7 +18,6 @@ function pairingServer(fetchImpl: jest.Mock) {
   const server = Object.create(MCPServer.prototype) as MCPServer;
   Object.assign(server as unknown as Record<string, unknown>, {
     instagramUrl: 'http://instagram-connector:3003',
-    connectorSecret: 'test-shared-secret',
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() },
   });
   global.fetch = fetchImpl as unknown as typeof fetch;

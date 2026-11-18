@@ -1,31 +1,15 @@
 import { Pool } from 'pg';
 import { syncSocialAccountsBestEffort } from '../infrastructure/database/social-accounts';
-import Redis, { RedisOptions } from 'ioredis';
-import * as fs from 'fs';
-import { MCPServer } from './server';
-import { requireConnectorSecret } from '@mcp-socialmedia/shared';
+import Redis from 'ioredis';
+import { loadMcpRuntimeConfig, redisOptionsFor } from './runtime-config';
+import { createMcpServer } from './runtime-server';
 
-// SC-1239 C2: no hardcoded fallback — fail at startup naming the variable.
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-  throw new Error(
-    'DATABASE_URL is unset: refusing to start the MCP server without an explicit database connection'
-  );
-}
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const REDIS_TLS_CA = process.env.REDIS_TLS_CA;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const LLM_BASE_URL = process.env.LLM_BASE_URL || '';
-const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || '';
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-change-in-production';
-// SKIRM-103 F3-2: no key, no start; the placeholder warns, and CONNECTOR_SECRET_STRICT=true refuses it.
-const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
-const CONNECTOR_URL = process.env.CONNECTOR_URL || 'http://whatsapp-connector:3001';
+const config = loadMcpRuntimeConfig('stdio');
 
 async function main() {
   try {
     const dbPool = new Pool({
-      connectionString: DATABASE_URL,
+      connectionString: config.databaseUrl,
       max: 30,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
@@ -36,35 +20,13 @@ async function main() {
     console.log('Connected to database (pool max=30, statement_timeout=10s)');
 
     // Connect to Redis with TLS if configured
-    let redisOptions: RedisOptions = {};
-
-    if (REDIS_URL.startsWith('rediss://') && REDIS_TLS_CA) {
-      const ca = fs.readFileSync(REDIS_TLS_CA, 'utf-8');
-      redisOptions = {
-        tls: {
-          ca: ca,
-          rejectUnauthorized: true,
-        },
-      };
-    }
-
-    const redisClient = new Redis(REDIS_URL, redisOptions);
-    console.log('Connected to Redis' + (REDIS_TLS_CA ? ' with TLS' : ''));
+    const redisClient = new Redis(config.redisUrl, redisOptionsFor(config));
+    console.log('Connected to Redis' + (config.redisTlsCa ? ' with TLS' : ''));
 
     await syncSocialAccountsBestEffort(dbPool);
 
     // Create MCP server
-    const server = new MCPServer(
-      dbPool,
-      redisClient,
-      OPENAI_API_KEY,
-      ENCRYPTION_KEY,
-      CONNECTOR_SHARED_SECRET,
-      CONNECTOR_URL,
-      REDIS_URL,
-      LLM_BASE_URL || undefined,
-      LLM_CHAT_MODEL || undefined
-    );
+    const server = createMcpServer(dbPool, redisClient, config);
 
     // Run server
     await server.run();

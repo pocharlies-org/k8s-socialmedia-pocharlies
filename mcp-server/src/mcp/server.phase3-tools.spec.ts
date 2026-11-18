@@ -122,6 +122,84 @@ describe('social_react_message', () => {
   });
 });
 
+describe('social_get_reactions', () => {
+  const tg = { channel: 'telegram', accountId: 'personal' };
+  const reactors = (total: number, emojis: string[]) => ({
+    total,
+    reactors: emojis.map((emoji, i) => ({ emoji, userId: i + 1, displayName: null, mine: false })),
+  });
+  const single = (from: string) => ({
+    message: {
+      senderFirstName: from,
+      messageType: 'PHOTO',
+      content: 'foto',
+      telegramTimestamp: 't',
+    },
+  });
+
+  it('tallies a forum topic, sorted by Telegram total, with per-emoji counts', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockImplementation(async (...a: unknown[]) => {
+      const path = String(a[2]);
+      if (path === '/api/v1/messages/search') return { results: [{ id: '10' }, { id: '11' }] };
+      if (path.startsWith('/api/v1/messages/single/'))
+        return single(path.endsWith('/10') ? 'Ana' : 'Bea');
+      return path.includes('/10?') ? reactors(2, ['🔥', '❤']) : reactors(3, ['🔥', '🔥', '❤']);
+    });
+    const out = await run('social_get_reactions', { ...tg, target: '-1003672565710', topicId: 6 });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://tg-personal',
+      'POST',
+      '/api/v1/messages/search',
+      {
+        query: '',
+        chatId: '-1003672565710',
+        threadId: 6,
+        limit: 100,
+      }
+    );
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://tg-personal',
+      'GET',
+      '/api/v1/messages/reactors/-1003672565710/11?limit=5000',
+      undefined,
+      60000
+    );
+    const { messages } = out.structuredContent.data;
+    expect(messages.map((m: any) => [m.from, m.total, m.byEmoji])).toEqual([
+      ['Bea', 3, { '🔥': 2, '❤': 1 }],
+      ['Ana', 2, { '🔥': 1, '❤': 1 }],
+    ]);
+  });
+
+  it('counts one message, keeps Telegram total over a shorter reactor list, and needs a topic otherwise', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockImplementation(async (...a: unknown[]) =>
+      String(a[2]).startsWith('/api/v1/messages/single/') ? single('Ana') : reactors(150, ['🔥'])
+    );
+    const one = await run('social_get_reactions', {
+      ...tg,
+      target: 'tg_12345',
+      messageId: 'tg_12345_77',
+    });
+    expect(one.structuredContent.data).toMatchObject({
+      messageId: '77',
+      from: 'Ana',
+      total: 150,
+      byEmoji: { '🔥': 1 },
+    });
+    const bare = await run('social_get_reactions', { ...tg, target: '12345' });
+    expect(bare.structuredContent.error).toMatchObject({ code: 'invalid_request' });
+    const wa = await run('social_get_reactions', {
+      channel: 'whatsapp',
+      accountId: 'personal',
+      target: 'x',
+      messageId: '1',
+    });
+    expect(wa.structuredContent.error).toMatchObject({ code: 'unsupported_capability' });
+  });
+});
+
 describe('social_set_chat_state', () => {
   it('mutes for a duration through POST /chats/modify and records the caller', async () => {
     const { run, connectorCall } = serverWith();
@@ -272,6 +350,41 @@ describe('social_get_group / social_manage_group', () => {
       '/api/v1/groups/participants',
       { groupId: '1203@g.us', action: 'promote', participants: ['34600000001@s.whatsapp.net'] }
     );
+  });
+
+  it('sets the group icon through POST /groups/photo with confirm (SC-3681)', async () => {
+    const { run, connectorCall } = serverWith();
+    connectorCall.mockResolvedValueOnce({
+      updated: true,
+      groupId: '1203@g.us',
+      photo: { available: true, accepted: true, confirmed: true, reason: 'IDENTITY_CHANGED' },
+      mimeType: 'image/png',
+      bytes: 67,
+    });
+    const out = await run('social_manage_group', {
+      ...wa,
+      target: '1203@g.us',
+      action: 'setPhoto',
+      photoUrl: 'https://cdn.example/x.png',
+    });
+    expect(connectorCall).toHaveBeenCalledWith(
+      'http://wa-professional',
+      'POST',
+      '/api/v1/groups/photo',
+      { groupId: '1203@g.us', fileUrl: 'https://cdn.example/x.png', confirm: true }
+    );
+    expect(out.structuredContent).toMatchObject({
+      status: 'accepted',
+      data: { photo: { confirmed: true } },
+    });
+  });
+
+  it('refuses setPhoto without a photoUrl (SC-3681)', async () => {
+    const { run, connectorCall } = serverWith();
+    await expect(
+      run('social_manage_group', { ...wa, target: '1203@g.us', action: 'setPhoto' })
+    ).rejects.toMatchObject({ canonicalCode: 'invalid_request' });
+    expect(connectorCall).not.toHaveBeenCalled();
   });
 
   it('refuses another account participant and an update with nothing to change', async () => {

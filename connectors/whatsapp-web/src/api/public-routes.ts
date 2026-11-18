@@ -1,11 +1,9 @@
 import express, { Request, Response } from 'express';
 import type { BaileysClient } from '../baileys-client';
-import { createHMACAuth, HMACRejectReason } from './auth';
+import { createHMACAuth } from './auth';
+import { createHMACRejectLog } from '@mcp-socialmedia/shared';
 
 type PublicClient = Pick<BaileysClient, 'getChats' | 'fetchChatHistory' | 'backfillRecentMedia'>;
-
-/** One rejection line per reason per this many ms; the rest are counted, not printed. */
-const REJECT_LOG_INTERVAL_MS = 10_000;
 
 /**
  * The history endpoints of the connector (sync service, mcp-server providerGet),
@@ -27,23 +25,8 @@ export function createPublicRouter(
   const router = express.Router();
 
   // F3-4: every rejection leaves one line (method, route, origin IP, reason) so a
-  // consumer nobody listed shows up in minutes. Never headers, body, signature or
-  // query; the route stops at its first segment so a chat id is not logged either.
-  const lastLogged = new Map<HMACRejectReason, { at: number; suppressed: number }>();
-  router.use(
-    createHMACAuth(sharedSecret, (req: Request, reason: HMACRejectReason) => {
-      const entry = lastLogged.get(reason);
-      if (entry && now() - entry.at < REJECT_LOG_INTERVAL_MS) {
-        entry.suppressed += 1;
-        return;
-      }
-      const route = `${req.baseUrl}/${req.path.split('/')[1] ?? ''}`;
-      log(
-        `[public-api] rejected ${req.method} ${route} ip=${req.ip} reason=${reason} suppressed=${entry?.suppressed ?? 0}`
-      );
-      lastLogged.set(reason, { at: now(), suppressed: 0 });
-    })
-  );
+  // consumer nobody listed shows up in minutes; the line carries nothing else of the request.
+  router.use(createHMACAuth(sharedSecret, createHMACRejectLog('public-api', { log, now })));
 
   // CONTRACT: http.whatsapp-connector.public-chats.v1 — GET /api/public/chats, HMAC over "<ts>:{}", 200 {chats}
   router.get('/chats', async (_req: Request, res: Response) => {

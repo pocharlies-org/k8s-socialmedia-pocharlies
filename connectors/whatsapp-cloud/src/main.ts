@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import pino from 'pino';
+import { requireConnectorSecret } from '@mcp-socialmedia/shared';
 import { createHMACAuth, AuthenticatedRequest } from './auth';
 import { WhatsAppCloudAPI, CloudConnectorError, cloudError } from './cloud-api';
 import { createWebhookRouter } from './webhook';
@@ -8,8 +9,8 @@ import { WhatsAppCloudPublisher } from './publisher';
 const logger = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
 
 const PORT = parseInt(process.env.PORT || '3004', 10);
-const CONNECTOR_SHARED_SECRET =
-  process.env.CONNECTOR_SHARED_SECRET || 'dev-secret-change-in-production';
+// SKIRM-111 (F3-2): no key, no process; the placeholder only with CONNECTOR_SECRET_STRICT unset.
+const CONNECTOR_SHARED_SECRET = requireConnectorSecret();
 const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
 const NATS_CA_CERT = process.env.NATS_CA_CERT;
 const GRAPH_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION || 'v25.0';

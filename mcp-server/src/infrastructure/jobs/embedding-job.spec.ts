@@ -6,11 +6,23 @@
  * todo Telegram se quedaban sin embedding en silencio (medido 04-10).
  */
 import { EmbeddingJob, lookupMessageId as EmbeddingJobLookup } from './embedding-job';
+import { useTestAccounts } from '../../domain/test-accounts';
 
 type Event = Parameters<typeof EmbeddingJob.messageKeyFor>[0];
 
+beforeAll(() =>
+  useTestAccounts({
+    whatsapp: { professional: 'http://wa-professional', leila: 'http://wa-leila' },
+    telegram: { personal: 'http://tg-personal', professional: 'http://tg-professional' },
+  })
+);
+
 it('WhatsApp personal: la clave va sin prefijo (compat con las filas históricas)', () => {
-  const e: Event = { eventType: 'MessageReceived', conversationId: '123@c.us', waMessageId: '3EB0AA' };
+  const e: Event = {
+    eventType: 'MessageReceived',
+    conversationId: '123@c.us',
+    waMessageId: '3EB0AA',
+  };
   expect(EmbeddingJob.messageKeyFor(e)).toBe('3EB0AA');
 });
 

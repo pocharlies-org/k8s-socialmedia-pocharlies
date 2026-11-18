@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { runInNewContext } from 'node:vm';
 import express from 'express';
 import { QRHandler } from '../qr-handler';
 import { createAuthQrV2Router } from './auth-qr';
@@ -93,11 +94,57 @@ test('/qr/page sin credenciales → la página, con el botón de renovar solo si
       assert.match(r.headers.get('content-type') ?? '', /text\/html/);
       const html = await r.text();
       assert.match(html, /Scan with WhatsApp/);
-      assert.match(html, /fetch\('\/status'\)/);
+      assert.match(html, /fetch\('\/status', \{ cache: 'no-store' \}\)/);
       assert.equal(html.includes('Generate new QR'), allow);
     } finally {
       await close();
     }
+  }
+});
+
+test('QR page keeps polling and clears Connected after disconnect or failed status', async () => {
+  const { base, close } = await serve(false);
+  try {
+    const html = await (await fetch(`${base}/qr/page`)).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)![1];
+    const elements = Object.fromEntries(['qr-section', 'connected-section', 'qr-img'].map(id =>
+      [id, { style: { display: '' }, src: '' }]));
+    let response: unknown = { connected: true };
+    let ok = true;
+    const timers: Array<() => Promise<void>> = [];
+    const window: { onload?: () => Promise<void> } = {};
+    runInNewContext(script, {
+      window,
+      document: { getElementById: (id: string) => elements[id] },
+      fetch: async () => {
+        if (response instanceof Error) throw response;
+        return { ok, json: async () => response };
+      },
+      setTimeout: (fn: () => Promise<void>, ms: number) => {
+        assert.equal(ms, 3000);
+        timers.push(fn);
+      },
+      Date,
+    });
+    await window.onload!();
+    assert.equal(elements['connected-section'].style.display, 'block');
+    assert.equal(timers.length, 1);
+    for (const state of [{ connected: false }, { connected: true }, new Error('offline'), { connected: 'true' }]) {
+      response = state;
+      await timers.shift()!();
+      assert.equal(elements['connected-section'].style.display,
+        state instanceof Error || state.connected !== true ? 'none' : 'block');
+      assert.equal(timers.length, 1);
+    }
+    response = { connected: true };
+    ok = false;
+    await timers.shift()!();
+    assert.equal(elements['connected-section'].style.display, 'none');
+    assert.equal(elements['qr-section'].style.display, 'block');
+    assert.match(elements['qr-img'].src, /^\/qr\?\d+$/);
+    assert.equal(timers.length, 1);
+  } finally {
+    await close();
   }
 });
 

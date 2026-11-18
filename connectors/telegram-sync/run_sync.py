@@ -42,7 +42,7 @@ async def main():
     else:
         logging.warning("Connector /me unreachable at startup; continuing (will retry).")
 
-    # HTTP bridge (serves mcp-server's live-unread + send + brain-chat).
+    # HTTP bridge (serves mcp-server's live-unread + send).
     bridge_port = int(os.environ.get("BRIDGE_PORT", "3080"))
     import uvicorn
     config = uvicorn.Config(bridge.app, host="0.0.0.0", port=bridge_port, log_level="info")

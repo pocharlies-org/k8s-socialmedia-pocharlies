@@ -53,8 +53,7 @@ HEADER = (
 )
 
 WA_IMAGE = (
-    "harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:1357057afaf6"
-    "@sha256:6a0789feb3fe2b268659508bbab259cfdf4a997513f83bc58fa181245aa67aae"
+    "harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.115@sha256:d6663b64593568f0d6ec35c0e6bad023747d7028e7596134abf51686963b422e"
 )
 TG_CONNECTOR_IMAGE = "harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:latest"
 TG_SYNC_IMAGE = "harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:latest"
@@ -72,25 +71,41 @@ def _secret_env(name, secret, key):
 
 # Storage envs shared by every connector that touches media (order matters:
 # the $(VAR) references resolve against envFrom and earlier entries).
+# INFRA-1175: los dos buckets (skirmshop-drive y el legacy socialmedia-media)
+# viven en OVH Object Storage; una sola credencial (Secret socialmedia-s3-ovh,
+# 1Password ovh-object-storage-s3) para los dos clientes.
+OVH_S3 = "https://s3.sbg.io.cloud.ovh.net"
 S3_ENV = [
-    _env("S3_ENDPOINT", "http://skirmshop-drive-s3.backup-hub.svc.cluster.local:9000"),
+    _env("S3_ENDPOINT", OVH_S3),
     _env("S3_BUCKET", "skirmshop-drive"),
-    _env("S3_REGION", "us-east-1"),
+    _env("S3_REGION", "sbg"),
     _env("S3_PREFIX", "socialmedia"),
-    _secret_env("AWS_ACCESS_KEY_ID", "skirmshop-drive-s3-socialmedia", "AWS_ACCESS_KEY_ID"),
-    _secret_env("AWS_SECRET_ACCESS_KEY", "skirmshop-drive-s3-socialmedia", "AWS_SECRET_ACCESS_KEY"),
-    _env("LEGACY_MINIO_ENDPOINT", f"whatsapp-mcp-minio.{SVC}:9000"),
-    _env("LEGACY_MINIO_ACCESS_KEY", "$(MINIO_ROOT_USER)"),
-    _env("LEGACY_MINIO_SECRET_KEY", "$(MINIO_ROOT_PASSWORD)"),
-    _env("LEGACY_MINIO_USE_SSL", "false"),
+    _secret_env("AWS_ACCESS_KEY_ID", "socialmedia-s3-ovh", "AWS_ACCESS_KEY_ID"),
+    _secret_env("AWS_SECRET_ACCESS_KEY", "socialmedia-s3-ovh", "AWS_SECRET_ACCESS_KEY"),
+    _env("LEGACY_MINIO_ENDPOINT", OVH_S3),
+    _env("LEGACY_MINIO_ACCESS_KEY", "$(AWS_ACCESS_KEY_ID)"),
+    _env("LEGACY_MINIO_SECRET_KEY", "$(AWS_SECRET_ACCESS_KEY)"),
+    _env("LEGACY_MINIO_USE_SSL", "true"),
     _env("LEGACY_MINIO_BUCKET", "socialmedia-media"),
-    _env("MINIO_ENDPOINT", f"whatsapp-mcp-minio.{SVC}:9000"),
-    _env("MINIO_ACCESS_KEY", "$(MINIO_ROOT_USER)"),
-    _env("MINIO_SECRET_KEY", "$(MINIO_ROOT_PASSWORD)"),
-    _env("MINIO_USE_SSL", "false"),
+    _env("MINIO_ENDPOINT", OVH_S3),
+    _env("MINIO_ACCESS_KEY", "$(AWS_ACCESS_KEY_ID)"),
+    _env("MINIO_SECRET_KEY", "$(AWS_SECRET_ACCESS_KEY)"),
+    _env("MINIO_USE_SSL", "true"),
     _env("MINIO_BUCKET", "socialmedia-media"),
 ]
 NATS_ENV = _env("NATS_URL", f"nats://whatsapp-mcp-nats.{SVC}:4222")
+# DGX-1640: voice notes publish eventos.whatsapp.voice.pending to the Synapse gateway's
+# durable /eventos (replaces the transcription CronJob). The secret is the existing
+# WHATSAPP_WEBHOOK_SECRET (envFrom whatsapp-mcp-secrets); empty URL ⇒ publisher disabled.
+SYNAPSE_EVENTOS_URL_ENV = _env(
+    "SYNAPSE_EVENTOS_URL", "http://synapse-gateway.synapse.svc.cluster.local:18790/eventos"
+)
+# dgx-messages (ns messages): since the DGX-190 extraction the messaging service
+# owns /api/messages/_connector/* — the connectors POST ephemeral events (typing,
+# reaction-snapshot) there, HMAC-signed with CONNECTOR_SHARED_SECRET (envFrom
+# whatsapp-mcp-secrets, sourced from 1Password Connect). DGX-291 repointed the
+# consumers: the dashboard serves no /api/messages anymore and is not a proxy.
+DASHBOARD_URL_ENV = _env("DASHBOARD_URL", "http://dgx-messages.messages.svc.cluster.local")
 DB_ENV = _env(
     "DATABASE_URL",
     "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres-shared-rw.databases.svc.cluster.local:5432/whatsappmcp",
@@ -169,7 +184,11 @@ def render_whatsapp(account):
             "@shared-valkey-master.databases.svc.cluster.local:6379/0",
         ),
         NATS_ENV,
+        # DGX-291: whatsapp-web forwards typing to the messaging service via
+        # shared/notifyDashboard; without DASHBOARD_URL the notifier is a no-op.
+        DASHBOARD_URL_ENV,
         DB_ENV,
+        SYNAPSE_EVENTOS_URL_ENV,
         _env("ENABLE_SENDING", "true"),
         _env("SESSION_PATH", "/app/persistent-session"),
     ]
@@ -179,7 +198,7 @@ def render_whatsapp(account):
     if d["emitAudioAttachments"]:
         env += [
             _env("WA_EMIT_AUDIO_ATTACHMENTS", "true"),
-            _env("S3_PUBLIC_ENDPOINT", "https://skirmshop-s3.e-dani.com"),
+            _env("S3_PUBLIC_ENDPOINT", OVH_S3),  # OVH ya es público: presign directo, sin pasar por el edge
             _env("S3_PRESIGN_EXPIRY_SECONDS", "3600"),
         ]
     env += S3_ENV
@@ -225,6 +244,16 @@ def render_whatsapp(account):
                         "httpGet": {"path": "/api/v1/health", "port": 3001},
                         "initialDelaySeconds": 15,
                         "timeoutSeconds": 3,
+                    },
+                    # QA #39: un proceso colgado no se reiniciaba nunca (solo dejaba
+                    # de recibir tráfico). /api/v1/health responde 200 aunque el socket
+                    # esté caído: el liveness solo dispara si el HTTP cuelga.
+                    "livenessProbe": {
+                        "httpGet": {"path": "/api/v1/health", "port": 3001},
+                        "initialDelaySeconds": 60,
+                        "periodSeconds": 30,
+                        "timeoutSeconds": 10,
+                        "failureThreshold": 4,
                     },
                     "volumeMounts": [
                         {"name": d["sessionPvc"], "mountPath": "/app/persistent-session"}
@@ -283,9 +312,22 @@ def telegram_defaults(account_id):
         # Secret key holding this account's gramjs session; None → the
         # TELEGRAM_SESSION_STRING already loaded by envFrom (personal).
         "sessionSecretKey": f"TELEGRAM_SESSION_STRING_{account_id.upper().replace('-', '_')}",
-        "connectorMemoryLimit": "768Mi",
+        # INFRA-888 puso 1.5Gi y sigue OOMKilling: medido 17-10 (journalctl
+        # kernel, nodo ubuntu) el node del conector personal llegó a 1531 MB
+        # de anon-rss en el kill (3 OOM en 21:33/21:42/21:48, cada uno ~5 min
+        # tras el arranque: pico del backfill, no fuga — la instancia estable
+        # se queda en ~300 MiB). 3Gi es el techo que ya lleva el telegram-sync.
+        # Si con 3Gi OOMKillea estando estable, es fuga del conector: ticket
+        # del whatsappmcp, no tamaño.
+        "connectorMemoryLimit": "3Gi",
         "syncMemoryLimit": "3Gi",
-        "connectorNodeSelector": {"topology": "lan", "kubernetes.io/arch": "amd64"},
+        # INFRA-1103 (03-11): el conector también va a sauvage. Su sesión gramjs vive en el
+        # Secret (sin PVC) y Recreate suelta el authkey antes de que conecte el pod nuevo, así
+        # que nunca la usan dos IPs a la vez (lo que dio AuthKeyDuplicated en el intento de ks5).
+        "connectorNodeSelector": {"kubernetes.io/hostname": "sauvage", "kubernetes.io/arch": "amd64"},
+        "connectorTolerations": [
+            {"key": "role", "operator": "Equal", "value": "edge", "effect": "NoSchedule"}
+        ],
         # telegram-sync is SESSION-LESS (ingests via NATS + the connector HTTP
         # API) → no IP binding → OVH edge node sauvage (role=edge taint).
         "syncNodeSelector": {"kubernetes.io/hostname": "sauvage", "kubernetes.io/arch": "amd64"},
@@ -300,40 +342,42 @@ def render_telegram(account):
     d = {**telegram_defaults(aid), **account.get("deploy", {})}
     cname, sname = d["connectorName"], d["syncName"]
 
-    c_env = [NATS_ENV]
+    # DGX-1235 B2: DATABASE_URL for telegram_send_attempts (send-idempotency.ts);
+    # a keyed send without it is refused (503), an unkeyed one never opens it.
+    c_env = [NATS_ENV, DASHBOARD_URL_ENV, DB_ENV]
     if d["connectorAccountEnv"]:
         c_env.append(_env("CONNECTOR_ACCOUNT", aid))
     if d["sessionSecretKey"]:
         c_env.append(
             _secret_env("TELEGRAM_SESSION_STRING", "whatsapp-mcp-secrets", d["sessionSecretKey"])
         )
-    connector = _deployment(
-        cname,
-        {
-            "enableServiceLinks": False,
-            "nodeSelector": d["connectorNodeSelector"],
-            "containers": [
-                {
-                    "name": "telegram-connector",
-                    "image": TG_CONNECTOR_IMAGE,
-                    "ports": [{"name": "http", "containerPort": 3002}],
-                    "livenessProbe": {
-                        "httpGet": {"path": "/health", "port": 3002},
-                        "initialDelaySeconds": 60,
-                        "periodSeconds": 30,
-                        "timeoutSeconds": 10,
-                        "failureThreshold": 4,
-                    },
-                    "env": c_env,
-                    "envFrom": SECRETS_ENV_FROM,
-                    "resources": {
-                        "requests": {"cpu": "30m", "memory": "256Mi"},
-                        "limits": {"memory": d["connectorMemoryLimit"]},
-                    },
-                }
-            ],
-        },
-    )
+    connector_spec = {
+        "enableServiceLinks": False,
+        "nodeSelector": d["connectorNodeSelector"],
+        "containers": [
+            {
+                "name": "telegram-connector",
+                "image": TG_CONNECTOR_IMAGE,
+                "ports": [{"name": "http", "containerPort": 3002}],
+                "livenessProbe": {
+                    "httpGet": {"path": "/health", "port": 3002},
+                    "initialDelaySeconds": 60,
+                    "periodSeconds": 30,
+                    "timeoutSeconds": 10,
+                    "failureThreshold": 4,
+                },
+                "env": c_env,
+                "envFrom": SECRETS_ENV_FROM,
+                "resources": {
+                    "requests": {"cpu": "30m", "memory": "256Mi"},
+                    "limits": {"memory": d["connectorMemoryLimit"]},
+                },
+            }
+        ],
+    }
+    if d["connectorTolerations"]:
+        connector_spec["tolerations"] = d["connectorTolerations"]
+    connector = _deployment(cname, connector_spec)
 
     s_env = [NATS_ENV, DB_ENV]
     if d["connectorAccountEnv"]:
