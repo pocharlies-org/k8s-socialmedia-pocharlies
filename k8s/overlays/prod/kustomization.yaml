@@ -16,6 +16,9 @@ patches:
   # SC-1197 encendido: SOCIAL_PAIRING_API=on + replicas 1 + CREDENTIAL_STORE_ENABLED
   # en social-api y los dos pools. Rollback = revert de este fichero y su linea.
   - path: patch-social-pairing-on.yaml
+  # SKIRM-103 / SC-2092: CONNECTOR_SECRET_STRICT=true en mcp-sse y los tres conectores de
+  # WhatsApp. Solo en la ventana de rotacion de la clave; rollback = revert de este fichero y su linea.
+  - path: patch-connector-secret-strict.yaml
   # DGX-1235: correo-bridge a 1 réplica, con entrada y salida (ENABLE_OUTBOUND "true").
   - path: patch-correo-bridge-on.yaml
   # SC-4836: leen CONNECTOR_SHARED_SECRET por env; Reloader los reinicia cuando su Secret cambia
