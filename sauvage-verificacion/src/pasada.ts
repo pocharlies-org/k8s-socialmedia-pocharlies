@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConnectorClient, descargarFoto, listarParticipantes, type FetchFn, type FetchResponse } from './connector-client';
 import { cargarEstado, auditadosHoy, guardarVeredicto, registrarPasada, type EstadoDb } from './estado';
-import { resolverSesionOpencode } from './sesion-opencode';
+import { leerSesionDeSalidaDelRun, resolverSesionOpencode } from './sesion-opencode';
 import { veredictoDeVision, type Veredicto } from './vision';
 
 /**
@@ -32,7 +32,13 @@ export interface ConfigPasada {
   visionModel: string;
   promptVision: string;
   fotosDir: string;
-  /** Directorio de sesiones de opencode (C1): <dir>/<proyecto>/ses_<id>.json. */
+  /**
+   * Fichero con la SALIDA del run de opencode (C1, fuente fiable):
+   * <data>/opencode/log/opencode.log — opencode graba ahi las mismas lineas
+   * que `--print-logs` vuelca a stdout, incluida `message=created id=ses_...`.
+   */
+  opencodeLogFile: string;
+  /** Fallback (C1): <dir>/<proyecto>/ses_<id>.json. No existe en 1.18.30 (SQLite). */
   sesionesOpencodeDir: string;
 }
 
@@ -66,9 +72,14 @@ export function configDesdeEntorno(env: NodeJS.ProcessEnv): ConfigPasada {
     visionModel: env.SAUVAGE_VISION_MODEL ?? 'qwen38-flash-next-uncensored',
     promptVision,
     fotosDir: env.SAUVAGE_FOTOS_DIR ?? '/tmp/sauvage-fotos',
-    // Dato de opencode (core/global.ts): <XDG_DATA_HOME>/opencode/storage/
-    // session. En el pod del CronJob XDG_DATA_HOME=/tmp/.local/share (emptyDir
-    // nuevo en cada job: la sesion mas reciente ES la sesion actual).
+    // Fuente del ses_ (C1): la SALIDA del run, que opencode graba en
+    // <XDG_DATA_HOME>/opencode/log/opencode.log (medido en 1.18.30; el job fija
+    // XDG_DATA_HOME=/tmp/.local/share, emptyDir nuevo en cada job: hay
+    // exactamente un run y una sesion). El almacenamiento (storage/session) es
+    // solo fallback: 1.18.30 guarda las sesiones en SQLite y no lo escribe.
+    opencodeLogFile:
+      env.SAUVAGE_OPENCODE_LOG_FILE ??
+      join(env.XDG_DATA_HOME ?? join(env.HOME ?? '/tmp', '.local/share'), 'opencode', 'log', 'opencode.log'),
     sesionesOpencodeDir:
       env.SAUVAGE_OPENCODE_SESSIONS_DIR ??
       join(env.XDG_DATA_HOME ?? join(env.HOME ?? '/tmp', '.local/share'), 'opencode', 'storage', 'session'),
@@ -146,9 +157,13 @@ export async function ejecutarPasada(
   // C1 (defecto encontrado por qa tras el cierre): la evidencia del ses_ no
   // puede vivir solo en el log (savage-pod-reaper borra el pod a las 2 h). La
   // fila en savage_pasadas es la prueba estable; el log del ses_ sigue igual.
+  // 2a vuelta (nota-qa-c1-18nov.md): la fuente es la SALIDA del run
+  // (opencode.log, SIEMPRE con `message=created id=ses_...`); el
+  // almacenamiento queda solo como fallback (1.18.30 no lo escribe: SQLite).
   // Fallo blando: sin tabla o sin ses_ la pasada termina y su informe se manda
   // igual (la evidencia es metadata; no tumba el barrido).
-  const sesion = resolverSesionOpencode(cfg.sesionesOpencodeDir);
+  const sesion =
+    leerSesionDeSalidaDelRun(cfg.opencodeLogFile) ?? resolverSesionOpencode(cfg.sesionesOpencodeDir);
   try {
     await registrarPasada(db, { account: cfg.account, sesionId: sesion });
     console.log(`pasada-sesion ses=${sesion ?? 'desconocido'}`);
