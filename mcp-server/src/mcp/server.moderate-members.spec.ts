@@ -10,6 +10,7 @@
  */
 import { runWithRequestActor } from '@mcp-socialmedia/shared';
 import { useTestAccounts } from '../domain/test-accounts';
+import { expectCanonical } from './canonical-error-test-helper';
 import { SOCIAL_TOOL_REGISTRY } from './tool-registry';
 import { MCPServer } from './server';
 
@@ -45,17 +46,6 @@ const banArgs = {
   reason: 'spam reiterado',
   confirm: true,
 };
-
-async function expectCanonical(promise: Promise<unknown>, code: string, message?: string) {
-  const error = await promise.then(
-    () => {
-      throw new Error(`expected a rejection with code ${code}`);
-    },
-    (e: unknown) => e
-  );
-  expect((error as { canonicalCode?: string }).canonicalCode).toBe(code);
-  if (message) expect((error as Error).message).toContain(message);
-}
 
 describe('social_moderate_members', () => {
   it('C1: the action enum is exactly the six moderation actions', () => {

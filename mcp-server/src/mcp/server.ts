@@ -3605,7 +3605,8 @@ export class MCPServer {
   private async openModerationAudit(entry: {
     account: string;
     chatId: string;
-    userId: string;
+    /** The moderated member; null for chat lifecycle (INFRA-278, migration 046). */
+    userId?: string;
     action: string;
     restriction?: string;
     until?: string;
@@ -3622,7 +3623,7 @@ export class MCPServer {
           actor.sub || actor.name || null,
           socialAccountId('telegram', entry.account),
           entry.chatId,
-          entry.userId,
+          entry.userId ?? null,
           entry.action,
           entry.restriction ?? null,
           entry.until ?? null,
@@ -3686,6 +3687,50 @@ export class MCPServer {
           ...common,
           isForum: args.enabled,
         });
+      case 'deleteChat':
+      case 'leaveChat': {
+        // INFRA-278: same guards and audit as social_moderate_members —
+        // confirm + idempotencyKey refused before the connector, one
+        // moderation_audit row per attempt (failures included), and
+        // audit_unavailable denies the mutation when the row cannot be written.
+        const chatId = this.moderationNumericId('target', args.target);
+        if (args.confirm !== true) {
+          throw this.canonicalError(
+            'confirmation_required',
+            `${action} requiere confirm: true; ninguna llamada salió a Telegram`
+          );
+        }
+        if (typeof args.idempotencyKey !== 'string' || args.idempotencyKey.length === 0) {
+          throw this.canonicalError(
+            'confirmation_required',
+            `${action} requiere idempotencyKey; ninguna llamada salió a Telegram`
+          );
+        }
+        const auditId = await this.openModerationAudit({
+          account: common.account,
+          chatId,
+          action,
+        });
+        const lifecyclePath =
+          action === 'deleteChat'
+            ? `/api/v1/chats/${encodeURIComponent(chatId)}/delete`
+            : `/api/v1/chats/${encodeURIComponent(chatId)}/leave`;
+        let data: any;
+        try {
+          data = await this.classifiedConnectorCall(
+            this.tgUrl(common.account),
+            'POST',
+            lifecyclePath,
+            undefined,
+            { idempotencyKey: args.idempotencyKey }
+          );
+        } catch (error) {
+          await this.closeModerationAudit(auditId, error);
+          throw error;
+        }
+        await this.closeModerationAudit(auditId, null);
+        return this.jsonResponse(data);
+      }
       default:
         throw this.canonicalError('invalid_request', `Unsupported chat action '${action}'`);
     }

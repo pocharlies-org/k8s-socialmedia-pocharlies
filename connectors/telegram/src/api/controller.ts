@@ -526,6 +526,32 @@ export function createRouter(
   });
   moderationRoute('unrestrict', (chat, user) => client.unrestrictChatMember(chat, user));
 
+  /**
+   * Chat lifecycle (INFRA-278). POST /chats/:id/delete deletes a
+   * supergroup/channel (mtcute channels.deleteChannel); POST /chats/:id/leave
+   * exits it with this account. Numeric ids only, the sending gate applies and
+   * failures answer the moderation failureClass table — never a 500. Never
+   * reachable under /api/public.
+   */
+  // CONTRACT: http.telegram-connector.chat-lifecycle.v1
+  const lifecycleRoute = (
+    action: 'delete' | 'leave',
+    run: (chatId: string) => Promise<unknown>
+  ): void => {
+    router.post(`/chats/:id/${action}`, requireSending, (req: Request, res: Response): void => {
+      void (async () => {
+        try {
+          res.json(await run(requireNumericTarget('chat_id', req.params.id)));
+        } catch (e) {
+          moderationErrorResponse(res, e, action === 'delete' ? 'deleteChat' : 'leaveChat');
+        }
+      })();
+    });
+  };
+
+  lifecycleRoute('delete', chat => client.deleteManagedChat(chat));
+  lifecycleRoute('leave', chat => client.leaveManagedChat(chat));
+
   router.get('/chats/:id/moderation/admin-rights', (req: Request, res: Response): void => {
     void (async () => {
       try {

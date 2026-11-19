@@ -46,7 +46,9 @@ async function serve(options: { log?: (line: string) => void; now?: () => number
       return [{ id: '1', name: 'A', type: 'private', unreadCount: 0 }];
     },
     getMessages: async (chatId: string, limit: number, before?: number, after?: number) => {
-      calls.push(`messages:${chatId}:${limit}${before ? `:before=${before}` : ''}${after ? `:after=${after}` : ''}`);
+      calls.push(
+        `messages:${chatId}:${limit}${before ? `:before=${before}` : ''}${after ? `:after=${after}` : ''}`
+      );
       return [{ telegramMessageId: 1 }];
     },
     sendMessage: async (chatId: string, text: string, topicId?: number) => {
@@ -221,6 +223,24 @@ test('cada rechazo deja una línea con método, ruta, IP y motivo: sin cabeceras
 
   await request(base, ROUTES[0], signed()); // a valid call leaves no trace
   assert.equal(lines.length, 3);
+});
+
+test('INFRA-278 (C3): ninguna ruta destructiva de ciclo de vida es alcanzable por /api/public', async () => {
+  const { base, calls } = await serve();
+  // Firmadas (la puerta HMAC pasa) y aun así 404: la ruta no está registrada.
+  const del = await request(base, ['DELETE', `/api/public/chats/${CHAT}`], signed());
+  assert.equal(del.status, 404);
+  const leave = await request(base, ['POST', `/api/public/chats/${CHAT}/leave`], signed());
+  assert.equal(leave.status, 404);
+  const delPost = await request(base, ['POST', `/api/public/chats/${CHAT}/delete`], signed());
+  assert.equal(delPost.status, 404);
+  assert.deepEqual(calls, [], 'ninguna llega a Telegram');
+  // La lista de rutas públicas enumeradas no cambia (dialogos, messages, send).
+  assert.deepEqual(ROUTES, [
+    ['GET', '/api/public/dialogs'],
+    ['GET', `/api/public/messages/${CHAT}?limit=5`],
+    ['POST', `/api/public/send/${CHAT}`, { text: 'hola' }],
+  ]);
 });
 
 test('vectores fijos: el firmador del conector da las firmas que telegram-sync (Python) debe dar', () => {
