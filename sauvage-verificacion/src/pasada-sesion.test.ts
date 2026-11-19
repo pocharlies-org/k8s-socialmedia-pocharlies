@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ejecutarPasada, type ConfigPasada } from './pasada';
 import { resolverSesionOpencode } from './sesion-opencode';
-import type { EstadoDb } from './estado';
-import type { FetchFn } from './connector-client';
+import {
+  configBase,
+  dbFalsa,
+  ejecutarConLogsSilenciados,
+  filasPasada,
+} from './test-harness';
 
 /**
  * INFRA-745 (qa, nota-qa-c1.md de INFRA-125): C1 exige «cada pasada en su
@@ -16,44 +19,16 @@ import type { FetchFn } from './connector-client';
  *
  * Fix: cada pasada deja UNA FILA en savage_pasadas (migracion 044) con el `ses_`
  * de su sesion y su fecha/hora. Estos tests lo exigen: con un almacenamiento
- * de opencode falso (el layout real: <dir>/<proyecto>/ses_<id>.json, medido en
- * opencode-ai 1.18.30) la pasada debe producir la fila con ese id; sin el fix,
- * cero filas.
+ * de opencode falso (<dir>/<proyecto>/ses_<id>.json) la pasada debe producir la
+ * fila con ese id; sin el fix, cero filas.
+ *
+ * 2a vuelta (nota-qa-c1-18nov.md): ese layout de almacenamiento NO lo escribe
+ * opencode-ai 1.18.30 (guarda sesiones en SQLite) — aqui sigue siendo el
+ * fallback que estos tests afirman; la fuente principal es la salida del run
+ * (ver sesion-salida.test.ts).
  */
 
-const GRUPO = '-1003365295248';
-const ids = ['1000001', '1000002', '1000003'];
-
-function fetchTelegram(): FetchFn {
-  return async (url: string) => {
-    if (url.includes('/photo')) {
-      return { status: 404, text: async () => '{"error":"No photo"}' };
-    }
-    if (url.includes('/participants')) {
-      const offset = parseInt(url.match(/offset=(\d+)/)?.[1] ?? '0', 10);
-      const pagina = ids.slice(offset).map(id => ({
-        id, firstName: `P${id}`, lastName: null, username: null, isBot: false,
-      }));
-      return { status: 200, text: async () => JSON.stringify({ participants: pagina, total: ids.length }) };
-    }
-    return { status: 404, text: async () => '{}' };
-  };
-}
-
-/** BD falsa que graba cada query (sql + params) como la haria pg.Pool. */
-function dbFalsa(): EstadoDb & { queries: Array<{ sql: string; params: unknown[] }> } {
-  const queries: Array<{ sql: string; params: unknown[] }> = [];
-  return {
-    queries,
-    async query(sql: string, params: unknown[] = []) {
-      queries.push({ sql, params });
-      if (sql.includes('count(*)')) return { rows: [{ n: 0 }] };
-      return { rows: [] };
-    },
-  };
-}
-
-/** Almacenamiento de opencode falso: <dir>/<proyecto>/ses_<id>.json. */
+/** Almacenamiento de opencode falso (layout legacy): <dir>/<proyecto>/ses_<id>.json. */
 function dirSesiones(con: Array<{ id: string; edadMs?: number }>): string {
   const dir = mkdtempSync(join(tmpdir(), 'sauvage-ses-'));
   const proyecto = join(dir, 'app-sauvage');
@@ -69,38 +44,9 @@ function dirSesiones(con: Array<{ id: string; edadMs?: number }>): string {
   return dir;
 }
 
-function config(dirSesiones?: string): ConfigPasada {
-  return {
-    group: GRUPO,
-    account: 'professional',
-    connectorProUrl: 'http://connector.local:3002/api/v1',
-    connectorSecret: 's3creto',
-    litellmUrl: 'http://litellm.local:4000/v1/chat/completions',
-    litellmKey: 'k',
-    visionModel: 'm',
-    promptVision: 'criterio de prueba',
-    fotosDir: mkdtempSync(join(tmpdir(), 'sauvage-fotos-')),
-    sesionesOpencodeDir: dirSesiones ?? join(mkdtempSync(join(tmpdir(), 'sauvage-vacio-')), 'no-existe'),
-  };
-}
-
-async function ejecutarConLogsSilenciados(cfg: ConfigPasada, db: EstadoDb): Promise<void> {
-  const logReal = console.log;
-  console.log = () => {};
-  try {
-    await ejecutarPasada(cfg, db, fetchTelegram());
-  } finally {
-    console.log = logReal;
-  }
-}
-
-function filasPasada(db: { queries: Array<{ sql: string; params: unknown[] }> }) {
-  return db.queries.filter(q => /INSERT INTO savage_pasadas/.test(q.sql));
-}
-
 test('C1: la pasada deja una fila en savage_pasadas con el ses_ de su sesion', async () => {
   const db = dbFalsa();
-  await ejecutarConLogsSilenciados(config(dirSesiones([{ id: 'ses_ROJO1234567890' }])), db);
+  await ejecutarConLogsSilenciados(configBase({ sesionesOpencodeDir: dirSesiones([{ id: 'ses_ROJO1234567890' }]) }), db);
 
   const filas = filasPasada(db);
   assert.equal(filas.length, 1, 'exactamente una fila de pasada por pasada');
@@ -113,7 +59,7 @@ test('C1: la pasada deja una fila en savage_pasadas con el ses_ de su sesion', a
 
 test('C1: sin ses_ resoluble la pasada sigue y deja su fila con sesion NULL', async () => {
   const db = dbFalsa();
-  await ejecutarConLogsSilenciados(config(), db); // directorio inexistente
+  await ejecutarConLogsSilenciados(configBase(), db); // fuentes inexistentes
 
   const filas = filasPasada(db);
   assert.equal(filas.length, 1, 'la pasada ocurrio: su fila existe');

@@ -81,8 +81,9 @@ function config(): ConfigPasada {
     visionModel: 'm',
     promptVision: 'criterio de prueba',
     fotosDir: mkdtempSync(join(tmpdir(), 'sauvage-test-')),
-    // Sin sesiones de opencode aqui: la pasada registra su fila con sesion NULL
-    // (lo que prueba el id real es pasada-sesion.test.ts).
+    // Sin salida del run ni sesiones de opencode aqui: la pasada registra su fila con sesion NULL
+    // (lo que prueba el id real es sesion-salida.test.ts).
+    opencodeLogFile: join(mkdtempSync(join(tmpdir(), 'sauvage-sinlog-')), 'no-existe.log'),
     sesionesOpencodeDir: join(mkdtempSync(join(tmpdir(), 'sauvage-ses-none-')), 'no-existe'),
   };
 }
