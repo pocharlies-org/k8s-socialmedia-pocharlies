@@ -14,18 +14,28 @@ import type { FetchFn } from './connector-client';
 export const GRUPO = '-1003365295248';
 export const ids = ['1000001', '1000002', '1000003'];
 
-/** Conector falso: 3 participantes, todos sin foto (404 => dudoso). */
-export function fetchTelegram(): FetchFn {
+/**
+ * Conector falso: participantes todos sin foto (404 => dudoso), con la
+ * semantica REAL de Telegram en el paginador: cada pagina de participantes
+ * mide como maximo 200 (el tope por llamada de `channels.getParticipants`),
+ * `offset` avanza y la respuesta lleva `total`. Por defecto 3 participantes;
+ * `ids` permite modelar un grupo mayor (pasada.test.ts modela 346) y
+ * `llamadas` graba cada URL pedida, como hacia el falso local de ese test.
+ */
+export function fetchTelegram(opts: { ids?: string[]; llamadas?: string[] } = {}): FetchFn {
+  const todos = opts.ids ?? ids;
   return async (url: string) => {
+    opts.llamadas?.push(url);
     if (url.includes('/photo')) {
       return { status: 404, text: async () => '{"error":"No photo"}' };
     }
     if (url.includes('/participants')) {
       const offset = parseInt(url.match(/offset=(\d+)/)?.[1] ?? '0', 10);
-      const pagina = ids.slice(offset).map(id => ({
+      const limit = parseInt(url.match(/limit=(\d+)/)?.[1] ?? '200', 10);
+      const pagina = todos.slice(offset, offset + Math.min(limit, 200)).map(id => ({
         id, firstName: `P${id}`, lastName: null, username: null, isBot: false,
       }));
-      return { status: 200, text: async () => JSON.stringify({ participants: pagina, total: ids.length }) };
+      return { status: 200, text: async () => JSON.stringify({ participants: pagina, total: todos.length }) };
     }
     return { status: 404, text: async () => '{}' };
   };
@@ -70,11 +80,15 @@ export function configBase(
 }
 
 /** Ejecuta la pasada sin ensuciar la salida TAP con sus logs. */
-export async function ejecutarConLogsSilenciados(cfg: ConfigPasada, db: EstadoDb): Promise<void> {
+export async function ejecutarConLogsSilenciados(
+  cfg: ConfigPasada,
+  db: EstadoDb,
+  fetch: FetchFn = fetchTelegram()
+): Promise<void> {
   const logReal = console.log;
   console.log = () => {};
   try {
-    await ejecutarPasada(cfg, db, fetchTelegram());
+    await ejecutarPasada(cfg, db, fetch);
   } finally {
     console.log = logReal;
   }
