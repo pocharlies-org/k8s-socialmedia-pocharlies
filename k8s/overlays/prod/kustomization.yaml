@@ -279,5 +279,5 @@ images:
   # INFRA-125 (INFRA-745 C1): v1.3.149 -> v1.3.150 (tabla savage_pasadas, migracion 044, y guardado
   # de sesion por pasada; fix C1). Digest comprobado en Harbor (crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
-    newTag: v1.3.150
-    digest: sha256:52f7f6133563331a30d97d6b8f4027e532244109d18cf3984518975c66152e14
+    newTag: v1.3.156
+    digest: sha256:58c55fa7456b514004fa958f86da6d67ff1a2c6dfb3619bd0075ec827c5ad634
