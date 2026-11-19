@@ -749,10 +749,7 @@ export class TelegramClientWrapper extends EventEmitter {
 
     const out: TelegramMessage[] = [];
     const readHistory = async (signal: AbortSignal): Promise<void> => {
-      const client = telegramReadClient(
-        this.client.withParams({ abortSignal: signal }),
-        signal
-      );
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
       for await (const m of client.iterHistory(toMtcutePeer(chatId), params)) {
         if (forward && m.id <= (afterId ?? 0)) continue;
         if (!forward && offsetId && m.id >= offsetId) continue;
@@ -1346,6 +1343,29 @@ export class TelegramClientWrapper extends EventEmitter {
         participantId: toMtcutePeer(user),
       });
       return { chatId: chat, userId: user, action: 'unrestrict' };
+    });
+  }
+
+  /**
+   * Chat lifecycle (INFRA-278). Delete a supergroup/channel via mtcute's
+   * `channels.deleteChannel` (the path of the 26-09 one-off job), or leave a
+   * chat with this account. Same canonical error table as member moderation.
+   */
+  async deleteManagedChat(chatId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    return this.moderate('deleteChat', async () => {
+      await this.requireSupergroup('deleteChat', chat);
+      await this.client.deleteChannel(toMtcutePeer(chat));
+      return { chatId: chat, action: 'deleteChat' };
+    });
+  }
+
+  /** Exit a chat (group, supergroup or channel) with this account. */
+  async leaveManagedChat(chatId: string): Promise<any> {
+    const chat = requireNumericTarget('chat_id', chatId);
+    return this.moderate('leaveChat', async () => {
+      await this.client.leaveChat(toMtcutePeer(chat));
+      return { chatId: chat, action: 'leaveChat' };
     });
   }
 

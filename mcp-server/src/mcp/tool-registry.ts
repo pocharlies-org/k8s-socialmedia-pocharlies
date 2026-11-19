@@ -1236,7 +1236,13 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
   tool({
     name: 'social_manage_chat',
     title: 'Manage Telegram chat',
-    description: 'Change Telegram title, description, photo or forum mode.',
+    description:
+      'Change Telegram title, description, photo or forum mode; deleteChat deletes the ' +
+      'supergroup/channel and leaveChat exits it with this account. deleteChat and leaveChat ' +
+      'require confirm=true and idempotencyKey: a missing or false confirm is refused with ' +
+      'confirmation_required and nothing goes out to Telegram. Both write one audit row ' +
+      '(also failed attempts) under the verified caller; if the row cannot be written the ' +
+      'mutation is refused with audit_unavailable. The four setting actions are unchanged.',
     effect: 'externalWrite',
     authScope: 'social.write',
     capability: 'chats.manage',
@@ -1246,12 +1252,26 @@ export const SOCIAL_TOOL_REGISTRY: readonly SocialToolDefinition[] = [
         ...writeProperties,
         action: {
           type: 'string',
-          enum: ['setTitle', 'setDescription', 'setPhoto', 'setForumEnabled'],
+          enum: [
+            'setTitle',
+            'setDescription',
+            'setPhoto',
+            'setForumEnabled',
+            'deleteChat',
+            'leaveChat',
+          ],
         },
         title: { type: 'string', minLength: 1 },
         description: { type: 'string' },
         mediaUrl: { type: 'string', format: 'uri' },
         enabled: { type: 'boolean' },
+        confirm: {
+          type: 'boolean',
+          description:
+            'Must be true for deleteChat and leaveChat; missing or false is refused with ' +
+            'confirmation_required before any connector call. Not required for the four ' +
+            'setting actions.',
+        },
       },
       ['channel', 'accountId', 'target', 'action'],
       {

@@ -2,7 +2,7 @@
   "schemaVersion": "2.0",
   "service": "socialmedia",
   "digestAlgorithm": "sha256",
-  "digest": "sha256:ce8814b6b469a3779580668c8818eabc4c02cf3b6f2f522c4912c1c17c5cc8dc",
+  "digest": "sha256:1acdfbeccf2bb8c18ebd922b91dc478d29b9231779f6fc80f93010c281b90e5c",
   "tools": [
     {
       "name": "social_approve_draft",
@@ -7568,7 +7568,7 @@
     {
       "name": "social_manage_chat",
       "title": "Manage Telegram chat",
-      "description": "Change Telegram title, description, photo or forum mode.",
+      "description": "Change Telegram title, description, photo or forum mode; deleteChat deletes the supergroup/channel and leaveChat exits it with this account. deleteChat and leaveChat require confirm=true and idempotencyKey: a missing or false confirm is refused with confirmation_required and nothing goes out to Telegram. Both write one audit row (also failed attempts) under the verified caller; if the row cannot be written the mutation is refused with audit_unavailable. The four setting actions are unchanged.",
       "effect": "externalWrite",
       "authScope": "social.write",
       "capability": "chats.manage",
@@ -7607,7 +7607,9 @@
               "setTitle",
               "setDescription",
               "setPhoto",
-              "setForumEnabled"
+              "setForumEnabled",
+              "deleteChat",
+              "leaveChat"
             ]
           },
           "title": {
@@ -7623,6 +7625,10 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be true for deleteChat and leaveChat; missing or false is refused with confirmation_required before any connector call. Not required for the four setting actions."
           }
         },
         "required": [

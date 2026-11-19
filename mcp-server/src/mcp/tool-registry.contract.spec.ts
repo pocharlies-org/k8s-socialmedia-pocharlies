@@ -827,6 +827,19 @@ describe('Socialmedia v2 tool contract', () => {
     expect(manifest.digest).toBe(computedDigest);
   });
 
+  it('C1 (INFRA-278): social_manage_chat accepts deleteChat and leaveChat beside the four existing actions', () => {
+    const tool = SOCIAL_TOOL_REGISTRY.find(t => t.name === 'social_manage_chat');
+    expect(tool).toBeDefined();
+    expect((tool!.inputSchema.properties as any).action.enum).toEqual([
+      'setTitle',
+      'setDescription',
+      'setPhoto',
+      'setForumEnabled',
+      'deleteChat',
+      'leaveChat',
+    ]);
+  });
+
   it('publishes no legacy tool names', () => {
     const publicNames = SOCIAL_TOOL_REGISTRY.map(tool => publicToolDefinition(tool)).map(
       tool => tool.name

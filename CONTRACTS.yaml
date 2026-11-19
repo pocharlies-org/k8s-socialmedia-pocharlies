@@ -984,6 +984,26 @@ contracts:
     code?, retry_after_s?, missing_right?} with failureClass in invalid_target|invalid_request|not_admin|rate_limited|user_not_participant|unsupported_chat_type|telegram_error
     — never 500, never outcome_unknown. The paths, the body fields, the 200 shapes and the failureClass
     set are contract: changing any is breaking — a new `.v2` entry beside this one.'
+- id: http.telegram-connector.chat-lifecycle.v1
+  kind: http-route
+  value: /chats/:id/{delete|leave}
+  anchor: lifecycleRoute
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'HMAC-signed routes of the house Telegram connectors (telegram-connector, telegram-connector-professional).
+    Chat lifecycle (INFRA-278), consumed by the MCP tool social_manage_chat (actions deleteChat/leaveChat,
+    which additionally require confirm=true + idempotencyKey and write one moderation_audit row on the
+    MCP side): POST /api/v1/chats/:id/delete deletes a supergroup/channel (mtcute channels.deleteChannel;
+    basic groups answer 422 unsupported_chat_type) and POST /api/v1/chats/:id/leave exits the chat with
+    this account. Numeric ids only (@nombre → 400 invalid_target). Both POSTs carry the sending gate:
+    403 disabled_sending {error, failureClass} before Telegram is touched when ENABLE_SENDING is set to
+    anything but "true" or EMERGENCY_DISABLE_SENDING=true (unset ENABLE_SENDING = on), the gate of
+    http.telegram-connector.messages-edit.v1. Failures answer the moderation failureClass table
+    {error, failureClass, code?, retry_after_s?, missing_right?} — never 500, never outcome_unknown.
+    Never reachable under /api/public (INFRA-278 C3). The paths, the 200 shapes {chatId, action} and the
+    failureClass set are contract: changing any is breaking — a new `.v2` entry beside this one.'
 - id: http.telegram-connector.chats-ban.v1
   kind: http-route
   value: /chats/:id/ban
@@ -2050,7 +2070,10 @@ contracts:
     (P1, INFRA-344). INFRA-1196: aditivo — social_update_content (effect externalWrite, authScope social.write,
     caption de una publicación IG por media id vía POST /{ig-media-id}), catálogo 78→79, digest
     sha256:ce8814b6b469a3779580668c8818eabc4c02cf3b6f2f522c4912c1c17c5cc8dc; re-venta en AgentGateway
-    (k8s-agentgateway-pocharlies PR #263).'
+    (k8s-agentgateway-pocharlies PR #263). INFRA-278: aditivo — social_manage_chat suma deleteChat y
+    leaveChat al enum de action (exigen confirm:true + idempotencyKey, auditoría moderation_audit
+    reutilizada con target_user_id NULL, migración 046); el catálogo sigue en 79 tools y el digest
+    cambia: re-venta en AgentGateway al desplegar; consume http.telegram-connector.chat-lifecycle.v1.'
 - id: http.whatsapp-connector.auth-qr.v2
   kind: http-route
   value: /api/v2/auth/qr
