@@ -29,6 +29,10 @@ COPY lib ./lib
 COPY public ./public
 COPY --from=build /app/public/assistant-ui.generated.js /app/public/assistant-ui.generated.js
 COPY --from=build /app/public/assistant-ui.generated.css /app/public/assistant-ui.generated.css
-USER node
+# DL3066 (image-guard, INFRA-540): hadolint rechaza USER con nombre. El usuario
+# `node` de node:22-alpine es uid/gid 1000 (addgroup -g 1000 / adduser -u 1000 en
+# el Dockerfile oficial de library/node) y la base va fijada por digest arriba,
+# así que el UID no puede derivar. Mismo uid/gid que tenía `USER node`.
+USER 1000:1000
 EXPOSE 3080
 CMD ["node", "server.mjs"]
