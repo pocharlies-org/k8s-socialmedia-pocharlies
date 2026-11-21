@@ -68,3 +68,53 @@ jobs:
       artifact_name: k8s-socialmedia-pocharlies
       version: ${{ github.event.inputs.image_tag || github.ref_name }}
     secrets: inherit
+
+  # INFRA-1500 (INFRA-540 P2 · C5) — guard de imágenes de la org (el reusable de
+  # INFRA-536, k8s-gitops): hadolint sobre el Dockerfile + tamaño comprimido con
+  # crane contra la baseline canónica. Patrón del job image-guard de
+  # skirmshop-labels (release.yml). El reusable se consume FIJADO POR SHA (los
+  # reusables de la org no se consumen @main). Sin HARBOR_USER/HARBOR_PASSWORD
+  # crane muere en UNAUTHORIZED: homelab/* es privado (INFRA-1363). La matriz es
+  # la misma lista de imágenes del job release, con las etiquetas IMAGE: y
+  # DOCKERFILE: por imagen. En PRs no corre: el guard mide imágenes ya subidas
+  # al registry (reusable-image-guard exige `imagen`); el build-check de las
+  # imágenes en PR sigue en ci.yml (job standard, run_docker_build).
+  image-guard:
+    name: image-guard ${{ matrix.IMAGE }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - IMAGE: whatsappmcp-whatsapp-connector
+            DOCKERFILE: connectors/whatsapp-web/Dockerfile
+          - IMAGE: whatsappmcp-whatsapp-cloud-connector
+            DOCKERFILE: connectors/whatsapp-cloud/Dockerfile
+          - IMAGE: whatsappmcp-telegram-connector
+            DOCKERFILE: connectors/telegram/Dockerfile
+          - IMAGE: whatsappmcp-telegram-sync
+            DOCKERFILE: connectors/telegram-sync/Dockerfile
+          - IMAGE: whatsappmcp-instagram-connector
+            DOCKERFILE: connectors/instagram/Dockerfile
+          - IMAGE: whatsappmcp-whatsapp-open-worker
+            DOCKERFILE: workers/whatsapp-open-worker/Dockerfile
+          - IMAGE: whatsappmcp-mcp-server
+            DOCKERFILE: mcp-server/Dockerfile
+          - IMAGE: whatsappmcp-whatsapp-app
+            DOCKERFILE: apps/whatsapp/Dockerfile
+          - IMAGE: whatsappmcp-whatsapp-synapse-bridge
+            DOCKERFILE: connectors/whatsapp-synapse-bridge/Dockerfile
+          - IMAGE: whatsappmcp-correo-bridge
+            DOCKERFILE: connectors/correo-bridge/Dockerfile
+          - IMAGE: whatsappmcp-sauvage-verificacion
+            DOCKERFILE: sauvage-verificacion/Dockerfile
+    uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-image-guard.yml@ab1afdcb9fb4ce83ec55ce428bda1fb8f0a03bf9
+    with:
+      dockerfile: ${{ matrix.DOCKERFILE }}
+      imagen: harbor.e-dani.com/homelab/${{ matrix.IMAGE }}:${{ github.event.inputs.image_tag || github.ref_name }}
+      baseline: https://raw.githubusercontent.com/pocharlies-org/k8s-infra-pocharlies/main/docs/images/sizes-baseline.json
+      modo: bloquear
+      nombre: ${{ matrix.IMAGE }}
+    secrets:
+      HARBOR_USER: ${{ secrets.HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}

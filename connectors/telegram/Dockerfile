@@ -1,4 +1,8 @@
-FROM node:22-bookworm-slim
+# INFRA-1500 (INFRA-540 P2) — base comun del dominio fijada por digest: base-node:22
+# (docs/images/bases.md de k8s-infra-pocharlies). El host es el registry al que ya
+# autentican los workflows de este repo (harbor.lan.e-dani.com); el digest es el
+# canonico de bases.md (la misma imagen que harbor.e-dani.com).
+FROM harbor.lan.e-dani.com/homelab/base-node:22@sha256:61b7a3ce3746d5f790a3a061eee28d932d778879dee3b367f2519292174f4049
 
 # Debian security updates. The release pipeline refuses any image that still
 # carries a fixable HIGH/CRITICAL finding.
