@@ -66,9 +66,12 @@ images:
   # Digest de Harbor (crane).
   # SC-5827 17-11: v1.3.153 -> v1.3.154 (run 44078201664, deploy/prod@42c8541): #505, telegram-sync sin el
   # proxy /brain-chat (y sin el NameError de httpx que dejaba). Digest comprobado en Harbor (crane digest).
+  # INFRA-1501 P3 21-11: v1.3.154 -> v1.3.201 (Release Production run 44902574357, deploy/prod@f6efc89:
+  # los Dockerfiles aligerados de INFRA-540/P2; el +16,2% de comprimido es crecimiento de app, ruling
+  # del tech-lead en 10-plan.md de INFRA-540 — se pinea igual). Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.154
-    digest: sha256:ee38739842662eedb7f5a05d0c8829ae5e7e26a55c209f2c31df4d191d24cc9e
+    newTag: v1.3.201
+    digest: sha256:ef2dd413592747d9740900f2877d771c9893e69bc4fa20d034e6f5af9d71424f
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
@@ -92,9 +95,11 @@ images:
   # INFRA-1196 06-11 (fix transporte): instagram-bc36371 -> instagram-e3735ef (release-instagram run 42175755043,
   # deploy/prod@e3735ef): #461 — el edit de caption es de la Business API (graph.facebook.com + EAA); con
   # primaryApi=instagram-login la IG Login API lo devolvía success:true como no-op. updateMediaCaption usa fbRequest.
+  # INFRA-1501 P3 21-11: instagram-e3735ef -> v1.3.201 (Release Production run 44902574357: Dockerfiles
+  # INFRA-540/P2; el tronco del release incluye #461 y todo lo posterior a e3735ef). Digest en Harbor (crane).
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: instagram-e3735efd76b61ce67c13c34d24fc5757f86e46b9
-    digest: sha256:8a55e9d0059469666bfa601df6ed0d38bc4e954761513ec05e22f5882c3057f5
+    newTag: v1.3.201
+    digest: sha256:525b68863b84f0ccfa081743ab68042e94ddc971b0559f443b1bf10311939997
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
@@ -221,12 +226,20 @@ images:
   # imagen). Viaja en el mismo PR que cambia el CronJob brain-windows por su Deployment: con la imagen
   # vieja el Deployment haría pasadas en bucle, y con la nueva el CronJob nunca terminaría. El resto de
   # consumidores no cambia de código (solo jobs/brain-windows*). Revisión y digest comprobados con crane.
+  # INFRA-1501 P3 21-11: v1.3.155 -> v1.3.201 (Release Production run 44902574357, deploy/prod@f6efc89:
+  # Dockerfiles aligerados INFRA-540/P2; el +9,0% de comprimido es crecimiento de app, ruling del
+  # tech-lead en 10-plan.md de INFRA-540). Mueve por nombre mcp-server, mcp-sse, social-api,
+  # brain-windows, voice-transcribe y el backfill (norma de la casa: bloque images: reescribe por nombre).
+  # Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.155
-    digest: sha256:9ea708f3798c5fe69fbf986064cc6eba7b358eb51ee8db1f440c51a83b3835d2
+    newTag: v1.3.201
+    digest: sha256:970bbdd18132686c9e3621c23462132af331e98be8e80003ac9153402f1412f3
+  # INFRA-1501 P3 21-11: socialmedia-v2-c88dce16 -> v1.3.201 (run 44902574357): Dockerfiles INFRA-540/P2;
+  # el tronco del release incluye todo lo fusionado tras c88dce16. −5,1% de comprimido.
+  # Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-synapse-bridge
-    newTag: socialmedia-v2-c88dce16
-    digest: sha256:21d7cf9b021dce06af53b779056f9bd5c599722251726e483cdb50917b02263e
+    newTag: v1.3.201
+    digest: sha256:54bf225ab071afedea73599d3d6706a690a44721e4a1cd6c54022d0334a3e40c
   # SC-2760: app de WhatsApp del fork de Jordi. El base la deja en :latest (no
   # existe en Harbor: el pod estaba en ImagePullBackOff); este pin la fija. v1.3.126
   # (run 39508533271) lleva el enrutado de media por bucket (skirmshop-drive vs legacy).
@@ -248,9 +261,11 @@ images:
   # asi que imagen y manifiesto tienen que aterrizar juntos. Dos intentos antes: v1.3.150 ya estaba en
   # Harbor desde otro commit (colision de tag inmutable) y el reintento sobre el mismo commit murio en
   # cosign por el 409 de Rekor (digest ya firmado).
+  # INFRA-1501 P3 21-11: v1.3.151 -> v1.3.201 (run 44902574357): Dockerfiles INFRA-540/P2; −16,1% de
+  # comprimido. Deployment inerte (replicas 0): el pin no despierta nada. Digest en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-correo-bridge
-    newTag: v1.3.151
-    digest: sha256:d3db7f7b7e4dfb355adc39b5ebb3f558cdca0176df8fbdf5cecc37c2eb9ba457
+    newTag: v1.3.201
+    digest: sha256:33f7dbf4a2be3a17e2c196b4e71d6ddd7804c713e7a052c2561c7c396f659a83
   # SC-2760 24-10: v1.3.126 -> v1.3.131 (run 39954080557, deploy/prod@4a97da6): el join del listado (#384),
   # los ETag/304 (#371), los ticks (#354), el rail (#375), el <select> del audio (#376), el service worker
   # cache-first (#385) y la lista de chats virtualizada (#387).
@@ -262,9 +277,12 @@ images:
   # tenia bloqueada desde el 26-10 (#133). Solo se avanza esta imagen: mcp-server y los conectores siguen
   # con sus digests de v1.3.131, que no cambian de bytes.
   # Digest comprobado en Harbor (docker manifest inspect) y contra la evidencia firmada del run.
+  # INFRA-1501 P3 21-11: v1.3.132 -> v1.3.201 (run 44902574357): Dockerfiles INFRA-540/P2 (apps/whatsapp
+  # multi-stage, USER numérico DL3066); el tronco del release incluye todo lo fusionado tras ec9e645.
+  # Plano de comprimido (+0,03%). Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-app
-    newTag: v1.3.132
-    digest: sha256:4278e4cefe65f37e1e709a2f2bd993fc8c04b9d2ccaaf13649f54c0346cd19bc
+    newTag: v1.3.201
+    digest: sha256:b33e6a25bde09712771eff9e8834357e64a50d8ecd667b7ab723b7accf24680e
   # INFRA-745 (INFRA-125 A): bot diario de verificacion facial del grupo Sauvage (CronJob
   # sauvage-verificacion-diaria). El base lo deja en :latest (no existe en Harbor); este bloque es
   # el sitio de su pin — patch-image.yaml solo parchea kind: Deployment y no haria match con el
@@ -278,6 +296,8 @@ images:
   # SAUVAGE_MODERATION=off (la activacion es del operador). Digest comprobado en Harbor (crane).
   # INFRA-125 (INFRA-745 C1): v1.3.149 -> v1.3.150 (tabla savage_pasadas, migracion 044, y guardado
   # de sesion por pasada; fix C1). Digest comprobado en Harbor (crane).
+  # INFRA-1501 P3 21-11: v1.3.156 -> v1.3.201 (run 44902574357): Dockerfiles INFRA-540/P2. CronJob diario;
+  # el pin se aplica en la próxima pasada. Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
-    newTag: v1.3.156
-    digest: sha256:58c55fa7456b514004fa958f86da6d67ff1a2c6dfb3619bd0075ec827c5ad634
+    newTag: v1.3.201
+    digest: sha256:4ae75a1674df6ddf0971a901ce62ab0c1cf13b1d0f3cc385401e2a7df85b8df4

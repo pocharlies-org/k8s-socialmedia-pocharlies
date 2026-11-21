@@ -89,8 +89,12 @@ spec:
   template:
     spec:
       containers:
+        # INFRA-1501 P3 21-11: v1.3.151 -> v1.3.201 (Release Production run 44902574357, deploy/prod@f6efc89):
+        # Dockerfiles aligerados INFRA-540/P2 (+10,0% comprimido = crecimiento de app, ruling del tech-lead
+        # en 10-plan.md de INFRA-540). Solo la casa personal: professional y leila quedan en su pin, y los
+        # pools de pairing intactos (norma de la casa: un conector por PR). Digest en Harbor (crane digest).
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.151@sha256:25cbb9e32a1c637390569a378069bece0c637420fa0f379c3f31ce836eb28935
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.201@sha256:37abbdf5e154c9586310bf8bf7add29911c47f721c4c1e4f6734724190a4375f
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
@@ -164,8 +168,11 @@ spec:
         # pinea AQUI y no en el bloque `images:` porque ese bloque reescribe por
         # nombre de imagen y se llevaria por delante al pool inerte
         # telegram-pairing, que sigue a proposito en v1.3.57. Digest en Harbor (crane).
+        # INFRA-1501 P3 21-11: v1.3.149 -> v1.3.201 (Release Production run 44902574357): Dockerfiles
+        # INFRA-540/P2 (+9,6% comprimido = crecimiento de app, ruling tech-lead INFRA-540). Solo la casa
+        # personal; professional y telegram-pairing (v1.3.57) intactos. Digest en Harbor (crane digest).
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.149@sha256:b81bbc6b514da5c46ae68c234af5b939d8efe046efcddcb7921160ce316cc2a3
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.201@sha256:3edb41f3b193db7785c983782965df41952a3beb489aef815c4ca5ed711c4e81
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
