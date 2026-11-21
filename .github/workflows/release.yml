@@ -79,11 +79,11 @@ jobs:
   # DOCKERFILE: por imagen. En PRs no corre: el guard mide imágenes ya subidas
   # al registry (reusable-image-guard exige `imagen`); el build-check de las
   # imágenes en PR sigue en ci.yml (job standard, run_docker_build).
-  # El host del input `imagen` es harbor.lan.e-dani.com (REWORK INFRA-1500):
-  # el runner arc-k8s mide la imagen por el host LAN del Harbor — misma
-  # instancia y mismo proyecto homelab/* que harbor.e-dani.com (los dos
-  # responden 401 sin credenciales), sin hairpin por el edge público. El FROM
-  # de las bases en los Dockerfiles no se toca: se resuelve en el builder.
+  # El host del input `imagen` es harbor.e-dani.com: es el que usa el consumidor
+  # de referencia (skirmshop-labels) y contra el que INFRA-1363 validó las
+  # credenciales del crane del guard (el login del reusable se hace al host de
+  # `imagen`). harbor.lan.e-dani.com solo aparece en pasos de API (retención de
+  # labels), no es el host del guard.
   image-guard:
     name: image-guard ${{ matrix.IMAGE }}
     needs: release
@@ -116,7 +116,7 @@ jobs:
     uses: pocharlies-org/k8s-gitops-pocharlies/.github/workflows/reusable-image-guard.yml@ab1afdcb9fb4ce83ec55ce428bda1fb8f0a03bf9
     with:
       dockerfile: ${{ matrix.DOCKERFILE }}
-      imagen: harbor.lan.e-dani.com/homelab/${{ matrix.IMAGE }}:${{ github.event.inputs.image_tag || github.ref_name }}
+      imagen: harbor.e-dani.com/homelab/${{ matrix.IMAGE }}:${{ github.event.inputs.image_tag || github.ref_name }}
       baseline: https://raw.githubusercontent.com/pocharlies-org/k8s-infra-pocharlies/main/docs/images/sizes-baseline.json
       modo: bloquear
       nombre: ${{ matrix.IMAGE }}
