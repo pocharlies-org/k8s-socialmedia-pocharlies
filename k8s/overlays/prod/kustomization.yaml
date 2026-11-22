@@ -18,6 +18,9 @@ patches:
   - path: patch-social-pairing-on.yaml
   # DGX-1235: correo-bridge a 1 réplica, con entrada y salida (ENABLE_OUTBOUND "true").
   - path: patch-correo-bridge-on.yaml
+  # INFRA-125 (INFRA-746 B): moderacion del bot Sauvage a on en prod (veredicto
+  # SÍ de security, Request INFRA-1518). Rollback = revert de este fichero y su linea.
+  - path: patch-sauvage-moderacion-on.yaml
   # SC-4836: leen CONNECTOR_SHARED_SECRET por env; Reloader los reinicia cuando su Secret cambia
   # (31-10 una rotación no llegó a los pods hasta un rollout restart manual).
   - target:

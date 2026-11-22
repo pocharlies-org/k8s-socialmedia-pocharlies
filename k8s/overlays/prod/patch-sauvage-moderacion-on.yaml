@@ -1,0 +1,24 @@
+# INFRA-125 (INFRA-746 parte B): moderacion del bot Sauvage encendida en prod.
+# La bandera nace off en k8s/base (fail-closed, patron ENABLE_OUTBOUND); este
+# patch es el paso del operador del runbook docs/sauvage-verificacion.md y la
+# volca a on SOLO aqui. Veredicto SÍ de security (Request INFRA-1518, cerrada
+# Done; nota nota-security-informe.md): salvaguardas fail-closed medidas y en
+# verde, rutas del conector desplegadas (401, no 404), guia-dm.md montada y
+# radio del primer on acotado a los ~10 miembros cuyo ultimo veredicto es
+# sin_cara, todos avisados por DM antes del ban y readmitibles.
+# Es solo la bandera, ningun secreto. Rollback = revert de este fichero y de su
+# linea en el `patches:` de kustomization.yaml (o ponerla a off aqui).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sauvage-verificacion-diaria
+  namespace: whatsapp-mcp
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: sauvage-verificacion
+              env:
+                - { name: SAUVAGE_MODERATION, value: "on" }
