@@ -5,10 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   configModeracionDesdeEntorno,
+  crearApiModeracion,
   ejecutarModeracion,
   type ConfigModeracion,
   type ModerationApi,
+  type ResultadoModeracion,
 } from './moderacion';
+import { fetchTelegram } from './test-harness';
 import type { EstadoDb } from './estado';
 import type { Veredicto } from './vision';
 
@@ -30,7 +33,12 @@ interface FilaAccion {
   motivo: string | null;
 }
 
-function fakeDb(opts: { veredictos: Array<[string, Veredicto]>; acciones?: FilaAccion[] }) {
+function fakeDb(opts: {
+  veredictos: Array<[string, Veredicto]>;
+  acciones?: FilaAccion[];
+  /** Reloj determinista para el `at` de las filas nuevas (sin reloj real). */
+  reloj?: () => string;
+}) {
   const acciones: FilaAccion[] = (opts.acciones ?? []).map(a => ({ ...a }));
   const veredictos: Array<[string, Veredicto]> = [...opts.veredictos];
   const db: EstadoDb = {
@@ -39,7 +47,7 @@ function fakeDb(opts: { veredictos: Array<[string, Veredicto]>; acciones?: FilaA
         acciones.push({
           user_id: String(params?.[0]),
           action: String(params?.[1]),
-          at: new Date().toISOString(),
+          at: (opts.reloj ?? (() => new Date().toISOString()))(),
           confirmed: Boolean(params?.[2]),
           motivo: (params?.[3] as string | undefined) ?? null,
         });
@@ -68,6 +76,8 @@ interface OpcionesApi {
   dentroTrasAdd?: boolean;
   link?: string;
   videoFalla?: boolean;
+  /** El dm a estos miembros les responde no-200 (falla el aviso). */
+  dmFalla?: string[];
 }
 
 function fakeApi(o: OpcionesApi) {
@@ -82,6 +92,7 @@ function fakeApi(o: OpcionesApi) {
     },
     async dm(userId, texto) {
       ops.push(`dm:${userId}`);
+      if (o.dmFalla?.includes(userId)) throw new Error(`dm fallo status=500 ID=${userId}`);
       dms.push({ userId, texto });
     },
     async video(userId) {
@@ -359,6 +370,172 @@ test('C7: el dueño desbaneo y readmitio a mano (ultimo ban del bot y esta dentr
   assert.deepEqual(ops, []);
   assert.ok(!logs1.concat(logs2).some(l => /^ban ID=401/.test(l)));
   assert.equal(acciones.filter(a => a.action === 'omitido' && a.motivo === 'anulacion_manual').length, 2);
+});
+
+// ————— Regresión INFRA-125 (70-qa.md 24-11): fixtures de la pasada medida —————
+//
+// Las filas que qa midió en producción son los fixtures: los doce expulsados
+// del 23-11 con su dm estrictamente anterior, y los tres readmitidos a mano
+// por el dueño que el 24-11 salieron `omitido motivo=anulacion_manual`. La
+// cadena de readmisión (C4) no tiene caso vivo todavía, así que su garantía
+// vive aquí, en CI. Deterministas: reloj falso, cero red.
+
+/** Los doce `user_id` de la tabla C3 de 70-qa.md (pasada del 23-11). */
+const DOCE_EXPULSADOS = [
+  '1238363311', '1472300639', '1604472888', '1659914741', '1793344338', '5039238512',
+  '5052174956', '5364398817', '5526148316', '5757156540', '5803749534', '6036824365',
+];
+
+/** Reloj que avanza `pasoMs` en cada llamada: el `at` de las filas es fijo. */
+function relojFijo(desde: string, pasoMs: number): () => string {
+  let t = Date.parse(desde);
+  return () => new Date((t += pasoMs)).toISOString();
+}
+
+async function correr(
+  cfgUsar: ConfigModeracion,
+  db: EstadoDb,
+  api: ModerationApi
+): Promise<{ r: ResultadoModeracion; logs: string[] }> {
+  let r!: ResultadoModeracion;
+  const logs = await conLogs(async () => {
+    r = await ejecutarModeracion(cfgUsar, db, api);
+  });
+  return { r, logs };
+}
+
+test('C3/C7 (los 12 medidos el 23-11): cada ban con su dm estrictamente anterior para el mismo miembro y CERO bans sin dm', async () => {
+  const { db, acciones } = fakeDb({
+    veredictos: DOCE_EXPULSADOS.map(id => [id, 'sin_cara'] as [string, Veredicto]),
+    reloj: relojFijo('2026-11-23T06:20:17.000Z', 150),
+  });
+  const { api, ops } = fakeApi({ enGrupo: DOCE_EXPULSADOS });
+  const { r } = await correr(cfg, db, api);
+  assert.equal(r.dm, 12);
+  assert.equal(r.ban, 12);
+  for (const id of DOCE_EXPULSADOS) {
+    const acts = acciones.filter(a => a.user_id === id);
+    assert.deepEqual(
+      acts.map(a => a.action),
+      ['dm', 'ban'],
+      `una sola guia y un solo ban para ${id}`
+    );
+    assert.ok(
+      Date.parse(acts[0].at) < Date.parse(acts[1].at),
+      `el dm de ${id} es estrictamente anterior a su ban`
+    );
+    assert.ok(
+      ops.indexOf(`dm:${id}`) < ops.indexOf(`ban:${id}`),
+      `el aviso se manda antes que la expulsion de ${id}`
+    );
+  }
+  // La consulta de 70-qa.md «bans SIN dm previo (debe ser 0)»: 0 filas.
+  const bansSinDm = DOCE_EXPULSADOS.filter(id => {
+    const acts = acciones.filter(a => a.user_id === id);
+    const iBan = acts.findIndex(a => a.action === 'ban');
+    return iBan !== -1 && !acts.slice(0, iBan).some(a => a.action === 'dm');
+  });
+  assert.deepEqual(bansSinDm, []);
+});
+
+test('C3/C7: en la pasada siguiente los expulsados fuera no reciben guia repetida ni ban repetido', async () => {
+  // Pasada 1: dentro del grupo, los doce son expulsados con su aviso.
+  const { db, acciones } = fakeDb({
+    veredictos: DOCE_EXPULSADOS.map(id => [id, 'sin_cara'] as [string, Veredicto]),
+    reloj: relojFijo('2026-11-23T06:20:17.000Z', 150),
+  });
+  const primera = fakeApi({ enGrupo: DOCE_EXPULSADOS });
+  await correr(cfg, db, primera.api);
+  // Pasada 2 (24-11): ya fuera, siguen sin foto valida (reauditoria sin_cara).
+  const segunda = fakeApi({
+    enGrupo: [],
+    reauditoria: Object.fromEntries(DOCE_EXPULSADOS.map(id => [id, 'sin_cara'] as [string, Veredicto])),
+  });
+  const { r } = await correr(cfg, db, segunda.api);
+  assert.equal(r.dm, 0, 'una guia por usuario mientras no cumpla: no se reenvia');
+  assert.equal(r.ban, 0, 'el ban no se repite: ya estan fuera');
+  assert.equal(r.readmitidos, 0);
+  assert.ok(segunda.ops.every(o => o.startsWith('reauditar:')));
+  assert.equal(
+    acciones.filter(a => a.action === 'dm').length,
+    12,
+    'sigue habiendo exactamente una guia por miembro'
+  );
+});
+
+test('C3: si el dm falla (no-200) el ban no se intenta: sin aviso registrado no hay expulsion', async () => {
+  const { db, acciones } = fakeDb({
+    veredictos: [['100', 'sin_cara']],
+    reloj: relojFijo('2026-11-23T06:20:17.000Z', 150),
+  });
+  const { api, ops } = fakeApi({ enGrupo: ['100'], dmFalla: ['100'] });
+  await assert.rejects(() => correr(cfg, db, api), /dm fallo status=500/);
+  assert.deepEqual(ops, ['dm:100'], 'se intento el aviso y nada mas');
+  assert.ok(!acciones.some(a => a.action === 'ban'), 'ni una fila de ban');
+  assert.ok(!acciones.some(a => a.action === 'dm'), 'el dm solo se registra si se envio');
+});
+
+test('C7 (los 3 del 24-11): readmitidos a mano por el dueno → omitido motivo=anulacion_manual pegajoso y ningun ban repetido', async () => {
+  // Filas literales de la tabla C7(b) de 70-qa.md (dm y ban del 23-11, hora UTC).
+  const filas23N: FilaAccion[] = [
+    { user_id: '1472300639', action: 'dm', at: '2026-11-23T06:20:17.712691Z', confirmed: false, motivo: null },
+    { user_id: '1472300639', action: 'ban', at: '2026-11-23T06:20:17.869583Z', confirmed: false, motivo: null },
+    { user_id: '5039238512', action: 'dm', at: '2026-11-23T06:20:18.891686Z', confirmed: false, motivo: null },
+    { user_id: '5039238512', action: 'ban', at: '2026-11-23T06:20:19.008456Z', confirmed: false, motivo: null },
+    { user_id: '6036824365', action: 'dm', at: '2026-11-23T06:20:20.811816Z', confirmed: false, motivo: null },
+    { user_id: '6036824365', action: 'ban', at: '2026-11-23T06:20:20.939161Z', confirmed: false, motivo: null },
+  ];
+  const tres = ['1472300639', '5039238512', '6036824365'];
+  const { db, acciones } = fakeDb({
+    veredictos: tres.map(id => [id, 'sin_cara'] as [string, Veredicto]),
+    acciones: filas23N,
+    reloj: relojFijo('2026-11-24T07:19:47.000Z', 70),
+  });
+  // El dueno los volvio a meter dentro: estan en el grupo sin readmision del bot.
+  const { api, ops } = fakeApi({ enGrupo: tres });
+  const p1 = await correr(cfg, db, api);
+  const p2 = await correr(cfg, db, api); // pasada siguiente: la anulacion es pegajosa
+  for (const id of tres) {
+    const linea = `omitido ID=${id} motivo=anulacion_manual`;
+    assert.equal(p1.logs.filter(l => l === linea).length, 1, `omitido en la pasada del 24-11 para ${id}`);
+    assert.equal(p2.logs.filter(l => l === linea).length, 1, `omitido tambien en la siguiente para ${id}`);
+  }
+  assert.deepEqual(ops, [], 'la anulacion manual no toca a nadie');
+  assert.deepEqual(
+    acciones.filter(a => a.action === 'ban' && a.at >= '2026-11-24'),
+    [],
+    'ningun ban nuevo: los tres del 23-11 no se repiten'
+  );
+  assert.equal(acciones.filter(a => a.motivo === 'anulacion_manual').length, 6);
+});
+
+test('C4: un add que responde bien pero cuyo miembro no esta en la lista NO cuenta como readmitido (readmitidos=0)', async () => {
+  const { db, acciones } = fakeDb({
+    veredictos: [],
+    acciones: [{ user_id: '200', action: 'ban', at: '2026-10-01T06:30:00Z', confirmed: false, motivo: null }],
+    reloj: relojFijo('2026-11-24T07:20:00.000Z', 50),
+  });
+  // add sin `missing` (responde bien) y la lista de participantes dice que no esta.
+  const { api, ops } = fakeApi({ enGrupo: [], reauditoria: { '200': 'cara' }, dentroTrasAdd: false });
+  const { r } = await correr(cfg, db, api);
+  assert.equal(r.readmitidos, 0, 'el retorno del add nunca da por readmitido a nadie');
+  assert.equal(ops.indexOf('participants:200') > ops.indexOf('add:200'), true, 'la confirmacion se pide despues del add');
+  const conf = acciones.find(a => a.action === 'confirmado');
+  assert.equal(conf?.confirmed, false);
+});
+
+test('C4: la confirmacion se lee del GET /chats/:id/participants del conector, paginando igual que Telegram', async () => {
+  // Arnes compartido: el paginador con tope real de 200 por pagina.
+  const ids = Array.from({ length: 250 }, (_, i) => String(700000 + i));
+  const llamadas: string[] = [];
+  const api = crearApiModeracion(cfg, fetchTelegram({ ids, llamadas }));
+  assert.equal(await api.esParticipante('700240'), true, 'en la pagina 2 tambien se le encuentra');
+  assert.equal(await api.esParticipante('999999'), false);
+  assert.ok(
+    llamadas.every(u => /\/chats\/-1003365295248\/participants\?limit=200&offset=\d+$/.test(u)),
+    `la confirmacion es el GET de participantes, no otra ruta: ${llamadas.join(' | ')}`
+  );
+  assert.ok(llamadas.length >= 2, 'recorre todas las paginas (tope real de 200 por llamada)');
 });
 
 test('readmitido por el bot que vuelve a quedarse sin cara recibe guia nueva y su ban', async () => {
