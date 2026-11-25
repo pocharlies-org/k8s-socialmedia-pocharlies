@@ -25,6 +25,7 @@ import {
   addRequestOf,
   GroupActionError,
   GROUP_INVITES_MAX,
+  parseGroupInvite,
   parseGroupInviteParticipants,
   parseGroupInviteText,
 } from './group-management';
@@ -119,6 +120,7 @@ function makeClient(
     meta?: () => any;
     answer?: (participants: string[]) => any[];
     inviteCode?: () => Promise<string | undefined>;
+    acceptInvite?: (code: string) => Promise<string | undefined>;
     sendError?: (jid: string) => unknown;
     lid?: Record<string, string>;
   } = {}
@@ -156,6 +158,9 @@ function makeClient(
       calls.inviteCode += 1;
       return behaviour.inviteCode ? behaviour.inviteCode() : 'LINKCODE';
     },
+    // Join by invite: WhatsApp answers the group jid (Baileys groupAcceptInvite).
+    groupAcceptInvite: async (code: string) =>
+      behaviour.acceptInvite ? behaviour.acceptInvite(code) : GROUP,
     sendMessage: async (jid: string, content: any, opts: any) => {
       const error = behaviour.sendError?.(jid);
       if (error) throw error;
@@ -554,5 +559,128 @@ test('HTTP /groups/invite: 400 first, then the sending gate (403), offline 503, 
     const body = (await none.json()) as any;
     assert.equal(body.failureClass, 'invite_not_sent');
     assert.equal(body.results[0].reason, 'send_failed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /groups/join — join a group this account is not in, by invite code / link
+// ---------------------------------------------------------------------------
+
+test('parseGroupInvite: link, bare code and non-invites are 400', () => {
+  assert.equal(parseGroupInvite('https://chat.whatsapp.com/AbCd1234EfGh'), 'AbCd1234EfGh');
+  assert.equal(parseGroupInvite('chat.whatsapp.com/AbCd1234EfGh/'), 'AbCd1234EfGh');
+  assert.equal(parseGroupInvite('  AbCd1234EfGh  '), 'AbCd1234EfGh');
+  for (const bad of ['', '   ', 'https://example.com/x', 'short', 'has space here']) {
+    assert.throws(
+      () => parseGroupInvite(bad),
+      (e: unknown) =>
+        e instanceof GroupActionError && e.status === 400 && e.failureClass === 'invalid_request',
+      `expected 400 for ${JSON.stringify(bad)}`
+    );
+  }
+});
+
+test('joinGroup: joins by link, persists the conversation, returns the group', async () => {
+  useAccount('personal');
+  const pool = stubPool(sql => (/INSERT INTO conversations/.test(sql) ? [{ id: 'conv-join' }] : []));
+  try {
+    const { client } = makeClient({}, { acceptInvite: async () => GROUP });
+    const result = await client.joinGroup('https://chat.whatsapp.com/AbCd1234EfGh', { actor: 'dani' });
+    assert.equal(result.groupId, GROUP);
+    assert.equal(result.conversationId, 'conv-join');
+    assert.equal(result.persisted, true);
+    assert.equal(result.subject, 'Equipo');
+    assert.ok(result.group, 'the group view comes back');
+  } finally {
+    pool.restore();
+  }
+});
+
+test('joinGroup: no jid → 409 change_not_confirmed; a Boom 404 → group_unavailable', async () => {
+  useAccount('personal');
+  const pool = stubPool();
+  try {
+    const empty = makeClient({}, { acceptInvite: async () => undefined });
+    await assert.rejects(
+      empty.client.joinGroup('AbCd1234EfGh'),
+      (e: unknown) =>
+        e instanceof GroupActionError &&
+        e.status === 409 &&
+        e.failureClass === 'change_not_confirmed'
+    );
+    const boom = makeClient({}, {
+      acceptInvite: async () => {
+        throw Object.assign(new Error('not-allowed'), {
+          isBoom: true,
+          output: { statusCode: 404 },
+        });
+      },
+    });
+    await assert.rejects(
+      boom.client.joinGroup('AbCd1234EfGh'),
+      (e: unknown) =>
+        e instanceof GroupActionError && e.status === 404 && e.failureClass === 'group_unavailable'
+    );
+  } finally {
+    pool.restore();
+  }
+});
+
+test('HTTP /groups/join: 400 before the gate, 403 gated, 503 offline, 200 shape, 409 error', async () => {
+  const seen: unknown[] = [];
+  let connected = true;
+  let fail: unknown;
+  const client = {
+    isConnected: () => connected,
+    getCachedState: () => (connected ? 'CONNECTED' : 'DISCONNECTED'),
+    joinGroup: async (invite: unknown, request: unknown) => {
+      seen.push({ invite, request });
+      if (fail) throw fail;
+      return {
+        groupId: GROUP,
+        conversationId: 'conv-join',
+        subject: 'Equipo',
+        persisted: true,
+        group: null,
+      };
+    },
+  } as unknown as Partial<BaileysClient>;
+  const ON = { ENABLE_SENDING: 'true', EMERGENCY_DISABLE_SENDING: undefined };
+
+  await withRouter(
+    client,
+    { ENABLE_SENDING: 'false', EMERGENCY_DISABLE_SENDING: undefined },
+    async call => {
+      // A non-invite is 400 before the sending gate (403).
+      const bad = await call('/groups/join', { invite: 'https://example.com/nope' });
+      assert.equal(bad.status, 400);
+      assert.equal(((await bad.json()) as any).failureClass, 'invalid_request');
+      const gated = await call('/groups/join', { invite: 'AbCd1234EfGh' });
+      assert.equal(gated.status, 403);
+      assert.equal(((await gated.json()) as any).failureClass, 'disabled_sending');
+    }
+  );
+
+  await withRouter(client, ON, async call => {
+    connected = false;
+    const off = await call('/groups/join', { invite: 'AbCd1234EfGh' });
+    assert.equal(off.status, 503);
+    connected = true;
+    const ok = await call('/groups/join', {
+      invite: 'https://chat.whatsapp.com/AbCd1234EfGh',
+      actor: 'dani',
+    });
+    assert.equal(ok.status, 200);
+    const body = (await ok.json()) as any;
+    assert.equal(body.joined, true);
+    assert.equal(body.groupId, GROUP);
+    assert.equal(body.conversationId, 'conv-join');
+    // The controller parsed the link down to the code before calling the client.
+    assert.equal((seen[seen.length - 1] as any).invite, 'AbCd1234EfGh');
+    fail = new GroupActionError('no jid', 409, 'change_not_confirmed');
+    const notConfirmed = await call('/groups/join', { invite: 'AbCd1234EfGh' });
+    assert.equal(notConfirmed.status, 409);
+    assert.equal(((await notConfirmed.json()) as any).failureClass, 'change_not_confirmed');
+    fail = undefined;
   });
 });

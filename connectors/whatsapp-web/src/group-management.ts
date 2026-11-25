@@ -400,6 +400,28 @@ export function parseGroupSubject(value: unknown): string {
   return subject;
 }
 
+/** Official group invite link; the path segment is the invite code. */
+const GROUP_INVITE_LINK =
+  /^(?:https?:\/\/)?(?:www\.)?chat\.whatsapp\.com\/([A-Za-z0-9_-]{6,128})\/?(?:[?#].*)?$/i;
+/** A bare invite code (what follows / in the link): letters, digits, - and _. */
+const GROUP_INVITE_CODE = /^[A-Za-z0-9_-]{6,128}$/;
+
+/**
+ * The invite code of a group, from a share link (`https://chat.whatsapp.com/<code>`)
+ * or the bare code; 400 invalid_request otherwise. This is exactly what Baileys
+ * `groupAcceptInvite` takes to join the group.
+ */
+export function parseGroupInvite(value: unknown): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || text.length > 2048) {
+    throw invalid('invite must be a chat.whatsapp.com invite link or its code');
+  }
+  const link = GROUP_INVITE_LINK.exec(text);
+  if (link) return link[1];
+  if (GROUP_INVITE_CODE.test(text)) return text;
+  throw invalid(`Not a chat.whatsapp.com invite link or an invite code: ${text.slice(0, 80)}`);
+}
+
 /** Description: at most 2048 characters; '' (or only spaces) removes it. */
 export function parseGroupDescription(value: unknown): string {
   if (typeof value !== 'string') throw invalid('description must be a string ("" removes it)');

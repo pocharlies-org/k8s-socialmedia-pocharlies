@@ -141,6 +141,13 @@ export interface CommunityGroupView {
   joined: boolean;
   /** Our admin role there; false when not joined. */
   isAdmin: boolean;
+  /**
+   * WhatsApp's invite code for this group, from the community's `<sub_groups>`
+   * node (whatsmeow's `CommLinkedGroup.code`): what `POST /groups/join` takes
+   * to join a group this account is not in. null when WhatsApp did not send it
+   * (then the caller passes an invite link instead).
+   */
+  inviteCode: string | null;
 }
 
 export interface CommunityCapabilities {
@@ -181,6 +188,8 @@ export interface LinkedGroupEntry {
   subject?: string;
   creation?: number;
   size?: number;
+  /** WhatsApp's invite code for the group (absent when it does not send one). */
+  code?: string;
 }
 
 function creationIso(creation: unknown): string | null {
@@ -248,7 +257,7 @@ export function communityView(
   }
   const groupView = (
     id: string,
-    fallback: { subject?: string; size?: number; creation?: number }
+    fallback: { subject?: string; size?: number; creation?: number; code?: string }
   ): CommunityGroupView => {
     const mine = joinedById.get(id);
     const self = mine ? ownParticipantOf(mine) : undefined;
@@ -260,6 +269,7 @@ export function communityView(
       createdAt: creationIso(mine?.creation ?? fallback.creation),
       joined: !!self,
       isAdmin: !!self && isAdminRole(self.admin),
+      inviteCode: fallback.code ?? null,
     };
   };
   const announcementId = joined.announcement?.id ?? null;

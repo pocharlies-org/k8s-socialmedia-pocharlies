@@ -87,6 +87,7 @@ import { parseChannelJid, parseChannelQuery, parseChannelSubscriptionAction } fr
 import {
   GroupActionError,
   normalizeGroupParticipantAction,
+  parseGroupInvite,
   parseGroupJid,
   parseGroupInviteParticipants,
   parseGroupInviteText,
@@ -2295,6 +2296,30 @@ export function createRouter(
         res.json({ invited: true, ...result });
       } catch (e) {
         mutationErrorResponse(res, e, 'send group invites');
+      }
+    })();
+  });
+
+  // Join a group this account is not in, by its invite code or a
+  // `chat.whatsapp.com/…` link (Baileys groupAcceptInvite): the community panel
+  // offers it on a group row marked "no estás". Validated (400 invalid_request
+  // for a non-invite) → sending gate (403) → connection (503). WhatsApp answers
+  // the group jid (409 change_not_confirmed when it does not); an invalid or
+  // expired code / a group that refuses us → invite_not_allowed /
+  // group_unavailable / rejected_by_whatsapp. The conversation row is written
+  // here (ingest only), so /messages shows the group after joining.
+  // CONTRACT: http.whatsapp-connector.groups-join.v1 — body {invite (code or chat.whatsapp.com link), actor?}, 200 {joined, groupId, conversationId, subject, persisted, group}, 400 invalid_request, 409 change_not_confirmed
+  router.post('/groups/join', auth, (req: AuthenticatedRequest, res: Response): void => {
+    void (async () => {
+      try {
+        const body = optionalObject(req.body);
+        const invite = parseGroupInvite(body.invite ?? body.code ?? body.link);
+        if (rejectWhenSendingDisabled(res)) return;
+        if (rejectWhenDisconnected(client, res)) return;
+        const result = await client.joinGroup(invite, { actor: actorFromBody(body.actor) });
+        res.json({ joined: true, ...result });
+      } catch (e) {
+        mutationErrorResponse(res, e, 'join group');
       }
     })();
   });
