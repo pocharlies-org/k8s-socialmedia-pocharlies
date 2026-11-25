@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { resetAccountRegistryCache } from '../domain/account-registry';
 import { useTestAccounts } from '../domain/test-accounts';
 import {
   EventPublisher,
@@ -47,6 +51,27 @@ describe('brain-windows-synapse', () => {
 
   it('rejects an account the registry does not know', () => {
     expect(() => tenantForAccount('nobody')).toThrow(/account registry/);
+  });
+
+  it('does not fall through to skirmshop when the brain instance has no tenant', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-instance-'));
+    const file = path.join(dir, 'accounts.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify([
+        { channel: 'whatsapp', accountId: 'personal', connectorUrl: 'http://wa' },
+        { channel: 'telegram', accountId: 'sauvage', connectorUrl: 'http://tg', brainInstance: 'sauvage' },
+      ])
+    );
+    const previous = process.env.SOCIAL_ACCOUNTS_FILE;
+    process.env.SOCIAL_ACCOUNTS_FILE = file;
+    resetAccountRegistryCache();
+    try {
+      expect(() => tenantForAccount('sauvage')).toThrow(/has no tenant/);
+    } finally {
+      process.env.SOCIAL_ACCOUNTS_FILE = previous;
+      resetAccountRegistryCache();
+    }
   });
 
   it('builds one upsert event per batch with adapter, hash and the documents', () => {

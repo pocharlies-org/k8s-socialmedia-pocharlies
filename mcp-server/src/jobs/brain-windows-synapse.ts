@@ -9,8 +9,8 @@
  *   brain_window.<tenant>.deleted  → tombstone (one doc per event)
  *
  * tenant: follows the account's brain instance in the account registry —
- * instance `personal` → family, instance `leila` → leila (INFRA-554), anything
- * else (`skirmshop`) → skirmshop.
+ * instance `personal` → family, instance `leila` → leila (INFRA-554), instance
+ * `skirmshop` → skirmshop; any other instance is a registry error (INFRA-1587).
  *
  * Publishing goes straight to the `events` topic exchange of vhost /synapse
  * with a write-only user (configure ^$, read ^$): never assert the exchange.
@@ -36,7 +36,10 @@ export function tenantForAccount(account: string): string {
   // (routing key brain_window.{tenant}.*): the leila workflows in synapse bind
   // this key with instance `leila`. Never fall through to skirmshop.
   if (instance === 'leila') return 'leila';
-  return 'skirmshop';
+  if (instance === 'skirmshop') return 'skirmshop';
+  // INFRA-1587: an instance with no tenant is a registry error. Falling through to
+  // skirmshop is how the professional Telegram bot's windows reached `tienda`.
+  throw new Error(`brain instance '${instance}' (account '${account}') has no tenant`);
 }
 
 export interface SynapseEvent {
