@@ -50,6 +50,8 @@ import {
   isJidGroup,
   jidEncode,
   jidNormalizedUser,
+  getBinaryNodeChild,
+  getBinaryNodeChildren,
   makeCacheableSignalKeyStore,
   AnyMessageContent,
   CacheStore,
@@ -268,6 +270,7 @@ import {
   normalizeGroupJid,
   normalizeGroupParticipantAction,
   ownParticipant,
+  parseGroupInvite,
   parseGroupJid,
   parseGroupParticipants,
   parseGroupSubject,
@@ -844,6 +847,17 @@ export interface GroupCreateResult {
   succeeded: number;
   failed: number;
   group: GroupStateView;
+}
+
+/** POST /groups/join. */
+export interface GroupJoinResult {
+  /** `…@g.us` of the group WhatsApp put this account in. */
+  groupId: string;
+  /** conversations.id written (ingest only), else null. */
+  conversationId: string | null;
+  subject: string;
+  persisted: boolean;
+  group: GroupStateView | null;
 }
 
 /** POST /groups/update. */
@@ -6586,6 +6600,54 @@ export class BaileysClient extends EventEmitter {
   }
 
   /**
+   * Join a group by its invite code or `chat.whatsapp.com/…` link (Baileys
+   * `groupAcceptInvite`): WhatsApp adds this account and answers the group jid.
+   * The conversation row is written here (ingest only), like a created group —
+   * WhatsApp's own groups.upsert may or may not reach a joiner. An invalid or
+   * expired code, or a group that refuses us, comes back as a group-call error;
+   * already being in is idempotent (WhatsApp answers the jid, nothing to undo).
+   */
+  async joinGroup(invite: unknown, request: MessageMutationRequest = {}): Promise<GroupJoinResult> {
+    const code = parseGroupInvite(invite);
+    const sock = this.connectedSocket();
+    const own = await this.ownIds();
+    const joined = await this.groupCall(
+      'joining the group by invite',
+      '@g.us',
+      () => sock.groupAcceptInvite(code),
+      { forbidden: 'invite_not_allowed', unavailable: 'group_unavailable' }
+    );
+    if (!joined || !isJidGroup(joined)) {
+      throw new GroupActionError(
+        'WhatsApp did not confirm the group: read the communities before retrying',
+        409,
+        'change_not_confirmed'
+      );
+    }
+    const meta = await this.fetchGroupMetadata(joined, true).catch((e: any) => {
+      this.logger.warn(`metadata of joined group ${joined} unavailable: ${e?.message || e}`);
+      return null;
+    });
+    if (meta) this.cacheGroupMetadata(meta);
+    let conversationId: string | null = null;
+    if (this.ingest && meta) {
+      conversationId =
+        (await recordGroupConversation(meta, { activityAt: new Date() }).catch((e: any) => {
+          this.logger.warn(`group ${joined} joined but not recorded: ${e?.message || e}`);
+          return undefined;
+        })) ?? null;
+    }
+    this.logger.info(`Group joined ${joined}${request.actor ? ` by ${request.actor}` : ''}`);
+    return {
+      groupId: this.normalizeJid(joined),
+      conversationId,
+      subject: meta?.subject || '',
+      persisted: !!conversationId,
+      group: meta ? this.groupView(meta, own) : null,
+    };
+  }
+
+  /**
    * Subject, description and settings of a group. Checked against fresh
    * metadata first: a member of the group; subject / description need admin
    * unless the group is not `restrict`ed; settings always need admin. What
@@ -7155,6 +7217,32 @@ export class BaileysClient extends EventEmitter {
     return meta;
   }
 
+  /**
+   * The invite code per group of a community, from the raw `<sub_groups>` node:
+   * Baileys' `communityFetchLinkedGroups` parses id / subject / size but drops
+   * WhatsApp's `code` (whatsmeow keeps it), which is what `POST /groups/join`
+   * needs to join a group we are not in. Best-effort: {} when the socket has no
+   * raw query or WhatsApp does not send a code (then the caller passes a link).
+   */
+  private async linkedGroupCodes(raw: string): Promise<Record<string, string>> {
+    try {
+      const result = await this.connectedSocket().query({
+        tag: 'iq',
+        attrs: { type: 'get', xmlns: 'w:g2', to: raw },
+        content: [{ tag: 'sub_groups', attrs: {} }],
+      });
+      const out: Record<string, string> = {};
+      for (const node of getBinaryNodeChildren(getBinaryNodeChild(result, 'sub_groups'), 'group')) {
+        const id = node.attrs.id ? jidEncode(node.attrs.id, 'g.us') : undefined;
+        const code = node.attrs.code;
+        if (id && typeof code === 'string' && code) out[id] = code;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
   /** Every group of a community (`<sub_groups>`); null when WhatsApp did not answer it. */
   private async linkedGroupsOf(raw: string): Promise<LinkedGroupEntry[] | null> {
     try {
@@ -7162,7 +7250,12 @@ export class BaileysClient extends EventEmitter {
       if (!answer || answer.communityJid !== raw || !Array.isArray(answer.linkedGroups)) {
         return null;
       }
-      return answer.linkedGroups;
+      const codes = await this.linkedGroupCodes(raw);
+      if (!Object.keys(codes).length) return answer.linkedGroups;
+      return answer.linkedGroups.map(entry => {
+        const code = entry.id ? codes[entry.id] : undefined;
+        return code ? { ...entry, code } : entry;
+      });
     } catch (e: any) {
       this.logger.warn(`linked groups of ${raw} unavailable: ${e?.message || e}`);
       return null;

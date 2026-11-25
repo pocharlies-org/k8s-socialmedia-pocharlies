@@ -1522,6 +1522,28 @@ contracts:
     only). The path, the body fields, the 200 shape, the reasons and the failureClass values are contract:
     changing any is breaking — a new `.v2` entry beside this one. Also consumed by the MCP tool social_invite_to_group
     (mcp-server/src/mcp/server.ts canonicalInviteToGroup; added later, surface unchanged).'
+- id: http.whatsapp-connector.groups-join.v1
+  kind: http-route
+  value: /groups/join
+  role: provider
+  files:
+  - connectors/whatsapp-web/src/api/controller.ts
+  status: active
+  note: 'POST /api/v1/groups/join of the house WhatsApp connectors: this account joins a group it is not
+    in, by its invite code or a `chat.whatsapp.com/<code>` link (Baileys groupAcceptInvite), consumed by
+    dgx-messages (the community panel''s "Unirse" on a group row marked "no estás"). HMAC-signed body
+    {invite, actor?}: invite the bare code or the full link (the path segment is the code); anything else
+    400 invalid_request. 400 first, then the sending gate (403 disabled_sending), then 503 disconnected.
+    WhatsApp adds the account and answers the group jid; no jid → 409 change_not_confirmed. An invalid or
+    expired code, or a group that refuses us → 403 invite_not_allowed / 404 group_unavailable / 422
+    rejected_by_whatsapp (the group-call classes). Already being in is idempotent (WhatsApp answers the
+    jid, nothing to undo). The group''s conversation row is written here (recordGroupConversation, ingest
+    only) so /messages shows it after joining. 200 {joined: true, groupId, conversationId (null without
+    ingest), subject, persisted, group | null}. The communities list now also carries (additively; the v1
+    fields unchanged) each linked group''s `inviteCode` — WhatsApp''s `code` from the community''s
+    <sub_groups> node, null when WhatsApp does not send one (then the caller passes a link). The path, the
+    body fields, the 200 shape and those failureClass values are contract: changing any is breaking — a
+    new `.v2` entry beside this one.'
 - id: http.whatsapp-connector.groups-photo.v1
   kind: http-route
   value: /groups/photo
