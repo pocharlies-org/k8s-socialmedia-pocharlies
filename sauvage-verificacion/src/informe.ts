@@ -1,6 +1,6 @@
 import { ConnectorClient } from './connector-client';
 import type { EstadoDb } from './estado';
-import { auditadosDesde, reingresosHoy } from './estado';
+import { auditadosDesde, estadoModeracion, reingresosHoy, type EstadoModeracion } from './estado';
 
 /**
  * Informe diario a Dani (C5), por la cuenta personal.
@@ -23,11 +23,16 @@ export interface ApartadosInforme {
   reingresos: string[];
   pendientes: string[];
   ambiguedades: string[];
+  /**
+   * Recuento de la moderacion (INFRA-1561 C3): hace visible el hueco — un
+   * candidato `sin_cara` dentro del grupo sin `dm` ni `ban` sale en `sinAccion`.
+   */
+  moderacion?: EstadoModeracion;
 }
 
 export function construirInforme(d: ApartadosInforme): string {
   const lista = (xs: string[]) => (xs.length ? xs.map(x => `  - ${x}`).join('\n') : '  - (ninguno)');
-  return [
+  const partes = [
     `Informe Sauvage · verificacion de cara visible · total=${d.total}`,
     '',
     `incumplidores (${d.incumplidores.length}):`,
@@ -41,7 +46,17 @@ export function construirInforme(d: ApartadosInforme): string {
     '',
     `ambiguedades (${d.ambiguedades.length}):`,
     lista(d.ambiguedades),
-  ].join('\n');
+  ];
+  if (d.moderacion) {
+    const m = d.moderacion;
+    partes.push(
+      '',
+      `moderacion (candidatos=${m.candidatos.length} avisados=${m.avisados.length} expulsados=${m.expulsados.length}):`,
+      `  - candidatos sin accion (${m.sinAccion.length}):`,
+      lista(m.sinAccion)
+    );
+  }
+  return partes.join('\n');
 }
 
 /**
@@ -52,7 +67,13 @@ export function construirInforme(d: ApartadosInforme): string {
 export async function reunirInforme(
   db: EstadoDb,
   account: string,
-  nombres: Map<string, string>
+  nombres: Map<string, string>,
+  /**
+   * Ids dentro del grupo (lista de participantes). Cuando se pasa, el informe
+   * lleva el recuento de moderacion (INFRA-1561 C3): sin el, se omite el
+   * apartado (no se puede decir quien sigue dentro).
+   */
+  enGrupo?: Set<string>
 ): Promise<ApartadosInforme> {
   const hoy = await auditadosDesde(db, account);
   const reingresos = await reingresosHoy(db);
@@ -63,6 +84,7 @@ export async function reunirInforme(
     reingresos: reingresos.map(nombre),
     pendientes: hoy.filter(v => v.verdict === 'no_auditar').map(v => nombre(v.userId)),
     ambiguedades: hoy.filter(v => v.verdict === 'dudoso').map(v => nombre(v.userId)),
+    moderacion: enGrupo ? await estadoModeracion(db, account, enGrupo) : undefined,
   };
 }
 

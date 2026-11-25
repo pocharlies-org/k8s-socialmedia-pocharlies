@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { ConnectorClient } from './connector-client';
+import { ConnectorClient, listarParticipantes } from './connector-client';
 import { chatInforme, construirInforme, enviarInforme, reunirInforme } from './informe';
 
 /**
@@ -21,7 +21,23 @@ async function main(): Promise<void> {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     const account = process.env.SAUVAGE_ACCOUNT ?? 'professional';
-    const datos = await reunirInforme(pool, account, new Map());
+    // Recuento de moderacion (INFRA-1561 C3): quien sigue dentro del grupo. Se
+    // pide al conector `professional` (el del grupo); si falla, el informe sale
+    // sin el apartado (fallo blando: no tumba el envio a Dani).
+    let enGrupo: Set<string> | undefined;
+    try {
+      const pro = new ConnectorClient({
+        baseUrl:
+          process.env.SAUVAGE_CONNECTOR_PRO_URL ??
+          'http://telegram-connector-professional.whatsapp-mcp.svc.cluster.local:3002/api/v1',
+        sharedSecret: secret,
+      });
+      const ps = await listarParticipantes(pro, process.env.SAUVAGE_GROUP_ID ?? '-1003365295248');
+      enGrupo = new Set(ps.map(p => p.id));
+    } catch (e) {
+      console.log(`informe: recuento de moderacion omitido (${String(e)})`);
+    }
+    const datos = await reunirInforme(pool, account, new Map(), enGrupo);
     const chat = await chatInforme(personal, process.env.SAUVAGE_REPORT_CHAT_ID);
     await enviarInforme(personal, chat, construirInforme(datos));
   } finally {

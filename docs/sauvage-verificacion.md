@@ -59,7 +59,12 @@ Con `on`, cada pasada, después del informe:
    le expulsa con `POST /api/v1/chats/:id/ban`. Cada `ban ID=` va precedido de
    su `dm ID=`; una guía por usuario mientras no cumpla (si una pasada muere
    entre el dm y el ban, la siguiente banea sin reenviar la guía). `dudoso` y
-   `no_auditar` **nunca** se expulsan.
+   `no_auditar` **nunca** se expulsan. El fallo de un miembro no silencia a los
+   demás (INFRA-1561): cada miembro se procesa aislado, el aviso enviado sin
+   expulsión queda registrado como `pendiente` y la pasada siguiente lo cierra
+   (expulsa si sigue sin cara, o lo cierra como `cumplido` si ya cumple). El
+   informe a Dani lleva el recuento `moderacion (candidatos=… avisados=…
+   expulsados=…)` con los candidatos sin acción listados.
 2. **Seguimiento y readmisión (C4)**: los expulsados se re-auditan cada pasada
    (foto + visión). Si su veredicto pasa a `cara`: `POST /chats/:id/unban` →
    `POST /chats/:id/members`; si el add responde `missing` (la privacidad del

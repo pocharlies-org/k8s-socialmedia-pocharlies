@@ -131,11 +131,39 @@ export interface ResultadoModeracion {
   ban: number;
   readmitidos: number;
   omitidos: number;
+  /** Avisos enviados cuyo ban no se completo: pendientes del diseño (INFRA-1561). */
+  pendientes: number;
+  /** Miembros cuyo procesamiento fallo (la pasada los reintenta). */
+  fallos: number;
 }
 
 function ultimoIndice(acts: Accion[], p: (a: Accion) => boolean): number {
   for (let i = acts.length - 1; i >= 0; i--) if (p(acts[i])) return i;
   return -1;
+}
+
+/**
+ * INFRA-1561: dm enviado y sin expulsion (ni cierre) detras = pendiente del
+ * diseno. Se mide tras la ultima readmision confirmada (la cuenta de guias
+ * vuelve a cero cuando el bot readmite). Un `pendiente/ban_fallo` detras del dm
+ * NO lo cierra: lo confirma.
+ */
+function pendienteAbierto(acts: Accion[]): boolean {
+  const desde = ultimoIndice(acts, a => a.action === 'confirmado' && a.confirmed);
+  const cola = acts.slice(desde + 1);
+  const iDm = ultimoIndice(cola, a => a.action === 'dm');
+  if (iDm === -1) return false;
+  return !cola
+    .slice(iDm + 1)
+    .some(a => a.action === 'ban' || (a.action === 'pendiente' && a.motivo === 'cumplido'));
+}
+
+/** Ya existe un `pendiente/ban_fallo` tras la ultima readmision confirmada? */
+function pendienteYaRegistrado(acts: Accion[]): boolean {
+  const desde = ultimoIndice(acts, a => a.action === 'confirmado' && a.confirmed);
+  return acts
+    .slice(desde + 1)
+    .some(a => a.action === 'pendiente' && a.motivo === 'ban_fallo');
 }
 
 /**
@@ -153,7 +181,22 @@ export async function ejecutarModeracion(
   db: EstadoDb,
   api: ModerationApi
 ): Promise<ResultadoModeracion> {
-  const res: ResultadoModeracion = { off: false, dm: 0, ban: 0, readmitidos: 0, omitidos: 0 };
+  const res: ResultadoModeracion = {
+    off: false,
+    dm: 0,
+    ban: 0,
+    readmitidos: 0,
+    omitidos: 0,
+    pendientes: 0,
+    fallos: 0,
+  };
+  // INFRA-1561: el fallo de un miembro no puede silenciar a los que vienen
+  // despues en el orden de iteracion (fue la causa medida: el ban que fallo
+  // del 6468280801 abortaba la pasada y los doce candidatos que caian detras
+  // no recibieron nunca ni dm ni ban). Cada miembro se procesa aislado y los
+  // fallos se acumulan: la pasada los reporta al final (main-moderacion sale 1)
+  // pero ninguno se queda sin su oportunidad.
+  const fallos: string[] = [];
 
   if (!cfg.moderation) {
     console.log('moderacion off: ninguna accion');
@@ -166,9 +209,23 @@ export async function ejecutarModeracion(
   const acciones = await accionesPorUsuario(db);
 
   // A) sin_cara dentro del grupo: aviso con guia y expulsion, una vez por usuario.
+  // Candidatos = ultimo veredicto por miembro (veredictosActuales, sin corte de
+  // fecha): un incumplidor de una pasada anterior sigue siendo candidato mientras
+  // siga dentro y sin cumplir (INFRA-1561).
   for (const [userId, verdict] of veredictos) {
-    if (verdict !== 'sin_cara' || !enGrupo.has(userId)) continue;
+    if (!enGrupo.has(userId)) continue;
     const acts = acciones.get(userId) ?? [];
+    if (verdict !== 'sin_cara') {
+      // C2 (INFRA-1561): aviso enviado en una pasada anterior y sin expulsion
+      // detras. Si el ultimo veredicto ya es `cara`, el pendiente se cierra
+      // como cumplido sin tocarle; `dudoso`/`no_auditar` no es cumplir (nunca
+      // se expulsan): el pendiente sigue abierto y visible en el informe.
+      if (verdict === 'cara' && pendienteAbierto(acts)) {
+        console.log(`pendiente-cerrado ID=${userId} motivo=cumplido`);
+        await registrarAccion(db, { userId, action: 'pendiente', motivo: 'cumplido' });
+      }
+      continue;
+    }
     const idxBan = ultimoIndice(acts, a => a.action === 'ban');
     // Accion posterior al ultimo ban del bot (o sin ban previo).
     const trasElBan = (p: (a: Accion) => boolean): boolean =>
@@ -200,24 +257,42 @@ export async function ejecutarModeracion(
     // C3: el ban no se intenta sin su dm registrado. Si la guia ya esta enviada
     // (pasada interrumpida entre dm y ban) no se repite: una guia por usuario
     // mientras no cumpla.
-    if (!guiaYaEnviada(acts)) {
-      await api.dm(userId, cfg.guiaTexto);
-      if (cfg.guiaVideoUrl) {
-        try {
-          await api.video(userId);
-        } catch (e) {
-          // La guia escrita ya esta enviada: el video es complemento, no corta el aviso.
-          console.log(`dm_video_fallo ID=${userId} ${String(e)}`);
+    const guiaPrevia = guiaYaEnviada(acts);
+    let dmEstaPasada = false;
+    try {
+      if (!guiaPrevia) {
+        await api.dm(userId, cfg.guiaTexto);
+        if (cfg.guiaVideoUrl) {
+          try {
+            await api.video(userId);
+          } catch (e) {
+            // La guia escrita ya esta enviada: el video es complemento, no corta el aviso.
+            console.log(`dm_video_fallo ID=${userId} ${String(e)}`);
+          }
         }
+        console.log(`dm ID=${userId}`);
+        await registrarAccion(db, { userId, action: 'dm' });
+        res.dm++;
+        dmEstaPasada = true;
       }
-      console.log(`dm ID=${userId}`);
-      await registrarAccion(db, { userId, action: 'dm' });
-      res.dm++;
+      await api.ban(userId);
+      console.log(`ban ID=${userId}`);
+      await registrarAccion(db, { userId, action: 'ban' });
+      res.ban++;
+    } catch (e) {
+      const linea = `fallo ID=${userId} ${String(e)}`;
+      console.log(linea);
+      fallos.push(linea);
+      res.fallos++;
+      // El aviso quedo registrado (de una pasada anterior o de esta) y el ban no
+      // se completo: el miembro queda registrado con el estado pendiente del
+      // diseno y la pasada siguiente lo cierra (INFRA-1561). Una fila por aviso.
+      if ((guiaPrevia || dmEstaPasada) && !pendienteYaRegistrado(acts)) {
+        console.log(`pendiente ID=${userId} motivo=ban_fallo`);
+        await registrarAccion(db, { userId, action: 'pendiente', motivo: 'ban_fallo' });
+        res.pendientes++;
+      }
     }
-    await api.ban(userId);
-    console.log(`ban ID=${userId}`);
-    await registrarAccion(db, { userId, action: 'ban' });
-    res.ban++;
   }
 
   // B) expulsados (ban del bot sin readmision confirmada todavia): re-auditar
@@ -243,40 +318,55 @@ export async function ejecutarModeracion(
     ) {
       continue;
     }
-    const v = await api.reauditar(userId);
-    await guardarVeredicto(db, { account: cfg.account, userId, verdict: v.verdict, rawText: v.rawText });
-    if (v.verdict !== 'cara') {
-      const motivo = v.verdict === 'sin_cara' ? 'sigue_sin_cara' : 'no_auditable';
-      console.log(`omitido ID=${userId} motivo=${motivo}`);
-      await registrarAccion(db, { userId, action: 'omitido', motivo });
-      res.omitidos++;
-      continue;
+    try {
+      const v = await api.reauditar(userId);
+      await guardarVeredicto(db, { account: cfg.account, userId, verdict: v.verdict, rawText: v.rawText });
+      if (v.verdict !== 'cara') {
+        const motivo = v.verdict === 'sin_cara' ? 'sigue_sin_cara' : 'no_auditable';
+        console.log(`omitido ID=${userId} motivo=${motivo}`);
+        await registrarAccion(db, { userId, action: 'omitido', motivo });
+        res.omitidos++;
+        continue;
+      }
+      await api.unban(userId);
+      console.log(`unban ID=${userId}`);
+      await registrarAccion(db, { userId, action: 'unban' });
+      const { missing } = await api.add(userId);
+      console.log(`add ID=${userId}${missing ? ' missing=true' : ''}`);
+      await registrarAccion(db, { userId, action: 'add', motivo: missing ? 'missing' : null });
+      if (missing) {
+        const link = await api.inviteLink();
+        await api.dm(
+          userId,
+          `Tu privacidad impide anadirte al grupo directamente. Entra con este enlace de invitacion: ${link}`
+        );
+        console.log(`link ID=${userId}`);
+        await registrarAccion(db, { userId, action: 'link' });
+      }
+      // Confirmacion SOLO por la lista de participantes (C4).
+      const dentro = await api.esParticipante(userId);
+      console.log(`confirmado ID=${userId} ${dentro}`);
+      await registrarAccion(db, { userId, action: 'confirmado', confirmed: dentro });
+      if (dentro) res.readmitidos++;
+    } catch (e) {
+      // Mismo aislamiento que el caso A (INFRA-1561): un fallo re-auditar o en
+      // la cadena de readmision no puede dejar sin procesar al resto.
+      const linea = `fallo ID=${userId} ${String(e)}`;
+      console.log(linea);
+      fallos.push(linea);
+      res.fallos++;
     }
-    await api.unban(userId);
-    console.log(`unban ID=${userId}`);
-    await registrarAccion(db, { userId, action: 'unban' });
-    const { missing } = await api.add(userId);
-    console.log(`add ID=${userId}${missing ? ' missing=true' : ''}`);
-    await registrarAccion(db, { userId, action: 'add', motivo: missing ? 'missing' : null });
-    if (missing) {
-      const link = await api.inviteLink();
-      await api.dm(
-        userId,
-        `Tu privacidad impide anadirte al grupo directamente. Entra con este enlace de invitacion: ${link}`
-      );
-      console.log(`link ID=${userId}`);
-      await registrarAccion(db, { userId, action: 'link' });
-    }
-    // Confirmacion SOLO por la lista de participantes (C4).
-    const dentro = await api.esParticipante(userId);
-    console.log(`confirmado ID=${userId} ${dentro}`);
-    await registrarAccion(db, { userId, action: 'confirmado', confirmed: dentro });
-    if (dentro) res.readmitidos++;
   }
 
   console.log(
-    `moderacion dm=${res.dm} ban=${res.ban} readmitidos=${res.readmitidos} omitidos=${res.omitidos}`
+    `moderacion dm=${res.dm} ban=${res.ban} readmitidos=${res.readmitidos} omitidos=${res.omitidos} pendientes=${res.pendientes} fallos=${res.fallos}`
   );
+  // La pasada termina en fallo si algun miembro no pudo procesarse (main-
+  // moderacion sale 1 y el CronJob lo marca), pero DESPUES de haber intentado
+  // a todos: el fallo de uno ya no silencia a los que vienen detras.
+  if (fallos.length) {
+    throw new Error(`moderacion con ${fallos.length} fallos: ${fallos.join(' | ')}`);
+  }
   return res;
 }
 
