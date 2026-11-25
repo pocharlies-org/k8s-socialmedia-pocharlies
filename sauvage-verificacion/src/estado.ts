@@ -151,6 +151,41 @@ export async function accionesPorUsuario(db: EstadoDb): Promise<Map<string, Acci
   return out;
 }
 
+/**
+ * Estado de la moderacion para el informe a Dani (INFRA-1561 C3): candidatos =
+ * ultimo veredicto `sin_cara` y siguen dentro del grupo; avisados = con un `dm`
+ * en su historia; expulsados = con un `ban`. `sinAccion` (candidato sin dm ni
+ * ban) es el hueco que hoy seria invisible: los doce medidos el 24-11 habrian
+ * salido aqui.
+ */
+export interface EstadoModeracion {
+  candidatos: string[];
+  avisados: string[];
+  expulsados: string[];
+  sinAccion: string[];
+}
+
+export async function estadoModeracion(
+  db: EstadoDb,
+  account: string,
+  enGrupo: Set<string>
+): Promise<EstadoModeracion> {
+  const veredictos = await veredictosActuales(db, account);
+  const acciones = await accionesPorUsuario(db);
+  const e: EstadoModeracion = { candidatos: [], avisados: [], expulsados: [], sinAccion: [] };
+  for (const [userId, verdict] of veredictos) {
+    if (verdict !== 'sin_cara' || !enGrupo.has(userId)) continue;
+    e.candidatos.push(userId);
+    const acts = acciones.get(userId) ?? [];
+    const dm = acts.some(a => a.action === 'dm');
+    const ban = acts.some(a => a.action === 'ban');
+    if (dm) e.avisados.push(userId);
+    if (ban) e.expulsados.push(userId);
+    if (!dm && !ban) e.sinAccion.push(userId);
+  }
+  return e;
+}
+
 /** Readmisiones confirmadas hoy (apartado `reingresos` del informe, C4→C5). */
 export async function reingresosHoy(db: EstadoDb): Promise<string[]> {
   const { rows } = await db.query(

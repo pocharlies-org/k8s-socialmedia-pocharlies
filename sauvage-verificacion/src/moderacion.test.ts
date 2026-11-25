@@ -78,6 +78,8 @@ interface OpcionesApi {
   videoFalla?: boolean;
   /** El dm a estos miembros les responde no-200 (falla el aviso). */
   dmFalla?: string[];
+  /** El ban a estos miembros les responde no-200 (falla la expulsión). */
+  banFalla?: string[];
 }
 
 function fakeApi(o: OpcionesApi) {
@@ -101,6 +103,7 @@ function fakeApi(o: OpcionesApi) {
     },
     async ban(userId) {
       ops.push(`ban:${userId}`);
+      if (o.banFalla?.includes(userId)) throw new Error(`ban fallo status=503 ID=${userId}`);
     },
     async unban(userId) {
       ops.push(`unban:${userId}`);
@@ -536,6 +539,89 @@ test('C4: la confirmacion se lee del GET /chats/:id/participants del conector, p
     `la confirmacion es el GET de participantes, no otra ruta: ${llamadas.join(' | ')}`
   );
   assert.ok(llamadas.length >= 2, 'recorre todas las paginas (tope real de 200 por llamada)');
+});
+
+// ————— INFRA-1561: cobertura de candidatos y cierre del dm pendiente —————
+//
+// Forma real medida (nota-developer-cobertura-salvage.md / 70-qa.md 24-11):
+// 6468280801 recibió su dm el 23-11 a las 06:20:21 UTC y su ban no llegó a
+// ejecutarse nunca; los doce miembros cuyo user_id (TEXT, orden de string) cae
+// DETRÁS del suyo no recibieron ni dm ni ban en toda su historia. La causa no
+// es de dónde salen los candidatos (veredictosActuales ya toma el último
+// veredicto por miembro, sin corte de fecha): es que la excepción del ban del
+// 6468280801 abortaba la pasada entera y silenciaba a todos los que venían
+// después en el orden de iteración.
+
+/** El dm medido del 6468280801 (23-11 06:20:21 UTC), sin ban detrás. */
+const FILA_DM_6468: FilaAccion = {
+  user_id: '6468280801',
+  action: 'dm',
+  at: '2026-11-23T06:20:21.000Z',
+  confirmed: false,
+  motivo: null,
+};
+
+test('C1 (INFRA-1561): el fallo al expulsar a un miembro no deja sin acción a los candidatos que vienen después', async () => {
+  // Un candidato de la pasada anterior (721652387: sin_cara, dentro, cero
+  // acciones) iterado detrás del miembro cuyo ban falla (6468280801).
+  const { db, acciones } = fakeDb({
+    veredictos: [
+      ['6468280801', 'sin_cara'],
+      ['721652387', 'sin_cara'],
+    ],
+    acciones: [FILA_DM_6468],
+    reloj: relojFijo('2026-11-25T06:20:00.000Z', 150),
+  });
+  const { api } = fakeApi({
+    enGrupo: ['6468280801', '721652387'],
+    banFalla: ['6468280801'],
+  });
+  // La pasada reporta el fallo (main-moderacion sale 1) pero NO abandona a los demás.
+  await assert.rejects(() => correr(cfg, db, api), /ban fallo status=503 ID=6468280801/);
+  assert.deepEqual(
+    acciones.filter(a => a.user_id === '721652387').map(a => a.action),
+    ['dm', 'ban'],
+    'el candidato de la pasada anterior recibe su dm y luego su ban pese al fallo del otro'
+  );
+  // C2: el aviso enviado sin expulsión queda registrado como pendiente del diseño.
+  assert.ok(
+    acciones.some(a => a.user_id === '6468280801' && a.action === 'pendiente' && a.motivo === 'ban_fallo'),
+    'el dm enviado sin ban queda registrado con el estado pendiente'
+  );
+  // La guía no se reenvía al pendiente (una guía por usuario mientras no cumpla).
+  assert.equal(acciones.filter(a => a.user_id === '6468280801' && a.action === 'dm').length, 1);
+});
+
+test('C2 (INFRA-1561): el pendiente se cierra en la pasada siguiente expulsando, sin repetir la guía', async () => {
+  const { db, acciones } = fakeDb({
+    veredictos: [['6468280801', 'sin_cara']],
+    acciones: [FILA_DM_6468],
+    reloj: relojFijo('2026-11-25T06:20:00.000Z', 150),
+  });
+  const primera = fakeApi({ enGrupo: ['6468280801'], banFalla: ['6468280801'] });
+  await assert.rejects(() => correr(cfg, db, primera.api), /ban fallo status=503/);
+  // Pasada siguiente: el ban ya responde bien → se cierra expulsando.
+  const segunda = fakeApi({ enGrupo: ['6468280801'] });
+  const { r } = await correr(cfg, db, segunda.api);
+  assert.deepEqual(segunda.ops, ['ban:6468280801'], 'solo el ban: la guía no se reenvía');
+  assert.equal(r.dm, 0, 'cero guías nuevas en la pasada que cierra el pendiente');
+  assert.equal(acciones.filter(a => a.action === 'dm').length, 1, 'sigue habiendo una sola guía');
+});
+
+test('C2 (INFRA-1561): el pendiente cuyo último veredicto ya es cara se cierra como cumplido sin tocarle', async () => {
+  const { db, acciones } = fakeDb({
+    veredictos: [['6468280801', 'cara']],
+    acciones: [FILA_DM_6468],
+    reloj: relojFijo('2026-11-25T06:20:00.000Z', 150),
+  });
+  const { api, ops } = fakeApi({ enGrupo: ['6468280801'] });
+  const logs = await conLogs(() => ejecutarModeracion(cfg, db, api).then(() => undefined));
+  assert.deepEqual(ops, [], 'cumplió: ni guía nueva ni expulsión');
+  assert.ok(logs.some(l => /^pendiente-cerrado ID=6468280801/.test(l)));
+  assert.ok(
+    acciones.some(a => a.user_id === '6468280801' && a.action === 'pendiente' && a.motivo === 'cumplido'),
+    'el cierre queda registrado'
+  );
 });
 
 test('readmitido por el bot que vuelve a quedarse sin cara recibe guia nueva y su ban', async () => {
