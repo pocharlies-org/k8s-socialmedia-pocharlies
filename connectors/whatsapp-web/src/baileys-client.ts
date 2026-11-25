@@ -794,6 +794,32 @@ const KEY_CACHE_MAX = 2000;
  */
 const OWN_MUTATION_ECHO_MS = 30_000;
 
+/**
+ * Cap for one inbound media download. WhatsApp documents reach 2 GB and
+ * buffering one OOM-killed this pod (SC-6631, MCPBackendOOMKilled 2026-11-25);
+ * oversized media is skipped, never downloaded.
+ */
+const WA_INBOUND_MEDIA_DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+
+export function inboundMediaMaxBytes(): number {
+  // CONTRACT: env.whatsapp-connector.max-inbound-media.v1
+  const raw = parseInt(process.env.WA_MAX_INBOUND_MEDIA_BYTES || '', 10);
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : WA_INBOUND_MEDIA_DEFAULT_MAX_BYTES;
+}
+
+/** The sender's declared media size (attacker-controlled metadata — the
+ * stream cap in `readNovedadesMediaStream` is the real guard). */
+export function declaredMediaBytes(msg: WAMessage): number {
+  const c = normalizeMessageContent(msg.message);
+  const media =
+    c?.imageMessage ||
+    c?.videoMessage ||
+    c?.audioMessage ||
+    c?.documentMessage ||
+    c?.stickerMessage;
+  return Number(media?.fileLength ?? 0) || 0;
+}
+
 /** Options of the outbound edit/delete calls. */
 export interface MessageMutationRequest {
   /** Who asked (dgx-messages user, MCP caller); recorded in metadata. */
@@ -3471,20 +3497,30 @@ export class BaileysClient extends EventEmitter {
     caption?: string
   ): Promise<StoredMediaInfo | null> {
     const timeoutMs = parseInt(process.env.WA_MEDIA_DOWNLOAD_TIMEOUT_MS || '30000', 10);
+    const maxBytes = inboundMediaMaxBytes();
+    const declared = declaredMediaBytes(msg);
+    if (declared > maxBytes) {
+      this.logger.warn(
+        `Skipping oversized media ${msg.key?.id} (${declared} bytes > cap ${maxBytes})`
+      );
+      return null;
+    }
 
     let buffer: Buffer;
     try {
-      buffer = await Promise.race([
-        downloadMediaMessage(
-          msg,
-          'buffer',
-          {},
-          { logger: this.logger as any, reuploadRequest: this.sock!.updateMediaMessage }
-        ),
-        new Promise<Buffer>((_, rej) =>
-          setTimeout(() => rej(new Error('downloadMedia timeout')), timeoutMs)
-        ),
-      ]);
+      // Bounded stream read: an oversized media (lying or honest metadata) is
+      // cut off at `maxBytes` instead of OOM-killing the pod (SC-6631).
+      buffer = await readNovedadesMediaStream(
+        () =>
+          downloadMediaMessage(
+            msg,
+            'stream',
+            {},
+            { logger: this.logger as any, reuploadRequest: this.sock!.updateMediaMessage }
+          ),
+        timeoutMs,
+        maxBytes
+      );
     } catch (e: any) {
       this.logger.warn(`downloadMedia failed for ${msg.key?.id}: ${e?.message || e}`);
       return null;
