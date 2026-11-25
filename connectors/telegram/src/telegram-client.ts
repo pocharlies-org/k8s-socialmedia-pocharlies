@@ -1,6 +1,5 @@
 import {
   TelegramClient,
-  MemoryStorage,
   MemoryStorageDriver,
   MemoryKeyValueRepository,
   MemoryAuthKeysRepository,
@@ -18,6 +17,14 @@ import {
 import type { Long } from '@mtcute/node';
 import type { ITelegramStorageProvider } from '@mtcute/node';
 import type { CommonSendParams } from '@mtcute/node/methods.js';
+import {
+  BoundedMemoryPeersRepository,
+  BoundedMemoryRefMessagesRepository,
+  BoundedMemoryStorage,
+  BoundedMap,
+  cacheLimits,
+  capDialogs,
+} from './bounded-storage';
 import { EventEmitter } from 'events';
 import pino from 'pino';
 import { notifyDashboard as dashboardNotify } from './dashboard-notifier';
@@ -145,6 +152,8 @@ export class HookedMemoryStorageDriver extends MemoryStorageDriver {
 /**
  * SC-1145: the storage provider for a per-sub connector — the same four
  * memory repositories MemoryStorage builds, all wired to the hooked driver.
+ * SKIRM-443: peers and ref-messages are the bounded variants, so a per-sub
+ * pool is capped the same way the house connector is.
  */
 export class PersistHookedStorage implements ITelegramStorageProvider {
   readonly driver: HookedMemoryStorageDriver;
@@ -157,21 +166,27 @@ export class PersistHookedStorage implements ITelegramStorageProvider {
     this.driver = new HookedMemoryStorageDriver(onPersist);
     this.kv = new MemoryKeyValueRepository(this.driver);
     this.authKeys = new MemoryAuthKeysRepository(this.driver);
-    this.peers = new MemoryPeersRepository(this.driver);
-    this.refMessages = new MemoryRefMessagesRepository(this.driver);
+    this.peers = new BoundedMemoryPeersRepository(this.driver, cacheLimits.peersMax());
+    this.refMessages = new BoundedMemoryRefMessagesRepository(
+      this.driver,
+      cacheLimits.refMessagesMax()
+    );
   }
 }
 
 /**
- * SC-1145: storage selection. Only a per-sub connector (credentialSessionKey
- * set) gets the persist hook; the house accounts (no key, flags OFF) keep a
- * plain `new MemoryStorage()`, byte-identical to before.
+ * Storage selection. A per-sub connector (credentialSessionKey set) gets the
+ * persist hook; the house accounts (no key, flags OFF) get a plain driver.
+ * SKIRM-443: both are bounded — the unbounded peers/ref-messages Maps are what
+ * grew the pod to OOM, so the cap applies to every connector, not just the
+ * per-sub ones.
  */
 export function createTelegramStorage(
   credentialSessionKey: string | null | undefined,
   onPersist: () => void
 ): ITelegramStorageProvider {
-  return credentialSessionKey ? new PersistHookedStorage(onPersist) : new MemoryStorage();
+  if (credentialSessionKey) return new PersistHookedStorage(onPersist);
+  return new BoundedMemoryStorage(cacheLimits.peersMax(), cacheLimits.refMessagesMax());
 }
 
 export interface TelegramMessage {
@@ -474,7 +489,8 @@ export class TelegramClientWrapper extends EventEmitter {
     this.logger.info('UserTyping event handler registered');
   }
 
-  private userNameCache = new Map<number, string>();
+  // SKIRM-443: bounded (FIFO) so a long-lived connector can't grow this unbounded.
+  private userNameCache = new BoundedMap<number, string>(cacheLimits.userNameMax());
   private async lookupUserName(userId: number): Promise<string | null> {
     const cached = this.userNameCache.get(userId);
     if (cached !== undefined) return cached;
@@ -482,11 +498,6 @@ export class TelegramClientWrapper extends EventEmitter {
       const peer: any = await this.client.getPeer(userId);
       const name = peer.firstName || peer.username || peer.title || String(userId);
       this.userNameCache.set(userId, name);
-      // Cap cache so it doesn't grow unbounded across long-running sessions.
-      if (this.userNameCache.size > 2000) {
-        const it = this.userNameCache.keys().next();
-        if (!it.done) this.userNameCache.delete(it.value);
-      }
       return name;
     } catch {
       return null;
@@ -1420,8 +1431,11 @@ export class TelegramClientWrapper extends EventEmitter {
           });
         }
       }
-      this.unreadChatsCache = { value: out, expiresAtMs: Date.now() + 30_000 };
-      return out;
+      // SKIRM-443: cap the dialogs snapshot the reconnect/backfill walk builds,
+      // so a large dialog set can't pin an unbounded array between refreshes.
+      const capped = capDialogs(out, cacheLimits.dialogsMax());
+      this.unreadChatsCache = { value: capped, expiresAtMs: Date.now() + 30_000 };
+      return capped;
     })();
 
     this.unreadChatsInflight = refresh;

@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { MemoryStorage } from '@mtcute/node';
+import { BoundedMemoryStorage } from './bounded-storage';
 import type { Pool } from 'pg';
 import type { CredentialChannel, CredentialStore, StoredCredential } from '@mcp-socialmedia/shared';
 import {
@@ -306,11 +306,14 @@ test('isSessionInvalidatedError: revoked/expired sessions true, everything else 
 // the mtcute persist hook itself
 // ---------------------------------------------------------------------------
 
-test('createTelegramStorage: no credentialSessionKey → plain MemoryStorage (house path untouched)', () => {
+test('createTelegramStorage: no credentialSessionKey → bounded storage, no persist hook (SKIRM-443)', () => {
   let fired = 0;
   for (const key of [undefined, null, '']) {
     const storage = createTelegramStorage(key, () => fired++);
-    assert.ok(storage instanceof MemoryStorage);
+    // SKIRM-443: the house connector is now bounded (peers/ref-messages evict);
+    // it is still NOT the persist-hooked per-sub path, and its driver stays a
+    // plain MemoryStorageDriver (no save()).
+    assert.ok(storage instanceof BoundedMemoryStorage);
     assert.ok(!(storage instanceof PersistHookedStorage));
     assert.equal(storage.driver.constructor.name, 'MemoryStorageDriver');
     assert.equal((storage.driver as { save?: unknown }).save, undefined);
