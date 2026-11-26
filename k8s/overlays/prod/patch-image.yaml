@@ -93,8 +93,11 @@ spec:
         # Dockerfiles aligerados INFRA-540/P2 (+10,0% comprimido = crecimiento de app, ruling del tech-lead
         # en 10-plan.md de INFRA-540). Solo la casa personal: professional y leila quedan en su pin, y los
         # pools de pairing intactos (norma de la casa: un conector por PR). Digest en Harbor (crane digest).
+        # INFRA-1584 25-11: v1.3.201 -> v1.3.203 (Release Production run 45720195755, deploy/prod@7ae4df1):
+        # POST /groups/join (unirse a un grupo por invite) + inviteCode en los grupos de comunidad (PR #523).
+        # Solo la casa personal (norma de la casa). Digest en Harbor (crane digest).
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.201@sha256:37abbdf5e154c9586310bf8bf7add29911c47f721c4c1e4f6734724190a4375f
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.203@sha256:ae195239881387adf8178e29abbd9cc61d7dc13872c26328dafc177e169abbe8
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
