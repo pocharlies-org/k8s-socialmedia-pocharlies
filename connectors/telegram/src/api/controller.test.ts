@@ -9,9 +9,8 @@ import { TelegramClientWrapper, TelegramMessageEdit } from '../telegram-client';
 import type { EditableMessage } from '../message-edit';
 
 /**
- * POST /api/v1/messages/edit of the house Telegram connector, end to end
- * through the real TelegramClientWrapper with a fake mtcute client behind it
- * (the wrapper is what dedupes our edit against Telegram's echo).
+ * End-to-end tests for message edits and actions in the house Telegram connector,
+ * using the real TelegramClientWrapper with a fake mtcute client.
  */
 
 const SECRET = 'test-connector-secret';

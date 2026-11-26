@@ -106,7 +106,7 @@ function actorFromBody(value: unknown): string | undefined {
   return actor ? actor.slice(0, 200) : undefined;
 }
 
-/** Error of an edit → status + failureClass (+ Telegram's code), the WhatsApp shape. */
+/** Format edit and message action errors with an HTTP status, failureClass, and optional Telegram code. */
 function mutationErrorResponse(res: Response, error: unknown): void {
   const e = error instanceof MessageMutationError ? error : classifyEditError(error);
   if (e.status >= 500) logger.error(`Error editing message: ${e.message}`);
