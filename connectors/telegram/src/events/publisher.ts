@@ -30,6 +30,8 @@ export interface TelegramMessageReceivedEvent {
   isOutbound: boolean;
   chatType: string;
   chatTitle?: string;
+  /** Poll definition for a POLL message; see TelegramMessage.poll. */
+  poll?: { question: string; options: string[]; multiple: boolean };
 }
 
 /**

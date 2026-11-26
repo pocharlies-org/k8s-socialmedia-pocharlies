@@ -167,6 +167,7 @@ def to_insert_kwargs(m: dict) -> Optional[dict]:
         "reply_to_message_id": _int_or_none(m.get("replyToMessageId")),
         "topic_id": _int_or_none(m.get("topicId")),
         "needs_transcription": mt in TRANSCRIBE_TYPES,
+        "poll": m.get("poll") or None,
     }
 
 

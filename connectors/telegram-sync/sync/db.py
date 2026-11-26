@@ -150,6 +150,7 @@ async def insert_message_ex(
     reply_to_message_id: int | None = None,
     topic_id: int | None = None,
     needs_transcription: bool = False,
+    poll: dict | None = None,
 ) -> tuple[MessageId | None, bool]:
     """Insert a message into the unified table.
 
@@ -179,6 +180,14 @@ async def insert_message_ex(
         metadata["needs_transcription"] = True
         metadata["transcription_status"] = "pending"
         metadata["transcription_attempts"] = 0
+    if poll:
+        # Same shape the WhatsApp connector (PR-7) writes, so dgx-messages'
+        # PollCard renders it. selectableCount: 0 = any number, 1 = single.
+        metadata["poll"] = {
+            "question": poll.get("question") or "",
+            "options": [o for o in (poll.get("options") or []) if isinstance(o, str)],
+            "selectableCount": 0 if poll.get("multiple") else 1,
+        }
 
     async with pool.acquire() as conn:
         async with conn.transaction():
