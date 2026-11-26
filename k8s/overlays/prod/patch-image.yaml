@@ -174,8 +174,9 @@ spec:
         # INFRA-1501 P3 21-11: v1.3.149 -> v1.3.201 (Release Production run 44902574357): Dockerfiles
         # INFRA-540/P2 (+9,6% comprimido = crecimiento de app, ruling tech-lead INFRA-540). Solo la casa
         # personal; professional y telegram-pairing (v1.3.57) intactos. Digest en Harbor (crane digest).
+        # DGX-1834: native message actions (Release Production run 45846780588).
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.201@sha256:3edb41f3b193db7785c983782965df41952a3beb489aef815c4ca5ed711c4e81
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.204@sha256:6f7cb100153aa2a85deef6b004f3a01edd6b893ce9df8b175ce59e2f3f016e78
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
