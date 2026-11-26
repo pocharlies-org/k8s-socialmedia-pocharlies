@@ -884,6 +884,34 @@ contracts:
     (unset ENABLE_SENDING = on), the gate of http.telegram-connector.messages-edit.v1. Registered with
     the sending gate (the route predates the registry). The path, the body fields and the 200 shape are
     contract: changing any is breaking — a new `.v2` entry beside this one.'
+- id: http.telegram-connector.message-actions.v1
+  kind: http-route
+  value: /messages/:chatId/:msgId/actions
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'Signed GET (sign {}). Returns {pinned, pinnable, reportable} for a known ordinary message. Pinnable reflects the account''s chat rights; reportable requires an inbound message and a user session. Optional link is the Telegram permalink for channels and supergroups. Consumed by DGX Messages.'
+- id: http.telegram-connector.messages-pin.v1
+  kind: http-route
+  value: /messages/:chatId/:msgId/pin
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'Signed POST {pin: boolean, actor?} changes the native pin behind the sending gate.
+    200 {pinned: boolean} only when the provider confirms the state. Telegram enforces chat permissions.'
+- id: http.telegram-connector.messages-report.v1
+  kind: http-route
+  value: /messages/:chatId/:msgId/report
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'Signed POST {option?: base64url, comment?: string, actor?}, behind the sending gate.
+    Native Telegram report for an inbound message using a user session. 200 {step: reason, title, options: [{text, option}]}
+    or {step: comment, optional, option} continues with the opaque option supplied by Telegram.
+    Only {step: reported} means Telegram confirmed submission.'
 - id: http.telegram-connector.messages-callback.v1
   kind: http-route
   value: /messages/callback

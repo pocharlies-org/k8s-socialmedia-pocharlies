@@ -349,6 +349,7 @@ export class TelegramClientWrapper extends EventEmitter {
   private logger: pino.Logger;
   private connected: boolean = false;
   private selfId?: string;
+  private selfIsBot = true;
   private unreadChatsCache: { expiresAtMs: number; value: any[] } | null = null;
   private unreadChatsInflight: Promise<any[]> | null = null;
   // SC-1145 credential-store hooks (see setSessionPersistHook /
@@ -405,6 +406,7 @@ export class TelegramClientWrapper extends EventEmitter {
 
     const me = await this.client.getMe();
     this.selfId = me.id.toString();
+    this.selfIsBot = me.isBot;
     this.connected = true;
     this.logger.info(`Connected to Telegram as ${me.username || me.firstName} (id=${this.selfId})`);
     this.emit('connected');
@@ -796,6 +798,117 @@ export class TelegramClientWrapper extends EventEmitter {
       if (!parsed) throw new Error('Failed to parse existing Telegram message');
       return parsed;
     }, mediaDeadlineMs());
+  }
+
+  private async actionMessage(
+    client: TelegramClient,
+    chat: string | number,
+    id: number
+  ): Promise<Message> {
+    const [message] = await client.getMessages(chat, [id]);
+    if (
+      !message ||
+      message.isService ||
+      message.id !== id ||
+      String(message.chat.id) !== String(chat)
+    ) {
+      throw new MessageMutationError('Message unavailable', 404, 'message_unavailable');
+    }
+    return message;
+  }
+
+  async messageActions(chatId: string, messageId: number) {
+    if (!this.connected)
+      throw new MessageMutationError('Not connected to Telegram', 503, 'disconnected');
+    return withDownloadDeadline(async signal => {
+      const client = telegramReadClient(this.client.withParams({ abortSignal: signal }), signal);
+      const message = await this.actionMessage(client, toMtcutePeer(chatId), messageId);
+      const chat = message.chat;
+      const pinnable =
+        chat.type === 'user' ||
+        chat.isCreator ||
+        (chat.chatType === 'channel'
+          ? chat.adminRights?.editMessages === true
+          : chat.adminRights?.pinMessages === true ||
+            (chat.permissions?.canPinMessages ?? chat.defaultPermissions?.canPinMessages ?? false));
+      return {
+        pinned: Boolean(message.isPinned),
+        pinnable,
+        reportable: !this.selfIsBot && !message.isOutgoing,
+        ...(chat.type === 'chat' && (chat.chatType === 'supergroup' || chat.chatType === 'channel')
+          ? { link: message.link }
+          : {}),
+      };
+    });
+  }
+
+  async messagePin(chatId: string, messageId: number, wanted: boolean): Promise<boolean> {
+    if (!this.connected)
+      throw new MessageMutationError('Not connected to Telegram', 503, 'disconnected');
+    return withDownloadDeadline(async signal => {
+      const client = this.client.withParams({ abortSignal: signal });
+      const chat = toMtcutePeer(chatId);
+      const read = async () =>
+        Boolean((await this.actionMessage(client, chat, messageId)).isPinned);
+      if ((await read()) === wanted) return wanted;
+      const target = { chatId: chat, message: messageId };
+      try {
+        if (wanted) await client.pinMessage({ ...target, bothSides: true });
+        else await client.unpinMessage(target);
+      } catch (e) {
+        if (tl.RpcError.is(e) && (e.code === 403 || e.text === 'CHAT_ADMIN_REQUIRED')) {
+          throw new MessageMutationError(
+            'Telegram did not allow changing this pin',
+            403,
+            'action_forbidden',
+            e.text
+          );
+        }
+        throw e;
+      }
+      return read();
+    });
+  }
+
+  async reportMessage(chatId: string, messageId: number, option: Uint8Array, comment: string) {
+    if (!this.connected)
+      throw new MessageMutationError('Not connected to Telegram', 503, 'disconnected');
+    if (this.selfIsBot)
+      throw new MessageMutationError('Bots cannot report messages', 403, 'action_forbidden');
+    return withDownloadDeadline(async signal => {
+      const client = this.client.withParams({
+        abortSignal: signal,
+        maxRetryCount: 0,
+        floodSleepThreshold: 0,
+        throw503: true,
+      });
+      const chat = toMtcutePeer(chatId);
+      const message = await this.actionMessage(client, chat, messageId);
+      if (message.isOutgoing)
+        throw new MessageMutationError('Cannot report your own message', 403, 'action_forbidden');
+      const result = await client.call({
+        _: 'messages.report',
+        peer: await client.resolvePeer(chat),
+        id: [messageId],
+        option,
+        message: comment,
+      });
+      if (result._ === 'reportResultReported') return { step: 'reported' } as const;
+      if (result._ === 'reportResultAddComment')
+        return {
+          step: 'comment',
+          optional: Boolean(result.optional),
+          option: Buffer.from(result.option).toString('base64url'),
+        } as const;
+      return {
+        step: 'reason',
+        title: result.title,
+        options: result.options.map(o => ({
+          text: o.text,
+          option: Buffer.from(o.option).toString('base64url'),
+        })),
+      } as const;
+    });
   }
 
   /**

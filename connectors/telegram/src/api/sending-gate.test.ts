@@ -27,6 +27,8 @@ function fakeClient(): { client: TelegramClientWrapper; calls: string[] } {
     getMessages: [],
     searchMessages: [],
     reactToMessage: true,
+    messagePin: true,
+    reportMessage: { step: 'reason', title: 'Motivo', options: [] },
     sendMessage: 7,
   };
   const client = new Proxy(
@@ -91,6 +93,8 @@ const OUTWARD: Array<[string, string, unknown?]> = [
   ['POST', '/api/v1/messages/voice', { chatId: CHAT, audioBase64: 'AAAA' }],
   ['POST', '/api/v1/messages/react', { chatId: CHAT, messageId: 42, emoji: '👍' }],
   ['POST', '/api/v1/messages/edit', { chatId: CHAT, messageId: 42, content: 'x' }],
+  ['POST', `/api/v1/messages/${CHAT}/42/pin`, { pin: true }],
+  ['POST', `/api/v1/messages/${CHAT}/42/report`, { option: 'YQ' }],
   ['POST', '/api/v1/messages/forward', { fromChatId: CHAT, messageId: 42, toChatId: '123' }],
   ['POST', '/api/v1/messages/callback', { chatId: CHAT, messageId: 42, data: 'ok' }],
   ['DELETE', `/api/v1/messages/${CHAT}/42`],

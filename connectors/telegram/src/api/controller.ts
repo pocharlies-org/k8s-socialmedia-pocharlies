@@ -106,7 +106,7 @@ function actorFromBody(value: unknown): string | undefined {
   return actor ? actor.slice(0, 200) : undefined;
 }
 
-/** Error of an edit → status + failureClass (+ Telegram's code), the WhatsApp shape. */
+/** Format edit and message action errors with an HTTP status, failureClass, and optional Telegram code. */
 function mutationErrorResponse(res: Response, error: unknown): void {
   const e = error instanceof MessageMutationError ? error : classifyEditError(error);
   if (e.status >= 500) logger.error(`Error editing message: ${e.message}`);
@@ -1113,6 +1113,74 @@ export function createRouter(
       }
     })();
   });
+
+  const messageAction =
+    (action: 'read' | 'pin' | 'report') => async (req: Request, res: Response) => {
+      const { chatId, msgId } = req.params;
+      const messageId = /^[1-9]\d{0,9}$/.test(msgId) ? Number(msgId) : 0;
+      const { pin, option = '', comment = '' } = req.body ?? {};
+      if (
+        !/^-?\d{1,16}$/.test(chatId) ||
+        !Number.isSafeInteger(Number(chatId)) ||
+        messageId === 0 ||
+        messageId > 2147483647 ||
+        (action === 'pin' && typeof pin !== 'boolean') ||
+        (action === 'report' &&
+          (typeof option !== 'string' ||
+            !/^[A-Za-z0-9_-]{0,1024}$/.test(option) ||
+            typeof comment !== 'string' ||
+            comment.length > 500))
+      ) {
+        res.status(400).json({ error: 'Invalid message action', failureClass: 'invalid_request' });
+        return;
+      }
+      try {
+        if (action === 'read') {
+          res.json(await client.messageActions(chatId, messageId));
+          return;
+        }
+        const result =
+          action === 'pin'
+            ? { pinned: await client.messagePin(chatId, messageId, pin) }
+            : await client.reportMessage(
+                chatId,
+                messageId,
+                Buffer.from(option, 'base64url'),
+                comment
+              );
+        if ('pinned' in result && result.pinned !== pin) {
+          res.status(502).json({
+            error: 'Telegram has not confirmed the new pin state',
+            failureClass: 'not_confirmed',
+          });
+          return;
+        }
+        if ('pinned' in result || result.step === 'reported') {
+          logger.info(
+            { chatId, messageId, actor: actorFromBody(req.body?.actor), action },
+            'Telegram message action confirmed'
+          );
+        }
+        res.json(result);
+      } catch (e) {
+        if (e instanceof MessageMutationError) mutationErrorResponse(res, e);
+        else if (!respondRateLimit(res, e)) {
+          const timeout = isTelegramDownloadTimeout(e);
+          res.status(timeout ? 504 : 422).json({
+            error: timeout
+              ? 'Telegram did not confirm the action in time'
+              : 'Telegram refused this message action',
+            failureClass: timeout ? 'not_confirmed' : 'action_forbidden',
+          });
+        }
+      }
+    };
+  // CONTRACT: http.telegram-connector.message-actions.v1
+  router.get('/messages/:chatId/:msgId/actions', messageAction('read'));
+  // CONTRACT: http.telegram-connector.messages-pin.v1
+  router.post('/messages/:chatId/:msgId/pin', requireSending, messageAction('pin'));
+  // CONTRACT: http.telegram-connector.messages-report.v1
+  router.post('/messages/:chatId/:msgId/report', requireSending, messageAction('report'));
 
   /**
    * POST /messages/callback - Click a Telegram inline callback button.
