@@ -2921,3 +2921,17 @@ contracts:
   note: 'DGX-1235 B1. correo-bridge consumes the core-NATS subject the Telegram connectors publish (TelegramMessageReceivedEvent),
     queue group correo-bridge, and reads only account, conversationId, chatType, telegramMessageId, telegramTimestamp,
     senderTelegramId and isOutbound. Renaming the subject or those fields breaks it.'
+- id: env.whatsapp-connector.max-inbound-media.v1
+  kind: schema
+  value: WA_MAX_INBOUND_MEDIA_BYTES
+  role: provider
+  files:
+  - connectors/whatsapp-web/src/baileys-client.ts
+  status: active
+  note: 'SC-6631. Byte cap for one inbound WhatsApp media download (default 512 MiB; unset,
+    0 or invalid keeps the default). Media whose declared fileLength exceeds it is skipped
+    with a warn and stored without attachment; the stream is cut at the same cap when the
+    metadata lies. Before this the whole media was buffered without limit and one large
+    document OOM-killed the pod (MCPBackendOOMKilled → Keep mcp-degraded, 2026-11-25).
+    Consumed by the k8s overlay that may set the env; renaming it leaves the cap
+    unconfigurable.'
