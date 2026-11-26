@@ -36,6 +36,45 @@ function stored(overrides: Partial<EditableMessage> = {}): EditableMessage {
 
 class FakeMtcute {
   message: EditableMessage | null = stored();
+  pinned = false;
+  pinCalls: Array<{ chatId: number; message: number; bothSides?: boolean }> = [];
+  reportCalls: Array<{
+    _: string;
+    peer: number;
+    id: number[];
+    option: Uint8Array;
+    message: string;
+  }> = [];
+  withParams() {
+    return this;
+  }
+  async resolvePeer(chatId: number) {
+    return chatId;
+  }
+  async pinMessage(target: { chatId: number; message: number; bothSides: boolean }) {
+    this.pinCalls.push(target);
+    this.pinned = true;
+  }
+  async unpinMessage(target: { chatId: number; message: number }) {
+    this.pinCalls.push(target);
+    this.pinned = false;
+  }
+  async call(request: FakeMtcute['reportCalls'][number]) {
+    this.reportCalls.push(request);
+    if (request.option.length === 0)
+      return {
+        _: 'reportResultChooseOption',
+        title: 'Motivo',
+        options: [{ text: 'Spam', option: Buffer.from('reason') }],
+      };
+    if (Buffer.from(request.option).toString() === 'reason')
+      return {
+        _: 'reportResultAddComment',
+        optional: false,
+        option: Buffer.from('comment'),
+      };
+    return { _: 'reportResultReported' };
+  }
   editError: Error | null = null;
   edits: Array<{ chatId: unknown; message: number; text: string }> = [];
   sends = 0;
@@ -43,7 +82,14 @@ class FakeMtcute {
   onEditMessage = { add: (fn: (m: EditableMessage) => unknown) => this.editHandlers.push(fn) };
 
   async getMessages() {
-    return [this.message];
+    return [
+      this.message && {
+        ...this.message,
+        chat: { ...this.message.chat, type: 'chat', chatType: 'supergroup', isCreator: true },
+        isPinned: this.pinned,
+        link: 'https://t.me/c/1234567890/42',
+      },
+    ];
   }
 
   async editMessage(params: { chatId: unknown; message: number; text: string }) {
@@ -85,8 +131,12 @@ afterEach(async () => {
   delete process.env.EMERGENCY_DISABLE_SENDING;
 });
 
-async function serve(fake = new FakeMtcute(), options: { connected?: boolean } = {}) {
+async function serve(
+  fake = new FakeMtcute(),
+  options: { connected?: boolean; bot?: boolean } = {}
+) {
   const wrapper = wrapperWith(fake, options.connected ?? true);
+  (wrapper as unknown as { selfIsBot: boolean }).selfIsBot = options.bot ?? false;
   const published: TelegramMessageEdit[] = [];
   const inbound: TelegramMessageEdit[] = [];
   wrapper.on('messageEdited', (e: TelegramMessageEdit) => inbound.push(e));
@@ -126,6 +176,63 @@ async function post(base: string, body: unknown) {
   const res = await fetch(`${base}/messages/edit`, signed(body));
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 }
+
+test('lee, fija y desfija el mensaje sin repetir el mismo cambio', async () => {
+  const { base, fake } = await serve();
+  const url = `${base}/messages/${CHAT}/42`;
+  const read = () => fetch(`${url}/actions`, { method: 'GET', headers: signed({}).headers });
+  const pin = (value: unknown) => fetch(`${url}/pin`, signed({ pin: value }));
+  assert.deepEqual(await (await read()).json(), {
+    pinned: false,
+    pinnable: true,
+    reportable: false,
+    link: 'https://t.me/c/1234567890/42',
+  });
+  assert.equal((await fetch(`${url}/pin`, { method: 'POST' })).ok, false);
+  assert.equal((await pin('true')).status, 400);
+  assert.equal(fake.pinCalls.length, 0);
+  for (const value of [true, true, false])
+    assert.deepEqual(await (await pin(value)).json(), { pinned: value });
+  assert.deepEqual(fake.pinCalls, [
+    { chatId: CHAT, message: 42, bothSides: true },
+    { chatId: CHAT, message: 42 },
+  ]);
+  fake.message = stored({ chat: { id: -1009999999999 } });
+  assert.equal((await pin(true)).status, 404);
+  assert.equal(fake.pinCalls.length, 2);
+});
+
+test('reporta solo mensajes recibidos y sigue las opciones opacas de Telegram', async () => {
+  const { base, fake } = await serve();
+  const url = `${base}/messages/${CHAT}/42/report`;
+  assert.equal((await fetch(url, signed({}))).status, 403);
+  assert.equal(fake.reportCalls.length, 0);
+  fake.message = stored({ isOutgoing: false });
+  const reason = (await (await fetch(url, signed({}))).json()) as {
+    step: string;
+    options: Array<{ option: string }>;
+  };
+  assert.equal(reason.step, 'reason');
+  const comment = (await (
+    await fetch(url, signed({ option: reason.options[0].option }))
+  ).json()) as { step: string; option: string };
+  assert.equal(comment.step, 'comment');
+  assert.deepEqual(
+    await (await fetch(url, signed({ option: comment.option, comment: 'prueba' }))).json(),
+    { step: 'reported' }
+  );
+  assert.deepEqual(
+    fake.reportCalls.map(r => [r._, r.peer, r.id, Buffer.from(r.option).toString(), r.message]),
+    [
+      ['messages.report', CHAT, [42], '', ''],
+      ['messages.report', CHAT, [42], 'reason', ''],
+      ['messages.report', CHAT, [42], 'comment', 'prueba'],
+    ]
+  );
+  const bot = await serve(fake, { bot: true });
+  assert.equal((await fetch(`${bot.base}/messages/${CHAT}/42/report`, signed({}))).status, 403);
+  assert.equal(fake.reportCalls.length, 3);
+});
 
 const EDIT = { chatId: String(CHAT), messageId: 42, content: 'texto nuevo', actor: 'dani' };
 
