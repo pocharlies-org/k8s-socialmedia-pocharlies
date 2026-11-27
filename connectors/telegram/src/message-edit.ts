@@ -44,14 +44,30 @@ export interface EditableMessage {
   id: number;
   chat: { id: number | string };
   isOutgoing: boolean;
+  /** Telegram's forward info (set on a forwarded message); isOwnMessage needs it. */
+  forward?: unknown;
   isService: boolean;
   text: string;
   media: { type: string } | null;
   editDate: Date | null;
 }
 
+/**
+ * Whose message this is, once for parseMessage and every mutation gate. Telegram
+ * hands Saved Messages (the chat with ourselves) over with out=false; like TDLib,
+ * a non-forwarded message there is ours (DGX-1938, gate fix DGX-1944).
+ */
+export function isOwnMessage(
+  message: Pick<EditableMessage, 'isOutgoing' | 'chat'> & { forward?: unknown },
+  selfId?: string
+): boolean {
+  return message.isOutgoing || (!!selfId && String(message.chat.id) === selfId && !message.forward);
+}
+
 /** The slice of the mtcute client the edit needs. */
 export interface TelegramEditApi {
+  /** Our own user id, so the Saved Messages rule can be applied (DGX-1944). */
+  selfId?: string;
   getMessages(chatId: string | number, messageIds: number[]): Promise<(EditableMessage | null)[]>;
   editMessage(params: {
     chatId: string | number;
@@ -207,7 +223,7 @@ export async function loadEditableMessage(
       'message_unavailable'
     );
   }
-  if (!found.isOutgoing) {
+  if (!isOwnMessage(found, api.selfId)) {
     throw new MessageMutationError(
       `Message ${messageId} was not sent by this account; Telegram only lets the author edit`,
       422,

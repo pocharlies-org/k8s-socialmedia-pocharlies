@@ -45,6 +45,7 @@ import {
   TelegramEditApi,
   editOwnTextMessage,
   inboundTextEdit,
+  isOwnMessage,
 } from './message-edit';
 
 const AVATAR_DEADLINE_MS = 20_000;
@@ -603,10 +604,7 @@ export class TelegramClientWrapper extends EventEmitter {
       }
 
       const senderId = sender ? sender.id.toString() : '';
-      // Telegram hands Saved Messages (the chat with ourselves) over with out=false;
-      // like TDLib, a non-forwarded message there is ours (DGX-1938).
-      const isOutbound =
-        message.isOutgoing || (chat.id.toString() === this.selfId && !message.forward);
+      const isOutbound = isOwnMessage(message, this.selfId);
       const senderUser = sender && sender.type === 'user' ? sender : undefined;
 
       return {
@@ -865,7 +863,7 @@ export class TelegramClientWrapper extends EventEmitter {
       return {
         pinned: Boolean(message.isPinned),
         pinnable,
-        reportable: !this.selfIsBot && !message.isOutgoing,
+        reportable: !this.selfIsBot && !isOwnMessage(message, this.selfId),
         ...(chat.type === 'chat' && (chat.chatType === 'supergroup' || chat.chatType === 'channel')
           ? { link: message.link }
           : {}),
@@ -915,7 +913,7 @@ export class TelegramClientWrapper extends EventEmitter {
       });
       const chat = toMtcutePeer(chatId);
       const message = await this.actionMessage(client, chat, messageId);
-      if (message.isOutgoing)
+      if (isOwnMessage(message, this.selfId))
         throw new MessageMutationError('Cannot report your own message', 403, 'action_forbidden');
       const result = await client.call({
         _: 'messages.report',
@@ -1698,6 +1696,7 @@ export class TelegramClientWrapper extends EventEmitter {
 
   private editApi(): TelegramEditApi {
     return {
+      selfId: this.selfId,
       getMessages: (chatId, messageIds) => this.client.getMessages(chatId, messageIds),
       editMessage: params => this.client.editMessage(params),
     };
