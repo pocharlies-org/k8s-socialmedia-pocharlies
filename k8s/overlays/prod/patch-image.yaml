@@ -179,8 +179,10 @@ spec:
         # INFRA-540/P2 (+9,6% comprimido = crecimiento de app, ruling tech-lead INFRA-540). Solo la casa
         # personal; professional y telegram-pairing (v1.3.57) intactos. Digest en Harbor (crane digest).
         # DGX-1834: native message actions (Release Production run 45846780588).
+        # DGX-1938: lo propio en Mensajes guardados es saliente (Release Production run 46066049373,
+        # deploy/prod@4ecf44b). Solo la casa personal; professional y telegram-pairing intactos.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:candidate-45956524062-1@sha256:1010bf53afb6e89567cf80a69431534a010632cc4a168c82ba3e92a06e46bdb6
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.206@sha256:9648cad116a7c75a6ceb248883e0cea5154e0cfcefd1e50f01e2a6d7b6714e3b
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
