@@ -303,6 +303,26 @@ export function createRouter(
   });
 
   /**
+   * GET /chats/:id/bot-commands - Comandos de los bots visibles en este chat
+   * (DGX-1921). En un grupo, los de todos los bots del grupo; en un privado,
+   * los del bot. `[]` si no hay bots.
+   */
+  // CONTRACT: http.telegram-connector.chats-bot-commands.v1
+  router.get('/chats/:id/bot-commands', (req: Request, res: Response): void => {
+    void (async () => {
+      try {
+        if (!client.isClientConnected()) {
+          res.status(503).json({ error: 'Not connected to Telegram' });
+          return;
+        }
+        res.json({ commands: await client.getBotCommands(req.params.id) });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    })();
+  });
+
+  /**
    * POST /groups - Create a group, supergroup/forum, or channel.
    */
   // CONTRACT: http.telegram-connector.groups.v1

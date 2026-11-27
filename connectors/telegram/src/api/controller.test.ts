@@ -50,6 +50,23 @@ class FakeMtcute {
   async resolvePeer(chatId: number) {
     return chatId;
   }
+  botPeerType: 'chat' | 'user' = 'chat';
+  groupBots: Array<{ id: number; commands: Array<{ command: string; description: string }> }> = [];
+  privateBotCommands: Array<{ command: string; description: string }> = [];
+  async getPeer() {
+    return this.botPeerType === 'user'
+      ? { type: 'user', id: 42, isBot: true, username: 'dgx_alarma_bot' }
+      : { type: 'chat', id: -1001234567890 };
+  }
+  async getFullChat() {
+    return { botInfo: this.groupBots };
+  }
+  async getFullUser() {
+    return { full: { bot_info: { commands: this.privateBotCommands } } };
+  }
+  async getChatMembers() {
+    return [{ user: { id: 42, isBot: true, username: 'dgx_alarma_bot', firstName: 'Alarma' } }];
+  }
   async pinMessage(target: { chatId: number; message: number; bothSides: boolean }) {
     this.pinCalls.push(target);
     this.pinned = true;
@@ -366,4 +383,31 @@ test('una edición fallida no silencia la misma edición hecha luego desde el m�
   assert.equal(inbound.length, 1);
   assert.equal(inbound[0].source, 'telegram');
   assert.equal(inbound[0].content, 'texto nuevo');
+});
+
+test('bot-commands: los bots del grupo y el bot del privado, con su nombre (DGX-1921)', async () => {
+  const fake = new FakeMtcute();
+  const { base } = await serve(fake);
+  const get = async () =>
+    ((await (
+      await fetch(`${base}/chats/${CHAT}/bot-commands`, {
+        method: 'GET',
+        headers: signed({}).headers,
+      })
+    ).json()) as { commands: unknown }).commands;
+  assert.deepEqual(await get(), []);
+  fake.groupBots = [{ id: 42, commands: [{ command: 'armar', description: 'Arma la alarma' }] }];
+  assert.deepEqual(await get(), [
+    { command: 'armar', description: 'Arma la alarma', bot: 'dgx_alarma_bot' },
+  ]);
+  fake.botPeerType = 'user';
+  fake.privateBotCommands = [{ command: 'estado', description: 'Estado' }];
+  assert.deepEqual(await get(), [
+    { command: 'estado', description: 'Estado', bot: 'dgx_alarma_bot' },
+  ]);
+  const { base: offline } = await serve(fake, { connected: false });
+  assert.equal(
+    (await fetch(`${offline}/chats/${CHAT}/bot-commands`, { headers: signed({}).headers })).status,
+    503
+  );
 });
