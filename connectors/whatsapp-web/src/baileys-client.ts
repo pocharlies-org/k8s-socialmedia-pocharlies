@@ -2601,7 +2601,9 @@ export class BaileysClient extends EventEmitter {
       writes.push(
         ensureParticipant({
           id: normalizedId,
-          name: effectiveName,
+          // INFRA-1611: same rule as preferWhatsAppContactName — a push-only
+          // contact event must not clobber a saved name already on the row.
+          name: source === 'saved' ? effectiveName : undefined,
           pushName: identity.pushName,
           phone: this.phoneFromJid(rawId),
         })
@@ -2889,9 +2891,12 @@ export class BaileysClient extends EventEmitter {
     if (pushName) {
       this.rememberContactName([senderRaw, waMessage.senderWaId], pushName, 'push');
     }
+    // INFRA-1611: a push name is never the alias. `participants.name` holds the
+    // saved name (recordContactName / a 'saved' contact event); writing pushName
+    // here clobbered it on every inbound message (the upsert prefers the new
+    // value). The readers fall back to push_name when name is NULL.
     await ensureParticipant({
       id: waMessage.senderWaId,
-      name: pushName,
       pushName,
       phone: this.phoneFromJid(senderRaw),
     });

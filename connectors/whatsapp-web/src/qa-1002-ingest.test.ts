@@ -436,8 +436,12 @@ test('WhatsApp own account 0@s.whatsapp.net is named "WhatsApp"', async () => {
     );
     const conv = calls.find(c => /INSERT INTO conversations/i.test(c.sql))!;
     assert.equal(conv.params[1], 'WhatsApp');
+    // INFRA-1611: the synthetic 'WhatsApp' is a push name, so it lands in
+    // push_name (params[3]), not the alias column `name` (params[2], unset).
+    // The reader falls back to push_name, so the chat still reads "WhatsApp".
     const part = calls.find(c => /INSERT INTO participants/i.test(c.sql))!;
-    assert.equal(part.params[2], 'WhatsApp');
+    assert.equal(part.params[2], undefined, 'a push name never writes the alias column');
+    assert.equal(part.params[3], 'WhatsApp');
   } finally {
     restore();
   }
