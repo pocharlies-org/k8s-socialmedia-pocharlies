@@ -182,7 +182,7 @@ spec:
         # DGX-1938: lo propio en Mensajes guardados es saliente (Release Production run 46066049373,
         # deploy/prod@4ecf44b). Solo la casa personal; professional y telegram-pairing intactos.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.206@sha256:9648cad116a7c75a6ceb248883e0cea5154e0cfcefd1e50f01e2a6d7b6714e3b
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.207@sha256:ee43a1b5bcd97f06ef3a20525786b035e88c95032f58475cd1b3cd8c865ab089
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -196,8 +196,11 @@ spec:
   template:
     spec:
       containers:
+        # DGX-1921 27-11: v1.3.149 -> v1.3.207 (run 46076242990): el telegram-sync
+        # professional llama a GET /chats/:id/bot-commands cada ciclo; con el conector
+        # viejo sería un 404 permanente y cero comandos en los chats professional.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.149@sha256:b81bbc6b514da5c46ae68c234af5b939d8efe046efcddcb7921160ce316cc2a3
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.207@sha256:ee43a1b5bcd97f06ef3a20525786b035e88c95032f58475cd1b3cd8c865ab089
 ---
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints
