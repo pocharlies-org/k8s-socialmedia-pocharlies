@@ -603,7 +603,10 @@ export class TelegramClientWrapper extends EventEmitter {
       }
 
       const senderId = sender ? sender.id.toString() : '';
-      const isOutbound = message.isOutgoing;
+      // Telegram hands Saved Messages (the chat with ourselves) over with out=false;
+      // like TDLib, a non-forwarded message there is ours (DGX-1938).
+      const isOutbound =
+        message.isOutgoing || (chat.id.toString() === this.selfId && !message.forward);
       const senderUser = sender && sender.type === 'user' ? sender : undefined;
 
       return {
