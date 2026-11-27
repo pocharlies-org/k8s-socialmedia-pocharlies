@@ -310,15 +310,9 @@ export function createRouter(
   // CONTRACT: http.telegram-connector.chats-bot-commands.v1
   router.get('/chats/:id/bot-commands', (req: Request, res: Response): void => {
     void (async () => {
-      try {
-        if (!client.isClientConnected()) {
-          res.status(503).json({ error: 'Not connected to Telegram' });
-          return;
-        }
-        res.json({ commands: await client.getBotCommands(req.params.id) });
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
+      if (!client.isClientConnected()) { res.status(503).json({ error: 'Not connected to Telegram' }); return; }
+      try { res.json({ commands: await client.getBotCommands(req.params.id) }); }
+      catch (e) { res.status(500).json({ error: String(e) }); }
     })();
   });
 
