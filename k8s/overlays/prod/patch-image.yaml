@@ -180,7 +180,7 @@ spec:
         # personal; professional y telegram-pairing (v1.3.57) intactos. Digest en Harbor (crane digest).
         # DGX-1834: native message actions (Release Production run 45846780588).
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.204@sha256:6f7cb100153aa2a85deef6b004f3a01edd6b893ce9df8b175ce59e2f3f016e78
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:candidate-45956524062-1@sha256:1010bf53afb6e89567cf80a69431534a010632cc4a168c82ba3e92a06e46bdb6
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -253,7 +253,7 @@ spec:
     spec:
       containers:
         - name: telegram-sync
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:v1.3.78@sha256:01235fc3d4f58535f7f1fb8f8e51893351dbe9c1e49d71c348018302f238dffa
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync:candidate-45956524062-1@sha256:0024fa76206fc280906c175c4606532be67854c22e0c5fdb90c460177bb25f77
 ---
 apiVersion: apps/v1
 kind: Deployment
