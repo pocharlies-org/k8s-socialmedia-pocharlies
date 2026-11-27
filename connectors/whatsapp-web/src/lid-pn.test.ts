@@ -642,3 +642,46 @@ test('group sender PN never replaces a group conversation JID', async () => {
     restore();
   }
 });
+
+test('ingest never writes pushName into participants.name (INFRA-1611: name is the saved alias)', async () => {
+  process.env.CONNECTOR_ACCOUNT = 'personal';
+  const originalQuery = pg.Pool.prototype.query;
+  const originalConnect = pg.Pool.prototype.connect;
+  const calls: CapturedQuery[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (pg.Pool.prototype as any).query = async (sql: string, params: unknown[] = []) => {
+    calls.push({ sql, params });
+    return { rows: [{ id: 'stored-message' }] };
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (pg.Pool.prototype as any).connect = async () => ({
+    query: async () => ({ rows: [] }),
+    release: () => {},
+  });
+  try {
+    const { BaileysClient } = await loadClientModule();
+    const client = new BaileysClient('/tmp/unused-infra1611', 'test-key') as any;
+    client.logger = { info() {}, warn() {}, error() {}, debug() {} };
+    client.rememberMessageForRetry = () => {};
+    client.rememberKey = () => {};
+    client.contactNameFor = () => undefined;
+    client.ensureConversationAvatarIfMissing = async () => {};
+    client.ensureParticipantAvatarIfMissing = async () => {};
+    client.phoneFromJid = () => undefined;
+    await client.ingestMessage({
+      key: { remoteJid: PN_JID, id: 'infra1611', fromMe: false },
+      message: { conversation: 'hola' },
+      pushName: 'Marc',
+      messageTimestamp: 1_700_000_000,
+    }, { publishEvent: false });
+    const participant = calls.find(c => /INSERT INTO participants\b/.test(c.sql));
+    assert.ok(participant, 'the ingest upserts the participant');
+    assert.ok(participant!.params[2] == null, 'name stays unset: a push name must not clobber the saved alias');
+    assert.equal(participant!.params[3], 'Marc', 'push_name carries the WhatsApp profile name');
+  } finally {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pg.Pool.prototype as any).query = originalQuery;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pg.Pool.prototype as any).connect = originalConnect;
+  }
+});
