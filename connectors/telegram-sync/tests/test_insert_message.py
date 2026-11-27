@@ -5,9 +5,10 @@ added and must keep passing. The recovery only adds metadata keys to a row
 later; it never changes how a fresh row is written.
 """
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
-from sync import db
+from sync import db, mapping
 from fakes import Context, Pool
 
 TS = datetime(2026, 10, 8, 12, 30, tzinfo=timezone(timedelta(hours=2)))
@@ -61,3 +62,31 @@ def test_new_message_returns_int_and_writes_prod_shape(monkeypatch):
 
 def test_existing_message_returns_its_id_not_new():
     assert _insert(Connection(new_id=None, existing=9)) == (9, False)
+
+
+def _insert_poll(conn, multiple=False):
+    kwargs = mapping.to_insert_kwargs({
+        "conversationId": "-1001", "telegramMessageId": "42", "chatType": "supergroup",
+        "senderTelegramId": "7", "senderFirstName": "Juan",
+        "content": "¿Cine?", "messageType": "POLL", "telegramTimestamp": TS.isoformat(),
+        "isOutbound": False,
+        "poll": {"question": "¿Cine?", "options": ["🎬 Acción", "😂 Comedia"], "multiple": multiple},
+    })
+    return asyncio.run(db.insert_message_ex(Pool(conn), **kwargs))
+
+
+def test_poll_writes_metadata_poll_and_question():
+    conn = Connection(new_id=7)
+    _insert_poll(conn)
+    row = conn.calls[db.INSERT_MESSAGE_SQL]
+    assert row[4:7] == ("INBOUND", "¿Cine?", "POLL")
+    poll = json.loads(row[9])["poll"]
+    assert poll["question"] == "¿Cine?"
+    assert poll["options"] == ["🎬 Acción", "😂 Comedia"]
+    assert poll["selectableCount"] == 1  # single answer
+
+
+def test_poll_multiple_maps_to_selectable_count_zero():
+    conn = Connection(new_id=8)
+    _insert_poll(conn, multiple=True)
+    assert json.loads(conn.calls[db.INSERT_MESSAGE_SQL][9])["poll"]["selectableCount"] == 0

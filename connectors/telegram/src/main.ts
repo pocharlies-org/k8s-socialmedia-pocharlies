@@ -160,6 +160,7 @@ async function main() {
       isOutbound: message.isOutbound,
       chatType: message.chatType,
       chatTitle: message.chatTitle,
+      poll: message.poll,
     };
 
     await eventPublisher.publishMessageReceived(event);

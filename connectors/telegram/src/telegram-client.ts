@@ -199,6 +199,7 @@ export interface TelegramMessage {
   content: string | null;
   messageType:
     | 'TEXT'
+    | 'POLL'
     | 'PHOTO'
     | 'VIDEO'
     | 'AUDIO'
@@ -231,6 +232,15 @@ export interface TelegramMessage {
    * exact bytes and is what a click should send back.
    */
   inlineButtons?: InlineKeyboardButton[][];
+  /**
+   * Poll definition, when messageType is 'POLL'. Telegram stores a poll in
+   * `message.media`, not in `message.text`, so without this the question and
+   * its options would be lost on ingest (the row arrived empty and dgx-messages
+   * showed the generic "Mensaje"). `multiple` is Telegram's multiple-answer
+   * flag; the unified row maps it to `metadata.poll.selectableCount`
+   * (0 = any number, 1 = single) the way the WhatsApp connector does.
+   */
+  poll?: { question: string; options: string[]; multiple: boolean };
 }
 
 export interface InlineKeyboardButton {
@@ -514,6 +524,7 @@ export class TelegramClientWrapper extends EventEmitter {
 
       let messageType: TelegramMessage['messageType'] = 'TEXT';
       const attachments: TelegramMessage['attachments'] = [];
+      let poll: TelegramMessage['poll'] | undefined;
 
       if (media) {
         switch (media.type) {
@@ -572,6 +583,22 @@ export class TelegramClientWrapper extends EventEmitter {
           case 'contact':
             messageType = 'CONTACT';
             break;
+          case 'poll': {
+            // A poll lives in message.media, not message.text: without this the
+            // question and its options are lost and the row ingests empty.
+            messageType = 'POLL';
+            const p = media as unknown as {
+              question: string;
+              answers: ReadonlyArray<{ text: string }>;
+              isMultiple: boolean;
+            };
+            poll = {
+              question: p.question || '',
+              options: (p.answers || []).map((a) => a.text).filter((t) => typeof t === 'string'),
+              multiple: !!p.isMultiple,
+            };
+            break;
+          }
         }
       }
 
@@ -586,9 +613,10 @@ export class TelegramClientWrapper extends EventEmitter {
         senderTelegramId: senderId,
         senderUsername: senderUser?.username || undefined,
         senderFirstName: senderUser?.firstName || undefined,
-        content: message.text || null,
+        content: poll ? poll.question : message.text || null,
         messageType,
         attachments: attachments.length > 0 ? attachments : undefined,
+        ...(poll ? { poll } : {}),
         isForwarded: !!message.forward,
         replyToMessageId: message.replyToMessage?.id?.toString(),
         topicId: message.replyToMessage?.threadId?.toString(),
