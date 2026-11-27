@@ -96,8 +96,12 @@ spec:
         # INFRA-1584 25-11: v1.3.201 -> v1.3.203 (Release Production run 45720195755, deploy/prod@7ae4df1):
         # POST /groups/join (unirse a un grupo por invite) + inviteCode en los grupos de comunidad (PR #523).
         # Solo la casa personal (norma de la casa). Digest en Harbor (crane digest).
+        # INFRA-1611 27-11: v1.3.203 -> v1.3.205 (Release Production run 45925667928, deploy/prod@e8e1945):
+        # la ingestión ya no pisa participants.name con pushName (PR #529; arrastra las encuestas de
+        # Telegram de #528, que van en la misma imagen). Solo la casa personal (norma de la casa).
+        # Digest en Harbor (crane digest). v1.3.204 lo ocupó otro commit en Harbor (tag inmutable).
         - name: whatsapp-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.203@sha256:ae195239881387adf8178e29abbd9cc61d7dc13872c26328dafc177e169abbe8
+          image: harbor.e-dani.com/homelab/whatsappmcp-whatsapp-connector:v1.3.205@sha256:f8a648e4b23c75262c91079e341675e858f78013f1b8189e4908e52267152336
 ---
 # SKIRM-103 10-10: whatsapp-connector-professional advances v1.3.103 -> v1.3.109 (run 38008072969,
 # deploy/prod@3cdf251: F4a-F4d and the signed /api/public/* and /api/v1/history/* doors).
