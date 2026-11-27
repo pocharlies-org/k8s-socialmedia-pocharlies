@@ -72,9 +72,13 @@ images:
   # INFRA-1501 P3 21-11: v1.3.154 -> v1.3.201 (Release Production run 44902574357, deploy/prod@f6efc89:
   # los Dockerfiles aligerados de INFRA-540/P2; el +16,2% de comprimido es crecimiento de app, ruling
   # del tech-lead en 10-plan.md de INFRA-540 — se pinea igual). Digest comprobado en Harbor (crane digest).
+  # DGX-1834 27-11: v1.3.201 -> candidate-45956524062-1 (build CI del commit e8e1945, PR #528): telegram-sync
+  # escribe metadata.poll (question/options/selectableCount) para que /messages renderice la encuesta de Telegram
+  # con sus opciones. Este bloque `images:` es el pinner efectivo de telegram-sync (gana sobre patch-image.yaml,
+  # que reescribe por nombre y aquí solo fija el tag). Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: v1.3.201
-    digest: sha256:ef2dd413592747d9740900f2877d771c9893e69bc4fa20d034e6f5af9d71424f
+    newTag: candidate-45956524062-1
+    digest: sha256:0024fa76206fc280906c175c4606532be67854c22e0c5fdb90c460177bb25f77
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
