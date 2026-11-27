@@ -15,7 +15,7 @@ import os
 
 import asyncpg
 
-from sync import db, mapping, media_download, avatar_sync
+from sync import db, mapping, media_download, avatar_sync, bot_commands
 from sync.connector_client import ConnectorClient
 
 logger = logging.getLogger(__name__)
@@ -138,6 +138,11 @@ async def run(pool: asyncpg.Pool, connector: ConnectorClient) -> None:
                         avatars_done += 1
                 except Exception as e:
                     logger.warning("dialog state sync failed for %s: %s", dialog.get("name"), e)
+
+                try:
+                    await bot_commands.sync_bot_commands(connector, pool, dialog)
+                except Exception as e:
+                    logger.warning("bot commands sync failed for %s: %s", dialog.get("name"), e)
 
                 try:
                     await import_chat(connector, pool, dialog)

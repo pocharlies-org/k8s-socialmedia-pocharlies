@@ -139,6 +139,12 @@ class ConnectorClient:
         r.raise_for_status()
         return r.json().get("dialogs", [])
 
+    async def get_bot_commands(self, chat_id: str) -> list[dict]:
+        """[{command, description, bot}] — DGX-1921. [] when the chat has no bots."""
+        r = await self._get_v1(f"/chats/{chat_id}/bot-commands")
+        r.raise_for_status()
+        return r.json().get("commands", [])
+
     async def get_messages(self, chat_id: str, limit: int = 100,
                            offset_id: Optional[int] = None) -> list[dict]:
         """Newest-first window (descending). offset_id is EXCLUSIVE and pages

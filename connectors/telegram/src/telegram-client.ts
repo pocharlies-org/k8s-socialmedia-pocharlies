@@ -1074,6 +1074,44 @@ export class TelegramClientWrapper extends EventEmitter {
   }
 
   /**
+   * DGX-1921: los comandos que los bots de este chat muestran al cliente.
+   * En un grupo, `channels.chatFull.bots` (los bots del grupo con sus comandos);
+   * en un privado con un bot, `users.getFullUser → bot_info.commands`. Lista
+   * vacía si no hay bots. shortcut: los grupos básicos (no supergrupo) no
+   * traen `bots` en el full — si algún día hace falta, getFullUser por bot.
+   */
+  async getBotCommands(
+    chatId: string
+  ): Promise<{ command: string; description: string; bot: string }[]> {
+    if (!this.connected) throw new Error('Not connected');
+    const chat = toMtcutePeer(chatId);
+    const peer = await this.client.getPeer(chat);
+    if (peer.type === 'user') {
+      if (!peer.isBot) return [];
+      const full = await this.client.getFullUser(peer);
+      const bot = peer.username ?? String(peer.id);
+      const commands =
+        (full.full as { bot_info?: { commands?: tl.TypeBotCommand[] } }).bot_info?.commands ?? [];
+      return commands.map(c => ({ command: c.command, description: c.description, bot }));
+    }
+    const [full, members] = await Promise.all([
+      this.client.getFullChat(chat),
+      this.client.getChatMembers(chat, { limit: 200, type: 'all' }),
+    ]);
+    const names = new Map<number, string>();
+    for (const m of members) {
+      if (m.user.isBot) names.set(m.user.id, m.user.username ?? m.user.firstName);
+    }
+    return full.botInfo.flatMap(b =>
+      b.commands.map(c => ({
+        command: c.command,
+        description: c.description,
+        bot: names.get(b.id) ?? String(b.id),
+      }))
+    );
+  }
+
+  /**
    * List forum topics for a supergroup.
    */
   async getForumTopics(chatId: string, limit: number = 100, query: string = ''): Promise<any[]> {

@@ -1190,6 +1190,18 @@ contracts:
     (channels.getParticipants count), not the page length. v1 callers that pass no `offset` keep
     the exact 200 {participants} they always got — the added field is additive. Same route as v1,
     marked with both ids.'
+- id: http.telegram-connector.chats-bot-commands.v1
+  kind: http-route
+  value: /chats/:id/bot-commands
+  role: provider
+  files:
+  - connectors/telegram/src/api/controller.ts
+  status: active
+  note: 'HMAC-signed GET (DGX-1921). 200 {commands: [{command, description, bot}]}: the commands the
+    bots of this chat show the client — in a group, from channels.chatFull.bots (all bots of the chat);
+    in a private chat, from users.getFullUser bot_info.commands. [] when the chat has no bots; 503
+    when the session is down. Consumed by telegram-sync, which stores them in telegram_bot_commands
+    for dgx-messages.'
 - id: http.telegram-connector.peers-photo.v1
   kind: http-route
   value: /peers/:id/photo
