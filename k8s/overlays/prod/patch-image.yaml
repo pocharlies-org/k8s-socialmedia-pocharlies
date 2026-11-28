@@ -155,7 +155,7 @@ spec:
     spec:
       containers:
         - name: instagram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:instagram-6cbf62c4fe4ffa66210361627ead1d112d3f24fd@sha256:af2930abbe49770a105d57398d832ae10ca574cd40529341c33f5a5163abfb6c
+          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:instagram-661a81db9f880718f2ec8b746a53484df08dcf57@sha256:8f0be46d8375a0e08fd5ee0ab87ba818cabbc587d981b1c3d457c1348d8d3fe8
 ---
 apiVersion: apps/v1
 kind: Deployment
