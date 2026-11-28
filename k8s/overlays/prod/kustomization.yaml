@@ -313,5 +313,5 @@ images:
   # INFRA-1501 P3 21-11: v1.3.156 -> v1.3.201 (run 44902574357): Dockerfiles INFRA-540/P2. CronJob diario;
   # el pin se aplica en la próxima pasada. Digest comprobado en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-sauvage-verificacion
-    newTag: v1.3.201
-    digest: sha256:4ae75a1674df6ddf0971a901ce62ab0c1cf13b1d0f3cc385401e2a7df85b8df4
+    newTag: v1.3.202
+    digest: sha256:694fc320b1f746344ad613e21d435300940f3486b2139626d4eede2903251544
