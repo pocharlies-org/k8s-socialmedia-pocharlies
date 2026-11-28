@@ -97,7 +97,15 @@ export function instagramApiFromPayload(payload: Record<string, unknown>): Insta
     instagramUserId: value.instagramUserId,
     primaryApi: 'instagram-login',
   };
-  return new InstagramAPI(config);
+  const api = new InstagramAPI(config);
+  // The IG Login API only lists threads the paired app itself received; DMs
+  // that arrived through the business inbox answer empty there. With the
+  // durable system-user token in the row, go Facebook Login primary — the same
+  // transport the house accounts use (main.ts boot fallback).
+  if (value.fbAccessToken && value.instagramUserId) {
+    api.setFacebookPrimary(value.instagramUserId);
+  }
+  return api;
 }
 
 export interface ResolveInstagramEntryOptions {
