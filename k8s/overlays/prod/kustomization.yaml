@@ -106,9 +106,12 @@ images:
   # primaryApi=instagram-login la IG Login API lo devolvía success:true como no-op. updateMediaCaption usa fbRequest.
   # INFRA-1501 P3 21-11: instagram-e3735ef -> v1.3.201 (Release Production run 44902574357: Dockerfiles
   # INFRA-540/P2; el tronco del release incluye #461 y todo lo posterior a e3735ef). Digest en Harbor (crane).
+  # INFRA-1634 27-11: v1.3.201 -> instagram-f28a3b59 (release-instagram run 46088319944,
+  # deploy/prod@f28a3b59 = #538: cuentas store-only nombradas + ruta /webhook en el edge).
+  # Digest en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.201
-    digest: sha256:525b68863b84f0ccfa081743ab68042e94ddc971b0559f443b1bf10311939997
+    newTag: instagram-f28a3b59d2caecd149188a48bc0231e8f45673c0
+    digest: sha256:06ff71da8063321b558fa3f13502f18b37ca24d39017336f01f47a6da9d97e35
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
