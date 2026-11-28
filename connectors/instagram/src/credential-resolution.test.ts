@@ -150,6 +150,25 @@ test('sub:account row takes precedence over the primary sub row', async () => {
   assert.equal(servedToken(resolution), 'SCOPED');
 });
 
+test('row with fbAccessToken + instagramUserId serves Facebook Login primary', async () => {
+  const store = new FakeStore();
+  store.seed(
+    'daniel-sub',
+    pairedPayload({ fbAccessToken: 'SYSTEM-USER', instagramUserId: '17841444094675941' })
+  );
+  const resolution = await resolveInstagramEntry({
+    headers: { 'x-user-sub': 'daniel-sub' },
+    accountName: 'skirmshop',
+    store,
+    legacyLookup: () => undefined,
+  });
+  const config = (resolution as { entry: { api: InstagramAPI } }).entry.api as unknown as {
+    config: { primaryApi: string; fbAccessToken?: string };
+  };
+  assert.equal(config.config.primaryApi, 'facebook-login', 'business-inbox threads need graph.facebook.com');
+  assert.equal(config.config.fbAccessToken, 'SYSTEM-USER');
+});
+
 // ── criterion 4: isolation with the synthetic sub ────────────────────────
 
 test('pm-test-sin-fila without a row: explicit error, never another sub account', async () => {
