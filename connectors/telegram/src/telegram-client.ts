@@ -1074,7 +1074,7 @@ export class TelegramClientWrapper extends EventEmitter {
   /**
    * DGX-1921: los comandos que los bots de este chat muestran al cliente.
    * En un grupo, `channels.chatFull.bots` (los bots del grupo con sus comandos);
-   * en un privado con un bot, `users.getFullUser → bot_info.commands`. Lista
+   * en un privado con un bot, `users.getFullUser → botInfo.commands`. Lista
    * vacía si no hay bots. shortcut: los grupos básicos (no supergrupo) no
    * traen `bots` en el full — si algún día hace falta, getFullUser por bot.
    */
@@ -1085,11 +1085,13 @@ export class TelegramClientWrapper extends EventEmitter {
     const chat = toMtcutePeer(chatId);
     const peer = await this.client.getPeer(chat);
     if (peer.type === 'user') {
-      if (!peer.isBot) return [];
+      // mtcute trae los campos del raw en camelCase (`botInfo`, medido 27-11:
+      // con `bot_info` devolvía [] hasta para BotFather). Sin persona no hay
+      // botInfo, así que un humano sale [] sin necesidad de mirar isBot.
       const full = await this.client.getFullUser(peer);
       const bot = peer.username ?? String(peer.id);
       const commands =
-        (full.full as { bot_info?: { commands?: tl.TypeBotCommand[] } }).bot_info?.commands ?? [];
+        (full.full as { botInfo?: { commands?: tl.TypeBotCommand[] } }).botInfo?.commands ?? [];
       return commands.map(c => ({ command: c.command, description: c.description, bot }));
     }
     const [full, members] = await Promise.all([
