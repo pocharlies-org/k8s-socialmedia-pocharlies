@@ -155,7 +155,7 @@ spec:
     spec:
       containers:
         - name: instagram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:instagram-6cbf62c4fe4ffa66210361627ead1d112d3f24fd@sha256:af2930abbe49770a105d57398d832ae10ca574cd40529341c33f5a5163abfb6c
+          image: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector:instagram-661a81db9f880718f2ec8b746a53484df08dcf57@sha256:8f0be46d8375a0e08fd5ee0ab87ba818cabbc587d981b1c3d457c1348d8d3fe8
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -181,8 +181,12 @@ spec:
         # DGX-1834: native message actions (Release Production run 45846780588).
         # DGX-1938: lo propio en Mensajes guardados es saliente (Release Production run 46066049373,
         # deploy/prod@4ecf44b). Solo la casa personal; professional y telegram-pairing intactos.
+        # DGX-1944: la puerta de edición/reporte usa la regla de mensaje propio (Release Production
+        # run 46082421397, deploy/prod@6b2074e). Solo la casa personal; professional y telegram-pairing intactos.
+        # DGX-1921 28-11: v1.3.208 -> v1.3.209 (run 46088575475, deploy/prod@2cc3631): lleva
+        # además el fix de getBotCommands privado (botInfo camelCase); incluye lo de la 208.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.206@sha256:9648cad116a7c75a6ceb248883e0cea5154e0cfcefd1e50f01e2a6d7b6714e3b
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.209@sha256:3834ec5a886b09cc98b5e5111e7725f42d69d9c3eabdd13913da2641c1287a0e
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
@@ -196,8 +200,11 @@ spec:
   template:
     spec:
       containers:
+        # DGX-1921 27-11: v1.3.149 -> v1.3.207 (run 46076242990): el telegram-sync
+        # professional llama a GET /chats/:id/bot-commands cada ciclo; con el conector
+        # viejo sería un 404 permanente y cero comandos en los chats professional.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.149@sha256:b81bbc6b514da5c46ae68c234af5b939d8efe046efcddcb7921160ce316cc2a3
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.209@sha256:3834ec5a886b09cc98b5e5111e7725f42d69d9c3eabdd13913da2641c1287a0e
 ---
 # SC-1197 encendido — the pairing pools ran v1.3.57 (run 36135670213,
 # deploy/prod@115c066, the tip carrying #70..#85: the pairing entrypoints

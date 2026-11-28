@@ -45,6 +45,7 @@ import {
   TelegramEditApi,
   editOwnTextMessage,
   inboundTextEdit,
+  isOwnMessage,
 } from './message-edit';
 
 const AVATAR_DEADLINE_MS = 20_000;
@@ -603,10 +604,7 @@ export class TelegramClientWrapper extends EventEmitter {
       }
 
       const senderId = sender ? sender.id.toString() : '';
-      // Telegram hands Saved Messages (the chat with ourselves) over with out=false;
-      // like TDLib, a non-forwarded message there is ours (DGX-1938).
-      const isOutbound =
-        message.isOutgoing || (chat.id.toString() === this.selfId && !message.forward);
+      const isOutbound = isOwnMessage(message, this.selfId);
       const senderUser = sender && sender.type === 'user' ? sender : undefined;
 
       return {
@@ -865,7 +863,7 @@ export class TelegramClientWrapper extends EventEmitter {
       return {
         pinned: Boolean(message.isPinned),
         pinnable,
-        reportable: !this.selfIsBot && !message.isOutgoing,
+        reportable: !this.selfIsBot && !isOwnMessage(message, this.selfId),
         ...(chat.type === 'chat' && (chat.chatType === 'supergroup' || chat.chatType === 'channel')
           ? { link: message.link }
           : {}),
@@ -915,7 +913,7 @@ export class TelegramClientWrapper extends EventEmitter {
       });
       const chat = toMtcutePeer(chatId);
       const message = await this.actionMessage(client, chat, messageId);
-      if (message.isOutgoing)
+      if (isOwnMessage(message, this.selfId))
         throw new MessageMutationError('Cannot report your own message', 403, 'action_forbidden');
       const result = await client.call({
         _: 'messages.report',
@@ -1076,7 +1074,7 @@ export class TelegramClientWrapper extends EventEmitter {
   /**
    * DGX-1921: los comandos que los bots de este chat muestran al cliente.
    * En un grupo, `channels.chatFull.bots` (los bots del grupo con sus comandos);
-   * en un privado con un bot, `users.getFullUser → bot_info.commands`. Lista
+   * en un privado con un bot, `users.getFullUser → botInfo.commands`. Lista
    * vacía si no hay bots. shortcut: los grupos básicos (no supergrupo) no
    * traen `bots` en el full — si algún día hace falta, getFullUser por bot.
    */
@@ -1087,11 +1085,13 @@ export class TelegramClientWrapper extends EventEmitter {
     const chat = toMtcutePeer(chatId);
     const peer = await this.client.getPeer(chat);
     if (peer.type === 'user') {
-      if (!peer.isBot) return [];
+      // mtcute trae los campos del raw en camelCase (`botInfo`, medido 27-11:
+      // con `bot_info` devolvía [] hasta para BotFather). Sin persona no hay
+      // botInfo, así que un humano sale [] sin necesidad de mirar isBot.
       const full = await this.client.getFullUser(peer);
       const bot = peer.username ?? String(peer.id);
       const commands =
-        (full.full as { bot_info?: { commands?: tl.TypeBotCommand[] } }).bot_info?.commands ?? [];
+        (full.full as { botInfo?: { commands?: tl.TypeBotCommand[] } }).botInfo?.commands ?? [];
       return commands.map(c => ({ command: c.command, description: c.description, bot }));
     }
     const [full, members] = await Promise.all([
@@ -1698,6 +1698,7 @@ export class TelegramClientWrapper extends EventEmitter {
 
   private editApi(): TelegramEditApi {
     return {
+      selfId: this.selfId,
       getMessages: (chatId, messageIds) => this.client.getMessages(chatId, messageIds),
       editMessage: params => this.client.editMessage(params),
     };

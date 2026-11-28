@@ -367,6 +367,10 @@ spec:
             # sigue siendo FACEBOOK_APP_SECRET — la caída de `ig_exchange_token` con el id de
             # Instagram es lo que diría que hace falta INSTAGRAM_LOGIN_APP_SECRET aparte.
             - { name: INSTAGRAM_LOGIN_APP_ID, value: "1869504556900523" }
+            # Cuentas conocidas sin token legacy (store-only): nombran la cuenta
+            # para /health por actor y su BUSINESS_ACCOUNT_ID (en el secreto)
+            # enruta los webhooks de Meta hacia la cuenta correcta.
+            - { name: INSTAGRAM_ACCOUNTS, value: "skirmshop,barbelpapis" }
           envFrom: [{ secretRef: { name: whatsapp-mcp-secrets } }]
           resources:
             requests: { cpu: 30m, memory: 64Mi }
@@ -600,6 +604,14 @@ spec:
     # Cloudflare). Traefik prefers the more specific rule over the Host-only
     # one below.
     - match: Host(`whatsapp.e-dani.com`) && Path(`/oauth/instagram/callback`)
+      kind: Rule
+      services:
+        - name: instagram-connector
+          port: 3003
+    # Meta webhook (DM/comments/mentions). Publico sin sso-chain: Meta no
+    # autentica; POST /webhook solo se acepta con x-hub-signature-256 valido
+    # (webhookSignatureGuard) y GET /webhook con el verify token.
+    - match: Host(`whatsapp.e-dani.com`) && Path(`/webhook`)
       kind: Rule
       services:
         - name: instagram-connector

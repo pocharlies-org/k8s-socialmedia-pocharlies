@@ -62,7 +62,7 @@ class FakeMtcute {
     return { botInfo: this.groupBots };
   }
   async getFullUser() {
-    return { full: { bot_info: { commands: this.privateBotCommands } } };
+    return { full: { botInfo: { commands: this.privateBotCommands } } };
   }
   async getChatMembers() {
     return [{ user: { id: 42, isBot: true, username: 'dgx_alarma_bot', firstName: 'Alarma' } }];

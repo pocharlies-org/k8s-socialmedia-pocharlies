@@ -238,8 +238,12 @@ test('flag OFF + env vacío → se conserva el abort histórico (C1)', () => {
   assert.match(fatalOff[0], /No valid accounts configured\./);
   const infos: string[] = [];
   const on = loadAccounts({ env: malformed, storeEnabled: true, onFatal: () => {}, info: m => infos.push(m) });
-  assert.equal(on.size, 0);
-  assert.ok(infos.some(m => m.includes('credential-store ENABLED')));
+  // Con el store ON las cuentas enumeradas sin token NO se descartan: quedan
+  // como store-only (ready false) para que /health por actor y el enrutado de
+  // webhooks las conozcan.
+  assert.equal(on.size, 2);
+  assert.equal(on.get('skirmshop')?.ready, false);
+  assert.ok(infos.some(m => m.includes('store-only')));
 });
 
 test('C2 no regresión: con cuentas presentes, flag ON y OFF dan el mismo mapa', () => {
@@ -343,5 +347,51 @@ test('boot con store ON y 0 cuentas: /health 200 y ruta por actor sirve desde el
     }
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test('store-only accounts (INSTAGRAM_ACCOUNTS sin token) se registran y enrutan webhooks', async () => {
+  const env = {
+    INSTAGRAM_ACCOUNTS: 'skirmshop,barbelpapis',
+    INSTAGRAM_SKIRMSHOP_BUSINESS_ACCOUNT_ID: '25864160563286488',
+    INSTAGRAM_BARBELPAPIS_BUSINESS_ACCOUNT_ID: '26215012984785350',
+    FACEBOOK_APP_SECRET: 'test-app-secret',
+    WEBHOOK_VERIFY_TOKEN: 'test-verify-token',
+    CONNECTOR_SHARED_SECRET: CONNECTOR_KEY,
+  } as NodeJS.ProcessEnv;
+  const accounts = loadAccounts({
+    env,
+    storeEnabled: true,
+    onFatal: () => assert.fail('no debía abortar con el store ON'),
+    info: () => {},
+  });
+  assert.deepEqual([...accounts.keys()], ['skirmshop', 'barbelpapis']);
+  assert.equal(accounts.get('skirmshop')?.ready, false);
+
+  const events: Array<{ account: string; text?: string }> = [];
+  const app = await createInstagramApp({
+    env,
+    accounts,
+    credentialStore: null,
+    publisher: { publish(account, event) { events.push({ account, text: event.text }); } },
+  });
+  const { server, base } = await listen(app);
+  try {
+    const raw = JSON.stringify({
+      object: 'instagram',
+      entry: [{ id: '25864160563286488', messaging: [{ sender: { id: 's-1' }, recipient: { id: '25864160563286488' }, timestamp: 1700000000, message: { mid: 'm-1', text: 'hola' } }] }],
+    });
+    const sign = 'sha256=' + createHmac('sha256', env.FACEBOOK_APP_SECRET).update(raw).digest('hex');
+    const res = await fetch(`${base}/webhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign },
+      body: raw,
+    });
+    assert.equal(res.status, 200);
+    await new Promise(r => setTimeout(r, 50));
+    assert.deepEqual(events, [{ account: 'skirmshop', text: 'hola' }],
+      'el id de negocio de una cuenta store-only debe enrutar el evento a su cuenta');
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });

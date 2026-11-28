@@ -76,9 +76,11 @@ images:
   # escribe metadata.poll (question/options/selectableCount) para que /messages renderice la encuesta de Telegram
   # con sus opciones. Este bloque `images:` es el pinner efectivo de telegram-sync (gana sobre patch-image.yaml,
   # que reescribe por nombre y aquí solo fija el tag). Digest comprobado en Harbor (crane digest).
+  # DGX-1921 27-11: candidate-45956524062-1 -> v1.3.207 (Release Production run 46076242990):
+  # telegram-sync mantiene telegram_bot_commands (migración 047) de los bots de cada chat.
   - name: harbor.e-dani.com/homelab/whatsappmcp-telegram-sync
-    newTag: candidate-45956524062-1
-    digest: sha256:0024fa76206fc280906c175c4606532be67854c22e0c5fdb90c460177bb25f77
+    newTag: v1.3.207
+    digest: sha256:a05c4bb2e446b50cc2fd3794d88febdd1931b69c3e2a48a5830df971eb7b6c1c
   # SC-1214 C4 re-pin: v1.3.55 (run 36075936408, deploy/prod@7d6c030 — after
   # ee71b15, the SC-1143/P1 merge) carries the IG pairing flow + credential
   # resolution (resolveCredential) + the oauth callback route, still dark:
@@ -104,9 +106,13 @@ images:
   # primaryApi=instagram-login la IG Login API lo devolvía success:true como no-op. updateMediaCaption usa fbRequest.
   # INFRA-1501 P3 21-11: instagram-e3735ef -> v1.3.201 (Release Production run 44902574357: Dockerfiles
   # INFRA-540/P2; el tronco del release incluye #461 y todo lo posterior a e3735ef). Digest en Harbor (crane).
+  # INFRA-1634 28-11: instagram-f28a3b59 -> instagram-661a81d (release-instagram run
+  # 46107006329, deploy/prod@661a81d = #543: la fila del store con fbAccessToken sirve
+  # Facebook Login primary, para que el MCP vea los hilos de la bandeja de business).
+  # Digest en Harbor (crane digest).
   - name: harbor.e-dani.com/homelab/whatsappmcp-instagram-connector
-    newTag: v1.3.201
-    digest: sha256:525b68863b84f0ccfa081743ab68042e94ddc971b0559f443b1bf10311939997
+    newTag: instagram-661a81db9f880718f2ec8b746a53484df08dcf57
+    digest: sha256:8f0be46d8375a0e08fd5ee0ab87ba818cabbc587d981b1c3d457c1348d8d3fe8
   # fase 3: v1.3.64 (run 36568095620) trajo las migraciones 009/010 (#95/#108);
   # v1.3.65 (run 36603533264, deploy/prod@c8cce97) añade PR-3 #110 (social_delete_message
   # por POST /messages/delete); v1.3.66 (run 36612247560, deploy/prod@c36993e) añade la
@@ -238,9 +244,11 @@ images:
   # tech-lead en 10-plan.md de INFRA-540). Mueve por nombre mcp-server, mcp-sse, social-api,
   # brain-windows, voice-transcribe y el backfill (norma de la casa: bloque images: reescribe por nombre).
   # Digest comprobado en Harbor (crane digest).
+  # DGX-1921 27-11: v1.3.201 -> v1.3.207 (run 46076242990): lleva la migración 047
+  # (telegram_bot_commands) que aplica el Job PreSync whatsapp-mcp-migrate.
   - name: harbor.e-dani.com/homelab/whatsappmcp-mcp-server
-    newTag: v1.3.201
-    digest: sha256:970bbdd18132686c9e3621c23462132af331e98be8e80003ac9153402f1412f3
+    newTag: v1.3.207
+    digest: sha256:58fa38dcf7e53af3fcd07a7fe2919a50750dead04f4cc752596084f4ee874f1d
   # INFRA-1501 P3 21-11: socialmedia-v2-c88dce16 -> v1.3.201 (run 44902574357): Dockerfiles INFRA-540/P2;
   # el tronco del release incluye todo lo fusionado tras c88dce16. −5,1% de comprimido.
   # Digest comprobado en Harbor (crane digest).

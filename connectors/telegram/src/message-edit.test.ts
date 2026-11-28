@@ -32,6 +32,7 @@ function message(overrides: Partial<EditableMessage> = {}): EditableMessage {
 }
 
 class FakeApi implements TelegramEditApi {
+  selfId?: string;
   edits: Array<{ chatId: string | number; message: number; text: string }> = [];
   stored: EditableMessage | null = message();
   getError: Error | null = null;
@@ -109,6 +110,23 @@ test('mensaje ajeno → 422 not_own_message sin llamar a Telegram', async () => 
   api.stored = message({ isOutgoing: false });
   await rejects(editOwnTextMessage(api, CHAT, 42, 'x'), 422, 'not_own_message');
   assert.equal(api.edits.length, 0);
+});
+
+// DGX-1944: Telegram delivers Saved Messages with out=false, and the gate read it
+// raw — the live 422 on Dani's own message 229648. The rule is isOwnMessage.
+test('Mensajes guardados: propio con out=false se edita; reenviado o en otro chat, 422', async () => {
+  const SELF = 33285833;
+  const api = new FakeApi();
+  api.selfId = String(SELF);
+  api.stored = message({ chat: { id: SELF }, isOutgoing: false });
+  await editOwnTextMessage(api, SELF, 42, 'x');
+  assert.equal(api.edits.length, 1);
+
+  api.stored = message({ chat: { id: SELF }, isOutgoing: false, forward: {} });
+  await rejects(editOwnTextMessage(api, SELF, 42, 'x'), 422, 'not_own_message');
+  api.stored = message({ isOutgoing: false });
+  await rejects(editOwnTextMessage(api, CHAT, 42, 'x'), 422, 'not_own_message');
+  assert.equal(api.edits.length, 1);
 });
 
 test('solo texto: media → 422 not_editable; texto con vista previa (webpage) sí se edita', async () => {
