@@ -181,8 +181,10 @@ spec:
         # DGX-1834: native message actions (Release Production run 45846780588).
         # DGX-1938: lo propio en Mensajes guardados es saliente (Release Production run 46066049373,
         # deploy/prod@4ecf44b). Solo la casa personal; professional y telegram-pairing intactos.
+        # DGX-1944: la puerta de edición/reporte usa la regla de mensaje propio (Release Production
+        # run 46082421397, deploy/prod@6b2074e). Solo la casa personal; professional y telegram-pairing intactos.
         - name: telegram-connector
-          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.207@sha256:ee43a1b5bcd97f06ef3a20525786b035e88c95032f58475cd1b3cd8c865ab089
+          image: harbor.e-dani.com/homelab/whatsappmcp-telegram-connector:v1.3.208@sha256:a0017823be09a8a317de08cda8f2c506f3ca963e449e774ec438d0fbff10d21e
 ---
 # telegram-connector-professional was pinned ONLY by the `images:` block
 # (generated/connectors.yaml ships it `:latest`); explicit pin, same digest
