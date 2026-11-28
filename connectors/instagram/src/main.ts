@@ -115,11 +115,6 @@ export function loadAccounts(
       const accessToken = env[`${prefix}ACCESS_TOKEN`] || '';
       const businessAccountId = env[`${prefix}BUSINESS_ACCOUNT_ID`] || '';
 
-      if (!accessToken) {
-        logger.warn({ account: name }, `Skipping account — no ${prefix}ACCESS_TOKEN`);
-        continue;
-      }
-
       const config: InstagramConfig = {
         accessToken,
         businessAccountId,
@@ -127,6 +122,18 @@ export function loadAccounts(
         appSecret: env[`${prefix}APP_SECRET`] || fbAppSecret,
         fbAccessToken: env[`${prefix}FB_ACCESS_TOKEN`] || undefined,
       };
+      if (!accessToken) {
+        // Store-only account (SC-1258 C10 left no legacy tokens): the per-sub
+        // store rows are its credentials. It still names the account for
+        // /health's per-actor view and its business id for webhook routing.
+        if (storeEnabled) {
+          accounts.set(name, { name, ready: false, api: new InstagramAPI(config), config });
+          info(`Loaded store-only account ${name} — no legacy ACCESS_TOKEN, credential-store ENABLED`);
+        } else {
+          logger.warn({ account: name }, `Skipping account — no ${prefix}ACCESS_TOKEN`);
+        }
+        continue;
+      }
       accounts.set(name, { name, api: new InstagramAPI(config), config });
       logger.info(
         { account: name, businessAccountId, hasFbToken: !!config.fbAccessToken },
@@ -209,10 +216,12 @@ async function registerInstagramIds(
 ): Promise<Map<string, string>> {
   const bizIdToAccount = new Map<string, string>();
   for (const [name, entry] of accounts) {
-    if (entry.ready === false) continue;
+    // The business id routes webhooks and needs no token: a store-only
+    // account (ready === false) registers it too.
     if (entry.config.businessAccountId) {
       bizIdToAccount.set(entry.config.businessAccountId, name);
     }
+    if (entry.ready === false) continue;
     // Fetch the Instagram User ID (user_id) from /me and register it too
     try {
       const meUrl = instagramMeUrl(entry.config.accessToken);
